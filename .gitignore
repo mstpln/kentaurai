@@ -1,0 +1,19 @@
+node_modules/
+.wrangler/
+.dev.vars
+.env
+.env.*
+.DS_Store
+coverage/
+*.log
+
+# Real/private data must never enter the public repository.
+imports/
+data/
+exports/
+private/
+*.private.json
+*.source.json
+*.dump
+*.sqlite
+*.sqlite3
