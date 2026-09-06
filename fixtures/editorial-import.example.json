@@ -1,0 +1,39 @@
+{
+  "source": {
+    "name": "Example Editorial Source",
+    "exported_at": "2026-09-12T08:30:00+02:00",
+    "export_id": "editorial-2026-09-12-v85",
+    "url": "https://example.invalid/editorial-source"
+  },
+  "items": [
+    {
+      "horse_name": "Example Horse",
+      "race_external_id": "2026-09-12_7_5",
+      "speaker_name": "Example Trainer",
+      "speaker_role": "trainer",
+      "published_at": "2026-09-12T07:45:00+02:00",
+      "source_url": "https://example.invalid/editorial-source/example",
+      "summary": "Main target today. Plans a more offensive drive and a verified equipment change.",
+      "signals": [
+        {
+          "type": "target",
+          "value": "main_target",
+          "polarity": "positive",
+          "strength": 0.8,
+          "fact_or_opinion": "fact",
+          "confidence": 0.9,
+          "evidence_excerpt": "The stable says this race has been the target."
+        },
+        {
+          "type": "tactics",
+          "value": "offensive",
+          "polarity": "positive",
+          "strength": 0.6,
+          "fact_or_opinion": "opinion",
+          "confidence": 0.7,
+          "evidence_excerpt": "They intend to leave more aggressively."
+        }
+      ]
+    }
+  ]
+}

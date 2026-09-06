@@ -1,0 +1,19 @@
+{
+  "name": "kentaurai",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22 <23" },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "test:schema": "node --test test/schema.test.js",
+    "qa": "npm test && node --check src/index.js",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply kentaurai --local",
+    "db:migrate:remote": "wrangler d1 migrations apply kentaurai --remote"
+  },
+  "devDependencies": {
+    "wrangler": "4.114.0"
+  }
+}
