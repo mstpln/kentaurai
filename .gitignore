@@ -12,8 +12,16 @@ imports/
 data/
 exports/
 private/
+private-imports/
+reference-data/
 *.private.json
 *.source.json
 *.dump
 *.sqlite
 *.sqlite3
+
+# Expected naming patterns for manual V85/V86 reference exports.
+kentaurai_V85_*.json
+kentaurai_V86_*.json
+*_V85_*_reference.json
+*_V86_*_reference.json

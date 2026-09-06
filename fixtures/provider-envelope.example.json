@@ -1,0 +1,7 @@
+{
+  "endpoint": "https://example.invalid/provider/round/EXAMPLE",
+  "captured_at": "2026-09-06T12:00:00+02:00",
+  "payload": {
+    "note": "Replace with an actual captured provider payload before live mapping is implemented."
+  }
+}
