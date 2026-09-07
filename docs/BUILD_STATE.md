@@ -1,129 +1,110 @@
 # Build state
 
-Version: 0.4.4
+Version: 0.4.5
 Phase: interface foundation on verified official data layer
-Status: production interface redesign and Spel history are merge-ready after CI/review; automatic live acquisition still disabled
+Status: Trend/navigation polish and measured entity-data presentation are review-clean for the current data phase; automatic live acquisition remains disabled
 
-Implemented:
-- D1 core schema, indexes and reference-round extension migrations
-- R2/raw snapshot abstraction with conflict detection
-- source/import-run provenance
-- generic manual editorial structured import contract
-- idempotent editorial imports with race-scoped identity matching
-- `kentaurai-reference-v1` pre-race reference importer
-- strict reference validation for eight legs, probability totals, exactly three spikar and row-count consistency
-- preservation of incomplete historical reference observations without invented facts
-- separate storage of imported external reference analysis vs future KentaurAI model runs
-- learning hypothesis/observation/change-log schema
-- private Worker routing/auth for every `/v1/*` route
-- private official-provider capture endpoint for calendar/day and game-by-id JSON
-- HTTPS-only provider configuration, input validation, timeout, JSON/content-type checks, response-size guard and blocked redirects
-- exact raw official responses archived privately before mapping
-- production D1 migrations applied
-- production Worker deployed with D1/R2 bindings
-- production `ADMIN_TOKEN` configured and fail-closed auth verified
-- GitHub/Cloudflare production build connection verified
-- one current calendar/day response captured and inspected privately
-- one current V86 game response captured and inspected privately
-- verified live field semantics for round/race/start identities, distances, start methods, market distribution scaling, odds scaling, horse money, equipment and optional nulls
-- conservative normalized official-game mapper with source-backed normalized observations
-- immutable betting, odds and equipment snapshots tied to exact source records and capture timestamps
-- idempotent handling of repeated normalization work
-- source-name conflicts preserved in observations and flagged as `source_conflict` instead of silently replacing canonical names
-- multi-track rounds do not invent a primary track
-- scratch semantics explicitly remain unverified rather than inferred
-- request-budgeted cursor protocol for production normalization so a full round can be processed across bounded Worker invocations
-- private raw-vs-normalized verification endpoint
-- production verification completed successfully with 60/60 checks passing and zero mismatches
-- SQLite-backed integration QA and GitHub Actions Node 22 QA
-- private read-only KentaurAI browser interface served by the Worker
-- separate `APP_PASSWORD` login path with secure HttpOnly 30-day session cookie
-- no `ADMIN_TOKEN` exposure in browser interface
-- fixed global search across horses, trainers and drivers
-- bottom navigation in approved entity order with new Spel destination: Start, Tränare, Hästar, Kuskar, Spel
-- entity list/detail views backed by reusable read-only D1 APIs
-- factual/null-safe interface behavior when historical results are unavailable
-- deterministic trainer/driver statistics only when stored race results exist
-- production UI validation against the first normalized V86 dataset
-- internal source IDs removed from user-facing entity lists
-- horse sex values localized for Swedish presentation without altering stored raw facts
-- trainer/driver profiles prioritize linked horses and database starts over unavailable metadata
-- mouse focus styling cleaned up while retaining keyboard-visible focus states
-- paginated entity APIs with deterministic total/limit/offset/hasMore metadata
-- 20-item entity browsing pages so every trainer, horse and driver remains reachable as the database grows
-- list-page position preserved when opening a profile and returning to the list
-- entity indexes converted from wide tables to compact touch-friendly rows
-- start-history tables separated from entity-list styling and given deliberate horizontal overflow on narrow screens
-- responsive top bar, profile hierarchy, pager controls and bottom navigation for mobile use
-- active navigation exposes `aria-current` while keyboard-visible focus remains intact
-- Start page reduced to a dedicated trends workspace; the old overview and data-status tabs are removed
-- trend workspace supports direct category switching between Tränare, Hästar and Kuskar
-- trend workspace supports 2 veckor, 4 veckor, 3 mån, 6 mån and 1 år timeframes without fabricating missing historical rankings
-- redundant KentaurAI eyebrow removed from page headings
-- search field rebuilt with a larger proper magnifying-glass vector, divider and deliberate spacing before query text
-- bottom navigation placeholders replaced by a coherent professional vector icon set
-- general application typography changed away from the previous Inter-heavy look while the approved brand-name typography remains separate
-- approved Sagittarius brand mark restored with `KENTAURAI` in caps and matching accent on mark + `AI`
-- third-party icon attributions documented publicly without exposing any private source identity
-- Spel section with tabs: Översikt, V85 and V86
-- V85/V86 list views are round-based, sortable by latest, most/fewest correct and best spike result
-- one primary system is selected deterministically per round: latest `main`, with deterministic fallback if no main exists
-- round list rows expose compact result, spike, cost and saved-system metadata without expanding into long analysis text
-- private round-detail API and UI with eight-leg post-race table plus per-leg analysis blocks
-- round detail exposes winner, winner trip classification when verified positional flags support it, pre-race rank/probability where available, system inclusion, spike status, scenario review, error type, km time and odds
-- winner-trip classification uses only explicit stored race-position flags such as lead, death seat, pocket, second/third over or wide/uncovered move; unsupported cases remain unknown rather than inferred
-- unfinished legs are not counted as unknown winner trips
-- round detail summarizes how the eight winners won and lists linked learning observations
-- concise stored post-race review summaries are shown when the structured review provides a supported summary field
-- all saved system proposals remain available on round detail and can be switched without losing the shared race/post-race facts
-- Spel overview aggregates completed-round accuracy, 8/8 hits, spike hit rate, V85/V86 comparison, result distribution, winner-trip distribution, recurring error types and learning statuses
-- revised post-race reviews are deduplicated for overview error statistics so only the latest review per primary system/race contributes
-- multiple saved system proposals remain preserved; overview/list metrics use a deterministic primary system while detail retains all saved systems
+## Verified foundation
+- D1 core schema, indexes and reference-round extension migrations are provisioned.
+- R2/raw snapshot abstraction preserves exact private source payloads with source/import-run provenance.
+- Manual editorial structured import and `kentaurai-reference-v1` import paths are implemented with public/private separation.
+- Official-provider calendar/day and game capture are implemented with strict HTTPS/host/redirect/content validation.
+- Conservative official-game normalization maps only verified field semantics and leaves unknown facts null.
+- Betting, odds and equipment are immutable timestamped snapshots tied to source records.
+- Source-name conflicts are preserved and flagged instead of silently replacing canonical names.
+- Multi-track rounds do not invent a primary track.
+- Live scratch semantics remain explicitly unverified.
+- Production normalization is cursor/chunk based to stay within Worker request budgets.
+- Raw-vs-normalized verification passed 60/60 checks on the accepted official vertical slice.
+- Automatic live acquisition is still off.
 
-Official vertical-slice conclusion:
-- raw capture -> private R2/D1 provenance -> normalization -> private verification is proven end-to-end
-- the verified subset is accepted as the baseline for future official-provider imports
-- live scratch/withdrawal semantics remain an explicit known gap until a real example is observed
-- automatic live acquisition remains off until a later explicit build enables it
+## Private interface
+- `/app` is a private read-only browser interface using `APP_PASSWORD` and a secure HttpOnly session cookie.
+- `/app/api/*` is private session-authenticated read API; `ADMIN_TOKEN` is never exposed to the browser.
+- `/v1/*` remains operational/admin-token protected.
+- Global search covers horses, trainers and drivers.
+- Entity lists are paginated and preserve list position when opening/returning from details.
+- Internal provider/source IDs are not primary user-facing content.
+- Missing facts and unsupported derived values remain null/unknown.
 
-Interface foundation decisions:
-- entity-centric database explorer plus a separate Spel performance/history area
-- fixed top global search
-- bottom navigation: Start -> Tränare -> Hästar -> Kuskar -> Spel
-- Start is the trend workspace rather than a database-count dashboard
-- trend navigation prioritizes entity category plus rolling timeframe controls
-- Spel overview is compact statistics; V85/V86 are round lists; each round has its own detailed post-race page
-- minimal dark visual system using black/grey/brown/beige with restrained blue/yellow/gold accents
-- brand name retains its distinct Inter treatment; application UI uses a separate calmer sans-serif stack
-- ready-made/open-licensed professional vector icons preferred over custom-drawn horse/UI symbols
-- tabs and paginated entity indexes preferred over excessive vertical scrolling
-- horse/trainer/driver profile pages are structured for later historical, X-Labs and calculated-feature additions
-- no invented trends or race-trip labels; unavailable derived facts remain null/unknown
-- internal provenance identifiers remain in the backend but are not primary UI content
-- learning observations may be shown per round, but model changes still require repeated supporting evidence
+## Navigation and visual direction
+- Bottom navigation is: **Trend -> Tränare -> Hästar -> Kuskar -> Spel**.
+- Trend uses the approved chart-line symbol shown in the production-feedback reference.
+- Tränare uses a brain symbol, Hästar keeps the horse symbol, and Kuskar uses the approved flexed-arm symbol.
+- Entity detail tiles retain the existing framed square; initials are replaced by the same entity-type symbol used in bottom navigation.
+- The Trend page header is singular **Trend**.
+- Trend category controls remain Tränare / Hästar / Kuskar with 2 veckor / 4 veckor / 3 mån / 6 mån / 1 år.
+- The timeframe shown inside the trend panel header is plain text, not an outlined pill.
+- The visible logout control and logout endpoint are removed; the private session still expires normally.
+- Approved Sagittarius KentaurAI brand mark remains unchanged.
+- General UI remains minimal/dark with black, grey, brown and beige plus restrained warm accent color.
 
-Verification completed for this build:
-- full Node 22 QA is green on the final feature branch after the redesign, Spel history, post-race detail and review-deduplication changes
-- exact branch diff reviewed for existing API preservation, private auth, read-only behavior, primary-system consistency, incomplete-result handling, race-trip factuality, revised-review aggregation, mobile navigation and branding regressions
-- no private racing payloads, paid/private editorial identity, secrets or real reference exports were added to the public repository
-- no unresolved pull-request review threads remain
+## Entity data coverage in 0.4.5
+Entity detail APIs and views expose the normalized/measured data already represented by the current schema, grouped so high-volume data does not become one continuous wall of fields.
 
-Next gate:
-1. Merge PR #12 only after explicit user authorization.
-2. Let the Cloudflare production deployment complete.
-3. Verify `/health` reports 0.4.4.
-4. Visually re-check trends, search, approved branding, bottom navigation, Spel overview, V85/V86 lists, saved-system switching and representative round/entity detail pages on desktop and mobile.
+### Profile and activity
+- identity/profile facts, active status, nationality/country and home-track context
+- horse sex, birth year/observed age, breed, color, trainer, owner, breeder and pedigree
+- horse career earnings and record when stored
+- person location, birth year and licence when present in normalized observations
+- database starts, result starts, wins, seconds, thirds, top-3, win/top-3 rates, gallops, disqualifications and prize money
+- scratched declarations are tracked separately and excluded from start/performance denominators
+- V85 and V86 start counts
+- deterministic breakdowns by start method, distance and track
 
-Not yet implemented:
+### Per-start facts and histories
+- race/game/date/leg, race name/number, track, scheduled time, distance, start method, field size, declared starters, first prize, class/class flags and race/source status
+- start number, lane, tier, handicap, actual start distance, back row, inner lane, springspar and scratch fields
+- placing, finish time, km time, prize, gallop, disqualification, distance behind winner, official odds and result status
+- latest betting percentage/market rank plus full stored betting-snapshot history for each returned start
+- latest odds by market type plus full stored odds history for each returned start
+- latest equipment plus stored equipment history/change flags for each returned start
+- latest X-Labs measurements plus stored X-Labs history and segment data for each returned start
+- race-position observations including supported trip/position flags, traffic events and structured event data
+- race conditions including track status, temperature, wind, precipitation, weather and day profile
+- calculated analysis features with uncertainty/data-quality/version context plus feature history
+- stored AI analyses/predictions shown in a separate section from facts/calculated features
+- structured editorial signals shown separately from factual and calculated data
+- data-coverage counts explicitly show which actual non-scratched starts have market, odds, equipment, X-Labs, positions, features, AI, editorial or race-condition data
+
+Arbitrary structured fields are displayed as readable key/value groups rather than raw JSON where practical. Internal feature provenance is retained in the backend but intentionally not rendered as normal user-facing data.
+
+Current entity-detail start retrieval is deliberately bounded to the latest 100 linked race entries per entity. This is sufficient for the present vertical-slice dataset but is not the final historical-browsing contract; paginated full-history retrieval must be added before the planned 2–3 year backfill.
+
+## Spel
+- Spel has exactly three tabs: Översikt, V85 and V86.
+- Overview aggregates completed-round accuracy, 8/8 hits, spike hit rate, V85/V86 comparison, result distribution, winner-trip distribution, recurring error types and learning statuses.
+- V85/V86 list views are round based and sortable by latest, most/fewest correct and best spike result.
+- Every saved system proposal remains preserved; list/overview use a deterministic primary system while round detail can switch saved systems.
+- Round detail shows all eight legs with winner, verified trip classification where supported, pre-race rank/probability, system inclusion, spike result, scenario review, error type, km time, odds, concise stored review and round learnings.
+- Winner-trip classification never guesses unsupported trips.
+
+## Quality and privacy
+- GitHub contains code/schema/tests/docs/synthetic fixtures only.
+- No real racing payloads, private reference exports, database dumps, secrets or paid/private editorial provider identity/content may be committed.
+- Raw facts, deterministic calculations and AI judgments remain explicitly separated.
+- Model weights are not changed after a single round; learnings remain No change / Candidate / Confirmed.
+- Review fixed literal SQL wildcard/escape handling in entity search/list filters.
+- Review replaced multiplicative multi-history coverage joins with per-entry `EXISTS` checks to avoid cross-product growth as histories accumulate.
+- Review added regression coverage for wildcard escaping and scratched-entry statistics.
+
+## Current verification gate
+1. Full CI must pass on the exact final PR #13 head.
+2. Exact diff must be reviewed for data completeness, null semantics, query correctness, privacy, read-only behavior, responsive layout and existing route preservation.
+3. Merge only after explicit user authorization.
+4. After deployment, visually verify Trend/nav icons, plain timeframe label and representative trainer/horse/driver detail pages on desktop and mobile.
+
+## Not yet implemented
+- paginated entity-detail history beyond the current latest-100 window; required before historical backfill
 - verified live scratch/withdrawal mapping
 - automatic live provider acquisition
-- additional provider endpoint patterns not yet observed
+- additional official-provider endpoint patterns not yet observed
 - historical trainer/driver/horse trend metrics and leaderboards
 - automatic post-race result collection/review orchestration
-- additional winner-trip categories that require facts not currently represented in the schema, for example explicit third-inside classification
-- dead-heat-specific presentation; no verified source example has yet been used to define that behavior
+- additional winner-trip categories requiring facts not currently represented in the schema
+- dead-heat-specific presentation pending a verified source example
 - X-Labs acquisition adapter
 - 2-3 year historical backfill
-- feature engine
+- future feature-engine expansion
 - KentaurAI AI analysis runner
 - system optimizer

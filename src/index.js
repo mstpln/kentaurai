@@ -8,10 +8,11 @@ import { getRound } from './routes/rounds.js';
 import { createHypothesis } from './routes/learning.js';
 import { verifyCapturedOfficialNormalization } from './routes/official-verification.js';
 import { getEntityDetail, getEntitySummary, listEntities, searchEntities } from './routes/entities.js';
+import { toEntityAppView } from './routes/entity-view.js';
 import { getGameHistoryDetail, listGameHistory } from './routes/games.js';
 import { getGameHistorySummary } from './routes/game-summary.js';
-import { appAuthConfigured, appPasswordMatches, clearAppSessionCookie, createAppSessionCookie, hasValidAppSession } from './app-auth.js';
-import { htmlResponse, redirectResponse, renderAppPage, renderLoginPage } from './app-page.js';
+import { appAuthConfigured, appPasswordMatches, createAppSessionCookie, hasValidAppSession } from './app-auth.js';
+import { htmlResponse, redirectResponse, renderAppPage, renderLoginPage } from './app-page-final.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -58,7 +59,7 @@ async function handleAppApi(request, env, url) {
   const detailMatch = path.match(/^\/app\/api\/entities\/(horses|trainers|drivers)\/([^/]+)$/);
   if (request.method === 'GET' && detailMatch) {
     const data = await getEntityDetail(env, detailMatch[1], decodeURIComponent(detailMatch[2]));
-    return data ? json(data) : json({ error: 'not_found' }, 404);
+    return data ? json(toEntityAppView(data)) : json({ error: 'not_found' }, 404);
   }
 
   const listMatch = path.match(/^\/app\/api\/entities\/(horses|trainers|drivers)$/);
@@ -91,7 +92,6 @@ async function handleApp(request, env, url) {
     if (!appPasswordMatches(env, form.get('password'))) return redirectResponse('/app/login?error=1');
     return redirectResponse('/app', { 'set-cookie': await createAppSessionCookie(env) });
   }
-  if (request.method === 'POST' && path === '/app/logout') return redirectResponse('/app/login', { 'set-cookie': clearAppSessionCookie() });
   if (request.method === 'GET' && (path === '/app' || path === '/app/')) {
     if (!(await hasValidAppSession(request, env))) return redirectResponse('/app/login');
     return htmlResponse(renderAppPage());
@@ -102,7 +102,7 @@ async function handleApp(request, env, url) {
 async function handleFetch(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
-  if (request.method === 'GET' && path === '/health') return json({ ok: true, service: 'kentaurai-api', version: '0.4.4' });
+  if (request.method === 'GET' && path === '/health') return json({ ok: true, service: 'kentaurai-api', version: '0.4.5' });
   if (path === '/') return redirectResponse('/app');
   if (path.startsWith('/app')) return handleApp(request, env, url);
   if (path.startsWith('/v1/')) {

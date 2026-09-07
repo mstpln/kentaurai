@@ -13,8 +13,16 @@ The KentaurAI Sagittarius brand mark is adapted from **Sagittarius** by Delapoui
 
 ## Phosphor Icons
 
-General interface/navigation icons are adapted from Phosphor Icons.
+General interface icons and the horse symbol are adapted from Phosphor Icons.
 
 - Source: https://github.com/phosphor-icons/core
 - License: MIT
+- Modification: selected SVG paths are embedded inline and sized/styled by KentaurAI CSS.
+
+## Lucide Icons
+
+The trainer brain and driver flexed-arm symbols are adapted from Lucide Icons.
+
+- Source: https://github.com/lucide-icons/lucide
+- License: ISC
 - Modification: selected SVG paths are embedded inline and sized/styled by KentaurAI CSS.
