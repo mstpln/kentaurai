@@ -2,21 +2,27 @@
 
 ## Architecture
 - GitHub: public code, migrations, tests and version history.
-- Cloudflare Worker: private API, import orchestration and scheduled jobs.
+- Cloudflare Worker: private API, import orchestration, interface delivery and scheduled jobs.
 - Cloudflare D1: normalized/queryable data.
 - Cloudflare R2: raw snapshots and larger source objects.
-- A private read-only KentaurAI interface is planned on top of the Worker/D1 data layer.
+- A private read-only KentaurAI interface sits on top of the Worker/D1 data layer.
 - AI provider is replaceable; OpenAI and Claude are both valid analysis layers.
 
 ## Entity-centric interface direction
 1. The interface is entity-centric rather than V85/V86-round-centric.
 2. Primary detail entities are horse, trainer and driver.
 3. V85/V86 round pages are not a core interface requirement.
-4. Detail pages should expose factual history, deterministic statistics and trends first; later X-Labs/features can be added to the same entity pages.
-5. The start page should eventually surface the most relevant rolling trend data, such as trainer and driver win rates over 2 weeks, 4 weeks, 3 months, 6 months and 1 year.
-6. Trend leaderboards must use deterministic code and sensible minimum-sample rules so very small samples do not dominate.
-7. The interface remains separate from the AI analysis layer: factual data and calculated metrics are displayed directly; AI interpretation is a later layer.
-8. The first interface build should be read-only and private.
+4. Bottom navigation order is fixed as Start -> Tränare -> Hästar -> Kuskar.
+5. A global search bar remains fixed at the top and searches all three primary entity types.
+6. Start and detail pages should use tabs instead of long continuous vertical pages wherever practical.
+7. Detail pages expose factual history, deterministic statistics and trends first; later X-Labs/features can be added to the same entity pages.
+8. The start page should eventually surface the most relevant rolling trend data, such as trainer and driver win rates over 2 weeks, 4 weeks, 3 months, 6 months and 1 year.
+9. Trend leaderboards must use deterministic code and sensible minimum-sample rules so very small samples do not dominate.
+10. The interface remains separate from the AI analysis layer: factual data and calculated metrics are displayed directly; AI interpretation is a later layer.
+11. The first interface is read-only and private.
+12. Visual direction is minimal and strongly structured, using black/grey/brown/beige as the base with restrained blue/yellow/gold accents and clear card/divider/tab separation.
+13. Missing historical/statistical data is shown as unavailable; the interface must never invent trend values or substitute unrelated data.
+14. Browser access uses a separate `APP_PASSWORD` secret and a secure HttpOnly session cookie. `ADMIN_TOKEN` remains reserved for operational APIs and is never exposed to the interface.
 
 ## Official live normalization
 1. Raw official responses are archived before normalization and remain the factual source of truth.

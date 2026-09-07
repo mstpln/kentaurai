@@ -7,11 +7,14 @@ import { captureCalendar, captureGame } from './provider/official.js';
 import { getRound } from './routes/rounds.js';
 import { createHypothesis } from './routes/learning.js';
 import { verifyCapturedOfficialNormalization } from './routes/official-verification.js';
+import { getEntityDetail, getEntitySummary, listEntities, searchEntities } from './routes/entities.js';
+import { appAuthConfigured, appPasswordMatches, clearAppSessionCookie, createAppSessionCookie, hasValidAppSession } from './app-auth.js';
+import { htmlResponse, redirectResponse, renderAppPage, renderLoginPage } from './app-page.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
     status,
-    headers: { 'content-type': 'application/json; charset=utf-8' }
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }
   });
 }
 
@@ -28,13 +31,81 @@ async function handleProviderCapture(env, body) {
   throw new Error('kind must be calendar or game');
 }
 
+async function handleAppApi(request, env, url) {
+  if (!(await hasValidAppSession(request, env))) return json({ error: 'unauthorized' }, 401);
+  const path = url.pathname;
+
+  if (request.method === 'GET' && path === '/app/api/summary') {
+    return json(await getEntitySummary(env));
+  }
+
+  if (request.method === 'GET' && path === '/app/api/search') {
+    return json(await searchEntities(env, url.searchParams.get('q'), url.searchParams.get('limit')));
+  }
+
+  const detailMatch = path.match(/^\/app\/api\/entities\/(horses|trainers|drivers)\/([^/]+)$/);
+  if (request.method === 'GET' && detailMatch) {
+    const data = await getEntityDetail(env, detailMatch[1], decodeURIComponent(detailMatch[2]));
+    return data ? json(data) : json({ error: 'not_found' }, 404);
+  }
+
+  const listMatch = path.match(/^\/app\/api\/entities\/(horses|trainers|drivers)$/);
+  if (request.method === 'GET' && listMatch) {
+    return json(await listEntities(env, listMatch[1], {
+      q: url.searchParams.get('q'),
+      limit: url.searchParams.get('limit')
+    }));
+  }
+
+  return json({ error: 'not_found' }, 404);
+}
+
+async function handleApp(request, env, url) {
+  const path = url.pathname;
+  if (!appAuthConfigured(env)) {
+    if (path.startsWith('/app/api/')) return json({ error: 'service_unavailable' }, 503);
+    return htmlResponse(renderLoginPage(), 503);
+  }
+
+  if (path.startsWith('/app/api/')) return handleAppApi(request, env, url);
+
+  if (request.method === 'GET' && path === '/app/login') {
+    if (await hasValidAppSession(request, env)) return redirectResponse('/app');
+    return htmlResponse(renderLoginPage({ error: url.searchParams.get('error') === '1' }));
+  }
+
+  if (request.method === 'POST' && path === '/app/login') {
+    const type = request.headers.get('content-type') || '';
+    if (!type.includes('application/x-www-form-urlencoded') && !type.includes('multipart/form-data')) {
+      return htmlResponse(renderLoginPage({ error: true }), 400);
+    }
+    const form = await request.formData();
+    if (!appPasswordMatches(env, form.get('password'))) return redirectResponse('/app/login?error=1');
+    return redirectResponse('/app', { 'set-cookie': await createAppSessionCookie(env) });
+  }
+
+  if (request.method === 'POST' && path === '/app/logout') {
+    return redirectResponse('/app/login', { 'set-cookie': clearAppSessionCookie() });
+  }
+
+  if (request.method === 'GET' && (path === '/app' || path === '/app/')) {
+    if (!(await hasValidAppSession(request, env))) return redirectResponse('/app/login');
+    return htmlResponse(renderAppPage());
+  }
+
+  return json({ error: 'not_found' }, 404);
+}
+
 async function handleFetch(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
 
   if (request.method === 'GET' && path === '/health') {
-    return json({ ok: true, service: 'kentaurai-api', version: '0.3.2' });
+    return json({ ok: true, service: 'kentaurai-api', version: '0.4.0' });
   }
+
+  if (path === '/') return redirectResponse('/app');
+  if (path.startsWith('/app')) return handleApp(request, env, url);
 
   if (path.startsWith('/v1/')) {
     const denied = requireAdmin(request, env);
@@ -93,7 +164,6 @@ async function handleFetch(request, env) {
 }
 
 async function handleScheduled(controller, env) {
-  // Phase 1C still does not make automatic live provider calls.
   const now = new Date(controller.scheduledTime || Date.now()).toISOString();
   const id = `cron_${crypto.randomUUID()}`;
   await env.DB.prepare(`
