@@ -2,7 +2,7 @@
 
 Version: 0.4.5
 Phase: interface foundation on verified official data layer
-Status: Trend/navigation polish and complete measured entity-data presentation are in PR review; automatic live acquisition remains disabled
+Status: Trend/navigation polish and measured entity-data presentation are review-clean for the current data phase; automatic live acquisition remains disabled
 
 ## Verified foundation
 - D1 core schema, indexes and reference-round extension migrations are provisioned.
@@ -40,7 +40,7 @@ Status: Trend/navigation polish and complete measured entity-data presentation a
 - General UI remains minimal/dark with black, grey, brown and beige plus restrained warm accent color.
 
 ## Entity data coverage in 0.4.5
-Entity detail APIs and views now expose the normalized/measured data already represented by the current schema, grouped so high-volume data does not become one continuous wall of fields.
+Entity detail APIs and views expose the normalized/measured data already represented by the current schema, grouped so high-volume data does not become one continuous wall of fields.
 
 ### Profile and activity
 - identity/profile facts, active status, nationality/country and home-track context
@@ -48,6 +48,7 @@ Entity detail APIs and views now expose the normalized/measured data already rep
 - horse career earnings and record when stored
 - person location, birth year and licence when present in normalized observations
 - database starts, result starts, wins, seconds, thirds, top-3, win/top-3 rates, gallops, disqualifications and prize money
+- scratched declarations are tracked separately and excluded from start/performance denominators
 - V85 and V86 start counts
 - deterministic breakdowns by start method, distance and track
 
@@ -55,18 +56,20 @@ Entity detail APIs and views now expose the normalized/measured data already rep
 - race/game/date/leg, race name/number, track, scheduled time, distance, start method, field size, declared starters, first prize, class/class flags and race/source status
 - start number, lane, tier, handicap, actual start distance, back row, inner lane, springspar and scratch fields
 - placing, finish time, km time, prize, gallop, disqualification, distance behind winner, official odds and result status
-- latest betting percentage/market rank plus full stored betting-snapshot history
-- latest odds by market type plus full stored odds history
-- latest equipment plus complete stored equipment history/change flags
-- latest X-Labs measurements plus stored X-Labs history and segment data
+- latest betting percentage/market rank plus full stored betting-snapshot history for each returned start
+- latest odds by market type plus full stored odds history for each returned start
+- latest equipment plus stored equipment history/change flags for each returned start
+- latest X-Labs measurements plus stored X-Labs history and segment data for each returned start
 - race-position observations including supported trip/position flags, traffic events and structured event data
 - race conditions including track status, temperature, wind, precipitation, weather and day profile
 - calculated analysis features with uncertainty/data-quality/version context plus feature history
 - stored AI analyses/predictions shown in a separate section from facts/calculated features
 - structured editorial signals shown separately from factual and calculated data
-- data-coverage counts explicitly show which starts have market, odds, equipment, X-Labs, positions, features, AI, editorial or race-condition data
+- data-coverage counts explicitly show which actual non-scratched starts have market, odds, equipment, X-Labs, positions, features, AI, editorial or race-condition data
 
 Arbitrary structured fields are displayed as readable key/value groups rather than raw JSON where practical. Internal feature provenance is retained in the backend but intentionally not rendered as normal user-facing data.
+
+Current entity-detail start retrieval is deliberately bounded to the latest 100 linked race entries per entity. This is sufficient for the present vertical-slice dataset but is not the final historical-browsing contract; paginated full-history retrieval must be added before the planned 2–3 year backfill.
 
 ## Spel
 - Spel has exactly three tabs: Översikt, V85 and V86.
@@ -81,16 +84,18 @@ Arbitrary structured fields are displayed as readable key/value groups rather th
 - No real racing payloads, private reference exports, database dumps, secrets or paid/private editorial provider identity/content may be committed.
 - Raw facts, deterministic calculations and AI judgments remain explicitly separated.
 - Model weights are not changed after a single round; learnings remain No change / Candidate / Confirmed.
+- Review fixed literal SQL wildcard/escape handling in entity search/list filters.
+- Review replaced multiplicative multi-history coverage joins with per-entry `EXISTS` checks to avoid cross-product growth as histories accumulate.
+- Review added regression coverage for wildcard escaping and scratched-entry statistics.
 
 ## Current verification gate
-1. Run full CI on the exact final PR #13 head.
-2. Review the exact diff for data completeness, null semantics, query correctness, privacy, read-only behavior, responsive layout and existing route preservation.
-3. Fix any blocking issues and repeat CI/review until clean.
-4. Update PR #13 with final verified head and scope.
-5. Merge only after explicit user authorization.
-6. After deployment, visually verify Trend/nav icons, plain timeframe label and representative trainer/horse/driver detail pages on desktop and mobile.
+1. Full CI must pass on the exact final PR #13 head.
+2. Exact diff must be reviewed for data completeness, null semantics, query correctness, privacy, read-only behavior, responsive layout and existing route preservation.
+3. Merge only after explicit user authorization.
+4. After deployment, visually verify Trend/nav icons, plain timeframe label and representative trainer/horse/driver detail pages on desktop and mobile.
 
 ## Not yet implemented
+- paginated entity-detail history beyond the current latest-100 window; required before historical backfill
 - verified live scratch/withdrawal mapping
 - automatic live provider acquisition
 - additional official-provider endpoint patterns not yet observed
