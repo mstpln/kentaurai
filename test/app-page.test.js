@@ -1,19 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import { renderAppPage, renderLoginPage } from '../src/app-page-complete.js';
+import { renderAppPage, renderLoginPage } from '../src/app-page-final.js';
 
 test('interface keeps navigation order, adds Spel, and retains global search', () => {
   const html = renderAppPage();
   assert.match(html, /id="globalSearch"/);
-  const start = html.indexOf('data-page="start"');
-  const trainers = html.indexOf('data-page="trainers"');
-  const horses = html.indexOf('data-page="horses"');
-  const drivers = html.indexOf('data-page="drivers"');
-  const games = html.indexOf('data-page="games"');
+  const nav = html.match(/<nav class="bottom-nav"[\s\S]*?<\/nav>/)?.[0] || '';
+  const start = nav.indexOf('data-page="start"');
+  const trainers = nav.indexOf('data-page="trainers"');
+  const horses = nav.indexOf('data-page="horses"');
+  const drivers = nav.indexOf('data-page="drivers"');
+  const games = nav.indexOf('data-page="games"');
   assert.ok(start >= 0 && start < trainers && trainers < horses && horses < drivers && drivers < games);
-  assert.match(html, />Spel<\/button>/);
-  assert.match(html, /aria-label="Huvudnavigation"/);
+  assert.match(nav, />Spel<\/button>/);
+  assert.match(nav, /aria-label="Huvudnavigation"/);
   assert.doesNotMatch(html, /ADMIN_TOKEN/);
 });
 
@@ -29,7 +30,7 @@ test('approved brand treatment renders exact Sagittarius direction and compact p
 
 test('trend navigation uses approved chart icon and Trend naming', () => {
   const html = renderAppPage();
-  assert.match(html, /chartLineIcon/);
+  assert.match(html, /v94\.37L90\.73,98/);
   assert.match(html, /node\.textContent='Trend'/);
   assert.match(html, /h\.textContent='Trend'/);
   assert.match(html, /const categories=\[\['trainers','Tränare'\],\['horses','Hästar'\],\['drivers','Kuskar'\]\]/);
@@ -43,8 +44,8 @@ test('trend navigation uses approved chart icon and Trend naming', () => {
 
 test('trainer and driver profile tiles keep their frame but use matching navigation symbols', () => {
   const html = renderAppPage();
-  assert.match(html, /const brainIcon/);
-  assert.match(html, /const bicepsIcon/);
+  assert.match(html, /M12 18V5/);
+  assert.match(html, /M12\.409 13\.017/);
   assert.match(html, /function profileIcon\(type\)/);
   assert.match(html, /type==='trainer'\)return POLISH_ICONS\.trainer/);
   assert.match(html, /type==='driver'\)return POLISH_ICONS\.driver/);
@@ -52,9 +53,10 @@ test('trainer and driver profile tiles keep their frame but use matching navigat
   assert.match(html, /\.avatar\{font-size:0;color:var\(--accent-soft\)\}/);
 });
 
-test('logout control is absent from the production interface', () => {
+test('logout control and route are absent from the production interface', () => {
   const html = renderAppPage();
-  assert.match(html, /\.top-inner>form\{display:none\}/);
+  assert.doesNotMatch(html, /action="\/app\/logout"/);
+  assert.doesNotMatch(html, />Logga ut</);
 });
 
 test('entity detail UI groups every stored measurement family', () => {
@@ -68,11 +70,12 @@ test('entity detail UI groups every stored measurement family', () => {
   for (const field of ['startsWithXLabs','startsWithPositions','startsWithFeatures','startsWithAi','startsWithEditorial','startsWithConditions']) assert.match(html, new RegExp(field));
 });
 
-test('complete data UI preserves raw/calculated/AI separation cues', () => {
+test('complete data UI preserves raw/calculated/AI separation cues and hides internal feature provenance', () => {
   const html = renderAppPage();
   assert.match(html, /råfakta → kodberäkning/);
   assert.match(html, /separerat från råfakta/);
   assert.match(html, /strukturerade signaler/);
+  assert.doesNotMatch(html, /jsonText\(f\.provenance\)/);
 });
 
 test('Spel remains available with overview, V85 and V86', () => {
