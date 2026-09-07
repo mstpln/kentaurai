@@ -131,13 +131,16 @@ async function getStats(env, relationColumn, id) {
       SUM(CASE WHEN rr.gallop = 1 THEN 1 ELSE 0 END) AS gallops,
       SUM(CASE WHEN rr.disqualified = 1 THEN 1 ELSE 0 END) AS disqualifications,
       SUM(CASE WHEN rr.race_entry_id IS NOT NULL THEN COALESCE(rr.prize_sek, 0) ELSE 0 END) AS prize_sek,
-      SUM(CASE WHEN gr.game_type = 'V85' THEN 1 ELSE 0 END) AS v85_starts,
-      SUM(CASE WHEN gr.game_type = 'V86' THEN 1 ELSE 0 END) AS v86_starts
+      SUM(CASE WHEN EXISTS (
+        SELECT 1 FROM game_legs gl JOIN game_rounds gr ON gr.id = gl.game_round_id
+        WHERE gl.race_id = re.race_id AND gr.game_type = 'V85'
+      ) THEN 1 ELSE 0 END) AS v85_starts,
+      SUM(CASE WHEN EXISTS (
+        SELECT 1 FROM game_legs gl JOIN game_rounds gr ON gr.id = gl.game_round_id
+        WHERE gl.race_id = re.race_id AND gr.game_type = 'V86'
+      ) THEN 1 ELSE 0 END) AS v86_starts
     FROM race_entries re
-    JOIN races r ON r.id = re.race_id
     LEFT JOIN race_results rr ON rr.race_entry_id = re.id
-    LEFT JOIN game_legs gl ON gl.race_id = r.id
-    LEFT JOIN game_rounds gr ON gr.id = gl.game_round_id
     WHERE re.${relationColumn} = ?
   `).bind(id).first();
   const resultStarts = Number(row?.result_starts ?? 0);
@@ -224,8 +227,6 @@ async function getBreakdowns(env, relationColumn, id) {
 }
 
 async function getBaseStarts(env, relationColumn, id) {
-  const horseProjection = relationColumn === 'horse_id' ? 'NULL AS horse_id, NULL AS horse_name,' : 'h.id AS horse_id, h.canonical_name AS horse_name,';
-  const horseJoin = relationColumn === 'horse_id' ? '' : 'JOIN horses h ON h.id = re.horse_id';
   const { results } = await env.DB.prepare(`
     SELECT
       re.id AS entry_id,
@@ -236,12 +237,15 @@ async function getBaseStarts(env, relationColumn, id) {
       r.distance_m,
       r.start_method,
       r.field_size,
+      r.starters_declared,
       r.first_prize_sek,
       r.race_name,
       r.main_class,
+      r.class_flags_json,
       r.status AS race_status,
       r.source_quality,
-      ${horseProjection}
+      h.id AS horse_id,
+      h.canonical_name AS horse_name,
       t.canonical_name AS track_name,
       d.id AS driver_id,
       d.canonical_name AS driver_name,
@@ -274,11 +278,12 @@ async function getBaseStarts(env, relationColumn, id) {
       rc.wind_direction,
       rc.precipitation_mm,
       rc.weather_text,
+      rc.day_profile_json,
       gr.game_type,
       gl.leg_number
     FROM race_entries re
     JOIN races r ON r.id = re.race_id
-    ${horseJoin}
+    JOIN horses h ON h.id = re.horse_id
     LEFT JOIN tracks t ON t.id = r.track_id
     LEFT JOIN drivers d ON d.id = re.driver_id
     LEFT JOIN trainers trn ON trn.id = re.trainer_id
@@ -288,14 +293,19 @@ async function getBaseStarts(env, relationColumn, id) {
     LEFT JOIN game_rounds gr ON gr.id = gl.game_round_id
     WHERE re.${relationColumn} = ?
     ORDER BY r.race_date DESC, r.race_number DESC, re.start_number ASC
+    LIMIT 100
   `).bind(id).all();
-  return results;
+  return results.map((row) => ({
+    ...row,
+    class_flags: parseJson(row.class_flags_json),
+    day_profile: parseJson(row.day_profile_json)
+  }));
 }
 
 async function rowsByEntry(env, tableSql, entryIds) {
   if (!entryIds.length) return [];
   const placeholders = entryIds.map(() => '?').join(',');
-  const { results } = await env.DB.prepare(tableSql.replace('__IDS__', placeholders)).bind(...entryIds).all();
+  const { results } = await env.DB.prepare(tableSql.replaceAll('__IDS__', placeholders)).bind(...entryIds).all();
   return results;
 }
 
@@ -309,122 +319,218 @@ function groupBy(rows, keyName) {
   return map;
 }
 
+function latestPer(rows, keyFn) {
+  const map = new Map();
+  for (const row of rows) {
+    const key = keyFn(row);
+    if (!map.has(key)) map.set(key, row);
+  }
+  return [...map.values()];
+}
+
+function equipmentItem(row) {
+  return {
+    shoesFront: row.shoes_front,
+    shoesRear: row.shoes_rear,
+    barefootFront: row.barefoot_front == null ? null : Boolean(row.barefoot_front),
+    barefootRear: row.barefoot_rear == null ? null : Boolean(row.barefoot_rear),
+    sulkyType: row.sulky_type,
+    exactSulky: row.exact_sulky,
+    headgear: row.headgear,
+    earplugs: row.earplugs,
+    otherEquipment: row.other_equipment,
+    changes: parseJson(row.change_from_previous_json),
+    verificationStatus: row.verification_status,
+    observedAt: row.observed_at
+  };
+}
+
+function xlabsItem(row) {
+  return {
+    first200Time: row.first_200_time,
+    last200Time: row.last_200_time,
+    last400Time: row.last_400_time,
+    last500Time: row.last_500_time,
+    last800Time: row.last_800_time,
+    last1000Time: row.last_1000_time,
+    actualDistanceM: numeric(row.actual_distance_m),
+    extraDistanceM: numeric(row.extra_distance_m),
+    convertedKmTime: row.converted_km_time,
+    slipstreamM: numeric(row.slipstream_m),
+    segments: parseJson(row.segments_json),
+    qualityStatus: row.quality_status,
+    observedAt: row.observed_at
+  };
+}
+
 async function enrichStarts(env, starts) {
   const entryIds = starts.map((row) => row.entry_id);
   if (!entryIds.length) return starts;
 
-  const [bettingRows, oddsRows, equipmentRows, xlabsRows, positionRows, featureRows] = await Promise.all([
+  const [bettingRows, oddsRows, equipmentRows, xlabsRows, positionRows, featureRows, predictionRows, editorialRows] = await Promise.all([
     rowsByEntry(env, `
-      SELECT race_entry_id, captured_at, bet_percent, market_rank FROM (
-        SELECT bs.*, ROW_NUMBER() OVER (PARTITION BY race_entry_id ORDER BY captured_at DESC, id DESC) AS rn
-        FROM betting_snapshots bs WHERE race_entry_id IN (__IDS__)
-      ) WHERE rn = 1
+      SELECT race_entry_id, captured_at, bet_percent, market_rank
+      FROM betting_snapshots WHERE race_entry_id IN (__IDS__)
+      ORDER BY race_entry_id, captured_at DESC, id DESC
     `, entryIds),
     rowsByEntry(env, `
-      SELECT race_entry_id, captured_at, market_type, odds FROM (
-        SELECT os.*, ROW_NUMBER() OVER (PARTITION BY race_entry_id, market_type ORDER BY captured_at DESC, id DESC) AS rn
-        FROM odds_snapshots os WHERE race_entry_id IN (__IDS__)
-      ) WHERE rn = 1 ORDER BY race_entry_id, market_type
+      SELECT race_entry_id, captured_at, market_type, odds
+      FROM odds_snapshots WHERE race_entry_id IN (__IDS__)
+      ORDER BY race_entry_id, captured_at DESC, market_type ASC, id DESC
     `, entryIds),
     rowsByEntry(env, `
-      SELECT race_entry_id, shoes_front, shoes_rear, barefoot_front, barefoot_rear, sulky_type, exact_sulky,
-             headgear, earplugs, other_equipment, change_from_previous_json, verification_status, observed_at
-      FROM (
-        SELECT e.*, sr.fetched_at AS observed_at,
-          ROW_NUMBER() OVER (PARTITION BY e.race_entry_id ORDER BY COALESCE(sr.fetched_at, '') DESC, e.id DESC) AS rn
-        FROM equipment e LEFT JOIN source_records sr ON sr.id = e.source_record_id
-        WHERE e.race_entry_id IN (__IDS__)
-      ) WHERE rn = 1
+      SELECT e.race_entry_id, e.shoes_front, e.shoes_rear, e.barefoot_front, e.barefoot_rear, e.sulky_type,
+             e.exact_sulky, e.headgear, e.earplugs, e.other_equipment, e.change_from_previous_json,
+             e.verification_status, sr.fetched_at AS observed_at
+      FROM equipment e LEFT JOIN source_records sr ON sr.id = e.source_record_id
+      WHERE e.race_entry_id IN (__IDS__)
+      ORDER BY e.race_entry_id, COALESCE(sr.fetched_at, '') DESC, e.id DESC
     `, entryIds),
     rowsByEntry(env, `
-      SELECT race_entry_id, first_200_time, last_200_time, last_400_time, last_500_time, last_800_time,
-             last_1000_time, actual_distance_m, extra_distance_m, converted_km_time, slipstream_m,
-             segments_json, quality_status, observed_at
-      FROM (
-        SELECT x.*, sr.fetched_at AS observed_at,
-          ROW_NUMBER() OVER (PARTITION BY x.race_entry_id ORDER BY COALESCE(sr.fetched_at, '') DESC, x.id DESC) AS rn
-        FROM xlabs_data x LEFT JOIN source_records sr ON sr.id = x.source_record_id
-        WHERE x.race_entry_id IN (__IDS__)
-      ) WHERE rn = 1
+      SELECT x.race_entry_id, x.first_200_time, x.last_200_time, x.last_400_time, x.last_500_time, x.last_800_time,
+             x.last_1000_time, x.actual_distance_m, x.extra_distance_m, x.converted_km_time, x.slipstream_m,
+             x.segments_json, x.quality_status, sr.fetched_at AS observed_at
+      FROM xlabs_data x LEFT JOIN source_records sr ON sr.id = x.source_record_id
+      WHERE x.race_entry_id IN (__IDS__)
+      ORDER BY x.race_entry_id, COALESCE(sr.fetched_at, '') DESC, x.id DESC
     `, entryIds),
     rowsByEntry(env, `
       SELECT race_entry_id, observed_at_m, position, lane, leader, pocket, death_seat, second_over, third_over,
-             wide_trip, uncovered_move, traffic_event
+             wide_trip, uncovered_move, traffic_event, event_json
       FROM race_positions WHERE race_entry_id IN (__IDS__)
       ORDER BY race_entry_id, observed_at_m ASC, id ASC
     `, entryIds),
     rowsByEntry(env, `
       SELECT race_entry_id, feature_name, numeric_value, text_value, uncertainty_low, uncertainty_high,
-             data_quality, as_of, feature_version
-      FROM (
-        SELECT af.*, ROW_NUMBER() OVER (PARTITION BY race_entry_id, feature_name ORDER BY as_of DESC, id DESC) AS rn
-        FROM analysis_features af WHERE race_entry_id IN (__IDS__)
-      ) WHERE rn = 1 ORDER BY race_entry_id, feature_name
+             data_quality, provenance_json, as_of, feature_version
+      FROM analysis_features WHERE race_entry_id IN (__IDS__)
+      ORDER BY race_entry_id, feature_name ASC, as_of DESC, id DESC
+    `, entryIds),
+    rowsByEntry(env, `
+      SELECT ahp.race_entry_id, ara.id AS analysis_id, ara.data_snapshot_at, ara.market_blind,
+             ara.scenarios_json, ara.race_shape_summary, ara.conclusion, ara.data_quality AS analysis_data_quality,
+             ara.analysis_origin, ara.method_note, ara.created_at,
+             mv.id AS model_version_id, mv.feature_version, mv.prompt_version, mv.ai_provider, mv.ai_model,
+             ahp.win_probability, ahp.uncertainty_low, ahp.uncertainty_high, ahp.raw_rank, ahp.abcd_group,
+             ahp.value_ratio, ahp.scenario_robustness, ahp.reasoning_json
+      FROM ai_horse_predictions ahp
+      JOIN ai_race_analyses ara ON ara.id = ahp.ai_race_analysis_id
+      LEFT JOIN model_versions mv ON mv.id = ara.model_version_id
+      WHERE ahp.race_entry_id IN (__IDS__)
+      ORDER BY ahp.race_entry_id, ara.data_snapshot_at DESC, ara.created_at DESC, ara.id DESC
+    `, entryIds),
+    rowsByEntry(env, `
+      SELECT ei.race_entry_id, ei.race_id, ei.horse_id, ei.published_at, ei.summary_text,
+             es.signal_type, es.value_text, es.polarity, es.strength, es.fact_or_opinion, es.confidence,
+             es.evidence_excerpt
+      FROM editorial_items ei
+      JOIN editorial_signals es ON es.editorial_item_id = ei.id
+      WHERE ei.race_entry_id IN (__IDS__)
+      ORDER BY ei.race_entry_id, COALESCE(ei.published_at, '') DESC, es.created_at DESC, es.id DESC
     `, entryIds)
   ]);
 
-  const betting = new Map(bettingRows.map((row) => [row.race_entry_id, row]));
+  const betting = groupBy(bettingRows, 'race_entry_id');
   const odds = groupBy(oddsRows, 'race_entry_id');
-  const equipment = new Map(equipmentRows.map((row) => [row.race_entry_id, row]));
-  const xlabs = new Map(xlabsRows.map((row) => [row.race_entry_id, row]));
+  const equipment = groupBy(equipmentRows, 'race_entry_id');
+  const xlabs = groupBy(xlabsRows, 'race_entry_id');
   const positions = groupBy(positionRows, 'race_entry_id');
   const features = groupBy(featureRows, 'race_entry_id');
+  const predictions = groupBy(predictionRows, 'race_entry_id');
+  const editorial = groupBy(editorialRows, 'race_entry_id');
 
   return starts.map((row) => {
-    const equip = equipment.get(row.entry_id) || null;
-    const xlab = xlabs.get(row.entry_id) || null;
+    const betHistory = (betting.get(row.entry_id) || []).map((item) => ({
+      capturedAt: item.captured_at,
+      betPercent: numeric(item.bet_percent),
+      marketRank: numeric(item.market_rank)
+    }));
+    const oddsHistory = (odds.get(row.entry_id) || []).map((item) => ({
+      capturedAt: item.captured_at,
+      marketType: item.market_type,
+      odds: numeric(item.odds)
+    }));
+    const equipmentHistory = (equipment.get(row.entry_id) || []).map(equipmentItem);
+    const xlabsHistory = (xlabs.get(row.entry_id) || []).map(xlabsItem);
+    const featureHistory = (features.get(row.entry_id) || []).map((item) => ({
+      name: item.feature_name,
+      numericValue: numeric(item.numeric_value),
+      textValue: item.text_value,
+      uncertaintyLow: numeric(item.uncertainty_low),
+      uncertaintyHigh: numeric(item.uncertainty_high),
+      dataQuality: item.data_quality,
+      provenance: parseJson(item.provenance_json),
+      asOf: item.as_of,
+      featureVersion: item.feature_version
+    }));
+    const aiAnalyses = (predictions.get(row.entry_id) || []).map((item) => ({
+      analysisId: item.analysis_id,
+      dataSnapshotAt: item.data_snapshot_at,
+      marketBlind: Boolean(item.market_blind),
+      scenarios: parseJson(item.scenarios_json),
+      raceShapeSummary: item.race_shape_summary,
+      conclusion: item.conclusion,
+      dataQuality: item.analysis_data_quality,
+      analysisOrigin: item.analysis_origin,
+      methodNote: item.method_note,
+      createdAt: item.created_at,
+      modelVersionId: item.model_version_id,
+      featureVersion: item.feature_version,
+      promptVersion: item.prompt_version,
+      aiProvider: item.ai_provider,
+      aiModel: item.ai_model,
+      winProbability: numeric(item.win_probability),
+      uncertaintyLow: numeric(item.uncertainty_low),
+      uncertaintyHigh: numeric(item.uncertainty_high),
+      rawRank: numeric(item.raw_rank),
+      abcdGroup: item.abcd_group,
+      valueRatio: numeric(item.value_ratio),
+      scenarioRobustness: numeric(item.scenario_robustness),
+      reasoning: parseJson(item.reasoning_json)
+    }));
+    const editorialSignals = (editorial.get(row.entry_id) || []).map((item) => ({
+      publishedAt: item.published_at,
+      summary: item.summary_text,
+      signalType: item.signal_type,
+      valueText: item.value_text,
+      polarity: item.polarity,
+      strength: numeric(item.strength),
+      factOrOpinion: item.fact_or_opinion,
+      confidence: numeric(item.confidence),
+      evidenceExcerpt: item.evidence_excerpt
+    }));
+
     return {
       ...row,
       scratched: Boolean(row.scratched),
       gallop: row.gallop == null ? null : Boolean(row.gallop),
       disqualified: row.disqualified == null ? null : Boolean(row.disqualified),
-      betting: betting.has(row.entry_id) ? {
-        capturedAt: betting.get(row.entry_id).captured_at,
-        betPercent: numeric(betting.get(row.entry_id).bet_percent),
-        marketRank: numeric(betting.get(row.entry_id).market_rank)
-      } : null,
-      odds: (odds.get(row.entry_id) || []).map((item) => ({ capturedAt: item.captured_at, marketType: item.market_type, odds: numeric(item.odds) })),
-      equipment: equip ? {
-        shoesFront: equip.shoes_front,
-        shoesRear: equip.shoes_rear,
-        barefootFront: equip.barefoot_front == null ? null : Boolean(equip.barefoot_front),
-        barefootRear: equip.barefoot_rear == null ? null : Boolean(equip.barefoot_rear),
-        sulkyType: equip.sulky_type,
-        exactSulky: equip.exact_sulky,
-        headgear: equip.headgear,
-        earplugs: equip.earplugs,
-        otherEquipment: equip.other_equipment,
-        changes: parseJson(equip.change_from_previous_json),
-        verificationStatus: equip.verification_status,
-        observedAt: equip.observed_at
-      } : null,
-      xlabs: xlab ? {
-        first200Time: xlab.first_200_time,
-        last200Time: xlab.last_200_time,
-        last400Time: xlab.last_400_time,
-        last500Time: xlab.last_500_time,
-        last800Time: xlab.last_800_time,
-        last1000Time: xlab.last_1000_time,
-        actualDistanceM: numeric(xlab.actual_distance_m),
-        extraDistanceM: numeric(xlab.extra_distance_m),
-        convertedKmTime: xlab.converted_km_time,
-        slipstreamM: numeric(xlab.slipstream_m),
-        segments: parseJson(xlab.segments_json),
-        qualityStatus: xlab.quality_status,
-        observedAt: xlab.observed_at
-      } : null,
+      betting: betHistory[0] || null,
+      bettingHistory: betHistory,
+      odds: latestPer(oddsHistory, (item) => item.marketType),
+      oddsHistory,
+      equipment: equipmentHistory[0] || null,
+      equipmentHistory,
+      xlabs: xlabsHistory[0] || null,
+      xlabsHistory,
       positions: (positions.get(row.entry_id) || []).map((item) => ({
-        observedAtM: numeric(item.observed_at_m), position: numeric(item.position), lane: numeric(item.lane),
-        leader: item.leader == null ? null : Boolean(item.leader), pocket: item.pocket == null ? null : Boolean(item.pocket),
-        deathSeat: item.death_seat == null ? null : Boolean(item.death_seat), secondOver: item.second_over == null ? null : Boolean(item.second_over),
-        thirdOver: item.third_over == null ? null : Boolean(item.third_over), wideTrip: item.wide_trip == null ? null : Boolean(item.wide_trip),
-        uncoveredMove: item.uncovered_move == null ? null : Boolean(item.uncovered_move), trafficEvent: item.traffic_event
+        observedAtM: numeric(item.observed_at_m),
+        position: numeric(item.position),
+        lane: numeric(item.lane),
+        leader: item.leader == null ? null : Boolean(item.leader),
+        pocket: item.pocket == null ? null : Boolean(item.pocket),
+        deathSeat: item.death_seat == null ? null : Boolean(item.death_seat),
+        secondOver: item.second_over == null ? null : Boolean(item.second_over),
+        thirdOver: item.third_over == null ? null : Boolean(item.third_over),
+        wideTrip: item.wide_trip == null ? null : Boolean(item.wide_trip),
+        uncoveredMove: item.uncovered_move == null ? null : Boolean(item.uncovered_move),
+        trafficEvent: item.traffic_event,
+        event: parseJson(item.event_json)
       })),
-      features: (features.get(row.entry_id) || []).map((item) => ({
-        name: item.feature_name, numericValue: numeric(item.numeric_value), textValue: item.text_value,
-        uncertaintyLow: numeric(item.uncertainty_low), uncertaintyHigh: numeric(item.uncertainty_high),
-        dataQuality: item.data_quality, asOf: item.as_of, featureVersion: item.feature_version
-      }))
+      features: latestPer(featureHistory, (item) => item.name),
+      featureHistory,
+      aiAnalyses,
+      editorialSignals
     };
   });
 }
@@ -438,7 +544,10 @@ async function getCoverage(env, relationColumn, id) {
       COUNT(DISTINCT CASE WHEN eq.id IS NOT NULL THEN re.id END) AS starts_with_equipment,
       COUNT(DISTINCT CASE WHEN xd.id IS NOT NULL THEN re.id END) AS starts_with_xlabs,
       COUNT(DISTINCT CASE WHEN rp.id IS NOT NULL THEN re.id END) AS starts_with_positions,
-      COUNT(DISTINCT CASE WHEN af.id IS NOT NULL THEN re.id END) AS starts_with_features
+      COUNT(DISTINCT CASE WHEN af.id IS NOT NULL THEN re.id END) AS starts_with_features,
+      COUNT(DISTINCT CASE WHEN ahp.id IS NOT NULL THEN re.id END) AS starts_with_ai,
+      COUNT(DISTINCT CASE WHEN ei.id IS NOT NULL THEN re.id END) AS starts_with_editorial,
+      COUNT(DISTINCT CASE WHEN rc.race_id IS NOT NULL THEN re.id END) AS starts_with_conditions
     FROM race_entries re
     LEFT JOIN betting_snapshots bs ON bs.race_entry_id = re.id
     LEFT JOIN odds_snapshots os ON os.race_entry_id = re.id
@@ -446,6 +555,9 @@ async function getCoverage(env, relationColumn, id) {
     LEFT JOIN xlabs_data xd ON xd.race_entry_id = re.id
     LEFT JOIN race_positions rp ON rp.race_entry_id = re.id
     LEFT JOIN analysis_features af ON af.race_entry_id = re.id
+    LEFT JOIN ai_horse_predictions ahp ON ahp.race_entry_id = re.id
+    LEFT JOIN editorial_items ei ON ei.race_entry_id = re.id
+    LEFT JOIN race_conditions rc ON rc.race_id = re.race_id
     WHERE re.${relationColumn} = ?
   `).bind(id).first();
   return {
@@ -455,7 +567,10 @@ async function getCoverage(env, relationColumn, id) {
     startsWithEquipment: Number(row?.starts_with_equipment ?? 0),
     startsWithXLabs: Number(row?.starts_with_xlabs ?? 0),
     startsWithPositions: Number(row?.starts_with_positions ?? 0),
-    startsWithFeatures: Number(row?.starts_with_features ?? 0)
+    startsWithFeatures: Number(row?.starts_with_features ?? 0),
+    startsWithAi: Number(row?.starts_with_ai ?? 0),
+    startsWithEditorial: Number(row?.starts_with_editorial ?? 0),
+    startsWithConditions: Number(row?.starts_with_conditions ?? 0)
   };
 }
 
@@ -473,8 +588,11 @@ async function getHorseDetail(env, id) {
   if (!horse) return null;
 
   const [observation, stats, breakdowns, coverage, baseStarts] = await Promise.all([
-    latestObservation(env, 'horse', id), getStats(env, 'horse_id', id), getBreakdowns(env, 'horse_id', id),
-    getCoverage(env, 'horse_id', id), getBaseStarts(env, 'horse_id', id)
+    latestObservation(env, 'horse', id),
+    getStats(env, 'horse_id', id),
+    getBreakdowns(env, 'horse_id', id),
+    getCoverage(env, 'horse_id', id),
+    getBaseStarts(env, 'horse_id', id)
   ]);
   const starts = await enrichStarts(env, baseStarts);
   return { type: 'horse', entity: horse, latestObservation: observation, stats, breakdowns, coverage, starts };
@@ -495,8 +613,11 @@ async function getPersonDetail(env, type, id) {
   if (!person) return null;
 
   const [observation, stats, breakdowns, coverage, baseStarts] = await Promise.all([
-    latestObservation(env, entityType, id), getStats(env, relationColumn, id), getBreakdowns(env, relationColumn, id),
-    getCoverage(env, relationColumn, id), getBaseStarts(env, relationColumn, id)
+    latestObservation(env, entityType, id),
+    getStats(env, relationColumn, id),
+    getBreakdowns(env, relationColumn, id),
+    getCoverage(env, relationColumn, id),
+    getBaseStarts(env, relationColumn, id)
   ]);
   const starts = await enrichStarts(env, baseStarts);
   return { type: entityType, entity: person, latestObservation: observation, stats, breakdowns, coverage, starts };
