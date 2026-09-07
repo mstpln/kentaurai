@@ -1,8 +1,8 @@
 # Build state
 
-Version: 0.3.2
-Phase: 1C - verified official live normalization
-Status: official-provider vertical slice verified end-to-end in production; automatic live acquisition still disabled
+Version: 0.4.0
+Phase: interface foundation on verified official data layer
+Status: entity-centric private interface implemented on feature branch; official-provider vertical slice remains verified end-to-end; automatic live acquisition still disabled
 
 Implemented:
 - D1 core schema, indexes and reference-round extension migrations
@@ -36,6 +36,15 @@ Implemented:
 - private raw-vs-normalized verification endpoint
 - production verification completed successfully with 60/60 checks passing and zero mismatches
 - SQLite-backed integration QA and GitHub Actions Node 22 QA
+- private read-only KentaurAI browser interface served by the Worker
+- separate `APP_PASSWORD` login path with secure HttpOnly 30-day session cookie
+- no `ADMIN_TOKEN` exposure in browser interface
+- fixed global search across horses, trainers and drivers
+- fixed bottom navigation in approved order: Start, Tränare, Hästar, Kuskar
+- entity list/detail views backed by reusable read-only D1 APIs
+- tabbed Start and entity detail screens to avoid long continuous scrolling
+- factual/null-safe interface behavior when historical results are unavailable
+- deterministic trainer/driver statistics only when stored race results exist
 
 Official vertical-slice conclusion:
 - raw capture -> private R2/D1 provenance -> normalization -> private verification is proven end-to-end
@@ -43,19 +52,28 @@ Official vertical-slice conclusion:
 - live scratch/withdrawal semantics remain an explicit known gap until a real example is observed
 - automatic live acquisition remains off until a later explicit build enables it
 
-Planned interface direction:
-- private read-only interface centered on horses, trainers and drivers rather than V85/V86 round pages
-- reusable private read APIs for entity search/list/detail views
-- factual history and deterministic statistics/trends shown directly, with AI interpretation kept separate
-- future homepage trend views such as 2 weeks, 4 weeks, 3 months, 6 months and 1 year, with sensible minimum-sample rules
-- exact sequencing between the interface foundation, X-Labs acquisition and historical backfill remains to be decided later
+Interface foundation decisions:
+- entity-centric rather than V85/V86-round-centric
+- fixed top global search
+- fixed bottom navigation: Start -> Tränare -> Hästar -> Kuskar
+- minimal dark visual system using black/grey/brown/beige with restrained blue/yellow/gold accents
+- clear card, divider and tab separation between sections
+- tabs preferred over excessive vertical scrolling
+- horse/trainer/driver profile pages are structured for later historical, X-Labs and calculated-feature additions
+- no invented trends; homepage rolling trend leaderboards remain unavailable until sufficient result history exists
+
+Next verification gate for this branch:
+1. Run full CI on the exact interface head.
+2. Review the exact final diff for auth, privacy, read-only guarantees, SQL correctness and responsive structure.
+3. Fix any blocking issues and repeat CI/review.
+4. Open/update the PR and merge only after explicit authorization.
+5. After merge, configure private `APP_PASSWORD` in Cloudflare before validating `/app` in production.
 
 Not yet implemented:
 - verified live scratch/withdrawal mapping
 - automatic live provider acquisition
 - additional provider endpoint patterns not yet observed
-- entity-centric KentaurAI interface/read API foundation
-- trainer/driver/horse trend metrics
+- historical trainer/driver/horse trend metrics and leaderboards
 - X-Labs acquisition adapter
 - 2-3 year historical backfill
 - feature engine
