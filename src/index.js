@@ -8,6 +8,7 @@ import { getRound } from './routes/rounds.js';
 import { createHypothesis } from './routes/learning.js';
 import { verifyCapturedOfficialNormalization } from './routes/official-verification.js';
 import { getEntityDetail, getEntitySummary, listEntities, searchEntities } from './routes/entities.js';
+import { toEntityAppView } from './routes/entity-view.js';
 import { getGameHistoryDetail, listGameHistory } from './routes/games.js';
 import { getGameHistorySummary } from './routes/game-summary.js';
 import { appAuthConfigured, appPasswordMatches, createAppSessionCookie, hasValidAppSession } from './app-auth.js';
@@ -58,7 +59,7 @@ async function handleAppApi(request, env, url) {
   const detailMatch = path.match(/^\/app\/api\/entities\/(horses|trainers|drivers)\/([^/]+)$/);
   if (request.method === 'GET' && detailMatch) {
     const data = await getEntityDetail(env, detailMatch[1], decodeURIComponent(detailMatch[2]));
-    return data ? json(data) : json({ error: 'not_found' }, 404);
+    return data ? json(toEntityAppView(data)) : json({ error: 'not_found' }, 404);
   }
 
   const listMatch = path.match(/^\/app\/api\/entities\/(horses|trainers|drivers)$/);
