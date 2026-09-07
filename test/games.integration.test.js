@@ -13,13 +13,13 @@ function seedRound(db) {
     const raceId = `race_${leg}`;
     const winnerEntryId = `winner_${leg}`;
     const otherEntryId = `other_${leg}`;
-    db.prepare(`INSERT INTO races (id, track_id, race_date, race_number, distance_m, start_method) VALUES (?, 'track_1', '2099-01-02', ?, 2140, 'auto')`).bind(raceId, leg).run();
-    db.prepare(`INSERT INTO game_legs (game_round_id, leg_number, race_id) VALUES ('round_1', ?, ?)`).bind(leg, raceId).run();
-    db.prepare(`INSERT INTO race_entries (id, race_id, horse_id, start_number) VALUES (?, ?, 'horse_1', 1)`).bind(winnerEntryId, raceId).run();
-    db.prepare(`INSERT INTO race_entries (id, race_id, horse_id, start_number) VALUES (?, ?, 'horse_2', 2)`).bind(otherEntryId, raceId).run();
-    db.prepare(`INSERT INTO race_results (race_entry_id, placing, placing_text, km_time, official_odds) VALUES (?, 1, '1', '1.12,0', 3.5)`).bind(winnerEntryId).run();
+    db.prepare(`INSERT INTO races (id, track_id, race_date, race_number, distance_m, start_method) VALUES ('${raceId}', 'track_1', '2099-01-02', ${leg}, 2140, 'auto')`).run();
+    db.prepare(`INSERT INTO game_legs (game_round_id, leg_number, race_id) VALUES ('round_1', ${leg}, '${raceId}')`).run();
+    db.prepare(`INSERT INTO race_entries (id, race_id, horse_id, start_number) VALUES ('${winnerEntryId}', '${raceId}', 'horse_1', 1)`).run();
+    db.prepare(`INSERT INTO race_entries (id, race_id, horse_id, start_number) VALUES ('${otherEntryId}', '${raceId}', 'horse_2', 2)`).run();
+    db.prepare(`INSERT INTO race_results (race_entry_id, placing, placing_text, km_time, official_odds) VALUES ('${winnerEntryId}', 1, '1', '1.12,0', 3.5)`).run();
     if (leg === 1) {
-      db.prepare(`INSERT INTO race_positions (id, race_entry_id, observed_at_m, position, leader) VALUES ('pos_1', ?, 500, 1, 1)`).bind(winnerEntryId).run();
+      db.prepare(`INSERT INTO race_positions (id, race_entry_id, observed_at_m, position, leader) VALUES ('pos_1', '${winnerEntryId}', 500, 1, 1)`).run();
     }
   }
 
@@ -28,7 +28,7 @@ function seedRound(db) {
   for (let leg = 1; leg <= 8; leg += 1) {
     const selectedEntryId = leg <= 6 ? `winner_${leg}` : `other_${leg}`;
     const isSpike = leg <= 3 ? 1 : 0;
-    db.prepare(`INSERT INTO system_selections (system_id, leg_number, race_entry_id, is_spike, own_probability, market_percent) VALUES ('system_main', ?, ?, ?, 0.25, 0.20)`).bind(leg, selectedEntryId, isSpike).run();
+    db.prepare(`INSERT INTO system_selections (system_id, leg_number, race_entry_id, is_spike, own_probability, market_percent) VALUES ('system_main', ${leg}, '${selectedEntryId}', ${isSpike}, 0.25, 0.20)`).run();
   }
 }
 
