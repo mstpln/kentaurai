@@ -68,16 +68,14 @@ The Phase 1B capture endpoint accepts one of these request shapes:
 ```
 
 ```json
-{ "kind": "product", "game_type": "V85" }
-```
-
-```json
 { "kind": "game", "game_id": "V85_2026-09-07_5_1" }
 ```
 
+Calendar/day and game-by-id endpoint patterns are the only live patterns wired at this stage. We intentionally do not add other product-specific endpoints until they have been observed and verified against a current real response.
+
 Responses are validated as JSON and archived to private R2/D1 with the status `captured_unmapped`. KentaurAI reports the observed top-level shape but does not yet map live provider fields into the normalized racing schema. Automatic live collection remains disabled until at least one real response has been captured and manually verified.
 
-The provider base URL can be overridden with `OFFICIAL_PROVIDER_BASE_URL` if the official endpoint changes. Only HTTPS is accepted.
+The provider base URL can be overridden with `OFFICIAL_PROVIDER_BASE_URL` if the official endpoint changes. Only HTTPS URLs without embedded credentials are accepted.
 
 ## Reference-round import
 `kentaurai-reference-v1` is the pre-race reference contract. The validator requires:
