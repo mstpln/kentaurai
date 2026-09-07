@@ -130,6 +130,25 @@ test('official provider capture rejects HTTP failures without archiving them', a
   assert.equal(db.prepare("SELECT status FROM import_runs").get().status, 'failed');
 });
 
+test('official provider capture rejects redirects without archiving them', async () => {
+  const { env, db, objects } = createTestEnv();
+  await assert.rejects(
+    () => captureCalendar(env, '2026-09-07', {
+      fetchImpl: async (_url, init) => {
+        assert.equal(init.redirect, 'manual');
+        return new Response(null, {
+          status: 302,
+          headers: { location: 'https://example.com/redirected' }
+        });
+      }
+    }),
+    /HTTP 302/
+  );
+  assert.equal(db.prepare('SELECT count(*) AS n FROM source_records').get().n, 0);
+  assert.equal(objects.size, 0);
+  assert.equal(db.prepare("SELECT status FROM import_runs").get().status, 'failed');
+});
+
 test('official provider capture rejects an oversized declared response before archiving it', async () => {
   const { env, db, objects } = createTestEnv();
   await assert.rejects(
