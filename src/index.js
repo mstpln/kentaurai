@@ -2,7 +2,7 @@ import { requireAdmin } from './auth.js';
 import { archiveRawPayload } from './raw.js';
 import { importEditorial } from './import/editorial.js';
 import { importReferenceRound } from './import/reference-round-safe.js';
-import { captureCalendar, captureGame, captureProduct } from './provider/official.js';
+import { captureCalendar, captureGame } from './provider/official.js';
 import { getRound } from './routes/rounds.js';
 import { createHypothesis } from './routes/learning.js';
 
@@ -22,9 +22,8 @@ async function readJson(request) {
 async function handleProviderCapture(env, body) {
   const kind = String(body.kind || '').toLowerCase();
   if (kind === 'calendar') return captureCalendar(env, body.date);
-  if (kind === 'product') return captureProduct(env, body.game_type);
   if (kind === 'game') return captureGame(env, body.game_id);
-  throw new Error('kind must be calendar, product or game');
+  throw new Error('kind must be calendar or game');
 }
 
 async function handleFetch(request, env) {
