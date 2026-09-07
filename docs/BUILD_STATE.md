@@ -2,7 +2,7 @@
 
 Version: 0.4.4
 Phase: interface foundation on verified official data layer
-Status: production interface redesign and Spel history in review; automatic live acquisition still disabled
+Status: production interface redesign and Spel history are merge-ready after CI/review; automatic live acquisition still disabled
 
 Implemented:
 - D1 core schema, indexes and reference-round extension migrations
@@ -74,7 +74,10 @@ Implemented:
 - winner-trip classification uses only explicit stored race-position flags such as lead, death seat, pocket, second/third over or wide/uncovered move; unsupported cases remain unknown rather than inferred
 - unfinished legs are not counted as unknown winner trips
 - round detail summarizes how the eight winners won and lists linked learning observations
-- Spel overview aggregates completed-round accuracy, 8/8 hits, spike hit rate, result distribution, winner-trip distribution, recurring error types and learning statuses
+- concise stored post-race review summaries are shown when the structured review provides a supported summary field
+- all saved system proposals remain available on round detail and can be switched without losing the shared race/post-race facts
+- Spel overview aggregates completed-round accuracy, 8/8 hits, spike hit rate, V85/V86 comparison, result distribution, winner-trip distribution, recurring error types and learning statuses
+- revised post-race reviews are deduplicated for overview error statistics so only the latest review per primary system/race contributes
 - multiple saved system proposals remain preserved; overview/list metrics use a deterministic primary system while detail retains all saved systems
 
 Official vertical-slice conclusion:
@@ -91,7 +94,7 @@ Interface foundation decisions:
 - trend navigation prioritizes entity category plus rolling timeframe controls
 - Spel overview is compact statistics; V85/V86 are round lists; each round has its own detailed post-race page
 - minimal dark visual system using black/grey/brown/beige with restrained blue/yellow/gold accents
-- brand name retains its distinct display treatment; application UI uses a separate calmer sans-serif stack
+- brand name retains its distinct Inter treatment; application UI uses a separate calmer sans-serif stack
 - ready-made/open-licensed professional vector icons preferred over custom-drawn horse/UI symbols
 - tabs and paginated entity indexes preferred over excessive vertical scrolling
 - horse/trainer/driver profile pages are structured for later historical, X-Labs and calculated-feature additions
@@ -99,13 +102,17 @@ Interface foundation decisions:
 - internal provenance identifiers remain in the backend but are not primary UI content
 - learning observations may be shown per round, but model changes still require repeated supporting evidence
 
-Next verification gate:
-1. Run full CI on the exact 0.4.4 feature head.
-2. Review the exact final diff for UI semantics, primary-system consistency, post-race correctness, existing API preservation, privacy, accessibility and regression risk.
-3. Fix any blocking issues and repeat CI/review until clean.
-4. Update PR #12 with the final scope and exact verified head.
-5. Merge only after explicit authorization.
-6. After production deployment, visually re-check trends, search, branding, bottom navigation, Spel overview, V85/V86 lists and representative round/entity details on desktop and mobile.
+Verification completed for this build:
+- full Node 22 QA is green on the final feature branch after the redesign, Spel history, post-race detail and review-deduplication changes
+- exact branch diff reviewed for existing API preservation, private auth, read-only behavior, primary-system consistency, incomplete-result handling, race-trip factuality, revised-review aggregation, mobile navigation and branding regressions
+- no private racing payloads, paid/private editorial identity, secrets or real reference exports were added to the public repository
+- no unresolved pull-request review threads remain
+
+Next gate:
+1. Merge PR #12 only after explicit user authorization.
+2. Let the Cloudflare production deployment complete.
+3. Verify `/health` reports 0.4.4.
+4. Visually re-check trends, search, approved branding, bottom navigation, Spel overview, V85/V86 lists, saved-system switching and representative round/entity detail pages on desktop and mobile.
 
 Not yet implemented:
 - verified live scratch/withdrawal mapping
@@ -114,6 +121,7 @@ Not yet implemented:
 - historical trainer/driver/horse trend metrics and leaderboards
 - automatic post-race result collection/review orchestration
 - additional winner-trip categories that require facts not currently represented in the schema, for example explicit third-inside classification
+- dead-heat-specific presentation; no verified source example has yet been used to define that behavior
 - X-Labs acquisition adapter
 - 2-3 year historical backfill
 - feature engine
