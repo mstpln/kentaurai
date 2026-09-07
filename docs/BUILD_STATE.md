@@ -1,8 +1,8 @@
 # Build state
 
-Version: 0.3.0
+Version: 0.3.1
 Phase: 1C - verified official live normalization
-Status: Worker deployed; D1/R2 provisioned; auth verified; one real calendar and one real V86 game captured privately; live game shape inspected; normalized mapper implemented with synthetic CI coverage; automatic live acquisition still disabled
+Status: Worker deployed; D1/R2 provisioned; auth verified; real calendar/game captures verified; production normalization is being adjusted to stay within Cloudflare per-invocation request limits; automatic live acquisition still disabled
 
 Implemented:
 - D1 core schema, indexes and reference-round extension migrations
@@ -28,16 +28,17 @@ Implemented:
 - verified live field semantics for round/race/start identities, distances, start methods, market distribution scaling, odds scaling, horse money, equipment and optional nulls
 - conservative normalized official-game mapper with source-backed normalized observations
 - immutable betting, odds and equipment snapshots tied to exact source records and capture timestamps
-- idempotent no-op behavior when the same captured game snapshot is normalized twice
+- idempotent handling of repeated normalization work
 - source-name conflicts preserved in observations and flagged as `source_conflict` instead of silently replacing canonical names
 - multi-track rounds do not invent a primary track
 - scratch semantics explicitly remain unverified rather than inferred
+- request-budgeted cursor protocol for production normalization so a full round can be processed across bounded Worker invocations
 - SQLite-backed integration QA and GitHub Actions Node 22 QA
 
 Next verification gate:
-1. Review and merge the Phase 1C mapper PR only after CI and exact-head review pass.
-2. Allow Cloudflare to apply the new migration and deploy only after explicit merge authorization.
-3. Normalize the already captured private V86 game snapshot through the private mapper endpoint, or normalize the next freshly captured game snapshot.
+1. Review and merge the request-budget fix only after CI and exact-head review pass.
+2. Let Cloudflare deploy v0.3.1 from `main` after explicit merge authorization.
+3. Resume normalization of the already captured private V86 game using the cursor protocol until `done: true`.
 4. Verify 10-20 normalized D1 fields against the already inspected private raw payload.
 5. Observe at least one real scratched/withdrawn live entry before implementing scratch-state updates.
 6. Only after the official vertical slice is verified end-to-end, proceed to X-Labs acquisition.
