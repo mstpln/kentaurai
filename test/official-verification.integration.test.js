@@ -88,17 +88,19 @@ async function seedAndNormalize(env, db) {
   assert.equal(final.done, true);
 }
 
-test('private verification compares raw capture with normalized D1 facts', async () => {
+test('private verification compares raw capture with normalized D1 facts and provenance', async () => {
   const { env, db } = createTestEnv();
   await seedAndNormalize(env, db);
 
   const report = await verifyCapturedOfficialNormalization(env, SOURCE_ID);
   assert.equal(report.ok, true);
   assert.equal(report.failedCount, 0);
-  assert.ok(report.checkCount >= 30);
+  assert.ok(report.checkCount >= 40);
   assert.equal(report.representative.voltSampleIncluded, true);
   assert.equal(report.checks.find((check) => check.id === 'volt.handicap_m').pass, true);
   assert.equal(report.checks.find((check) => check.id === 'counts.entries').actual, 8);
+  assert.equal(report.checks.find((check) => check.id === 'counts.observations.race_entry').actual, 8);
+  assert.equal(report.checks.find((check) => check.id === 'entry.source_start_id').pass, true);
 });
 
 test('private verification reports a normalized/raw mismatch instead of hiding it', async () => {
@@ -116,4 +118,59 @@ test('private verification reports a normalized/raw mismatch instead of hiding i
   const mismatch = report.checks.find((check) => check.id === 'entry.horse_money_sek');
   assert.equal(mismatch.pass, false);
   assert.equal(report.failedCount, 1);
+});
+
+test('private verification fails when source-backed entry provenance is incomplete', async () => {
+  const { env, db } = createTestEnv();
+  await seedAndNormalize(env, db);
+
+  const entryId = db.prepare(`
+    SELECT re.id
+    FROM race_entries re
+    JOIN race_external_ids rx ON rx.race_id = re.race_id
+    WHERE rx.source_type = 'official' AND rx.external_id = ?
+    LIMIT 1
+  `).get(`${DATE}_905_1`).id;
+  db.prepare(`
+    DELETE FROM normalized_observations
+    WHERE source_record_id = ? AND entity_type = 'race_entry' AND entity_id = ?
+  `).run(SOURCE_ID, entryId);
+
+  const report = await verifyCapturedOfficialNormalization(env, SOURCE_ID);
+  assert.equal(report.ok, false);
+  const mismatch = report.checks.find((check) => check.id === 'counts.observations.race_entry');
+  assert.equal(mismatch.expected, 8);
+  assert.equal(mismatch.actual, 7);
+  assert.equal(mismatch.pass, false);
+});
+
+test('private verification accepts preserved canonical names when the source observation records a conflict', async () => {
+  const { env, db } = createTestEnv();
+  await seedAndNormalize(env, db);
+
+  const horse = db.prepare(`
+    SELECT h.id, h.canonical_name
+    FROM horses h
+    JOIN horse_external_ids x ON x.horse_id = h.id
+    WHERE x.source_type = 'official' AND x.external_id = '993001'
+  `).get();
+  const observation = db.prepare(`
+    SELECT id, fields_json FROM normalized_observations
+    WHERE source_record_id = ? AND entity_type = 'horse' AND entity_id = ?
+  `).get(SOURCE_ID, horse.id);
+  const fields = JSON.parse(observation.fields_json);
+  fields.priorCanonicalName = 'Preserved Canonical';
+  fields.nameConflict = true;
+  db.prepare('UPDATE horses SET canonical_name = ? WHERE id = ?').run('Preserved Canonical', horse.id);
+  db.prepare(`
+    UPDATE normalized_observations
+    SET fields_json = ?, quality_status = 'source_conflict'
+    WHERE id = ?
+  `).run(JSON.stringify(fields), observation.id);
+
+  const report = await verifyCapturedOfficialNormalization(env, SOURCE_ID);
+  assert.equal(report.ok, true);
+  assert.equal(report.failedCount, 0);
+  assert.equal(report.checks.find((check) => check.id === 'entry.horse_name.conflict_status').pass, true);
+  assert.equal(report.checks.find((check) => check.id === 'entry.horse_name.canonical_preserved').pass, true);
 });
