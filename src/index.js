@@ -2,6 +2,7 @@ import { requireAdmin } from './auth.js';
 import { archiveRawPayload } from './raw.js';
 import { importEditorial } from './import/editorial.js';
 import { importReferenceRound } from './import/reference-round-safe.js';
+import { normalizeCapturedOfficialGame } from './import/official-live.js';
 import { captureCalendar, captureGame } from './provider/official.js';
 import { getRound } from './routes/rounds.js';
 import { createHypothesis } from './routes/learning.js';
@@ -31,7 +32,7 @@ async function handleFetch(request, env) {
   const path = url.pathname;
 
   if (request.method === 'GET' && path === '/health') {
-    return json({ ok: true, service: 'kentaurai-api', version: '0.2.0' });
+    return json({ ok: true, service: 'kentaurai-api', version: '0.3.0' });
   }
 
   if (path.startsWith('/v1/')) {
@@ -47,6 +48,11 @@ async function handleFetch(request, env) {
 
   if (request.method === 'POST' && path === '/v1/provider/capture') {
     return json(await handleProviderCapture(env, await readJson(request)), 201);
+  }
+
+  if (request.method === 'POST' && path === '/v1/provider/normalize') {
+    const body = await readJson(request);
+    return json(await normalizeCapturedOfficialGame(env, body.source_record_id));
   }
 
   if (request.method === 'POST' && path === '/v1/import/editorial') {
@@ -81,13 +87,13 @@ async function handleFetch(request, env) {
 }
 
 async function handleScheduled(controller, env) {
-  // Phase 1B records scheduler health only. Live collection remains disabled until a real response is validated.
+  // Phase 1C still does not make automatic live provider calls.
   const now = new Date(controller.scheduledTime || Date.now()).toISOString();
   const id = `cron_${crypto.randomUUID()}`;
   await env.DB.prepare(`
     INSERT INTO import_runs (id, source_type, started_at, finished_at, status, metadata_json)
     VALUES (?, 'scheduled_orchestrator', ?, ?, 'success', ?)
-  `).bind(id, now, now, JSON.stringify({ cron: controller.cron, phase: '1B_capture_ready_no_automatic_live_calls' })).run();
+  `).bind(id, now, now, JSON.stringify({ cron: controller.cron, phase: '1C_verified_mapper_no_automatic_live_calls' })).run();
 }
 
 export default {

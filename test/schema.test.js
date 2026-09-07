@@ -6,7 +6,8 @@ import { DatabaseSync } from 'node:sqlite';
 const migration1 = readFileSync(new URL('../migrations/0001_core.sql', import.meta.url), 'utf8');
 const migration2 = readFileSync(new URL('../migrations/0002_reference_round.sql', import.meta.url), 'utf8');
 const migration3 = readFileSync(new URL('../migrations/0003_nullable_reference_prediction.sql', import.meta.url), 'utf8');
-const sql = `${migration1}\n${migration2}\n${migration3}`;
+const migration4 = readFileSync(new URL('../migrations/0004_official_live_observations.sql', import.meta.url), 'utf8');
+const sql = `${migration1}\n${migration2}\n${migration3}\n${migration4}`;
 
 test('core migrations apply cleanly and create required tables', () => {
   const db = new DatabaseSync(':memory:');
@@ -17,7 +18,7 @@ test('core migrations apply cleanly and create required tables', () => {
     'xlabs_data', 'game_rounds', 'betting_snapshots', 'editorial_items', 'analysis_features',
     'ai_race_analyses', 'ai_horse_predictions', 'systems', 'post_race_reviews', 'import_runs',
     'learning_hypotheses', 'learning_observations', 'model_change_log',
-    'reference_round_exports', 'reference_observations'
+    'reference_round_exports', 'reference_observations', 'normalized_observations'
   ]) {
     assert.ok(names.has(required), `missing ${required}`);
   }
@@ -37,6 +38,16 @@ test('reference migration adds captured factual fields without changing raw/anal
   assert.ok(analysisColumns.has('method_note'));
   assert.ok(editorialColumns.has('race_id'));
   assert.ok(editorialColumns.has('game_round_id'));
+});
+
+test('official live observation migration keeps source provenance mandatory', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(sql);
+  const columns = new Map(db.prepare('PRAGMA table_info(normalized_observations)').all().map((r) => [r.name, r]));
+  assert.equal(columns.get('source_record_id').notnull, 1);
+  assert.equal(columns.get('observed_at').notnull, 1);
+  assert.equal(columns.get('fields_json').notnull, 1);
+  assert.equal(columns.get('quality_status').notnull, 1);
 });
 
 test('reference prediction schema allows a null probability for entries without a pre-race probability', () => {
