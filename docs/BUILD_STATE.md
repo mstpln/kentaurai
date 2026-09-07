@@ -1,8 +1,8 @@
 # Build state
 
-Version: 0.3.1
+Version: 0.3.2
 Phase: 1C - verified official live normalization
-Status: Worker deployed; D1/R2 provisioned; auth verified; real calendar/game captures verified; production normalization is being adjusted to stay within Cloudflare per-invocation request limits; automatic live acquisition still disabled
+Status: official-provider vertical slice verified end-to-end in production; automatic live acquisition still disabled
 
 Implemented:
 - D1 core schema, indexes and reference-round extension migrations
@@ -33,20 +33,29 @@ Implemented:
 - multi-track rounds do not invent a primary track
 - scratch semantics explicitly remain unverified rather than inferred
 - request-budgeted cursor protocol for production normalization so a full round can be processed across bounded Worker invocations
+- private raw-vs-normalized verification endpoint
+- production verification completed successfully with 60/60 checks passing and zero mismatches
 - SQLite-backed integration QA and GitHub Actions Node 22 QA
 
-Next verification gate:
-1. Review and merge the request-budget fix only after CI and exact-head review pass.
-2. Let Cloudflare deploy v0.3.1 from `main` after explicit merge authorization.
-3. Resume normalization of the already captured private V86 game using the cursor protocol until `done: true`.
-4. Verify 10-20 normalized D1 fields against the already inspected private raw payload.
-5. Observe at least one real scratched/withdrawn live entry before implementing scratch-state updates.
-6. Only after the official vertical slice is verified end-to-end, proceed to X-Labs acquisition.
+Official vertical-slice conclusion:
+- raw capture -> private R2/D1 provenance -> normalization -> private verification is proven end-to-end
+- the verified subset is accepted as the baseline for future official-provider imports
+- live scratch/withdrawal semantics remain an explicit known gap until a real example is observed
+- automatic live acquisition remains off until a later explicit build enables it
+
+Planned interface direction:
+- private read-only interface centered on horses, trainers and drivers rather than V85/V86 round pages
+- reusable private read APIs for entity search/list/detail views
+- factual history and deterministic statistics/trends shown directly, with AI interpretation kept separate
+- future homepage trend views such as 2 weeks, 4 weeks, 3 months, 6 months and 1 year, with sensible minimum-sample rules
+- exact sequencing between the interface foundation, X-Labs acquisition and historical backfill remains to be decided later
 
 Not yet implemented:
 - verified live scratch/withdrawal mapping
 - automatic live provider acquisition
 - additional provider endpoint patterns not yet observed
+- entity-centric KentaurAI interface/read API foundation
+- trainer/driver/horse trend metrics
 - X-Labs acquisition adapter
 - 2-3 year historical backfill
 - feature engine
