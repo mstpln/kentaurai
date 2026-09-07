@@ -8,6 +8,7 @@ import { getRound } from './routes/rounds.js';
 import { createHypothesis } from './routes/learning.js';
 import { verifyCapturedOfficialNormalization } from './routes/official-verification.js';
 import { getEntityDetail, getEntitySummary, listEntities, searchEntities } from './routes/entities.js';
+import { getSystemHistorySummary, listSystemHistory } from './routes/games.js';
 import { appAuthConfigured, appPasswordMatches, clearAppSessionCookie, createAppSessionCookie, hasValidAppSession } from './app-auth.js';
 import { htmlResponse, redirectResponse, renderAppPage, renderLoginPage } from './app-page.js';
 
@@ -41,6 +42,18 @@ async function handleAppApi(request, env, url) {
 
   if (request.method === 'GET' && path === '/app/api/search') {
     return json(await searchEntities(env, url.searchParams.get('q'), url.searchParams.get('limit')));
+  }
+
+  if (request.method === 'GET' && path === '/app/api/games/summary') {
+    return json(await getSystemHistorySummary(env));
+  }
+
+  if (request.method === 'GET' && path === '/app/api/games') {
+    return json(await listSystemHistory(env, {
+      gameType: url.searchParams.get('type'),
+      limit: url.searchParams.get('limit'),
+      offset: url.searchParams.get('offset')
+    }));
   }
 
   const detailMatch = path.match(/^\/app\/api\/entities\/(horses|trainers|drivers)\/([^/]+)$/);
@@ -102,7 +115,7 @@ async function handleFetch(request, env) {
   const path = url.pathname;
 
   if (request.method === 'GET' && path === '/health') {
-    return json({ ok: true, service: 'kentaurai-api', version: '0.4.3' });
+    return json({ ok: true, service: 'kentaurai-api', version: '0.4.4' });
   }
 
   if (path === '/') return redirectResponse('/app');
