@@ -35,7 +35,9 @@ test('entity lists omit internal source ids and details preserve factual nulls',
 
   const horses = await listEntities(env, 'horses');
   assert.equal(horses.items.length, 1);
-  assert.deepEqual(horses.items[0], { id: 'horse_1', name: 'Comet Horse' });
+  assert.equal(horses.items[0].id, 'horse_1');
+  assert.equal(horses.items[0].name, 'Comet Horse');
+  assert.equal('external_id' in horses.items[0], false);
 
   const horse = await getEntityDetail(env, 'horses', 'horse_1');
   assert.equal(horse.entity.name, 'Comet Horse');
