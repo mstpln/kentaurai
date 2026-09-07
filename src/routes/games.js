@@ -155,8 +155,7 @@ const TRIP_LABELS = {
   pocket: 'Rygg ledaren',
   second_over: '2:a utvändigt',
   third_over: '3:e utvändigt',
-  wide_attack: 'Bred attack',
-  from_back: 'Bakifrån'
+  wide_attack: 'Bred attack'
 };
 
 function classifyWinnerTrip(observations) {
@@ -168,40 +167,25 @@ function classifyWinnerTrip(observations) {
     const key = tripKeyForObservation(row);
     if (key) counts.set(key, (counts.get(key) || 0) + 1);
   }
+  if (!counts.size) return null;
 
-  if (counts.size) {
-    const priority = ['lead', 'death_seat', 'pocket', 'second_over', 'third_over', 'wide_attack'];
-    let bestKey = null;
-    let bestCount = -1;
-    for (const key of priority) {
-      const count = counts.get(key) || 0;
-      if (count > bestCount) {
-        bestKey = key;
-        bestCount = count;
-      }
-    }
-    if (bestKey && bestCount > 0) {
-      return {
-        key: bestKey,
-        label: TRIP_LABELS[bestKey],
-        evidenceCount: bestCount,
-        observationCount: usable.length
-      };
+  const priority = ['lead', 'death_seat', 'pocket', 'second_over', 'third_over', 'wide_attack'];
+  let bestKey = null;
+  let bestCount = -1;
+  for (const key of priority) {
+    const count = counts.get(key) || 0;
+    if (count > bestCount) {
+      bestKey = key;
+      bestCount = count;
     }
   }
-
-  const positioned = usable
-    .filter((row) => Number.isInteger(Number(row.position)))
-    .sort((a, b) => Number(b.observed_at_m ?? -1) - Number(a.observed_at_m ?? -1));
-  if (positioned.length && Number(positioned[0].position) >= 5) {
-    return {
-      key: 'from_back',
-      label: TRIP_LABELS.from_back,
-      evidenceCount: 1,
-      observationCount: usable.length
-    };
-  }
-  return null;
+  if (!bestKey || bestCount <= 0) return null;
+  return {
+    key: bestKey,
+    label: TRIP_LABELS[bestKey],
+    evidenceCount: bestCount,
+    observationCount: usable.length
+  };
 }
 
 function sortClause(sort) {
@@ -297,14 +281,12 @@ function summarize(items) {
 export async function getGameHistorySummary(env) {
   const { results } = await env.DB.prepare(`${ROUND_HISTORY_SELECT}\nORDER BY round_date DESC, id ASC`).all();
   const rounds = results.map(mapRoundRow);
-  const uniqueRoundIds = rounds.map((round) => round.id);
 
   const tripCounts = new Map();
   let unknownTrips = 0;
-  for (const roundId of uniqueRoundIds) {
-    const trips = tripMapFromRows(await getTripRows(env, roundId));
-    for (let leg = 1; leg <= 8; leg += 1) {
-      const trip = trips.get(leg);
+  for (const round of rounds) {
+    const trips = tripMapFromRows(await getTripRows(env, round.id));
+    for (const trip of trips.values()) {
       if (!trip) {
         unknownTrips += 1;
         continue;
@@ -406,7 +388,14 @@ export async function getGameHistoryDetail(env, roundId) {
       ) AS correct_spikes
     FROM systems s
     WHERE s.game_round_id = ?
-    ORDER BY CASE WHEN s.system_type = 'main' THEN 0 ELSE 1 END, s.created_at ASC, s.id ASC
+    ORDER BY
+      CASE WHEN s.id = COALESCE(
+        (SELECT s1.id FROM systems s1 WHERE s1.game_round_id = s.game_round_id AND s1.system_type = 'main' ORDER BY s1.created_at DESC, s1.id ASC LIMIT 1),
+        (SELECT s2.id FROM systems s2 WHERE s2.game_round_id = s.game_round_id ORDER BY s2.created_at ASC, s2.id ASC LIMIT 1)
+      ) THEN 0 ELSE 1 END,
+      CASE WHEN s.system_type = 'main' THEN 0 ELSE 1 END,
+      s.created_at DESC,
+      s.id ASC
   `).bind(id).all();
   const systems = systemRows.map(systemMetricsFromRow);
 
