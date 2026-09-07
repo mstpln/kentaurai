@@ -2,8 +2,17 @@
 
 Private V85/V86 data and analysis backend with a public codebase. No end-user app is required.
 
-## What this first build contains
-This is Phase 1A: the data foundation. It creates the database schema, provenance model, raw snapshot support, private import API, reference-round import path and a generic manual editorial import path.
+## Current build
+Phase 1A established the data foundation. Phase 1B adds a deliberately narrow live-provider capture layer so KentaurAI can fetch and archive official JSON responses privately before any schema mapping is trusted.
+
+The current build contains:
+- D1 schema and provenance model
+- R2 raw snapshot support
+- private import API
+- reference-round import path
+- generic manual editorial import path
+- private official-provider capture endpoint
+- strict validation and idempotency tests
 
 ## Public-code / private-data boundary
 This repository contains code, migrations, tests, documentation and synthetic fixtures only.
@@ -40,9 +49,10 @@ npx wrangler secret put ADMIN_TOKEN
 
 Do not commit that token.
 
-## Private API - Phase 1A
+## Private API
 - `GET /health` - intentionally public health check
 - `GET /v1/rounds/:roundId` - Bearer ADMIN_TOKEN
+- `POST /v1/provider/capture` - Bearer ADMIN_TOKEN
 - `POST /v1/import/editorial` - Bearer ADMIN_TOKEN
 - `POST /v1/import/reference-round` - Bearer ADMIN_TOKEN
 - `POST /v1/import/raw` - Bearer ADMIN_TOKEN
@@ -50,8 +60,27 @@ Do not commit that token.
 
 All `/v1/*` routes fail closed unless `ADMIN_TOKEN` is configured and supplied.
 
+### Official-provider capture
+The Phase 1B capture endpoint accepts one of these request shapes:
+
+```json
+{ "kind": "calendar", "date": "2026-09-07" }
+```
+
+```json
+{ "kind": "product", "game_type": "V85" }
+```
+
+```json
+{ "kind": "game", "game_id": "V85_2026-09-07_5_1" }
+```
+
+Responses are validated as JSON and archived to private R2/D1 with the status `captured_unmapped`. KentaurAI reports the observed top-level shape but does not yet map live provider fields into the normalized racing schema. Automatic live collection remains disabled until at least one real response has been captured and manually verified.
+
+The provider base URL can be overridden with `OFFICIAL_PROVIDER_BASE_URL` if the official endpoint changes. Only HTTPS is accepted.
+
 ## Reference-round import
-`kentaurai-reference-v1` is the Phase 1A pre-race reference contract. The validator requires:
+`kentaurai-reference-v1` is the pre-race reference contract. The validator requires:
 - exactly eight V85/V86 legs
 - every race entry represented in the analysis snapshot
 - non-scratched win probabilities summing to 100% per leg
