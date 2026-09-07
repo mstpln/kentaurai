@@ -5,8 +5,18 @@
 - Cloudflare Worker: private API, import orchestration and scheduled jobs.
 - Cloudflare D1: normalized/queryable data.
 - Cloudflare R2: raw snapshots and larger source objects.
-- No frontend/app is required.
+- A private read-only KentaurAI interface is planned on top of the Worker/D1 data layer.
 - AI provider is replaceable; OpenAI and Claude are both valid analysis layers.
+
+## Entity-centric interface direction
+1. The interface is entity-centric rather than V85/V86-round-centric.
+2. Primary detail entities are horse, trainer and driver.
+3. V85/V86 round pages are not a core interface requirement.
+4. Detail pages should expose factual history, deterministic statistics and trends first; later X-Labs/features can be added to the same entity pages.
+5. The start page should eventually surface the most relevant rolling trend data, such as trainer and driver win rates over 2 weeks, 4 weeks, 3 months, 6 months and 1 year.
+6. Trend leaderboards must use deterministic code and sensible minimum-sample rules so very small samples do not dominate.
+7. The interface remains separate from the AI analysis layer: factual data and calculated metrics are displayed directly; AI interpretation is a later layer.
+8. The first interface build should be read-only and private.
 
 ## Official live normalization
 1. Raw official responses are archived before normalization and remain the factual source of truth.
@@ -19,7 +29,8 @@
 8. Multi-track rounds do not invent a primary track.
 9. Conflicting canonical names for the same official external ID preserve the existing canonical value and flag the new observation as `source_conflict`.
 10. Live scratch semantics remain unimplemented until a real scratched/withdrawn response is observed. Declared starts are marked with that limitation rather than guessed.
-11. Automatic live acquisition remains disabled until the normalized official vertical slice is verified end-to-end.
+11. Automatic live acquisition remains disabled until a later explicit build enables it.
+12. The official-provider vertical slice is accepted only after raw-vs-normalized production verification passes without mismatches for the verified subset.
 
 ## Manual editorial flow
 1. Editorial content is reviewed outside KentaurAI using an authorized user workflow.
