@@ -9,7 +9,7 @@
     {
       "binding": "DB",
       "database_name": "kentaurai",
-      "database_id": "REPLACE_AFTER_D1_CREATE",
+      "database_id": "d8189e0e-6127-4ef2-88cc-534cb2217340",
       "migrations_dir": "migrations"
     }
   ],
