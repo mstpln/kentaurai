@@ -17,19 +17,38 @@ test('entity interface keeps approved navigation order and global search', () =>
   assert.doesNotMatch(html, /ADMIN_TOKEN/);
 });
 
-test('premium polish keeps brand identity and mobile-first entity lists', () => {
+test('brand and navigation use real horse-aware vector icons', () => {
   const html = renderAppPage();
   const login = renderLoginPage();
   assert.match(html, /KENTAUR<span>AI<\/span>/);
   assert.match(login, /KENTAUR<span>AI<\/span>/);
-  assert.match(html, /<circle cx="32" cy="32" r="29"/);
-  assert.match(html, /class="entity-row"/);
-  assert.match(html, /class="table starts-table"/);
-  assert.match(html, /PAGE_SIZE=20/);
-  assert.match(html, /listOffsets/);
-  assert.match(html, /Visar /);
-  assert.match(html, /Föregående/);
-  assert.match(html, /Nästa/);
+  assert.match(html, /class="brand-badge"/);
+  assert.match(html, /class="brand-icon"/);
+  assert.match(html, /class="nav-icon"/);
+  assert.doesNotMatch(html, /<span class="nav-icon">[⌂◉♞●]/);
+});
+
+test('start page is trends-first with category and timeframe controls', () => {
+  const html = renderAppPage();
+  assert.match(html, /<h1>Trender<\/h1>/);
+  assert.match(html, /data-trend-category="trainers"/);
+  assert.match(html, /data-trend-category="horses"/);
+  assert.match(html, /data-trend-category="drivers"/);
+  assert.match(html, /data-trend-range="2w"/);
+  assert.match(html, /data-trend-range="4w"/);
+  assert.match(html, /data-trend-range="3m"/);
+  assert.match(html, /data-trend-range="6m"/);
+  assert.match(html, /data-trend-range="1y"/);
+  assert.doesNotMatch(html, /Databasöversikt och relevanta trender/);
+  assert.doesNotMatch(html, /Datastatus/);
+});
+
+test('search control has large vector icon and visual divider', () => {
+  const html = renderAppPage();
+  assert.match(html, /class="search-prefix"/);
+  assert.match(html, /class="search-icon"/);
+  assert.match(html, /class="search-divider"/);
+  assert.match(html, /padding:0 46px 0 74px/);
 });
 
 test('production interface remains factual and localized', () => {
@@ -41,6 +60,18 @@ test('production interface remains factual and localized', () => {
   assert.match(html, /Hästar i databasen/);
   assert.match(html, /Starter i databasen/);
   assert.match(html, /button:focus-visible/);
+  assert.match(html, /Trenddata byggs upp/);
+});
+
+test('entity browsing still supports complete paginated lists', () => {
+  const html = renderAppPage();
+  assert.match(html, /class="entity-row"/);
+  assert.match(html, /class="table starts-table"/);
+  assert.match(html, /PAGE_SIZE=20/);
+  assert.match(html, /listOffsets/);
+  assert.match(html, /Visar /);
+  assert.match(html, /Föregående/);
+  assert.match(html, /Nästa/);
 });
 
 test('embedded browser application script is valid JavaScript', () => {
