@@ -1,6 +1,6 @@
 # KentaurAI
 
-Private V85/V86 data and analysis backend with a public codebase. No end-user app is required.
+Private V85/V86 data and analysis backend with a public codebase. No end-user app is required for the current backend phases.
 
 ## Current build
 Phase 1C adds a conservative normalized live-provider mapper on top of the Phase 1B raw-capture layer. Real provider payloads remain private; the public repository contains only mapping code, migrations and synthetic tests.
@@ -15,6 +15,7 @@ The current build contains:
 - verified official game normalizer for the observed game payload shape
 - immutable normalized observations tied to source records
 - betting/odds/equipment snapshots with source provenance
+- private raw-vs-normalized verification endpoint
 - strict validation and idempotency tests
 
 ## Public-code / private-data boundary
@@ -34,6 +35,7 @@ Real source data belongs only in the private Cloudflare D1/R2 deployment or is s
 - `GET /v1/rounds/:roundId` - Bearer ADMIN_TOKEN
 - `POST /v1/provider/capture` - Bearer ADMIN_TOKEN
 - `POST /v1/provider/normalize` - Bearer ADMIN_TOKEN
+- `POST /v1/provider/verify-normalization` - Bearer ADMIN_TOKEN
 - `POST /v1/import/editorial` - Bearer ADMIN_TOKEN
 - `POST /v1/import/reference-round` - Bearer ADMIN_TOKEN
 - `POST /v1/import/raw` - Bearer ADMIN_TOKEN
@@ -47,6 +49,8 @@ Calendar/day and game-by-id are the only live acquisition patterns currently wir
 The normalizer reads a previously captured game source record from private R2 and maps only the verified subset into normalized D1 tables. It preserves source timestamps and source-record references for observations, betting percentages, odds and equipment snapshots. Reprocessing the same captured source record is a no-op.
 
 Production normalization is deliberately split across bounded Worker invocations so a full V85/V86 round cannot exceed Cloudflare's per-invocation external-service request budget. `POST /v1/provider/normalize` accepts `source_record_id` and an optional integer `cursor` starting at `0`. Each non-final response returns `nextCursor`; the caller submits that value in the next request. When `done` becomes `true`, the source record is marked `normalized_verified_subset`. Repeating a completed source record returns `reused: true`.
+
+`POST /v1/provider/verify-normalization` is a read-only verification gate. It re-reads the exact private R2 snapshot for a completed source record, compares representative raw facts and aggregate counts with normalized D1 rows, and returns per-check pass/fail details. It does not mutate normalized racing data.
 
 Verified mapping rules include:
 - stable official IDs for races, horses, drivers, trainers and tracks

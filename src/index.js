@@ -6,6 +6,7 @@ import { normalizeCapturedOfficialGameSequential } from './import/official-live-
 import { captureCalendar, captureGame } from './provider/official.js';
 import { getRound } from './routes/rounds.js';
 import { createHypothesis } from './routes/learning.js';
+import { verifyCapturedOfficialNormalization } from './routes/official-verification.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -32,7 +33,7 @@ async function handleFetch(request, env) {
   const path = url.pathname;
 
   if (request.method === 'GET' && path === '/health') {
-    return json({ ok: true, service: 'kentaurai-api', version: '0.3.1' });
+    return json({ ok: true, service: 'kentaurai-api', version: '0.3.2' });
   }
 
   if (path.startsWith('/v1/')) {
@@ -53,6 +54,11 @@ async function handleFetch(request, env) {
   if (request.method === 'POST' && path === '/v1/provider/normalize') {
     const body = await readJson(request);
     return json(await normalizeCapturedOfficialGameSequential(env, body.source_record_id, body.cursor ?? 0));
+  }
+
+  if (request.method === 'POST' && path === '/v1/provider/verify-normalization') {
+    const body = await readJson(request);
+    return json(await verifyCapturedOfficialNormalization(env, body.source_record_id));
   }
 
   if (request.method === 'POST' && path === '/v1/import/editorial') {
