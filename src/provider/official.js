@@ -2,13 +2,13 @@ import { archiveRawPayload } from '../raw.js';
 import { discoverProviderShape } from '../import/atg.js';
 
 const DEFAULT_BASE_URL = 'https://www.atg.se/services/racinginfo/v1/api';
-const SUPPORTED_GAMES = new Set(['V85', 'V86']);
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
 function providerBaseUrl(env) {
   const raw = env.OFFICIAL_PROVIDER_BASE_URL || DEFAULT_BASE_URL;
   const url = new URL(raw);
   if (url.protocol !== 'https:') throw new Error('official provider base URL must use https');
+  if (url.username || url.password) throw new Error('official provider base URL must not contain credentials');
   url.pathname = url.pathname.replace(/\/$/, '');
   url.search = '';
   url.hash = '';
@@ -25,18 +25,8 @@ export function validateIsoDate(value) {
   return text;
 }
 
-export function validateGameType(value) {
-  const gameType = String(value || '').toUpperCase();
-  if (!SUPPORTED_GAMES.has(gameType)) throw new Error('game type must be V85 or V86');
-  return gameType;
-}
-
 export function buildCalendarUrl(env, date) {
   return `${providerBaseUrl(env)}/calendar/day/${encodeURIComponent(validateIsoDate(date))}`;
-}
-
-export function buildProductUrl(env, gameType) {
-  return `${providerBaseUrl(env)}/products/${encodeURIComponent(validateGameType(gameType))}`;
 }
 
 export function buildGameUrl(env, gameId) {
@@ -54,10 +44,7 @@ async function fetchJson(url, fetchImpl) {
   try {
     response = await fetchImpl(url, {
       method: 'GET',
-      headers: {
-        accept: 'application/json',
-        'user-agent': 'KentaurAI/0.2 provider-capture'
-      },
+      headers: { accept: 'application/json' },
       signal: controller.signal
     });
   } finally {
@@ -68,6 +55,11 @@ async function fetchJson(url, fetchImpl) {
   const type = response.headers.get('content-type') || '';
   if (!type.toLowerCase().includes('json')) throw new Error('official provider did not return JSON');
 
+  const declaredLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
+    throw new Error('official provider response exceeded size limit');
+  }
+
   const body = await response.text();
   if (new TextEncoder().encode(body).byteLength > MAX_RESPONSE_BYTES) {
     throw new Error('official provider response exceeded size limit');
@@ -75,7 +67,9 @@ async function fetchJson(url, fetchImpl) {
 
   try {
     const payload = JSON.parse(body);
-    if (!payload || typeof payload !== 'object') throw new Error('payload must be an object');
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      throw new Error('payload must be an object');
+    }
     return payload;
   } catch (error) {
     throw new Error(`official provider returned invalid JSON: ${error.message}`);
@@ -112,16 +106,6 @@ export async function captureCalendar(env, date, options = {}) {
     kind: 'calendar',
     identity: normalized,
     url: buildCalendarUrl(env, normalized),
-    fetchImpl: options.fetchImpl
-  });
-}
-
-export async function captureProduct(env, gameType, options = {}) {
-  const normalized = validateGameType(gameType);
-  return capture(env, {
-    kind: 'product',
-    identity: normalized,
-    url: buildProductUrl(env, normalized),
     fetchImpl: options.fetchImpl
   });
 }
