@@ -92,3 +92,63 @@ test('entity details preserve factual nulls and database activity stats', async 
   assert.equal(trainer.stats.winRate, null);
   assert.equal(trainer.starts[0].horse_name, 'Comet Horse');
 });
+
+test('entity detail exposes each existing measurement family with histories and coverage', async () => {
+  const { env, db } = createTestEnv();
+  seed(db);
+
+  db.prepare(`INSERT INTO source_records (id, source_type, fetched_at, quality_status) VALUES ('src_1','synthetic','2099-01-01T10:00:00Z','verified')`).run();
+  db.prepare(`INSERT INTO source_records (id, source_type, fetched_at, quality_status) VALUES ('src_2','synthetic','2099-01-01T11:00:00Z','verified')`).run();
+  db.prepare(`INSERT INTO normalized_observations (id, entity_type, entity_id, source_record_id, observed_at, fields_json, quality_status) VALUES ('obs_h','horse','horse_1','src_2','2099-01-01T11:00:00Z','{"ageYears":5,"homeTrackName":"Synthetic Track"}','verified')`).run();
+  db.prepare(`UPDATE races SET field_size=10, starters_declared=10, first_prize_sek=100000, race_name='Synthetic Cup', main_class='Class A', class_flags_json='{"final":true}', status='finished', source_quality='verified' WHERE id='race_1'`).run();
+  db.prepare(`INSERT INTO game_rounds (id, game_type, round_date, status) VALUES ('round_1','V85','2099-01-02','finished')`).run();
+  db.prepare(`INSERT INTO game_legs (game_round_id, leg_number, race_id) VALUES ('round_1',1,'race_1')`).run();
+  db.prepare(`INSERT INTO race_results (race_entry_id, placing, placing_text, finish_time, km_time, prize_sek, gallop, disqualified, distance_behind_winner_m, official_odds, result_status) VALUES ('entry_1',1,'1','1:14.0','14,0',100000,0,0,0,2.5,'official')`).run();
+  db.prepare(`INSERT INTO betting_snapshots (id, game_round_id, leg_number, race_entry_id, captured_at, bet_percent, market_rank) VALUES ('bet_1','round_1',1,'entry_1','2099-01-01T10:00:00Z',0.30,2)`).run();
+  db.prepare(`INSERT INTO betting_snapshots (id, game_round_id, leg_number, race_entry_id, captured_at, bet_percent, market_rank) VALUES ('bet_2','round_1',1,'entry_1','2099-01-01T11:00:00Z',0.35,1)`).run();
+  db.prepare(`INSERT INTO odds_snapshots (id, race_entry_id, captured_at, market_type, odds) VALUES ('odds_1','entry_1','2099-01-01T10:00:00Z','vinnare',3.0)`).run();
+  db.prepare(`INSERT INTO odds_snapshots (id, race_entry_id, captured_at, market_type, odds) VALUES ('odds_2','entry_1','2099-01-01T11:00:00Z','vinnare',2.5)`).run();
+  db.prepare(`INSERT INTO equipment (id, race_entry_id, shoes_front, shoes_rear, barefoot_front, barefoot_rear, sulky_type, exact_sulky, change_from_previous_json, verification_status, source_record_id) VALUES ('eq_1','entry_1','shod','shod',0,0,'standard','S1','{"sulkyTypeChanged":false}','reported','src_1')`).run();
+  db.prepare(`INSERT INTO equipment (id, race_entry_id, shoes_front, shoes_rear, barefoot_front, barefoot_rear, sulky_type, exact_sulky, change_from_previous_json, verification_status, source_record_id) VALUES ('eq_2','entry_1','barefoot','shod',1,0,'bike','B1','{"shoesFrontChanged":true,"sulkyTypeChanged":true}','reported','src_2')`).run();
+  db.prepare(`INSERT INTO xlabs_data (id, race_entry_id, last_200_time, last_800_time, actual_distance_m, extra_distance_m, converted_km_time, slipstream_m, segments_json, quality_status, source_record_id) VALUES ('xl_1','entry_1','10.5','44.0',2150,10,'13,9',900,'{"segment":"synthetic"}','verified','src_2')`).run();
+  db.prepare(`INSERT INTO race_positions (id, race_entry_id, observed_at_m, position, lane, leader, pocket, death_seat, second_over, third_over, wide_trip, uncovered_move, traffic_event, event_json) VALUES ('pos_1','entry_1',500,1,1,1,0,0,0,0,0,0,'clear','{"tempo":"synthetic"}')`).run();
+  db.prepare(`INSERT INTO race_conditions (race_id, track_status, temperature_c, wind_mps, wind_direction, precipitation_mm, weather_text, day_profile_json) VALUES ('race_1','fast',12,3,'W',0,'clear','{"profile":"synthetic"}')`).run();
+  db.prepare(`INSERT INTO analysis_features (id, race_entry_id, feature_version, as_of, feature_name, numeric_value, uncertainty_low, uncertainty_high, data_quality, provenance_json) VALUES ('feat_1','entry_1','fv1','2099-01-01T11:00:00Z','synthetic_feature',0.75,0.7,0.8,'verified','{"internal":"synthetic"}')`).run();
+  db.prepare(`INSERT INTO model_versions (id, created_at, feature_version, prompt_version, ai_provider, ai_model) VALUES ('mv_1','2099-01-01T11:00:00Z','fv1','pv1','synthetic','synthetic-model')`).run();
+  db.prepare(`INSERT INTO ai_race_analyses (id, race_id, model_version_id, data_snapshot_at, market_blind, race_shape_summary, conclusion, data_quality, created_at) VALUES ('analysis_1','race_1','mv_1','2099-01-01T11:00:00Z',1,'Synthetic shape','Synthetic conclusion','verified','2099-01-01T11:00:00Z')`).run();
+  db.prepare(`INSERT INTO ai_horse_predictions (id, ai_race_analysis_id, race_entry_id, win_probability, uncertainty_low, uncertainty_high, raw_rank, abcd_group, value_ratio, scenario_robustness, reasoning_json) VALUES ('pred_1','analysis_1','entry_1',0.35,0.30,0.40,1,'A',1.1,0.8,'{"reason":"synthetic"}')`).run();
+  db.prepare(`INSERT INTO editorial_items (id, race_entry_id, horse_id, published_at, source_name, summary_text) VALUES ('ed_1','entry_1','horse_1','2099-01-01T09:00:00Z','premium_editorial','Synthetic structured summary')`).run();
+  db.prepare(`INSERT INTO editorial_signals (id, editorial_item_id, signal_type, value_text, polarity, strength, fact_or_opinion, confidence, evidence_excerpt) VALUES ('sig_1','ed_1','form','positive','positive',0.8,'opinion',0.7,'Synthetic excerpt')`).run();
+
+  const detail = await getEntityDetail(env, 'horses', 'horse_1');
+  assert.equal(detail.latestObservation.fields.ageYears, 5);
+  assert.equal(detail.stats.wins, 1);
+  assert.equal(detail.stats.v85Starts, 1);
+  assert.equal(detail.breakdowns.startMethods[0].wins, 1);
+  assert.equal(detail.coverage.startsWithMarket, 1);
+  assert.equal(detail.coverage.startsWithOdds, 1);
+  assert.equal(detail.coverage.startsWithEquipment, 1);
+  assert.equal(detail.coverage.startsWithXLabs, 1);
+  assert.equal(detail.coverage.startsWithPositions, 1);
+  assert.equal(detail.coverage.startsWithFeatures, 1);
+  assert.equal(detail.coverage.startsWithAi, 1);
+  assert.equal(detail.coverage.startsWithEditorial, 1);
+  assert.equal(detail.coverage.startsWithConditions, 1);
+
+  const start = detail.starts[0];
+  assert.equal(start.race_name, 'Synthetic Cup');
+  assert.deepEqual(start.class_flags, { final: true });
+  assert.equal(start.betting.betPercent, 0.35);
+  assert.equal(start.bettingHistory.length, 2);
+  assert.equal(start.odds[0].odds, 2.5);
+  assert.equal(start.oddsHistory.length, 2);
+  assert.equal(start.equipment.sulkyType, 'bike');
+  assert.equal(start.equipmentHistory.length, 2);
+  assert.deepEqual(start.xlabs.segments, { segment: 'synthetic' });
+  assert.equal(start.positions[0].leader, true);
+  assert.deepEqual(start.positions[0].event, { tempo: 'synthetic' });
+  assert.equal(start.features[0].name, 'synthetic_feature');
+  assert.equal(start.aiAnalyses[0].abcdGroup, 'A');
+  assert.equal(start.editorialSignals[0].signalType, 'form');
+  assert.deepEqual(start.day_profile, { profile: 'synthetic' });
+});
