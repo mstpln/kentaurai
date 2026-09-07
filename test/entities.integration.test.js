@@ -29,6 +29,18 @@ test('entity summary and search expose normalized read-only data', async () => {
   assert.equal(matches[0].name, 'Ada Trainer');
 });
 
+test('entity search treats SQL wildcard and escape characters literally', async () => {
+  const { env, db } = createTestEnv();
+  seed(db);
+  db.prepare(`INSERT INTO trainers (id, canonical_name, country_code) VALUES ('trainer_2','Percent% Trainer','SE')`).run();
+  db.prepare(`INSERT INTO trainers (id, canonical_name, country_code) VALUES ('trainer_3','Under_score Trainer','SE')`).run();
+  db.prepare(`INSERT INTO trainers (id, canonical_name, country_code) VALUES ('trainer_4','Back\\slash Trainer','SE')`).run();
+
+  assert.deepEqual((await searchEntities(env, '%')).map((row) => row.name), ['Percent% Trainer']);
+  assert.deepEqual((await searchEntities(env, '_')).map((row) => row.name), ['Under_score Trainer']);
+  assert.deepEqual((await searchEntities(env, '\\')).map((row) => row.name), ['Back\\slash Trainer']);
+});
+
 test('entity lists paginate without exposing internal source ids', async () => {
   const { env, db } = createTestEnv();
   seed(db);
@@ -91,6 +103,21 @@ test('entity details preserve factual nulls and database activity stats', async 
   assert.equal(trainer.stats.resultStarts, 0);
   assert.equal(trainer.stats.winRate, null);
   assert.equal(trainer.starts[0].horse_name, 'Comet Horse');
+});
+
+test('scratched declarations are not counted as starts or performance opportunities', async () => {
+  const { env, db } = createTestEnv();
+  seed(db);
+  db.prepare(`INSERT INTO races (id, track_id, race_date, race_number, distance_m, start_method) VALUES ('race_2','track_1','2099-01-03',2,2140,'auto')`).run();
+  db.prepare(`INSERT INTO race_entries (id, race_id, horse_id, driver_id, trainer_id, start_number, scratched, actual_start_distance_m) VALUES ('entry_2','race_2','horse_1','driver_1','trainer_1',4,1,2140)`).run();
+  db.prepare(`INSERT INTO betting_snapshots (id, game_round_id, leg_number, race_entry_id, captured_at, bet_percent, market_rank) VALUES ('bet_scratched','round_missing',1,'entry_2','2099-01-03T10:00:00Z',0.2,2)`).run();
+
+  const detail = await getEntityDetail(env, 'trainers', 'trainer_1');
+  assert.equal(detail.stats.databaseStarts, 1);
+  assert.equal(detail.stats.scratchedEntries, 1);
+  assert.equal(detail.coverage.starts, 1);
+  assert.equal(detail.coverage.startsWithMarket, 0);
+  assert.equal(detail.breakdowns.startMethods.reduce((sum, row) => sum + row.starts, 0), 1);
 });
 
 test('entity detail exposes each existing measurement family with histories and coverage', async () => {
