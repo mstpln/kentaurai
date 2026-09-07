@@ -43,13 +43,12 @@ Official vertical-slice conclusion:
 - live scratch/withdrawal semantics remain an explicit known gap until a real example is observed
 - automatic live acquisition remains off until a later explicit build enables it
 
-Next build priority:
-1. Establish the read-only entity-centric KentaurAI interface foundation before X-Labs acquisition.
-2. The interface is centered on horses, trainers and drivers, not V85/V86 round pages.
-3. Prepare reusable private read APIs for entity search/list/detail views without exposing private data publicly.
-4. Keep trend calculations deterministic in code and separate from AI interpretation.
-5. Add homepage trend views later when enough historical result data exists, with rolling windows such as 2 weeks, 4 weeks, 3 months, 6 months and 1 year and sensible minimum-sample rules.
-6. After the interface foundation is stable, proceed with X-Labs acquisition and then historical backfill.
+Planned interface direction:
+- private read-only interface centered on horses, trainers and drivers rather than V85/V86 round pages
+- reusable private read APIs for entity search/list/detail views
+- factual history and deterministic statistics/trends shown directly, with AI interpretation kept separate
+- future homepage trend views such as 2 weeks, 4 weeks, 3 months, 6 months and 1 year, with sensible minimum-sample rules
+- exact sequencing between the interface foundation, X-Labs acquisition and historical backfill remains to be decided later
 
 Not yet implemented:
 - verified live scratch/withdrawal mapping
