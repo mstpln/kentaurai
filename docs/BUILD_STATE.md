@@ -2,7 +2,7 @@
 
 Version: 0.2.0
 Phase: 1B - official-provider capture / live-shape verification
-Status: capture code prepared and CI-backed; Cloudflare resources not provisioned yet; no automatic live collection enabled
+Status: capture code prepared and CI-backed; private D1/R2 resources provisioned; Worker not yet deployed; no automatic live collection enabled
 
 Implemented:
 - D1 core schema, indexes and reference-round extension migrations
@@ -24,21 +24,28 @@ Implemented:
 - SQLite-backed integration QA for D1 importer and provider-capture behavior
 - public-code/private-data boundary, private-import ignore rules and repository leakage guard
 - GitHub Actions Node 22 QA
+- private Cloudflare D1 database `kentaurai` provisioned and bound in `wrangler.jsonc`
+- private Cloudflare R2 bucket `kentaurai-raw` provisioned
 
 Next verification gate:
-1. Provision private Cloudflare D1/R2 resources and `ADMIN_TOKEN`.
-2. Deploy the reviewed Worker.
-3. Capture one real calendar/day response for a V85/V86 date.
-4. Read the returned game id from that private response and capture that exact game-by-id response.
-5. Inspect the observed JSON shape and manually verify 10-20 fields against the official race page.
-6. Only then implement normalized live field mapping and enable scheduled collection.
+1. Apply all remote D1 migrations.
+2. Configure `ADMIN_TOKEN` as a Cloudflare secret.
+3. Deploy the reviewed Worker.
+4. Verify public `/health`.
+5. Verify private `/v1/*` auth fails closed without/with an invalid token and succeeds with the configured token.
+6. Capture one real calendar/day response for a V85/V86 date.
+7. Read the returned game id from that private response and capture that exact game-by-id response.
+8. Inspect the observed JSON shape and manually verify 10-20 fields against the official race page.
+9. Only then implement normalized live field mapping and enable scheduled collection.
 
 Not yet implemented:
 - verified live provider JSON field mapping
 - automatic live provider acquisition
 - additional provider endpoint patterns that have not yet been observed against current data
 - X-Labs acquisition adapter
-- production D1/R2 resources
+- remote migration application
+- deployed production Worker
+- configured production `ADMIN_TOKEN`
 - 2-3 year historical backfill
 - feature engine
 - KentaurAI AI analysis runner
