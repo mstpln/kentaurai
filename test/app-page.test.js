@@ -17,13 +17,13 @@ test('interface keeps navigation order, adds Spel, and retains global search', (
   assert.doesNotMatch(html, /ADMIN_TOKEN/);
 });
 
-test('approved brand treatment uses Sagittarius mark and KENTAURAI wordmark', () => {
+test('approved brand treatment renders Sagittarius mark and KENTAURAI wordmark', () => {
   const html = renderAppPage();
   const login = renderLoginPage();
   assert.match(html, /KENTAUR<span>AI<\/span>/);
   assert.match(login, /KENTAUR<span>AI<\/span>/);
-  assert.match(html, /sagittarius:/);
-  assert.match(html, /viewBox="0 0 512 512"/);
+  assert.match(html, /class="brand-icon" viewBox="0 0 512 512"/);
+  assert.match(html, /M267\.934 459\.625l-80\.013-80\.08/);
   assert.match(html, /brand-badge/);
 });
 
