@@ -3,6 +3,7 @@ import { validateOfficialGamePayload } from '../import/official-live.js';
 const SOURCE_TYPE = 'official_provider';
 const EXTERNAL_SOURCE = 'official';
 const NORMALIZED_QUALITY = 'normalized_verified_subset';
+const CONFLICT_QUALITY = 'source_conflict';
 
 function maybeText(value) {
   if (typeof value !== 'string') return null;
@@ -38,6 +39,29 @@ function addCheck(checks, id, expected, actual) {
   checks.push({ id, pass: valuesEqual(expected, actual), expected, actual });
 }
 
+function parseFieldsJson(row) {
+  if (!row?.fields_json) return null;
+  try {
+    const parsed = JSON.parse(row.fields_json);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function addConflictAwareNameChecks(checks, prefix, expectedName, canonicalName, observation) {
+  const fields = parseFieldsJson(observation);
+  addCheck(checks, `${prefix}.source_name`, expectedName, maybeText(fields?.name));
+  const hasConflict = fields?.nameConflict === true;
+  if (hasConflict) {
+    addCheck(checks, `${prefix}.conflict_status`, CONFLICT_QUALITY, observation?.quality_status ?? null);
+    addCheck(checks, `${prefix}.canonical_preserved`, maybeText(fields?.priorCanonicalName), canonicalName);
+  } else {
+    addCheck(checks, `${prefix}.canonical_name`, expectedName, canonicalName);
+    addCheck(checks, `${prefix}.observation_status`, NORMALIZED_QUALITY, observation?.quality_status ?? null);
+  }
+}
+
 function expectedShoeState(shoes, end) {
   if (!shoes || shoes.reported !== true || typeof shoes?.[end]?.hasShoe !== 'boolean') return null;
   return shoes[end].hasShoe ? 'shod' : 'barefoot';
@@ -68,6 +92,32 @@ function rawCounts(races, gameType) {
   return { entries, betting, odds, equipment };
 }
 
+function expectedObservationCounts(races) {
+  const tracks = new Set();
+  const horses = new Set();
+  const drivers = new Set();
+  const trainers = new Set();
+  let entries = 0;
+  for (const race of races) {
+    tracks.add(String(race.track.id));
+    for (const start of race.starts) {
+      entries += 1;
+      horses.add(String(start.horse.id));
+      if (start.driver?.id != null && personName(start.driver)) drivers.add(String(start.driver.id));
+      if (start.horse?.trainer?.id != null && personName(start.horse.trainer)) trainers.add(String(start.horse.trainer.id));
+    }
+  }
+  return {
+    game_round: 1,
+    track: tracks.size,
+    race: races.length,
+    race_entry: entries,
+    horse: horses.size,
+    driver: drivers.size,
+    trainer: trainers.size
+  };
+}
+
 function findVoltSample(races) {
   for (const race of races) {
     if (race.startMethod !== 'volte') continue;
@@ -91,11 +141,14 @@ async function getRepresentativeEntry(env, raceId, horseExternalId, sourceRecord
       re.start_tier,
       re.handicap_m,
       re.actual_start_distance_m,
+      h.id AS horse_id,
       h.canonical_name AS horse_name,
       h.career_earnings_sek,
       hei.external_id AS horse_external_id,
+      d.id AS driver_id,
       d.canonical_name AS driver_name,
       dei.external_id AS driver_external_id,
+      tr.id AS trainer_id,
       tr.canonical_name AS trainer_name,
       tei.external_id AS trainer_external_id,
       e.shoes_front,
@@ -141,6 +194,30 @@ async function getRepresentativeEntry(env, raceId, horseExternalId, sourceRecord
   ).first();
 }
 
+async function getRepresentativeObservations(env, sourceRecordId, race, entry) {
+  const { results } = await env.DB.prepare(`
+    SELECT entity_type, entity_id, fields_json, quality_status
+    FROM normalized_observations
+    WHERE source_record_id = ? AND (
+      (entity_type = 'track' AND entity_id = ?) OR
+      (entity_type = 'race' AND entity_id = ?) OR
+      (entity_type = 'race_entry' AND entity_id = ?) OR
+      (entity_type = 'horse' AND entity_id = ?) OR
+      (entity_type = 'driver' AND entity_id = ?) OR
+      (entity_type = 'trainer' AND entity_id = ?)
+    )
+  `).bind(
+    sourceRecordId,
+    race.track_id,
+    race.id,
+    entry.race_entry_id,
+    entry.horse_id,
+    entry.driver_id,
+    entry.trainer_id
+  ).all();
+  return new Map(results.map((row) => [`${row.entity_type}:${row.entity_id}`, row]));
+}
+
 export async function verifyCapturedOfficialNormalization(env, sourceRecordId) {
   if (!env.DB) throw new Error('DB is not configured');
   if (!env.RAW_BUCKET?.get) throw new Error('RAW_BUCKET read access is not configured');
@@ -173,6 +250,7 @@ export async function verifyCapturedOfficialNormalization(env, sourceRecordId) {
   const firstStart = firstRace.starts[0];
   const voltSample = findVoltSample(validated.races);
   const countsExpected = rawCounts(validated.races, validated.gameType);
+  const observationCountsExpected = expectedObservationCounts(validated.races);
   const rawTrackIds = new Set(validated.races.map((race) => String(race.track.id)));
 
   const round = await env.DB.prepare(`
@@ -193,6 +271,7 @@ export async function verifyCapturedOfficialNormalization(env, sourceRecordId) {
   const race = await env.DB.prepare(`
     SELECT
       r.id,
+      r.track_id,
       r.race_date,
       r.race_number,
       r.scheduled_start_at,
@@ -213,6 +292,14 @@ export async function verifyCapturedOfficialNormalization(env, sourceRecordId) {
   const entry = await getRepresentativeEntry(env, firstRace.id, firstStart.horse.id, id);
   if (!entry) throw new Error('representative normalized race entry was not found');
 
+  const observations = await getRepresentativeObservations(env, id, race, entry);
+  const trackObservation = observations.get(`track:${race.track_id}`) || null;
+  const raceObservation = observations.get(`race:${race.id}`) || null;
+  const entryObservation = observations.get(`race_entry:${entry.race_entry_id}`) || null;
+  const horseObservation = observations.get(`horse:${entry.horse_id}`) || null;
+  const driverObservation = entry.driver_id ? observations.get(`driver:${entry.driver_id}`) || null : null;
+  const trainerObservation = entry.trainer_id ? observations.get(`trainer:${entry.trainer_id}`) || null : null;
+
   const voltEntry = voltSample
     ? await getRepresentativeEntry(env, voltSample.race.id, voltSample.start.horse.id, id)
     : null;
@@ -225,10 +312,15 @@ export async function verifyCapturedOfficialNormalization(env, sourceRecordId) {
        WHERE gl.game_round_id = ?) AS entry_count,
       (SELECT COUNT(*) FROM betting_snapshots WHERE source_record_id = ?) AS betting_count,
       (SELECT COUNT(*) FROM odds_snapshots WHERE source_record_id = ?) AS odds_count,
-      (SELECT COUNT(*) FROM equipment WHERE source_record_id = ?) AS equipment_count,
-      (SELECT COUNT(*) FROM normalized_observations
-       WHERE source_record_id = ? AND entity_type = 'race_entry') AS entry_observation_count
-  `).bind(validated.gameId, id, id, id, id).first();
+      (SELECT COUNT(*) FROM equipment WHERE source_record_id = ?) AS equipment_count
+  `).bind(validated.gameId, id, id, id).first();
+  const { results: observationCountRows } = await env.DB.prepare(`
+    SELECT entity_type, COUNT(*) AS n
+    FROM normalized_observations
+    WHERE source_record_id = ?
+    GROUP BY entity_type
+  `).bind(id).all();
+  const observationCounts = Object.fromEntries(observationCountRows.map((row) => [row.entity_type, Number(row.n)]));
 
   const checks = [];
   addCheck(checks, 'source.quality_status', NORMALIZED_QUALITY, source.quality_status);
@@ -243,18 +335,34 @@ export async function verifyCapturedOfficialNormalization(env, sourceRecordId) {
   addCheck(checks, 'race.distance_m', Number(firstRace.distance), Number(race.distance_m));
   addCheck(checks, 'race.start_method', firstRace.startMethod, race.start_method);
   addCheck(checks, 'race.track_external_id', String(firstRace.track.id), String(race.track_external_id));
-  addCheck(checks, 'race.track_name', firstRace.track.name, race.track_name);
+  addConflictAwareNameChecks(checks, 'race.track_name', firstRace.track.name, race.track_name, trackObservation);
+  const raceFields = parseFieldsJson(raceObservation);
+  addCheck(checks, 'race.observation_status', NORMALIZED_QUALITY, raceObservation?.quality_status ?? null);
+  addCheck(checks, 'race.source_distance_m', Number(firstRace.distance), finiteNumber(raceFields?.distanceM));
+  addCheck(checks, 'race.source_start_method', firstRace.startMethod, maybeText(raceFields?.startMethod));
 
   addCheck(checks, 'entry.horse_external_id', String(firstStart.horse.id), String(entry.horse_external_id));
-  addCheck(checks, 'entry.horse_name', firstStart.horse.name, entry.horse_name);
+  addConflictAwareNameChecks(checks, 'entry.horse_name', firstStart.horse.name, entry.horse_name, horseObservation);
   addCheck(checks, 'entry.horse_money_sek', finiteNumber(firstStart.horse.money), finiteNumber(entry.career_earnings_sek));
   addCheck(checks, 'entry.driver_external_id', firstStart.driver?.id == null ? null : String(firstStart.driver.id), entry.driver_external_id == null ? null : String(entry.driver_external_id));
-  addCheck(checks, 'entry.driver_name', personName(firstStart.driver), entry.driver_name);
+  if (firstStart.driver?.id != null && personName(firstStart.driver)) {
+    addConflictAwareNameChecks(checks, 'entry.driver_name', personName(firstStart.driver), entry.driver_name, driverObservation);
+  } else {
+    addCheck(checks, 'entry.driver_name', null, entry.driver_name);
+  }
   addCheck(checks, 'entry.trainer_external_id', firstStart.horse?.trainer?.id == null ? null : String(firstStart.horse.trainer.id), entry.trainer_external_id == null ? null : String(entry.trainer_external_id));
-  addCheck(checks, 'entry.trainer_name', personName(firstStart.horse?.trainer), entry.trainer_name);
+  if (firstStart.horse?.trainer?.id != null && personName(firstStart.horse.trainer)) {
+    addConflictAwareNameChecks(checks, 'entry.trainer_name', personName(firstStart.horse.trainer), entry.trainer_name, trainerObservation);
+  } else {
+    addCheck(checks, 'entry.trainer_name', null, entry.trainer_name);
+  }
   addCheck(checks, 'entry.start_number', Number(firstStart.number), Number(entry.start_number));
   addCheck(checks, 'entry.actual_lane', finiteNumber(firstStart.postPosition), finiteNumber(entry.actual_lane));
   addCheck(checks, 'entry.actual_start_distance_m', finiteNumber(firstStart.distance), finiteNumber(entry.actual_start_distance_m));
+  const entryFields = parseFieldsJson(entryObservation);
+  addCheck(checks, 'entry.observation_status', NORMALIZED_QUALITY, entryObservation?.quality_status ?? null);
+  addCheck(checks, 'entry.source_start_id', firstStart.id, maybeText(entryFields?.externalStartId));
+  addCheck(checks, 'entry.source_start_number', Number(firstStart.number), finiteNumber(entryFields?.startNumber));
   addCheck(checks, 'entry.bet_percent', scaledHundredths(firstStart.pools?.[validated.gameType]?.betDistribution), finiteNumber(entry.bet_percent));
   addCheck(checks, 'entry.winner_odds', scaledHundredths(firstStart.pools?.vinnare?.odds), finiteNumber(entry.winner_odds));
   addCheck(checks, 'entry.place_min_odds', scaledHundredths(firstStart.pools?.plats?.minOdds), finiteNumber(entry.place_min_odds));
@@ -274,10 +382,12 @@ export async function verifyCapturedOfficialNormalization(env, sourceRecordId) {
   }
 
   addCheck(checks, 'counts.entries', countsExpected.entries, Number(counts?.entry_count ?? 0));
-  addCheck(checks, 'counts.entry_observations', countsExpected.entries, Number(counts?.entry_observation_count ?? 0));
   addCheck(checks, 'counts.betting_snapshots', countsExpected.betting, Number(counts?.betting_count ?? 0));
   addCheck(checks, 'counts.odds_snapshots', countsExpected.odds, Number(counts?.odds_count ?? 0));
   addCheck(checks, 'counts.equipment_snapshots', countsExpected.equipment, Number(counts?.equipment_count ?? 0));
+  for (const [entityType, expectedCount] of Object.entries(observationCountsExpected)) {
+    addCheck(checks, `counts.observations.${entityType}`, expectedCount, observationCounts[entityType] ?? 0);
+  }
 
   const failed = checks.filter((check) => !check.pass);
   return {
