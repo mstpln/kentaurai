@@ -29,13 +29,15 @@ test('entity summary and search expose normalized read-only data', async () => {
   assert.equal(matches[0].name, 'Ada Trainer');
 });
 
-test('entity lists and details preserve factual nulls when results are unavailable', async () => {
+test('entity lists omit internal source ids and details preserve factual nulls', async () => {
   const { env, db } = createTestEnv();
   seed(db);
 
   const horses = await listEntities(env, 'horses');
   assert.equal(horses.items.length, 1);
-  assert.equal(horses.items[0].external_id, 'ho_001');
+  assert.equal(horses.items[0].id, 'horse_1');
+  assert.equal(horses.items[0].name, 'Comet Horse');
+  assert.equal('external_id' in horses.items[0], false);
 
   const horse = await getEntityDetail(env, 'horses', 'horse_1');
   assert.equal(horse.entity.name, 'Comet Horse');
@@ -44,7 +46,9 @@ test('entity lists and details preserve factual nulls when results are unavailab
   assert.equal(horse.starts[0].placing, null);
 
   const trainer = await getEntityDetail(env, 'trainers', 'trainer_1');
-  assert.equal(trainer.stats.starts, 0);
+  assert.equal(trainer.stats.databaseStarts, 1);
+  assert.equal(trainer.stats.linkedHorses, 1);
+  assert.equal(trainer.stats.resultStarts, 0);
   assert.equal(trainer.stats.winRate, null);
   assert.equal(trainer.starts[0].horse_name, 'Comet Horse');
 });

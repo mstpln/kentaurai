@@ -1,8 +1,8 @@
 # Build state
 
-Version: 0.4.0
+Version: 0.4.1
 Phase: interface foundation on verified official data layer
-Status: entity-centric private interface implemented on feature branch; official-provider vertical slice remains verified end-to-end; automatic live acquisition still disabled
+Status: first production interface validated against real normalized data; production-polish fixes prepared on feature branch; automatic live acquisition still disabled
 
 Implemented:
 - D1 core schema, indexes and reference-round extension migrations
@@ -45,6 +45,11 @@ Implemented:
 - tabbed Start and entity detail screens to avoid long continuous scrolling
 - factual/null-safe interface behavior when historical results are unavailable
 - deterministic trainer/driver statistics only when stored race results exist
+- production UI validation against the first normalized V86 dataset
+- internal source IDs removed from user-facing entity lists
+- horse sex values localized for Swedish presentation without altering stored raw facts
+- trainer/driver profiles prioritize linked horses and database starts over unavailable metadata
+- mouse focus styling cleaned up while retaining keyboard-visible focus states
 
 Official vertical-slice conclusion:
 - raw capture -> private R2/D1 provenance -> normalization -> private verification is proven end-to-end
@@ -61,13 +66,14 @@ Interface foundation decisions:
 - tabs preferred over excessive vertical scrolling
 - horse/trainer/driver profile pages are structured for later historical, X-Labs and calculated-feature additions
 - no invented trends; homepage rolling trend leaderboards remain unavailable until sufficient result history exists
+- internal provenance identifiers remain in the backend but are not primary UI content
 
-Next verification gate for this branch:
-1. Run full CI on the exact interface head.
-2. Review the exact final diff for auth, privacy, read-only guarantees, SQL correctness and responsive structure.
+Next verification gate:
+1. Run full CI on the exact production-polish head.
+2. Review the exact final diff for read-only guarantees, SQL correctness, UI semantics and regression risk.
 3. Fix any blocking issues and repeat CI/review.
-4. Open/update the PR and merge only after explicit authorization.
-5. After merge, configure private `APP_PASSWORD` in Cloudflare before validating `/app` in production.
+4. Merge only after explicit authorization.
+5. After production deployment, visually re-check Start, entity lists, search and representative trainer/horse/driver profiles.
 
 Not yet implemented:
 - verified live scratch/withdrawal mapping

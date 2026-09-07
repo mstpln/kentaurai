@@ -16,6 +16,17 @@ test('entity interface keeps approved navigation order and global search', () =>
   assert.doesNotMatch(html, /ADMIN_TOKEN/);
 });
 
+test('production polish hides source ids and localizes horse sex values', () => {
+  const html = renderAppPage();
+  assert.doesNotMatch(html, /Käll-ID/);
+  assert.match(html, /mare:'Sto'/);
+  assert.match(html, /gelding:'Valack'/);
+  assert.match(html, /stallion:'Hingst'/);
+  assert.match(html, /Hästar i databasen/);
+  assert.match(html, /Starter i databasen/);
+  assert.match(html, /button:focus-visible/);
+});
+
 test('embedded browser application script is valid JavaScript', () => {
   const html = renderAppPage();
   const match = html.match(/<script>([\s\S]*?)<\/script>/);
