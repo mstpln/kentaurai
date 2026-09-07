@@ -62,7 +62,7 @@ async function fetchJson(url, fetchImpl) {
     response = await fetchImpl(url, {
       method: 'GET',
       headers: { accept: 'application/json' },
-      redirect: 'error',
+      redirect: 'manual',
       signal: controller.signal
     });
   } finally {

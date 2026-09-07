@@ -63,7 +63,7 @@ test('official calendar capture archives the exact JSON and records a successful
   assert.equal(seen.length, 1);
   assert.match(seen[0].url, /calendar\/day\/2026-09-07$/);
   assert.equal(seen[0].init.method, 'GET');
-  assert.equal(seen[0].init.redirect, 'error');
+  assert.equal(seen[0].init.redirect, 'manual');
   assert.equal(result.kind, 'calendar');
   assert.equal(result.identity, '2026-09-07');
   assert.equal(result.shape.hasGamesObject, true);
@@ -127,6 +127,25 @@ test('official provider capture rejects HTTP failures without archiving them', a
     /HTTP 503/
   );
   assert.equal(db.prepare('SELECT count(*) AS n FROM source_records').get().n, 0);
+  assert.equal(db.prepare("SELECT status FROM import_runs").get().status, 'failed');
+});
+
+test('official provider capture rejects redirects without archiving them', async () => {
+  const { env, db, objects } = createTestEnv();
+  await assert.rejects(
+    () => captureCalendar(env, '2026-09-07', {
+      fetchImpl: async (_url, init) => {
+        assert.equal(init.redirect, 'manual');
+        return new Response(null, {
+          status: 302,
+          headers: { location: 'https://example.com/redirected' }
+        });
+      }
+    }),
+    /HTTP 302/
+  );
+  assert.equal(db.prepare('SELECT count(*) AS n FROM source_records').get().n, 0);
+  assert.equal(objects.size, 0);
   assert.equal(db.prepare("SELECT status FROM import_runs").get().status, 'failed');
 });
 
