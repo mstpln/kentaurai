@@ -1,8 +1,8 @@
 # Build state
 
-Version: 0.4.1
+Version: 0.4.2
 Phase: interface foundation on verified official data layer
-Status: first production interface validated against real normalized data; production-polish fixes prepared on feature branch; automatic live acquisition still disabled
+Status: production interface hardened for complete entity browsing and mobile use; automatic live acquisition still disabled
 
 Implemented:
 - D1 core schema, indexes and reference-round extension migrations
@@ -50,6 +50,14 @@ Implemented:
 - horse sex values localized for Swedish presentation without altering stored raw facts
 - trainer/driver profiles prioritize linked horses and database starts over unavailable metadata
 - mouse focus styling cleaned up while retaining keyboard-visible focus states
+- paginated entity APIs with deterministic total/limit/offset/hasMore metadata
+- 20-item entity browsing pages so every trainer, horse and driver remains reachable as the database grows
+- list-page position preserved when opening a profile and returning to the list
+- entity indexes converted from wide tables to compact touch-friendly rows
+- start-history tables separated from entity-list styling and given deliberate horizontal overflow on narrow screens
+- refined circular horse-inspired Kentaur mark and stronger `KENTAURAI` wordmark while preserving the restrained dark/gold visual system
+- responsive top bar, profile hierarchy, pager controls and bottom navigation for mobile use
+- active navigation exposes `aria-current` while keyboard-visible focus remains intact
 
 Official vertical-slice conclusion:
 - raw capture -> private R2/D1 provenance -> normalization -> private verification is proven end-to-end
@@ -62,18 +70,19 @@ Interface foundation decisions:
 - fixed top global search
 - fixed bottom navigation: Start -> Tränare -> Hästar -> Kuskar
 - minimal dark visual system using black/grey/brown/beige with restrained blue/yellow/gold accents
+- compact circular horse-inspired mark plus uppercase KentaurAI wordmark
 - clear card, divider and tab separation between sections
-- tabs preferred over excessive vertical scrolling
+- tabs and paginated entity indexes preferred over excessive vertical scrolling
 - horse/trainer/driver profile pages are structured for later historical, X-Labs and calculated-feature additions
 - no invented trends; homepage rolling trend leaderboards remain unavailable until sufficient result history exists
 - internal provenance identifiers remain in the backend but are not primary UI content
 
 Next verification gate:
-1. Run full CI on the exact production-polish head.
-2. Review the exact final diff for read-only guarantees, SQL correctness, UI semantics and regression risk.
-3. Fix any blocking issues and repeat CI/review.
-4. Merge only after explicit authorization.
-5. After production deployment, visually re-check Start, entity lists, search and representative trainer/horse/driver profiles.
+1. Run full CI on the exact 0.4.2 feature head.
+2. Review the exact final diff for pagination correctness, read-only guarantees, UI semantics, accessibility and regression risk.
+3. Fix any blocking issues and repeat CI/review until clean.
+4. Open the pull request and merge only after explicit authorization.
+5. After production deployment, visually re-check Start, all entity-list pages, pagination, search and representative trainer/horse/driver profiles on desktop and mobile.
 
 Not yet implemented:
 - verified live scratch/withdrawal mapping

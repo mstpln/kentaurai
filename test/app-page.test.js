@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import { renderAppPage } from '../src/app-page.js';
+import { renderAppPage, renderLoginPage } from '../src/app-page.js';
 
 test('entity interface keeps approved navigation order and global search', () => {
   const html = renderAppPage();
@@ -13,10 +13,26 @@ test('entity interface keeps approved navigation order and global search', () =>
   assert.ok(start >= 0 && start < trainers && trainers < horses && horses < drivers);
   assert.match(html, /position:sticky;top:0/);
   assert.match(html, /position:fixed;z-index:50/);
+  assert.match(html, /aria-label="Huvudnavigation"/);
   assert.doesNotMatch(html, /ADMIN_TOKEN/);
 });
 
-test('production polish hides source ids and localizes horse sex values', () => {
+test('premium polish keeps brand identity and mobile-first entity lists', () => {
+  const html = renderAppPage();
+  const login = renderLoginPage();
+  assert.match(html, /KENTAUR<span>AI<\/span>/);
+  assert.match(login, /KENTAUR<span>AI<\/span>/);
+  assert.match(html, /<circle cx="32" cy="32" r="29"/);
+  assert.match(html, /class="entity-row"/);
+  assert.match(html, /class="table starts-table"/);
+  assert.match(html, /PAGE_SIZE=20/);
+  assert.match(html, /listOffsets/);
+  assert.match(html, /Visar /);
+  assert.match(html, /Föregående/);
+  assert.match(html, /Nästa/);
+});
+
+test('production interface remains factual and localized', () => {
   const html = renderAppPage();
   assert.doesNotMatch(html, /Käll-ID/);
   assert.match(html, /mare:'Sto'/);

@@ -53,7 +53,8 @@ async function handleAppApi(request, env, url) {
   if (request.method === 'GET' && listMatch) {
     return json(await listEntities(env, listMatch[1], {
       q: url.searchParams.get('q'),
-      limit: url.searchParams.get('limit')
+      limit: url.searchParams.get('limit'),
+      offset: url.searchParams.get('offset')
     }));
   }
 
@@ -101,7 +102,7 @@ async function handleFetch(request, env) {
   const path = url.pathname;
 
   if (request.method === 'GET' && path === '/health') {
-    return json({ ok: true, service: 'kentaurai-api', version: '0.4.1' });
+    return json({ ok: true, service: 'kentaurai-api', version: '0.4.2' });
   }
 
   if (path === '/') return redirectResponse('/app');

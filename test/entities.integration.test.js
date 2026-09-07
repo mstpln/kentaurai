@@ -29,7 +29,48 @@ test('entity summary and search expose normalized read-only data', async () => {
   assert.equal(matches[0].name, 'Ada Trainer');
 });
 
-test('entity lists omit internal source ids and details preserve factual nulls', async () => {
+test('entity lists paginate without exposing internal source ids', async () => {
+  const { env, db } = createTestEnv();
+  seed(db);
+  db.prepare(`INSERT INTO trainers (id, canonical_name, country_code) VALUES ('trainer_2','Bea Trainer','SE')`).run();
+  db.prepare(`INSERT INTO trainers (id, canonical_name, country_code) VALUES ('trainer_3','Carl Trainer','SE')`).run();
+
+  const first = await listEntities(env, 'trainers', { limit: 1, offset: 0 });
+  assert.equal(first.items.length, 1);
+  assert.equal(first.items[0].name, 'Ada Trainer');
+  assert.equal(first.total, 3);
+  assert.equal(first.limit, 1);
+  assert.equal(first.offset, 0);
+  assert.equal(first.hasMore, true);
+  assert.equal('external_id' in first.items[0], false);
+
+  const second = await listEntities(env, 'trainers', { limit: 1, offset: 1 });
+  assert.equal(second.items[0].name, 'Bea Trainer');
+  assert.equal(second.total, 3);
+  assert.equal(second.offset, 1);
+  assert.equal(second.hasMore, true);
+
+  const last = await listEntities(env, 'trainers', { limit: 1, offset: 2 });
+  assert.equal(last.items[0].name, 'Carl Trainer');
+  assert.equal(last.hasMore, false);
+});
+
+test('entity pagination uses stable id tie-breakers for duplicate names', async () => {
+  const { env, db } = createTestEnv();
+  seed(db);
+  db.prepare(`INSERT INTO trainers (id, canonical_name, country_code) VALUES ('trainer_3','Same Name','SE')`).run();
+  db.prepare(`INSERT INTO trainers (id, canonical_name, country_code) VALUES ('trainer_2','Same Name','SE')`).run();
+
+  const firstSame = await listEntities(env, 'trainers', { q: 'Same Name', limit: 1, offset: 0 });
+  const secondSame = await listEntities(env, 'trainers', { q: 'Same Name', limit: 1, offset: 1 });
+  assert.equal(firstSame.items[0].id, 'trainer_2');
+  assert.equal(secondSame.items[0].id, 'trainer_3');
+  assert.equal(firstSame.total, 2);
+  assert.equal(firstSame.hasMore, true);
+  assert.equal(secondSame.hasMore, false);
+});
+
+test('entity details preserve factual nulls and database activity stats', async () => {
   const { env, db } = createTestEnv();
   seed(db);
 
@@ -37,7 +78,6 @@ test('entity lists omit internal source ids and details preserve factual nulls',
   assert.equal(horses.items.length, 1);
   assert.equal(horses.items[0].id, 'horse_1');
   assert.equal(horses.items[0].name, 'Comet Horse');
-  assert.equal('external_id' in horses.items[0], false);
 
   const horse = await getEntityDetail(env, 'horses', 'horse_1');
   assert.equal(horse.entity.name, 'Comet Horse');

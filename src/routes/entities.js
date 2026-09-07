@@ -14,10 +14,16 @@ function sanitizeQuery(value) {
   return String(value || '').trim().slice(0, 80);
 }
 
-function clampLimit(value, fallback = 50, max = 100) {
+function clampLimit(value, fallback = 20, max = 50) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1) return fallback;
   return Math.min(parsed, max);
+}
+
+function clampOffset(value) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) return 0;
+  return Math.min(parsed, 100000);
 }
 
 export async function getEntitySummary(env) {
@@ -60,7 +66,7 @@ export async function searchEntities(env, query, limitValue) {
       UNION ALL
       SELECT 'driver' AS type, id, canonical_name AS name FROM drivers WHERE canonical_name LIKE ? ESCAPE '\\'
     )
-    ORDER BY name COLLATE NOCASE ASC
+    ORDER BY name COLLATE NOCASE ASC, type ASC, id ASC
     LIMIT ?
   `).bind(like, like, like, limit).all();
   return results;
@@ -69,20 +75,44 @@ export async function searchEntities(env, query, limitValue) {
 export async function listEntities(env, type, options = {}) {
   const config = configFor(type);
   const q = sanitizeQuery(options.q);
-  const limit = clampLimit(options.limit, 50, 100);
+  const limit = clampLimit(options.limit);
+  const offset = clampOffset(options.offset);
   const like = `%${q.replaceAll('%', '\\%').replaceAll('_', '\\_')}%`;
   const filter = q ? `WHERE ${config.nameColumn} LIKE ? ESCAPE '\\'` : '';
-  const statement = env.DB.prepare(`
+
+  const listStatement = env.DB.prepare(`
     SELECT ${config.idColumn} AS id, ${config.nameColumn} AS name
     FROM ${config.table}
     ${filter}
-    ORDER BY ${config.nameColumn} COLLATE NOCASE ASC
-    LIMIT ?
+    ORDER BY ${config.nameColumn} COLLATE NOCASE ASC, ${config.idColumn} ASC
+    LIMIT ? OFFSET ?
   `);
-  const { results } = q
-    ? await statement.bind(like, limit).all()
-    : await statement.bind(limit).all();
-  return { type, label: config.label, items: results };
+  const countStatement = env.DB.prepare(`
+    SELECT COUNT(*) AS total
+    FROM ${config.table}
+    ${filter}
+  `);
+
+  const [{ results }, countRow] = q
+    ? await Promise.all([
+        listStatement.bind(like, limit, offset).all(),
+        countStatement.bind(like).first()
+      ])
+    : await Promise.all([
+        listStatement.bind(limit, offset).all(),
+        countStatement.first()
+      ]);
+
+  const total = Number(countRow?.total ?? 0);
+  return {
+    type,
+    label: config.label,
+    items: results,
+    total,
+    limit,
+    offset,
+    hasMore: offset + results.length < total
+  };
 }
 
 async function getHorseDetail(env, id) {
