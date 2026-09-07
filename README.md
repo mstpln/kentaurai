@@ -1,9 +1,9 @@
 # KentaurAI
 
-Private V85/V86 data and analysis backend with a public codebase. No end-user app is required for the current backend phases.
+Private V85/V86 data, analysis backend and read-only intelligence interface with a public codebase.
 
 ## Current build
-Phase 1C adds a conservative normalized live-provider mapper on top of the Phase 1B raw-capture layer. Real provider payloads remain private; the public repository contains only mapping code, migrations and synthetic tests.
+Version 0.4.0 adds the first private entity-centric interface on top of the verified official-provider data layer. Real provider payloads remain private; the public repository contains only code, migrations, tests, documentation and synthetic fixtures.
 
 The current build contains:
 - D1 schema and provenance model
@@ -16,7 +16,24 @@ The current build contains:
 - immutable normalized observations tied to source records
 - betting/odds/equipment snapshots with source provenance
 - private raw-vs-normalized verification endpoint
+- private read-only KentaurAI interface at `/app`
+- global horse/trainer/driver search
+- entity lists and detail pages for horses, trainers and drivers
+- secure app login with a separate `APP_PASSWORD` and HttpOnly session cookie
 - strict validation and idempotency tests
+
+## Interface
+The interface is deliberately entity-centric rather than V85/V86-round-centric.
+
+Bottom navigation order is:
+1. Start
+2. Tränare
+3. Hästar
+4. Kuskar
+
+A global search bar remains fixed at the top. Start and entity detail views use tabs rather than long continuous scrolling. The visual system is minimal, dark and structured, with grey/black/brown/beige as the base and restrained blue/yellow/gold accents.
+
+The interface currently displays only facts and deterministic calculations that are supported by D1. Missing history remains unavailable instead of being inferred. Rolling trend leaderboards will be added once enough historical result data exists.
 
 ## Public-code / private-data boundary
 This repository contains code, migrations, tests, documentation and synthetic fixtures only.
@@ -30,8 +47,16 @@ Never commit:
 
 Real source data belongs only in the private Cloudflare D1/R2 deployment or is supplied temporarily at import time. Expected private-import filenames and directories are blocked by `.gitignore`, and CI scans committed repository files for configured private-source leakage indicators.
 
-## Private API
+## Private access
+- `/app/login` - private browser login using `APP_PASSWORD`
+- `/app` - private read-only KentaurAI interface
+- `/app/api/*` - private session-authenticated interface read APIs
+- `/v1/*` - operational APIs protected by `ADMIN_TOKEN`
 - `GET /health` - intentionally public health check
+
+`APP_PASSWORD` and `ADMIN_TOKEN` are separate Cloudflare runtime secrets. Neither belongs in GitHub. The interface never asks for or stores `ADMIN_TOKEN`.
+
+## Private operational API
 - `GET /v1/rounds/:roundId` - Bearer ADMIN_TOKEN
 - `POST /v1/provider/capture` - Bearer ADMIN_TOKEN
 - `POST /v1/provider/normalize` - Bearer ADMIN_TOKEN
