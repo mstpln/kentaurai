@@ -17,14 +17,18 @@ test('interface keeps navigation order, adds Spel, and retains global search', (
   assert.doesNotMatch(html, /ADMIN_TOKEN/);
 });
 
-test('approved brand treatment renders Sagittarius mark and KENTAURAI wordmark', () => {
+test('approved brand treatment renders exact Sagittarius direction and compact proportions', () => {
   const html = renderAppPage();
   const login = renderLoginPage();
   assert.match(html, /KENTAUR<span>AI<\/span>/);
   assert.match(login, /KENTAUR<span>AI<\/span>/);
   assert.match(html, /class="brand-icon" viewBox="0 0 512 512"/);
   assert.match(html, /M267\.934 459\.625l-80\.013-80\.08/);
-  assert.match(html, /brand-badge/);
+  assert.match(html, /--accent:#C79552/);
+  assert.match(html, /\.brand-badge\{width:32px;height:32px/);
+  assert.match(html, /\.brand-name\{font:800 31px\/1/);
+  assert.match(html, /\.brand-name\{display:block;font-size:28px\}/);
+  assert.doesNotMatch(html, /\.brand-name\{display:none\}/);
 });
 
 test('start page source is trends-first with requested categories and timeframes', () => {
@@ -45,21 +49,25 @@ test('search control has proper vector icon, divider, and deliberate query spaci
   assert.match(html, /class="search-prefix"/);
   assert.match(html, /class="search-icon"/);
   assert.match(html, /class="search-divider"/);
-  assert.match(html, /padding:0 46px 0 78px/);
+  assert.match(html, /padding:0 46px 0 80px/);
+  assert.match(html, /\.search-icon\{width:21px;height:21px/);
 });
 
-test('Spel has overview, V85, V86, sorting, and round-detail concepts', () => {
+test('Spel has overview, V85, V86, sorting, round detail and compact comparison', () => {
   const html = renderAppPage();
   assert.match(html, /\['overview','Översikt'\],\['v85','V85'\],\['v86','V86'\]/);
   assert.match(html, /\['latest','Senaste'\]/);
   assert.match(html, /\['correct_desc','Flest rätt'\]/);
   assert.match(html, /\['correct_asc','Färst rätt'\]/);
   assert.match(html, /\['spikes_desc','Bästa spikar'\]/);
+  assert.match(html, /comparisonCard\('V85'/);
+  assert.match(html, /comparisonCard\('V86'/);
   assert.match(html, /Så vann loppen/);
   assert.match(html, /Var missar vi\?/);
   assert.match(html, /Avdelning för avdelning/);
   assert.match(html, /Omgångens learnings/);
   assert.match(html, /Vann från/);
+  assert.match(html, /Efteranalys/);
 });
 
 test('production interface remains factual and localized', () => {
@@ -71,6 +79,8 @@ test('production interface remains factual and localized', () => {
   assert.match(html, /Trenddata byggs upp/);
   assert.match(html, /Okänt/);
   assert.match(html, /Ingen automatisk viktändring efter en omgång/);
+  assert.match(html, /confirmed'\)return 'Bekräftad'/);
+  assert.match(html, /candidate'\)return 'Kandidat'/);
 });
 
 test('entity browsing still supports complete paginated lists', () => {
