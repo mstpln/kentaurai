@@ -55,6 +55,21 @@ test('entity lists paginate without exposing internal source ids', async () => {
   assert.equal(last.hasMore, false);
 });
 
+test('entity pagination uses stable id tie-breakers for duplicate names', async () => {
+  const { env, db } = createTestEnv();
+  seed(db);
+  db.prepare(`INSERT INTO trainers (id, canonical_name, country_code) VALUES ('trainer_3','Same Name','SE')`).run();
+  db.prepare(`INSERT INTO trainers (id, canonical_name, country_code) VALUES ('trainer_2','Same Name','SE')`).run();
+
+  const firstSame = await listEntities(env, 'trainers', { q: 'Same Name', limit: 1, offset: 0 });
+  const secondSame = await listEntities(env, 'trainers', { q: 'Same Name', limit: 1, offset: 1 });
+  assert.equal(firstSame.items[0].id, 'trainer_2');
+  assert.equal(secondSame.items[0].id, 'trainer_3');
+  assert.equal(firstSame.total, 2);
+  assert.equal(firstSame.hasMore, true);
+  assert.equal(secondSame.hasMore, false);
+});
+
 test('entity details preserve factual nulls and database activity stats', async () => {
   const { env, db } = createTestEnv();
   seed(db);
