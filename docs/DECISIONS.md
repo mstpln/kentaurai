@@ -55,9 +55,9 @@
 1. Editorial content is reviewed outside KentaurAI using an authorized user workflow.
 2. That workflow exports only the structured signals needed by KentaurAI.
 3. The export is supplied temporarily to the private import flow and is never committed to the public repository.
-4. The import endpoint validates it and writes structured signals to private D1 while preserving private provenance.
+4. The generic manual editorial import validates it and writes structured signals to private D1 while preserving private provenance.
 5. Manual editorial data uses a separate import path from automated provider ingestion.
-6. KentaurAI does not build an automated logged-in editorial scraper.
+6. KentaurAI does not browse or collect editorial content itself and does not build an automated logged-in editorial scraper.
 7. Public code, tests, docs and examples never identify a private editorial source.
 8. The private UI may display stored structured signals and short summaries/evidence, not full paid articles.
 
