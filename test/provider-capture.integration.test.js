@@ -63,7 +63,7 @@ test('official calendar capture archives the exact JSON and records a successful
   assert.equal(seen.length, 1);
   assert.match(seen[0].url, /calendar\/day\/2026-09-07$/);
   assert.equal(seen[0].init.method, 'GET');
-  assert.equal(seen[0].init.redirect, 'error');
+  assert.equal(seen[0].init.redirect, 'manual');
   assert.equal(result.kind, 'calendar');
   assert.equal(result.identity, '2026-09-07');
   assert.equal(result.shape.hasGamesObject, true);
