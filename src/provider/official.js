@@ -4,11 +4,19 @@ import { discoverProviderShape } from '../import/atg.js';
 const DEFAULT_BASE_URL = 'https://www.atg.se/services/racinginfo/v1/api';
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
+function assertOfficialHostname(url) {
+  const host = url.hostname.toLowerCase();
+  if (host !== 'atg.se' && !host.endsWith('.atg.se')) {
+    throw new Error('official provider base URL must use an atg.se host');
+  }
+}
+
 function providerBaseUrl(env) {
   const raw = env.OFFICIAL_PROVIDER_BASE_URL || DEFAULT_BASE_URL;
   const url = new URL(raw);
   if (url.protocol !== 'https:') throw new Error('official provider base URL must use https');
   if (url.username || url.password) throw new Error('official provider base URL must not contain credentials');
+  assertOfficialHostname(url);
   url.pathname = url.pathname.replace(/\/$/, '');
   url.search = '';
   url.hash = '';
@@ -45,6 +53,7 @@ async function fetchJson(url, fetchImpl) {
     response = await fetchImpl(url, {
       method: 'GET',
       headers: { accept: 'application/json' },
+      redirect: 'error',
       signal: controller.signal
     });
   } finally {
@@ -77,6 +86,9 @@ async function fetchJson(url, fetchImpl) {
 }
 
 async function capture(env, { kind, identity, url, fetchImpl = fetch }) {
+  if (!env.DB) throw new Error('DB is not configured');
+  if (!env.RAW_BUCKET) throw new Error('RAW_BUCKET is not configured');
+
   const fetchedAt = new Date().toISOString();
   const payload = await fetchJson(url, fetchImpl);
   const archived = await archiveRawPayload(env, {
@@ -86,7 +98,7 @@ async function capture(env, { kind, identity, url, fetchImpl = fetch }) {
     fetchedAt,
     payload,
     qualityStatus: 'captured_unmapped',
-    rightsStatus: 'official_source',
+    rightsStatus: 'unknown',
     metadata: { kind, identity }
   });
 
