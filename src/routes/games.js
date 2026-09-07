@@ -220,29 +220,35 @@ export async function listGameHistory(env, options = {}) {
   };
 }
 
+const TRIP_ROWS_SELECT = `
+  SELECT
+    gl.game_round_id,
+    gl.leg_number,
+    r.id AS race_id,
+    winner.id AS race_entry_id,
+    rp.observed_at_m,
+    rp.position,
+    rp.leader,
+    rp.pocket,
+    rp.death_seat,
+    rp.second_over,
+    rp.third_over,
+    rp.wide_trip,
+    rp.uncovered_move
+  FROM game_legs gl
+  JOIN races r ON r.id = gl.race_id
+  JOIN race_entries winner ON winner.race_id = r.id
+  JOIN race_results rr ON rr.race_entry_id = winner.id AND rr.placing = 1
+  LEFT JOIN race_positions rp ON rp.race_entry_id = winner.id
+`;
+
 async function getTripRows(env, roundId) {
-  const { results } = await env.DB.prepare(`
-    SELECT
-      gl.leg_number,
-      r.id AS race_id,
-      winner.id AS race_entry_id,
-      rp.observed_at_m,
-      rp.position,
-      rp.leader,
-      rp.pocket,
-      rp.death_seat,
-      rp.second_over,
-      rp.third_over,
-      rp.wide_trip,
-      rp.uncovered_move
-    FROM game_legs gl
-    JOIN races r ON r.id = gl.race_id
-    JOIN race_entries winner ON winner.race_id = r.id
-    JOIN race_results rr ON rr.race_entry_id = winner.id AND rr.placing = 1
-    LEFT JOIN race_positions rp ON rp.race_entry_id = winner.id
-    WHERE gl.game_round_id = ?
-    ORDER BY gl.leg_number ASC, rp.observed_at_m ASC
-  `).bind(roundId).all();
+  const { results } = await env.DB.prepare(`${TRIP_ROWS_SELECT}\nWHERE gl.game_round_id = ?\nORDER BY gl.leg_number ASC, rp.observed_at_m ASC`).bind(roundId).all();
+  return results;
+}
+
+async function getAllSavedRoundTripRows(env) {
+  const { results } = await env.DB.prepare(`${TRIP_ROWS_SELECT}\nWHERE EXISTS (SELECT 1 FROM systems sx WHERE sx.game_round_id = gl.game_round_id)\nORDER BY gl.game_round_id ASC, gl.leg_number ASC, rp.observed_at_m ASC`).all();
   return results;
 }
 
@@ -256,6 +262,18 @@ function tripMapFromRows(rows) {
   const trips = new Map();
   for (const [leg, observations] of grouped.entries()) trips.set(leg, classifyWinnerTrip(observations));
   return trips;
+}
+
+function tripMapsByRoundFromRows(rows) {
+  const grouped = new Map();
+  for (const row of rows) {
+    const roundId = row.game_round_id;
+    if (!grouped.has(roundId)) grouped.set(roundId, []);
+    grouped.get(roundId).push(row);
+  }
+  const maps = new Map();
+  for (const [roundId, roundRows] of grouped.entries()) maps.set(roundId, tripMapFromRows(roundRows));
+  return maps;
 }
 
 function summarize(items) {
@@ -279,13 +297,17 @@ function summarize(items) {
 }
 
 export async function getGameHistorySummary(env) {
-  const { results } = await env.DB.prepare(`${ROUND_HISTORY_SELECT}\nORDER BY round_date DESC, id ASC`).all();
+  const [{ results }, tripRows] = await Promise.all([
+    env.DB.prepare(`${ROUND_HISTORY_SELECT}\nORDER BY round_date DESC, id ASC`).all(),
+    getAllSavedRoundTripRows(env)
+  ]);
   const rounds = results.map(mapRoundRow);
+  const tripMaps = tripMapsByRoundFromRows(tripRows);
 
   const tripCounts = new Map();
   let unknownTrips = 0;
   for (const round of rounds) {
-    const trips = tripMapFromRows(await getTripRows(env, round.id));
+    const trips = tripMaps.get(round.id) || new Map();
     for (const trip of trips.values()) {
       if (!trip) {
         unknownTrips += 1;
