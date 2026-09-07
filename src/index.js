@@ -11,7 +11,7 @@ import { getEntityDetail, getEntitySummary, listEntities, searchEntities } from 
 import { getGameHistoryDetail, listGameHistory } from './routes/games.js';
 import { getGameHistorySummary } from './routes/game-summary.js';
 import { appAuthConfigured, appPasswordMatches, createAppSessionCookie, hasValidAppSession } from './app-auth.js';
-import { htmlResponse, redirectResponse, renderAppPage, renderLoginPage } from './app-page-polish.js';
+import { htmlResponse, redirectResponse, renderAppPage, renderLoginPage } from './app-page-complete.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
