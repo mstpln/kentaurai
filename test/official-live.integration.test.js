@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createTestEnv } from './helpers/d1.js';
-import { normalizeOfficialGame, validateOfficialGamePayload } from '../src/import/official-live.js';
+import { normalizeCapturedOfficialGame, normalizeOfficialGame, validateOfficialGamePayload } from '../src/import/official-live.js';
 
 const DATE = '2099-01-15';
 const GAME_ID = 'V86_2099-01-15_999_1';
@@ -71,10 +71,10 @@ function syntheticGame() {
   };
 }
 
-function insertSource(db, id = 'src_synthetic_game_1') {
-  db.prepare(`INSERT INTO source_records (id, source_type, external_id, fetched_at, quality_status)
-    VALUES (?, 'official_provider', ?, '2099-01-13T10:00:00.000Z', 'captured_unmapped')`)
-    .run(id, `game:${GAME_ID}`);
+function insertSource(db, id = 'src_synthetic_game_1', fetchedAt = '2099-01-13T10:00:00.000Z', rawObjectKey = null) {
+  db.prepare(`INSERT INTO source_records (id, source_type, external_id, fetched_at, raw_object_key, quality_status)
+    VALUES (?, 'official_provider', ?, ?, ?, 'captured_unmapped')`)
+    .run(id, `game:${GAME_ID}`, fetchedAt, rawObjectKey);
   return id;
 }
 
@@ -132,6 +132,39 @@ test('normalizer maps verified facts and preserves provenance', async () => {
   assert.deepEqual(odds.map((row) => [row.market_type, row.odds]), [['plats_max', 18.02], ['plats_min', 16.02], ['vinnare', 17.22]]);
   assert.equal(db.prepare('SELECT quality_status FROM source_records WHERE id = ?').get(sourceRecordId).quality_status, 'normalized_verified_subset');
   assert.ok(db.prepare('SELECT count(*) AS n FROM normalized_observations WHERE source_record_id = ?').get(sourceRecordId).n > 0);
+});
+
+test('captured normalizer reads the archived R2 object used by the private endpoint', async () => {
+  const { env, db } = createTestEnv();
+  const rawObjectKey = 'raw/official_provider/2099-01-13/synthetic.json';
+  const sourceRecordId = insertSource(db, 'src_synthetic_r2', '2099-01-13T10:00:01.000Z', rawObjectKey);
+  await env.RAW_BUCKET.put(rawObjectKey, JSON.stringify(syntheticGame()), { httpMetadata: { contentType: 'application/json' } });
+
+  const result = await normalizeCapturedOfficialGame(env, sourceRecordId);
+  assert.equal(result.gameRoundId, GAME_ID);
+  assert.equal(result.sourceRecordId, sourceRecordId);
+  assert.equal(result.reused, false);
+});
+
+test('canonical name conflicts preserve the canonical value and flag the new source observation', async () => {
+  const { env, db } = createTestEnv();
+  const firstSource = insertSource(db);
+  await normalizeOfficialGame(env, syntheticGame(), { sourceRecordId: firstSource });
+
+  const changed = syntheticGame();
+  changed.races[0].starts[0].horse.name = 'Conflicting Synthetic Name';
+  const secondSource = insertSource(db, 'src_synthetic_game_2', '2099-01-13T10:05:00.000Z');
+  await normalizeOfficialGame(env, changed, { sourceRecordId: secondSource });
+
+  const horse = db.prepare(`SELECT h.id, h.canonical_name FROM horses h
+    JOIN horse_external_ids hei ON hei.horse_id = h.id
+    WHERE hei.source_type = 'official' AND hei.external_id = '970001'`).get();
+  assert.equal(horse.canonical_name, 'Synthetic Horse 11');
+
+  const observation = db.prepare(`SELECT quality_status, fields_json FROM normalized_observations
+    WHERE entity_type = 'horse' AND entity_id = ? AND source_record_id = ?`).get(horse.id, secondSource);
+  assert.equal(observation.quality_status, 'source_conflict');
+  assert.equal(JSON.parse(observation.fields_json).nameConflict, true);
 });
 
 test('same captured source record normalizes only once', async () => {
