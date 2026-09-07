@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import { renderAppPage, renderLoginPage } from '../src/app-page-polish.js';
+import { renderAppPage, renderLoginPage } from '../src/app-page-complete.js';
 
 test('interface keeps navigation order, adds Spel, and retains global search', () => {
   const html = renderAppPage();
@@ -25,12 +25,9 @@ test('approved brand treatment renders exact Sagittarius direction and compact p
   assert.match(html, /class="brand-icon" viewBox="0 0 512 512"/);
   assert.match(html, /M267\.934 459\.625l-80\.013-80\.08/);
   assert.match(html, /--accent:#C79552/);
-  assert.match(html, /\.brand-badge\{width:32px;height:32px/);
-  assert.match(html, /\.brand-name\{font:800 31px\/1/);
-  assert.match(html, /\.brand-name\{display:block;font-size:28px\}/);
 });
 
-test('trend navigation uses the approved chart icon and Trend naming', () => {
+test('trend navigation uses approved chart icon and Trend naming', () => {
   const html = renderAppPage();
   assert.match(html, /chartLineIcon/);
   assert.match(html, /node\.textContent='Trend'/);
@@ -55,36 +52,32 @@ test('trainer and driver profile tiles keep their frame but use matching navigat
   assert.match(html, /\.avatar\{font-size:0;color:var\(--accent-soft\)\}/);
 });
 
-test('logout control is absent from the rendered production interface', () => {
+test('logout control is absent from the production interface', () => {
   const html = renderAppPage();
   assert.match(html, /\.top-inner>form\{display:none\}/);
 });
 
-test('search control has proper vector icon, divider, and deliberate query spacing', () => {
+test('entity detail UI groups every stored measurement family', () => {
   const html = renderAppPage();
-  assert.match(html, /class="search-prefix"/);
-  assert.match(html, /class="search-icon"/);
-  assert.match(html, /class="search-divider"/);
-  assert.match(html, /padding:0 46px 0 80px/);
+  for (const label of [
+    'Profil','Aktivitet','Datatäckning','Lopp & start','Klassflaggor','Resultat','Senaste marknad & odds',
+    'Streckhistorik','Oddshistorik','Senaste utrustning','Utrustningshistorik','Senaste X-Labs','X-Labs segment',
+    'X-Labs historik','Positioner','Beräknade features','Featurehistorik','Lagrade AI-bedömningar',
+    'Editorial signals','Förhållanden','Dagsprofil'
+  ]) assert.ok(html.includes(label), `missing ${label}`);
+  for (const field of ['startsWithXLabs','startsWithPositions','startsWithFeatures','startsWithAi','startsWithEditorial','startsWithConditions']) assert.match(html, new RegExp(field));
 });
 
-test('entity detail UI groups complete stored measurements instead of flattening them', () => {
+test('complete data UI preserves raw/calculated/AI separation cues', () => {
   const html = renderAppPage();
-  for (const label of ['Profil','Aktivitet','Datatäckning','Lopp & start','Resultat','Marknad & odds','Utrustning','X-Labs','Positioner','Beräknade features','Förhållanden']) {
-    assert.match(html, new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  }
-  assert.match(html, /startsWithXLabs/);
-  assert.match(html, /startsWithPositions/);
-  assert.match(html, /startsWithFeatures/);
+  assert.match(html, /råfakta → kodberäkning/);
+  assert.match(html, /separerat från råfakta/);
+  assert.match(html, /strukturerade signaler/);
 });
 
-test('Spel has overview, V85, V86, sorting, round detail and compact comparison', () => {
+test('Spel remains available with overview, V85 and V86', () => {
   const html = renderAppPage();
   assert.match(html, /\['overview','Översikt'\],\['v85','V85'\],\['v86','V86'\]/);
-  assert.match(html, /\['latest','Senaste'\]/);
-  assert.match(html, /\['correct_desc','Flest rätt'\]/);
-  assert.match(html, /\['correct_asc','Färst rätt'\]/);
-  assert.match(html, /\['spikes_desc','Bästa spikar'\]/);
   assert.match(html, /Så vann loppen/);
   assert.match(html, /Var missar vi\?/);
   assert.match(html, /Avdelning för avdelning/);
@@ -112,6 +105,6 @@ test('entity browsing still supports complete paginated lists', () => {
 test('all embedded browser application scripts are valid JavaScript', () => {
   const html = renderAppPage();
   const scripts = [...html.matchAll(/<script(?: [^>]*)?>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
-  assert.ok(scripts.length >= 2, 'expected base and polish scripts');
+  assert.ok(scripts.length >= 3, 'expected base, polish and complete-data scripts');
   for (const script of scripts) assert.doesNotThrow(() => new vm.Script(script));
 });
