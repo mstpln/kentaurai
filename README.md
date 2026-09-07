@@ -46,6 +46,8 @@ Calendar/day and game-by-id are the only live acquisition patterns currently wir
 
 The normalizer reads a previously captured game source record from private R2 and maps only the verified subset into normalized D1 tables. It preserves source timestamps and source-record references for observations, betting percentages, odds and equipment snapshots. Reprocessing the same captured source record is a no-op.
 
+Production normalization is deliberately split across bounded Worker invocations so a full V85/V86 round cannot exceed Cloudflare's per-invocation external-service request budget. `POST /v1/provider/normalize` accepts `source_record_id` and an optional integer `cursor` starting at `0`. Each non-final response returns `nextCursor`; the caller submits that value in the next request. When `done` becomes `true`, the source record is marked `normalized_verified_subset`. Repeating a completed source record returns `reused: true`.
+
 Verified mapping rules include:
 - stable official IDs for races, horses, drivers, trainers and tracks
 - race distance, start method, scheduled start and status
