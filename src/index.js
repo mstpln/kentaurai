@@ -101,7 +101,7 @@ async function handleFetch(request, env) {
   const path = url.pathname;
 
   if (request.method === 'GET' && path === '/health') {
-    return json({ ok: true, service: 'kentaurai-api', version: '0.4.0' });
+    return json({ ok: true, service: 'kentaurai-api', version: '0.4.1' });
   }
 
   if (path === '/') return redirectResponse('/app');
