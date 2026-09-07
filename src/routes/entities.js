@@ -1,28 +1,7 @@
 const ENTITY_CONFIG = {
-  horses: {
-    table: 'horses',
-    idColumn: 'id',
-    nameColumn: 'canonical_name',
-    externalTable: 'horse_external_ids',
-    externalIdColumn: 'horse_id',
-    label: 'häst'
-  },
-  trainers: {
-    table: 'trainers',
-    idColumn: 'id',
-    nameColumn: 'canonical_name',
-    externalTable: 'trainer_external_ids',
-    externalIdColumn: 'trainer_id',
-    label: 'tränare'
-  },
-  drivers: {
-    table: 'drivers',
-    idColumn: 'id',
-    nameColumn: 'canonical_name',
-    externalTable: 'driver_external_ids',
-    externalIdColumn: 'driver_id',
-    label: 'kusk'
-  }
+  horses: { table: 'horses', idColumn: 'id', nameColumn: 'canonical_name', label: 'häst' },
+  trainers: { table: 'trainers', idColumn: 'id', nameColumn: 'canonical_name', label: 'tränare' },
+  drivers: { table: 'drivers', idColumn: 'id', nameColumn: 'canonical_name', label: 'kusk' }
 };
 
 function configFor(type) {
@@ -92,21 +71,14 @@ export async function listEntities(env, type, options = {}) {
   const q = sanitizeQuery(options.q);
   const limit = clampLimit(options.limit, 50, 100);
   const like = `%${q.replaceAll('%', '\\%').replaceAll('_', '\\_')}%`;
-  const filter = q ? `WHERE e.${config.nameColumn} LIKE ? ESCAPE '\\'` : '';
-  const sql = `
-    SELECT
-      e.${config.idColumn} AS id,
-      e.${config.nameColumn} AS name,
-      x.external_id AS external_id
-    FROM ${config.table} e
-    LEFT JOIN ${config.externalTable} x
-      ON x.${config.externalIdColumn} = e.${config.idColumn}
-      AND x.source_type = 'official'
+  const filter = q ? `WHERE ${config.nameColumn} LIKE ? ESCAPE '\\'` : '';
+  const statement = env.DB.prepare(`
+    SELECT ${config.idColumn} AS id, ${config.nameColumn} AS name
+    FROM ${config.table}
     ${filter}
-    ORDER BY e.${config.nameColumn} COLLATE NOCASE ASC
+    ORDER BY ${config.nameColumn} COLLATE NOCASE ASC
     LIMIT ?
-  `;
-  const statement = env.DB.prepare(sql);
+  `);
   const { results } = q
     ? await statement.bind(like, limit).all()
     : await statement.bind(limit).all();
@@ -131,16 +103,15 @@ async function getHorseDetail(env, id) {
       h.career_earnings_sek,
       t.id AS trainer_id,
       t.canonical_name AS trainer_name,
-      tr.canonical_name AS home_track_name,
-      x.external_id AS external_id
+      tr.canonical_name AS home_track_name
     FROM horses h
     LEFT JOIN trainers t ON t.id = h.current_trainer_id
     LEFT JOIN tracks tr ON tr.id = h.home_track_id
-    LEFT JOIN horse_external_ids x ON x.horse_id = h.id AND x.source_type = 'official'
     WHERE h.id = ?
     LIMIT 1
   `).bind(id).first();
   if (!horse) return null;
+
   const { results: starts } = await env.DB.prepare(`
     SELECT
       re.id AS entry_id,
@@ -171,24 +142,21 @@ async function getHorseDetail(env, id) {
     ORDER BY r.race_date DESC, r.race_number DESC
     LIMIT 50
   `).bind(id).all();
+
   return { type: 'horse', entity: horse, starts };
 }
 
 async function getPersonDetail(env, type, id) {
   const driver = type === 'drivers';
   const table = driver ? 'drivers' : 'trainers';
-  const externalTable = driver ? 'driver_external_ids' : 'trainer_external_ids';
-  const externalIdColumn = driver ? 'driver_id' : 'trainer_id';
   const person = await env.DB.prepare(`
     SELECT
       p.id,
       p.canonical_name AS name,
       p.country_code,
-      ${driver ? 'tr.canonical_name AS home_track_name,' : 'NULL AS home_track_name,'}
-      x.external_id AS external_id
+      ${driver ? 'tr.canonical_name AS home_track_name' : 'NULL AS home_track_name'}
     FROM ${table} p
     ${driver ? 'LEFT JOIN tracks tr ON tr.id = p.home_track_id' : ''}
-    LEFT JOIN ${externalTable} x ON x.${externalIdColumn} = p.id AND x.source_type = 'official'
     WHERE p.id = ?
     LIMIT 1
   `).bind(id).first();
@@ -224,26 +192,30 @@ async function getPersonDetail(env, type, id) {
 
   const stats = await env.DB.prepare(`
     SELECT
-      COUNT(*) AS starts,
+      COUNT(*) AS database_starts,
+      COUNT(DISTINCT re.horse_id) AS linked_horses,
+      SUM(CASE WHEN rr.race_entry_id IS NOT NULL THEN 1 ELSE 0 END) AS result_starts,
       SUM(CASE WHEN rr.placing = 1 THEN 1 ELSE 0 END) AS wins,
       SUM(CASE WHEN rr.placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) AS top3,
-      SUM(COALESCE(rr.prize_sek, 0)) AS prize_sek
+      SUM(CASE WHEN rr.race_entry_id IS NOT NULL THEN COALESCE(rr.prize_sek, 0) ELSE 0 END) AS prize_sek
     FROM race_entries re
     LEFT JOIN race_results rr ON rr.race_entry_id = re.id
-    WHERE re.${relationColumn} = ? AND rr.race_entry_id IS NOT NULL
+    WHERE re.${relationColumn} = ?
   `).bind(id).first();
 
-  const startsWithResults = Number(stats?.starts ?? 0);
+  const resultStarts = Number(stats?.result_starts ?? 0);
   return {
     type: driver ? 'driver' : 'trainer',
     entity: person,
     stats: {
-      starts: startsWithResults,
+      databaseStarts: Number(stats?.database_starts ?? 0),
+      linkedHorses: Number(stats?.linked_horses ?? 0),
+      resultStarts,
       wins: Number(stats?.wins ?? 0),
       top3: Number(stats?.top3 ?? 0),
       prizeSek: Number(stats?.prize_sek ?? 0),
-      winRate: startsWithResults ? Number(stats?.wins ?? 0) / startsWithResults : null,
-      top3Rate: startsWithResults ? Number(stats?.top3 ?? 0) / startsWithResults : null
+      winRate: resultStarts ? Number(stats?.wins ?? 0) / resultStarts : null,
+      top3Rate: resultStarts ? Number(stats?.top3 ?? 0) / resultStarts : null
     },
     starts
   };
