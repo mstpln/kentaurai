@@ -35,6 +35,10 @@ function numeric(value) {
   return value == null ? null : Number(value);
 }
 
+function escapedLike(value) {
+  return `%${value.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`;
+}
+
 export async function getEntitySummary(env) {
   const row = await env.DB.prepare(`
     SELECT
@@ -66,7 +70,7 @@ export async function searchEntities(env, query, limitValue) {
   const q = sanitizeQuery(query);
   if (!q) return [];
   const limit = clampLimit(limitValue, 20, 40);
-  const like = `%${q.replaceAll('%', '\\%').replaceAll('_', '\\_')}%`;
+  const like = escapedLike(q);
   const { results } = await env.DB.prepare(`
     SELECT type, id, name FROM (
       SELECT 'horse' AS type, id, canonical_name AS name FROM horses WHERE canonical_name LIKE ? ESCAPE '\\'
@@ -86,7 +90,7 @@ export async function listEntities(env, type, options = {}) {
   const q = sanitizeQuery(options.q);
   const limit = clampLimit(options.limit);
   const offset = clampOffset(options.offset);
-  const like = `%${q.replaceAll('%', '\\%').replaceAll('_', '\\_')}%`;
+  const like = escapedLike(q);
   const filter = q ? `WHERE ${config.nameColumn} LIKE ? ESCAPE '\\'` : '';
 
   const listStatement = env.DB.prepare(`
@@ -121,21 +125,22 @@ async function latestObservation(env, entityType, id) {
 async function getStats(env, relationColumn, id) {
   const row = await env.DB.prepare(`
     SELECT
-      COUNT(*) AS database_starts,
+      SUM(CASE WHEN re.scratched = 0 THEN 1 ELSE 0 END) AS database_starts,
+      SUM(CASE WHEN re.scratched = 1 THEN 1 ELSE 0 END) AS scratched_entries,
       COUNT(DISTINCT re.horse_id) AS linked_horses,
-      SUM(CASE WHEN rr.race_entry_id IS NOT NULL THEN 1 ELSE 0 END) AS result_starts,
-      SUM(CASE WHEN rr.placing = 1 THEN 1 ELSE 0 END) AS wins,
-      SUM(CASE WHEN rr.placing = 2 THEN 1 ELSE 0 END) AS seconds,
-      SUM(CASE WHEN rr.placing = 3 THEN 1 ELSE 0 END) AS thirds,
-      SUM(CASE WHEN rr.placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) AS top3,
-      SUM(CASE WHEN rr.gallop = 1 THEN 1 ELSE 0 END) AS gallops,
-      SUM(CASE WHEN rr.disqualified = 1 THEN 1 ELSE 0 END) AS disqualifications,
-      SUM(CASE WHEN rr.race_entry_id IS NOT NULL THEN COALESCE(rr.prize_sek, 0) ELSE 0 END) AS prize_sek,
-      SUM(CASE WHEN EXISTS (
+      SUM(CASE WHEN re.scratched = 0 AND rr.race_entry_id IS NOT NULL THEN 1 ELSE 0 END) AS result_starts,
+      SUM(CASE WHEN re.scratched = 0 AND rr.placing = 1 THEN 1 ELSE 0 END) AS wins,
+      SUM(CASE WHEN re.scratched = 0 AND rr.placing = 2 THEN 1 ELSE 0 END) AS seconds,
+      SUM(CASE WHEN re.scratched = 0 AND rr.placing = 3 THEN 1 ELSE 0 END) AS thirds,
+      SUM(CASE WHEN re.scratched = 0 AND rr.placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) AS top3,
+      SUM(CASE WHEN re.scratched = 0 AND rr.gallop = 1 THEN 1 ELSE 0 END) AS gallops,
+      SUM(CASE WHEN re.scratched = 0 AND rr.disqualified = 1 THEN 1 ELSE 0 END) AS disqualifications,
+      SUM(CASE WHEN re.scratched = 0 AND rr.race_entry_id IS NOT NULL THEN COALESCE(rr.prize_sek, 0) ELSE 0 END) AS prize_sek,
+      SUM(CASE WHEN re.scratched = 0 AND EXISTS (
         SELECT 1 FROM game_legs gl JOIN game_rounds gr ON gr.id = gl.game_round_id
         WHERE gl.race_id = re.race_id AND gr.game_type = 'V85'
       ) THEN 1 ELSE 0 END) AS v85_starts,
-      SUM(CASE WHEN EXISTS (
+      SUM(CASE WHEN re.scratched = 0 AND EXISTS (
         SELECT 1 FROM game_legs gl JOIN game_rounds gr ON gr.id = gl.game_round_id
         WHERE gl.race_id = re.race_id AND gr.game_type = 'V86'
       ) THEN 1 ELSE 0 END) AS v86_starts
@@ -148,6 +153,7 @@ async function getStats(env, relationColumn, id) {
   const top3 = Number(row?.top3 ?? 0);
   return {
     databaseStarts: Number(row?.database_starts ?? 0),
+    scratchedEntries: Number(row?.scratched_entries ?? 0),
     linkedHorses: Number(row?.linked_horses ?? 0),
     resultStarts,
     wins,
@@ -174,7 +180,7 @@ async function getBreakdowns(env, relationColumn, id) {
     FROM race_entries re
     JOIN races r ON r.id = re.race_id
     LEFT JOIN race_results rr ON rr.race_entry_id = re.id
-    WHERE re.${relationColumn} = ?
+    WHERE re.${relationColumn} = ? AND re.scratched = 0
     GROUP BY COALESCE(r.start_method, 'unknown')
     ORDER BY starts DESC, label ASC
   `).bind(id).all();
@@ -188,7 +194,7 @@ async function getBreakdowns(env, relationColumn, id) {
     FROM race_entries re
     JOIN races r ON r.id = re.race_id
     LEFT JOIN race_results rr ON rr.race_entry_id = re.id
-    WHERE re.${relationColumn} = ?
+    WHERE re.${relationColumn} = ? AND re.scratched = 0
     GROUP BY r.distance_m
     ORDER BY starts DESC, r.distance_m ASC
   `).bind(id).all();
@@ -203,7 +209,7 @@ async function getBreakdowns(env, relationColumn, id) {
     JOIN races r ON r.id = re.race_id
     LEFT JOIN tracks t ON t.id = r.track_id
     LEFT JOIN race_results rr ON rr.race_entry_id = re.id
-    WHERE re.${relationColumn} = ?
+    WHERE re.${relationColumn} = ? AND re.scratched = 0
     GROUP BY t.id, t.canonical_name
     ORDER BY starts DESC, label COLLATE NOCASE ASC
     LIMIT 20
@@ -538,26 +544,17 @@ async function enrichStarts(env, starts) {
 async function getCoverage(env, relationColumn, id) {
   const row = await env.DB.prepare(`
     SELECT
-      COUNT(DISTINCT re.id) AS starts,
-      COUNT(DISTINCT CASE WHEN bs.id IS NOT NULL THEN re.id END) AS starts_with_market,
-      COUNT(DISTINCT CASE WHEN os.id IS NOT NULL THEN re.id END) AS starts_with_odds,
-      COUNT(DISTINCT CASE WHEN eq.id IS NOT NULL THEN re.id END) AS starts_with_equipment,
-      COUNT(DISTINCT CASE WHEN xd.id IS NOT NULL THEN re.id END) AS starts_with_xlabs,
-      COUNT(DISTINCT CASE WHEN rp.id IS NOT NULL THEN re.id END) AS starts_with_positions,
-      COUNT(DISTINCT CASE WHEN af.id IS NOT NULL THEN re.id END) AS starts_with_features,
-      COUNT(DISTINCT CASE WHEN ahp.id IS NOT NULL THEN re.id END) AS starts_with_ai,
-      COUNT(DISTINCT CASE WHEN ei.id IS NOT NULL THEN re.id END) AS starts_with_editorial,
-      COUNT(DISTINCT CASE WHEN rc.race_id IS NOT NULL THEN re.id END) AS starts_with_conditions
+      SUM(CASE WHEN re.scratched = 0 THEN 1 ELSE 0 END) AS starts,
+      SUM(CASE WHEN re.scratched = 0 AND EXISTS (SELECT 1 FROM betting_snapshots bs WHERE bs.race_entry_id = re.id) THEN 1 ELSE 0 END) AS starts_with_market,
+      SUM(CASE WHEN re.scratched = 0 AND EXISTS (SELECT 1 FROM odds_snapshots os WHERE os.race_entry_id = re.id) THEN 1 ELSE 0 END) AS starts_with_odds,
+      SUM(CASE WHEN re.scratched = 0 AND EXISTS (SELECT 1 FROM equipment eq WHERE eq.race_entry_id = re.id) THEN 1 ELSE 0 END) AS starts_with_equipment,
+      SUM(CASE WHEN re.scratched = 0 AND EXISTS (SELECT 1 FROM xlabs_data xd WHERE xd.race_entry_id = re.id) THEN 1 ELSE 0 END) AS starts_with_xlabs,
+      SUM(CASE WHEN re.scratched = 0 AND EXISTS (SELECT 1 FROM race_positions rp WHERE rp.race_entry_id = re.id) THEN 1 ELSE 0 END) AS starts_with_positions,
+      SUM(CASE WHEN re.scratched = 0 AND EXISTS (SELECT 1 FROM analysis_features af WHERE af.race_entry_id = re.id) THEN 1 ELSE 0 END) AS starts_with_features,
+      SUM(CASE WHEN re.scratched = 0 AND EXISTS (SELECT 1 FROM ai_horse_predictions ahp WHERE ahp.race_entry_id = re.id) THEN 1 ELSE 0 END) AS starts_with_ai,
+      SUM(CASE WHEN re.scratched = 0 AND EXISTS (SELECT 1 FROM editorial_items ei WHERE ei.race_entry_id = re.id) THEN 1 ELSE 0 END) AS starts_with_editorial,
+      SUM(CASE WHEN re.scratched = 0 AND EXISTS (SELECT 1 FROM race_conditions rc WHERE rc.race_id = re.race_id) THEN 1 ELSE 0 END) AS starts_with_conditions
     FROM race_entries re
-    LEFT JOIN betting_snapshots bs ON bs.race_entry_id = re.id
-    LEFT JOIN odds_snapshots os ON os.race_entry_id = re.id
-    LEFT JOIN equipment eq ON eq.race_entry_id = re.id
-    LEFT JOIN xlabs_data xd ON xd.race_entry_id = re.id
-    LEFT JOIN race_positions rp ON rp.race_entry_id = re.id
-    LEFT JOIN analysis_features af ON af.race_entry_id = re.id
-    LEFT JOIN ai_horse_predictions ahp ON ahp.race_entry_id = re.id
-    LEFT JOIN editorial_items ei ON ei.race_entry_id = re.id
-    LEFT JOIN race_conditions rc ON rc.race_id = re.race_id
     WHERE re.${relationColumn} = ?
   `).bind(id).first();
   return {
