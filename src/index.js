@@ -2,7 +2,7 @@ import { requireAdmin } from './auth.js';
 import { archiveRawPayload } from './raw.js';
 import { importEditorial } from './import/editorial.js';
 import { importReferenceRound } from './import/reference-round-safe.js';
-import { normalizeCapturedOfficialGame } from './import/official-live.js';
+import { normalizeCapturedOfficialGameChunk } from './import/official-live-chunked.js';
 import { captureCalendar, captureGame } from './provider/official.js';
 import { getRound } from './routes/rounds.js';
 import { createHypothesis } from './routes/learning.js';
@@ -32,7 +32,7 @@ async function handleFetch(request, env) {
   const path = url.pathname;
 
   if (request.method === 'GET' && path === '/health') {
-    return json({ ok: true, service: 'kentaurai-api', version: '0.3.0' });
+    return json({ ok: true, service: 'kentaurai-api', version: '0.3.1' });
   }
 
   if (path.startsWith('/v1/')) {
@@ -52,7 +52,7 @@ async function handleFetch(request, env) {
 
   if (request.method === 'POST' && path === '/v1/provider/normalize') {
     const body = await readJson(request);
-    return json(await normalizeCapturedOfficialGame(env, body.source_record_id));
+    return json(await normalizeCapturedOfficialGameChunk(env, body.source_record_id, body.cursor ?? 0));
   }
 
   if (request.method === 'POST' && path === '/v1/import/editorial') {
