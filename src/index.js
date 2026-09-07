@@ -2,6 +2,7 @@ import { requireAdmin } from './auth.js';
 import { archiveRawPayload } from './raw.js';
 import { importEditorial } from './import/editorial.js';
 import { importReferenceRound } from './import/reference-round-safe.js';
+import { captureCalendar, captureGame, captureProduct } from './provider/official.js';
 import { getRound } from './routes/rounds.js';
 import { createHypothesis } from './routes/learning.js';
 
@@ -18,12 +19,20 @@ async function readJson(request) {
   return request.json();
 }
 
+async function handleProviderCapture(env, body) {
+  const kind = String(body.kind || '').toLowerCase();
+  if (kind === 'calendar') return captureCalendar(env, body.date);
+  if (kind === 'product') return captureProduct(env, body.game_type);
+  if (kind === 'game') return captureGame(env, body.game_id);
+  throw new Error('kind must be calendar, product or game');
+}
+
 async function handleFetch(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
 
   if (request.method === 'GET' && path === '/health') {
-    return json({ ok: true, service: 'kentaurai-api', version: '0.1.0' });
+    return json({ ok: true, service: 'kentaurai-api', version: '0.2.0' });
   }
 
   if (path.startsWith('/v1/')) {
@@ -35,6 +44,10 @@ async function handleFetch(request, env) {
     const roundId = decodeURIComponent(path.slice('/v1/rounds/'.length));
     const data = await getRound(env, roundId);
     return data ? json(data) : json({ error: 'not_found' }, 404);
+  }
+
+  if (request.method === 'POST' && path === '/v1/provider/capture') {
+    return json(await handleProviderCapture(env, await readJson(request)), 201);
   }
 
   if (request.method === 'POST' && path === '/v1/import/editorial') {
@@ -69,13 +82,13 @@ async function handleFetch(request, env) {
 }
 
 async function handleScheduled(controller, env) {
-  // Phase 1A intentionally does not call live providers yet.
+  // Phase 1B records scheduler health only. Live collection remains disabled until a real response is validated.
   const now = new Date(controller.scheduledTime || Date.now()).toISOString();
   const id = `cron_${crypto.randomUUID()}`;
   await env.DB.prepare(`
     INSERT INTO import_runs (id, source_type, started_at, finished_at, status, metadata_json)
     VALUES (?, 'scheduled_orchestrator', ?, ?, 'success', ?)
-  `).bind(id, now, now, JSON.stringify({ cron: controller.cron, phase: '1A_no_live_calls' })).run();
+  `).bind(id, now, now, JSON.stringify({ cron: controller.cron, phase: '1B_capture_ready_no_automatic_live_calls' })).run();
 }
 
 export default {
