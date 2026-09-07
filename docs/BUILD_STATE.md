@@ -1,8 +1,8 @@
 # Build state
 
-Version: 0.4.2
+Version: 0.4.3
 Phase: interface foundation on verified official data layer
-Status: production interface hardened for complete entity browsing and mobile use; automatic live acquisition still disabled
+Status: production interface redesign in review; automatic live acquisition still disabled
 
 Implemented:
 - D1 core schema, indexes and reference-round extension migrations
@@ -42,7 +42,6 @@ Implemented:
 - fixed global search across horses, trainers and drivers
 - fixed bottom navigation in approved order: Start, Tränare, Hästar, Kuskar
 - entity list/detail views backed by reusable read-only D1 APIs
-- tabbed Start and entity detail screens to avoid long continuous scrolling
 - factual/null-safe interface behavior when historical results are unavailable
 - deterministic trainer/driver statistics only when stored race results exist
 - production UI validation against the first normalized V86 dataset
@@ -55,9 +54,16 @@ Implemented:
 - list-page position preserved when opening a profile and returning to the list
 - entity indexes converted from wide tables to compact touch-friendly rows
 - start-history tables separated from entity-list styling and given deliberate horizontal overflow on narrow screens
-- refined circular horse-inspired Kentaur mark and stronger `KENTAURAI` wordmark while preserving the restrained dark/gold visual system
 - responsive top bar, profile hierarchy, pager controls and bottom navigation for mobile use
 - active navigation exposes `aria-current` while keyboard-visible focus remains intact
+- Start page reduced to a dedicated trends workspace; the old overview and data-status tabs are removed
+- trend workspace supports direct category switching between Tränare, Hästar and Kuskar
+- trend workspace supports 2 veckor, 4 veckor, 3 mån, 6 mån and 1 år timeframes without fabricating missing historical rankings
+- redundant KentaurAI eyebrow removed from page headings
+- search field rebuilt with a larger proper magnifying-glass vector, divider and deliberate spacing before query text
+- bottom navigation placeholders replaced by a coherent professional vector icon set
+- general application typography changed away from the previous Inter-heavy look while the approved brand-name typography remains separate
+- brand horse mark now uses a ready-made professional horse icon rather than a hand-drawn symbol
 
 Official vertical-slice conclusion:
 - raw capture -> private R2/D1 provenance -> normalization -> private verification is proven end-to-end
@@ -69,20 +75,22 @@ Interface foundation decisions:
 - entity-centric rather than V85/V86-round-centric
 - fixed top global search
 - fixed bottom navigation: Start -> Tränare -> Hästar -> Kuskar
+- Start is the trend workspace rather than a database-count dashboard
+- trend navigation prioritizes entity category plus rolling timeframe controls
 - minimal dark visual system using black/grey/brown/beige with restrained blue/yellow/gold accents
-- compact circular horse-inspired mark plus uppercase KentaurAI wordmark
-- clear card, divider and tab separation between sections
+- brand name retains its distinct display treatment; application UI uses a separate calmer sans-serif stack
+- ready-made professional vector icons preferred over custom-drawn horse/UI symbols
 - tabs and paginated entity indexes preferred over excessive vertical scrolling
 - horse/trainer/driver profile pages are structured for later historical, X-Labs and calculated-feature additions
 - no invented trends; homepage rolling trend leaderboards remain unavailable until sufficient result history exists
 - internal provenance identifiers remain in the backend but are not primary UI content
 
 Next verification gate:
-1. Run full CI on the exact 0.4.2 feature head.
-2. Review the exact final diff for pagination correctness, read-only guarantees, UI semantics, accessibility and regression risk.
+1. Run full CI on the exact 0.4.3 feature head.
+2. Review the exact final diff for UI semantics, existing API preservation, accessibility and regression risk.
 3. Fix any blocking issues and repeat CI/review until clean.
-4. Open the pull request and merge only after explicit authorization.
-5. After production deployment, visually re-check Start, all entity-list pages, pagination, search and representative trainer/horse/driver profiles on desktop and mobile.
+4. Open/update the pull request and merge only after explicit authorization.
+5. After production deployment, visually re-check the trends workspace, search field, new iconography, typography, all entity-list pages and representative profiles on desktop and mobile.
 
 Not yet implemented:
 - verified live scratch/withdrawal mapping
