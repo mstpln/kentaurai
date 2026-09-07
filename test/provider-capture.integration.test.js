@@ -10,14 +10,9 @@ import {
 
 function jsonResponse(payload, init = {}) {
   const body = JSON.stringify(payload);
-  const headers = {
-    'content-type': init.contentType ?? 'application/json'
-  };
+  const headers = { 'content-type': init.contentType ?? 'application/json' };
   if (init.contentLength != null) headers['content-length'] = String(init.contentLength);
-  return new Response(body, {
-    status: init.status ?? 200,
-    headers
-  });
+  return new Response(body, { status: init.status ?? 200, headers });
 }
 
 test('official provider URL builders only accept expected inputs', () => {
@@ -33,12 +28,16 @@ test('official provider URL builders only accept expected inputs', () => {
   assert.throws(() => validateIsoDate('2026-02-30'), /valid calendar date/);
   assert.throws(() => buildGameUrl(env, '../../secret'), /unsupported format/);
   assert.throws(
-    () => buildCalendarUrl({ OFFICIAL_PROVIDER_BASE_URL: 'https://user:pass@example.com/api' }, '2026-09-07'),
+    () => buildCalendarUrl({ OFFICIAL_PROVIDER_BASE_URL: 'https://user:pass@www.atg.se/api' }, '2026-09-07'),
     /must not contain credentials/
   );
   assert.throws(
-    () => buildCalendarUrl({ OFFICIAL_PROVIDER_BASE_URL: 'http://example.com/api' }, '2026-09-07'),
+    () => buildCalendarUrl({ OFFICIAL_PROVIDER_BASE_URL: 'http://www.atg.se/api' }, '2026-09-07'),
     /must use https/
+  );
+  assert.throws(
+    () => buildCalendarUrl({ OFFICIAL_PROVIDER_BASE_URL: 'https://example.com/api' }, '2026-09-07'),
+    /must use an atg\.se host/
   );
 });
 
@@ -59,6 +58,7 @@ test('official calendar capture archives the exact JSON before mapping it', asyn
   assert.equal(seen.length, 1);
   assert.match(seen[0].url, /calendar\/day\/2026-09-07$/);
   assert.equal(seen[0].init.method, 'GET');
+  assert.equal(seen[0].init.redirect, 'error');
   assert.equal(result.kind, 'calendar');
   assert.equal(result.identity, '2026-09-07');
   assert.equal(result.shape.hasGamesObject, true);
@@ -69,7 +69,16 @@ test('official calendar capture archives the exact JSON before mapping it', asyn
   assert.equal(source.source_type, 'official_provider');
   assert.equal(source.external_id, 'calendar:2026-09-07');
   assert.equal(source.quality_status, 'captured_unmapped');
-  assert.equal(source.rights_status, 'official_source');
+  assert.equal(source.rights_status, 'unknown');
+});
+
+test('official provider capture requires private raw storage', async () => {
+  const { env } = createTestEnv();
+  delete env.RAW_BUCKET;
+  await assert.rejects(
+    () => captureCalendar(env, '2026-09-07', { fetchImpl: async () => jsonResponse({}) }),
+    /RAW_BUCKET is not configured/
+  );
 });
 
 test('official provider capture rejects non-JSON responses without archiving them', async () => {
@@ -83,7 +92,6 @@ test('official provider capture rejects non-JSON responses without archiving the
     }),
     /did not return JSON/
   );
-
   assert.equal(db.prepare('SELECT count(*) AS n FROM source_records').get().n, 0);
   assert.equal(objects.size, 0);
 });
