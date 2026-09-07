@@ -4,16 +4,19 @@ import { createTestEnv } from './helpers/d1.js';
 import {
   buildCalendarUrl,
   buildGameUrl,
-  buildProductUrl,
   captureCalendar,
-  validateGameType,
   validateIsoDate
 } from '../src/provider/official.js';
 
 function jsonResponse(payload, init = {}) {
-  return new Response(JSON.stringify(payload), {
+  const body = JSON.stringify(payload);
+  const headers = {
+    'content-type': init.contentType ?? 'application/json'
+  };
+  if (init.contentLength != null) headers['content-length'] = String(init.contentLength);
+  return new Response(body, {
     status: init.status ?? 200,
-    headers: { 'content-type': init.contentType ?? 'application/json' }
+    headers
   });
 }
 
@@ -24,16 +27,19 @@ test('official provider URL builders only accept expected inputs', () => {
     'https://www.atg.se/services/racinginfo/v1/api/calendar/day/2026-09-07'
   );
   assert.equal(
-    buildProductUrl(env, 'v85'),
-    'https://www.atg.se/services/racinginfo/v1/api/products/V85'
-  );
-  assert.equal(
     buildGameUrl(env, 'V85_2026-09-07_5_1'),
     'https://www.atg.se/services/racinginfo/v1/api/games/V85_2026-09-07_5_1'
   );
   assert.throws(() => validateIsoDate('2026-02-30'), /valid calendar date/);
-  assert.throws(() => validateGameType('V75'), /V85 or V86/);
   assert.throws(() => buildGameUrl(env, '../../secret'), /unsupported format/);
+  assert.throws(
+    () => buildCalendarUrl({ OFFICIAL_PROVIDER_BASE_URL: 'https://user:pass@example.com/api' }, '2026-09-07'),
+    /must not contain credentials/
+  );
+  assert.throws(
+    () => buildCalendarUrl({ OFFICIAL_PROVIDER_BASE_URL: 'http://example.com/api' }, '2026-09-07'),
+    /must use https/
+  );
 });
 
 test('official calendar capture archives the exact JSON before mapping it', async () => {
@@ -91,4 +97,16 @@ test('official provider capture rejects HTTP failures without archiving them', a
     /HTTP 503/
   );
   assert.equal(db.prepare('SELECT count(*) AS n FROM source_records').get().n, 0);
+});
+
+test('official provider capture rejects an oversized declared response before archiving it', async () => {
+  const { env, db, objects } = createTestEnv();
+  await assert.rejects(
+    () => captureCalendar(env, '2026-09-07', {
+      fetchImpl: async () => jsonResponse({ ok: true }, { contentLength: 9 * 1024 * 1024 })
+    }),
+    /exceeded size limit/
+  );
+  assert.equal(db.prepare('SELECT count(*) AS n FROM source_records').get().n, 0);
+  assert.equal(objects.size, 0);
 });
