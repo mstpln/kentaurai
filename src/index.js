@@ -8,7 +8,8 @@ import { getRound } from './routes/rounds.js';
 import { createHypothesis } from './routes/learning.js';
 import { verifyCapturedOfficialNormalization } from './routes/official-verification.js';
 import { getEntityDetail, getEntitySummary, listEntities, searchEntities } from './routes/entities.js';
-import { getGameHistoryDetail, getGameHistorySummary, listGameHistory } from './routes/games.js';
+import { getGameHistoryDetail, listGameHistory } from './routes/games.js';
+import { getGameHistorySummary } from './routes/game-summary.js';
 import { appAuthConfigured, appPasswordMatches, clearAppSessionCookie, createAppSessionCookie, hasValidAppSession } from './app-auth.js';
 import { htmlResponse, redirectResponse, renderAppPage, renderLoginPage } from './app-page.js';
 
