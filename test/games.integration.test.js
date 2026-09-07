@@ -32,6 +32,22 @@ function seedRound(db) {
   }
 }
 
+function seedPartialRound(db) {
+  db.prepare(`INSERT INTO tracks (id, canonical_name, country_code) VALUES ('track_p','Partial Park','SE')`).run();
+  db.prepare(`INSERT INTO game_rounds (id, game_type, round_date, status) VALUES ('round_p','V85','2099-01-03','running')`).run();
+  db.prepare(`INSERT INTO horses (id, canonical_name) VALUES ('horse_p','Partial Horse')`).run();
+  for (let leg = 1; leg <= 8; leg += 1) {
+    db.prepare(`INSERT INTO races (id, track_id, race_date, race_number, distance_m, start_method) VALUES ('prace_${leg}', 'track_p', '2099-01-03', ${leg}, 2140, 'auto')`).run();
+    db.prepare(`INSERT INTO game_legs (game_round_id, leg_number, race_id) VALUES ('round_p', ${leg}, 'prace_${leg}')`).run();
+    db.prepare(`INSERT INTO race_entries (id, race_id, horse_id, start_number) VALUES ('pentry_${leg}', 'prace_${leg}', 'horse_p', 1)`).run();
+    if (leg <= 2) db.prepare(`INSERT INTO race_results (race_entry_id, placing, placing_text) VALUES ('pentry_${leg}', 1, '1')`).run();
+  }
+  db.prepare(`INSERT INTO systems (id, game_round_id, system_type, budget_sek, row_count, spike_count, created_at) VALUES ('system_partial','round_p','main',180,120,3,'2099-01-03T10:00:00Z')`).run();
+  for (let leg = 1; leg <= 8; leg += 1) {
+    db.prepare(`INSERT INTO system_selections (system_id, leg_number, race_entry_id, is_spike) VALUES ('system_partial', ${leg}, 'pentry_${leg}', ${leg <= 3 ? 1 : 0})`).run();
+  }
+}
+
 test('game history lists one row per round with result and spike metrics', async () => {
   const { env, db } = createTestEnv();
   seedRound(db);
@@ -70,4 +86,31 @@ test('game overview summarizes rounds, spikes and winner-trip evidence without i
   assert.equal(summary.all.spikeHitRate, 1);
   assert.deepEqual(summary.winnerTrips, [{ label: 'Spets', count: 1 }]);
   assert.equal(summary.unknownWinnerTrips, 7);
+});
+
+test('unfinished legs are not counted as unknown winner trips', async () => {
+  const { env, db } = createTestEnv();
+  seedPartialRound(db);
+  const summary = await getGameHistorySummary(env);
+  assert.equal(summary.all.rounds, 1);
+  assert.equal(summary.all.completedRounds, 0);
+  assert.equal(summary.unknownWinnerTrips, 2);
+});
+
+test('latest main system is used consistently as the primary round system', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  db.prepare(`INSERT INTO systems (id, game_round_id, system_type, budget_sek, row_count, spike_count, created_at) VALUES ('system_main_new','round_1','main',240,160,3,'2099-01-02T11:00:00Z')`).run();
+  for (let leg = 1; leg <= 8; leg += 1) {
+    const selectedEntryId = leg <= 7 ? `winner_${leg}` : `other_${leg}`;
+    db.prepare(`INSERT INTO system_selections (system_id, leg_number, race_entry_id, is_spike) VALUES ('system_main_new', ${leg}, '${selectedEntryId}', ${leg <= 3 ? 1 : 0})`).run();
+  }
+
+  const list = await listGameHistory(env, { gameType: 'V86' });
+  assert.equal(list.items[0].primarySystemId, 'system_main_new');
+  assert.equal(list.items[0].correctLegs, 7);
+
+  const detail = await getGameHistoryDetail(env, 'round_1');
+  assert.equal(detail.systems[0].id, 'system_main_new');
+  assert.equal(detail.systems[0].correctLegs, 7);
 });
