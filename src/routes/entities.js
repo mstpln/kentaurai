@@ -66,7 +66,7 @@ export async function searchEntities(env, query, limitValue) {
       UNION ALL
       SELECT 'driver' AS type, id, canonical_name AS name FROM drivers WHERE canonical_name LIKE ? ESCAPE '\\'
     )
-    ORDER BY name COLLATE NOCASE ASC
+    ORDER BY name COLLATE NOCASE ASC, type ASC, id ASC
     LIMIT ?
   `).bind(like, like, like, limit).all();
   return results;
@@ -84,7 +84,7 @@ export async function listEntities(env, type, options = {}) {
     SELECT ${config.idColumn} AS id, ${config.nameColumn} AS name
     FROM ${config.table}
     ${filter}
-    ORDER BY ${config.nameColumn} COLLATE NOCASE ASC
+    ORDER BY ${config.nameColumn} COLLATE NOCASE ASC, ${config.idColumn} ASC
     LIMIT ? OFFSET ?
   `);
   const countStatement = env.DB.prepare(`
