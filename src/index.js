@@ -2,7 +2,7 @@ import { requireAdmin } from './auth.js';
 import { archiveRawPayload } from './raw.js';
 import { importEditorial } from './import/editorial.js';
 import { importReferenceRound } from './import/reference-round-safe.js';
-import { normalizeCapturedOfficialGameChunk } from './import/official-live-chunked.js';
+import { normalizeCapturedOfficialGameSequential } from './import/official-live-sequential.js';
 import { captureCalendar, captureGame } from './provider/official.js';
 import { getRound } from './routes/rounds.js';
 import { createHypothesis } from './routes/learning.js';
@@ -52,7 +52,7 @@ async function handleFetch(request, env) {
 
   if (request.method === 'POST' && path === '/v1/provider/normalize') {
     const body = await readJson(request);
-    return json(await normalizeCapturedOfficialGameChunk(env, body.source_record_id, body.cursor ?? 0));
+    return json(await normalizeCapturedOfficialGameSequential(env, body.source_record_id, body.cursor ?? 0));
   }
 
   if (request.method === 'POST' && path === '/v1/import/editorial') {
