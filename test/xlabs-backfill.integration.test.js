@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import worker from '../src/index.js';
 import { createTestEnv } from './helpers/d1.js';
 import {
   ensureDailyXlabsJob,
@@ -130,4 +131,50 @@ test('404 race objects are neutral missing coverage and advance the checkpoint',
   assert.equal(job.consecutive_errors, 0);
   assert.equal(job.status, 'running');
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM xlabs_data`).get().n, 0);
+});
+
+test('404 date pages are neutral missing coverage and complete a single-day job', async () => {
+  const { env, db } = createTestEnv();
+  seedOfficialRace(db);
+  await startXlabsBackfill(env, DATE, DATE);
+
+  const result = await runXlabsBackfillStep(env, null, {
+    dateFetchImpl: async () => new Response('missing', { status: 404 })
+  });
+
+  assert.equal(result.unavailableDate, DATE);
+  assert.equal(result.status, 'completed');
+  assert.equal(result.done, true);
+  const job = db.prepare(`SELECT status,processed_dates,unavailable_dates,consecutive_errors FROM xlabs_backfill_jobs`).get();
+  assert.equal(job.status, 'completed');
+  assert.equal(job.processed_dates, 1);
+  assert.equal(job.unavailable_dates, 1);
+  assert.equal(job.consecutive_errors, 0);
+});
+
+test('X-Labs backfill admin routes require ADMIN_TOKEN and expose stable status', async () => {
+  const { env } = createTestEnv();
+  env.ADMIN_TOKEN = 'synthetic-admin-token';
+  const body = JSON.stringify({ start_date: DATE, end_date: DATE });
+  const request = (token = null) => new Request('https://example.test/v1/xlabs/backfill/start', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body
+  });
+
+  let response = await worker.fetch(request(), env);
+  assert.equal(response.status, 401);
+  response = await worker.fetch(request(env.ADMIN_TOKEN), env);
+  assert.equal(response.status, 201);
+  const created = await response.json();
+  assert.equal(created.start_date, DATE);
+  assert.equal(created.end_date, DATE);
+
+  response = await worker.fetch(new Request(`https://example.test/v1/xlabs/backfill/status?job_id=${encodeURIComponent(created.id)}`, {
+    headers: { authorization: `Bearer ${env.ADMIN_TOKEN}` }
+  }), env);
+  assert.equal(response.status, 200);
+  const status = await response.json();
+  assert.equal(status.id, created.id);
+  assert.equal(status.status, 'running');
 });
