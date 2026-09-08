@@ -8,6 +8,7 @@ const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_REDIRECTS = 2;
 const MAX_SAMPLE_FIELDS = 20;
 const MAX_SAMPLE_DEPTH = 3;
+const MAX_RACES_SCRIPT_BYTES = 2 * 1024 * 1024;
 
 function positiveInteger(value, name, max) {
   const text = typeof value === 'number'
@@ -71,6 +72,159 @@ async function loadCaptureContext(env, calculateSourceRecordId) {
   const date = typeof parentMetadata.date === 'string' ? parentMetadata.date : null;
   try { validateXlabsDate(date); } catch { throw new Error('captured X-Labs parent source is missing a valid date'); }
   return { parentId, date };
+}
+
+async function lookupCanonicalTrackName(env, externalTrackId) {
+  const row = await env.DB.prepare(`
+    SELECT t.canonical_name AS name
+    FROM track_external_ids x
+    JOIN tracks t ON t.id = x.track_id
+    WHERE x.source_type = 'official' AND x.external_id = ?
+    LIMIT 1
+  `).bind(String(externalTrackId)).first();
+  const name = String(row?.name || '').trim();
+  return name || null;
+}
+
+async function loadNewestRacesScript(env, parentId) {
+  const row = await env.DB.prepare(`
+    SELECT raw_object_key
+    FROM source_records
+    WHERE source_type = 'xlabs_script'
+      AND external_id = ?
+    ORDER BY fetched_at DESC, id DESC
+    LIMIT 1
+  `).bind(`${parentId}:races.js`).first();
+  if (!row?.raw_object_key) return null;
+  const object = await env.RAW_BUCKET.get(row.raw_object_key);
+  if (!object) return null;
+  const text = await object.text();
+  if (new TextEncoder().encode(text).byteLength > MAX_RACES_SCRIPT_BYTES) throw new Error('captured X-Labs races.js exceeded mapping size limit');
+  return text;
+}
+
+function normalizedTrackName(value) {
+  return String(value || '').normalize('NFKC').trim().toLocaleLowerCase('sv-SE');
+}
+
+function scanJavascriptObjectsAndStrings(script) {
+  const text = String(script || '');
+  const objectStack = [];
+  const objects = [];
+  const strings = [];
+  let quote = null;
+  let stringStart = -1;
+  let stringValue = '';
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const next = text[i + 1];
+
+    if (lineComment) {
+      if (ch === '\n') lineComment = false;
+      continue;
+    }
+    if (blockComment) {
+      if (ch === '*' && next === '/') {
+        blockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+    if (quote) {
+      if (escaped) {
+        stringValue += ch;
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch === quote) {
+        strings.push({ start: stringStart, end: i, value: stringValue, template: quote === '`' });
+        quote = null;
+        stringStart = -1;
+        stringValue = '';
+        continue;
+      }
+      stringValue += ch;
+      continue;
+    }
+    if (ch === '/' && next === '/') {
+      lineComment = true;
+      i += 1;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      blockComment = true;
+      i += 1;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+      stringStart = i;
+      stringValue = '';
+      escaped = false;
+      continue;
+    }
+    if (ch === '{') {
+      objectStack.push(i);
+      continue;
+    }
+    if (ch === '}') {
+      const start = objectStack.pop();
+      if (start != null) objects.push({ start, end: i });
+    }
+  }
+  return { objects, strings };
+}
+
+function trackIdsInObject(text) {
+  const ids = [];
+  for (const match of text.matchAll(/\btrackId\b\s*[:=]\s*['"]?(\d{1,3})/g)) {
+    const id = Number(match[1]);
+    if (Number.isInteger(id) && id > 0 && id <= 999 && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+function trackIdsForExactName(script, trackName) {
+  const text = String(script || '');
+  const needle = normalizedTrackName(trackName);
+  if (!needle) return [];
+  const { objects, strings } = scanJavascriptObjectsAndStrings(text);
+  const candidates = [];
+
+  for (const token of strings) {
+    if (token.template && token.value.includes('${')) continue;
+    if (normalizedTrackName(token.value) !== needle) continue;
+    const containers = objects
+      .filter((object) => object.start < token.start && object.end > token.end)
+      .sort((a, b) => (a.end - a.start) - (b.end - b.start));
+    for (const object of containers) {
+      const ids = trackIdsInObject(text.slice(object.start, object.end + 1));
+      if (ids.length === 1) {
+        if (!candidates.includes(ids[0])) candidates.push(ids[0]);
+        break;
+      }
+      if (ids.length > 1) break;
+    }
+  }
+  return candidates;
+}
+
+async function resolveXlabsTrackId(env, parentId, requestedTrackId) {
+  const canonicalTrackName = await lookupCanonicalTrackName(env, requestedTrackId);
+  if (!canonicalTrackName) throw new Error('official track id is not mapped to a canonical track');
+  const racesScript = await loadNewestRacesScript(env, parentId);
+  if (!racesScript) throw new Error('captured X-Labs races.js is required to resolve the X-Labs track id');
+  const candidates = trackIdsForExactName(racesScript, canonicalTrackName);
+  if (candidates.length !== 1) throw new Error('X-Labs track id could not be uniquely resolved from captured races.js');
+  return { xlabsTrackId: candidates[0], canonicalTrackName, mappingStatus: 'resolved_from_races_script' };
 }
 
 export function buildXlabsRaceFileName(date, trackId, raceNumber) {
@@ -159,7 +313,7 @@ function summarizeValue(value, depth = 0, budget = { remaining: MAX_SAMPLE_FIELD
 
 export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId, raceNumber, options = {}) {
   if (!env.DB) throw new Error('DB is not configured');
-  if (!env.RAW_BUCKET) throw new Error('RAW_BUCKET is not configured');
+  if (!env.RAW_BUCKET?.get || !env.RAW_BUCKET?.put) throw new Error('RAW_BUCKET read/write access is not configured');
   const sourceId = String(calculateSourceRecordId || '').trim();
   if (!sourceId) throw new Error('source_record_id is required');
 
@@ -169,12 +323,15 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
     throw new Error(`X-Labs race-data path is not uniquely resolved (${pathResolution.status})`);
   }
   const baseUrl = validateResolvedBaseUrl(pathResolution.resolvedBaseUrl, date);
-  const track = positiveInteger(trackId, 'track_id', 999);
+  const requestedTrackId = positiveInteger(trackId, 'track_id', 999);
   const race = positiveInteger(raceNumber, 'race_number', 99);
-  const fileName = buildXlabsRaceFileName(date, track, race);
+  const trackMapping = await resolveXlabsTrackId(env, parentId, requestedTrackId);
+  const xlabsTrackId = positiveInteger(trackMapping.xlabsTrackId, 'xlabs_track_id', 999);
+  const fileName = buildXlabsRaceFileName(date, xlabsTrackId, race);
   const requestedUrl = new URL(fileName, baseUrl).toString();
   const run = await startImportRun(env, 'xlabs_race_capture', {
-    kind: 'race_json', parentSourceRecordId: parentId, calculateSourceRecordId: sourceId, date, trackId: track, raceNumber: race
+    kind: 'race_json', parentSourceRecordId: parentId, calculateSourceRecordId: sourceId, date,
+    requestedTrackId, xlabsTrackId, raceNumber: race, trackMappingStatus: trackMapping.mappingStatus
   });
   const counts = { inserted: 0, updated: 0, skipped: 0, errors: 0 };
 
@@ -183,7 +340,7 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
     const fetched = await fetchJsonText(requestedUrl, options.fetchImpl || fetch);
     const archived = await archiveRawSnapshot(env, {
       sourceType: 'xlabs_race_json',
-      externalId: `${date}:${track}:${race}`,
+      externalId: `${date}:${xlabsTrackId}:${race}`,
       sourceUrl: fetched.finalUrl,
       fetchedAt,
       body: fetched.body,
@@ -194,7 +351,10 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
       metadata: {
         kind: 'race_json',
         date,
-        trackId: track,
+        requestedTrackId,
+        xlabsTrackId,
+        canonicalTrackName: trackMapping.canonicalTrackName,
+        trackMappingStatus: trackMapping.mappingStatus,
         raceNumber: race,
         fileName,
         parentSourceRecordId: parentId,
@@ -212,7 +372,9 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
       sourceRecordId: archived.sourceRecordId,
       parentSourceRecordId: parentId,
       date,
-      trackId: track,
+      requestedTrackId,
+      xlabsTrackId,
+      trackMappingStatus: trackMapping.mappingStatus,
       raceNumber: race,
       fileName,
       requestedUrl,

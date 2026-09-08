@@ -26,6 +26,20 @@ function seedContext(db, objects, path = 'json/') {
     .run(mainKey, JSON.stringify({ parentSourceRecordId: 'src_parent', scriptName: 'main.js' }));
 }
 
+function seedTrackMapping(db, objects, { externalTrackId = 7, xlabsTrackId = 42, trackName = 'Synthetic Park' } = {}) {
+  db.prepare(`INSERT INTO tracks (id, canonical_name) VALUES ('track_synthetic', ?)`).run(trackName);
+  db.prepare(`INSERT INTO track_external_ids (track_id, source_type, external_id) VALUES ('track_synthetic', 'official', ?)`).run(String(externalTrackId));
+  const key = 'raw/xlabs_script/races.js';
+  objects.set(key, {
+    body: `const races = [{ trackId: ${xlabsTrackId}, trackName: '${trackName}', number: 5 }];`,
+    options: {}
+  });
+  db.prepare(`INSERT INTO source_records
+    (id, source_type, external_id, source_url, fetched_at, raw_object_key, content_hash, quality_status, rights_status, metadata_json)
+    VALUES ('src_races','xlabs_script','src_parent:races.js','https://kmtid.atgx.se/260906/js/races.js','2099-01-01T00:00:03Z',?,'hash_races','captured_unmapped','unknown',?)`)
+    .run(key, JSON.stringify({ parentSourceRecordId: 'src_parent', scriptName: 'races.js' }));
+}
+
 test('builds the verified X-Labs race filename deterministically', () => {
   assert.equal(buildXlabsRaceFileName('2026-09-06', 7, 5), '09067105.json');
   assert.equal(buildXlabsRaceFileName('2026-12-31', 12, 14), '123112114.json');
@@ -37,9 +51,20 @@ test('builds the verified X-Labs race filename deterministically', () => {
   assert.throws(() => buildXlabsRaceFileName('2026-09-06', 7, '5abc'), /race_number/);
 });
 
-test('captures one resolved race JSON exactly and writes no normalized X-Labs rows', async () => {
+test('requires verified track mapping before capture', async () => {
   const { env, db, objects } = createTestEnv();
   seedContext(db, objects);
+  await assert.rejects(
+    () => captureXlabsRaceJson(env, 'src_calc', 7, 5, { fetchImpl: async () => new Response('{}') }),
+    /official track id is not mapped/
+  );
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM source_records WHERE source_type = 'xlabs_race_json'`).get().n, 0);
+});
+
+test('maps an official track id to the exact X-Labs object containing the canonical track name', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedContext(db, objects);
+  seedTrackMapping(db, objects, { externalTrackId: 7, xlabsTrackId: 42, trackName: 'Synthetic Park' });
   const payload = JSON.stringify({ race: { number: 5 }, horses: [{ number: 1, syntheticMetric: 12.3 }] });
   const seen = [];
 
@@ -51,9 +76,12 @@ test('captures one resolved race JSON exactly and writes no normalized X-Labs ro
   });
 
   assert.equal(seen.length, 1);
-  assert.equal(seen[0].url, 'https://kmtid.atgx.se/260906/json/09067105.json');
+  assert.equal(seen[0].url, 'https://kmtid.atgx.se/260906/json/090642105.json');
   assert.equal(seen[0].init.redirect, 'manual');
-  assert.equal(result.fileName, '09067105.json');
+  assert.equal(result.fileName, '090642105.json');
+  assert.equal(result.requestedTrackId, 7);
+  assert.equal(result.xlabsTrackId, 42);
+  assert.equal(result.trackMappingStatus, 'resolved_from_races_script');
   assert.equal(result.qualityStatus, 'captured_unmapped');
   assert.equal(result.normalizationStatus, 'not_implemented');
   assert.equal(result.normalizedRowsWritten, 0);
@@ -63,10 +91,14 @@ test('captures one resolved race JSON exactly and writes no normalized X-Labs ro
 
   const source = db.prepare(`SELECT source_type, external_id, source_url, quality_status, metadata_json FROM source_records WHERE source_type = 'xlabs_race_json'`).get();
   assert.equal(source.source_type, 'xlabs_race_json');
-  assert.equal(source.external_id, '2026-09-06:7:5');
-  assert.equal(source.source_url, 'https://kmtid.atgx.se/260906/json/09067105.json');
+  assert.equal(source.external_id, '2026-09-06:42:5');
+  assert.equal(source.source_url, 'https://kmtid.atgx.se/260906/json/090642105.json');
   assert.equal(source.quality_status, 'captured_unmapped');
-  assert.equal(JSON.parse(source.metadata_json).fileName, '09067105.json');
+  const metadata = JSON.parse(source.metadata_json);
+  assert.equal(metadata.fileName, '090642105.json');
+  assert.equal(metadata.requestedTrackId, 7);
+  assert.equal(metadata.xlabsTrackId, 42);
+  assert.equal(metadata.canonicalTrackName, 'Synthetic Park');
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM xlabs_data').get().n, 0);
 
   const stored = [...objects.entries()].find(([key]) => key.includes('/xlabs_race_json/'));
@@ -74,9 +106,64 @@ test('captures one resolved race JSON exactly and writes no normalized X-Labs ro
   assert.equal(stored[1].body, payload);
 });
 
+test('does not use a non-official external-id mapping as track identity', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedContext(db, objects);
+  db.prepare(`INSERT INTO tracks (id, canonical_name) VALUES ('track_other', 'Synthetic Park')`).run();
+  db.prepare(`INSERT INTO track_external_ids (track_id, source_type, external_id) VALUES ('track_other', 'other_source', '7')`).run();
+  await assert.rejects(
+    () => captureXlabsRaceJson(env, 'src_calc', 7, 5, { fetchImpl: async () => new Response('{}') }),
+    /official track id is not mapped/
+  );
+});
+
+test('fails closed when captured races.js is missing', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedContext(db, objects);
+  db.prepare(`INSERT INTO tracks (id, canonical_name) VALUES ('track_synthetic', 'Synthetic Park')`).run();
+  db.prepare(`INSERT INTO track_external_ids (track_id, source_type, external_id) VALUES ('track_synthetic', 'official', '7')`).run();
+  await assert.rejects(
+    () => captureXlabsRaceJson(env, 'src_calc', 7, 5, { fetchImpl: async () => new Response('{}') }),
+    /races\.js is required/
+  );
+});
+
+test('does not associate a nearby different object track id with the matching track name', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedContext(db, objects);
+  seedTrackMapping(db, objects, { externalTrackId: 7, xlabsTrackId: 42, trackName: 'Synthetic Park' });
+  objects.set('raw/xlabs_script/races.js', {
+    body: `const races=[{trackId:99,trackName:'Other Track'},{trackId:42,trackName:'Synthetic Park'}];`,
+    options: {}
+  });
+  const seen = [];
+  const result = await captureXlabsRaceJson(env, 'src_calc', 7, 5, {
+    fetchImpl: async (url) => {
+      seen.push(url);
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+  });
+  assert.equal(result.xlabsTrackId, 42);
+  assert.deepEqual(seen, ['https://kmtid.atgx.se/260906/json/090642105.json']);
+});
+
+test('fails closed when the exact canonical track name maps to multiple X-Labs track ids', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedContext(db, objects);
+  seedTrackMapping(db, objects, { externalTrackId: 7, xlabsTrackId: 42, trackName: 'Synthetic Park' });
+  const racesKey = 'raw/xlabs_script/races.js';
+  objects.set(racesKey, { body: `const a={trackId:42,trackName:'Synthetic Park'}; const b={trackId:43,trackName:'Synthetic Park'};`, options: {} });
+
+  await assert.rejects(
+    () => captureXlabsRaceJson(env, 'src_calc', 7, 5, { fetchImpl: async () => new Response('{}') }),
+    /could not be uniquely resolved/
+  );
+});
+
 test('bounds the returned schema sample across nested objects', async () => {
   const { env, db, objects } = createTestEnv();
   seedContext(db, objects);
+  seedTrackMapping(db, objects);
   const wide = {};
   for (let i = 0; i < 50; i += 1) wide[`field_${String(i).padStart(2, '0')}`] = i;
   const payload = JSON.stringify({ race: wide, horse: wide, extra: wide });
@@ -99,6 +186,7 @@ test('bounds the returned schema sample across nested objects', async () => {
 test('rejects a resolved base path outside the captured date json directory', async () => {
   const { env, db, objects } = createTestEnv();
   seedContext(db, objects, '/other-date/json/');
+  seedTrackMapping(db, objects);
   await assert.rejects(
     () => captureXlabsRaceJson(env, 'src_calc', 7, 5, { fetchImpl: async () => new Response('{}') }),
     /must use \/260906\/json\//
@@ -109,6 +197,7 @@ test('rejects a resolved base path outside the captured date json directory', as
 test('rejects unexpected content type without archiving a race payload', async () => {
   const { env, db, objects } = createTestEnv();
   seedContext(db, objects);
+  seedTrackMapping(db, objects);
   await assert.rejects(
     () => captureXlabsRaceJson(env, 'src_calc', 7, 5, {
       fetchImpl: async () => new Response('<html>not json</html>', { status: 200, headers: { 'content-type': 'text/html' } })
@@ -124,6 +213,7 @@ test('rejects unexpected content type without archiving a race payload', async (
 test('rejects invalid JSON even with an accepted content type', async () => {
   const { env, db, objects } = createTestEnv();
   seedContext(db, objects);
+  seedTrackMapping(db, objects);
   await assert.rejects(
     () => captureXlabsRaceJson(env, 'src_calc', 7, 5, {
       fetchImpl: async () => new Response('not-json', { status: 200, headers: { 'content-type': 'text/plain' } })
@@ -136,6 +226,7 @@ test('rejects invalid JSON even with an accepted content type', async () => {
 test('rejects same-host redirects that change the verified race file path', async () => {
   const { env, db, objects } = createTestEnv();
   seedContext(db, objects);
+  seedTrackMapping(db, objects);
   await assert.rejects(
     () => captureXlabsRaceJson(env, 'src_calc', 7, 5, {
       fetchImpl: async () => new Response(null, {
