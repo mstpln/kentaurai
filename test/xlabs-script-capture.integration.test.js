@@ -19,7 +19,7 @@ test('X-Labs script capture archives only an allowlisted script referenced by th
   seedParent({
     db,
     objects,
-    html: '<script src="js/races.js?token=private"></script><script src="js/other.js"></script>'
+    html: '<script src="js/races.js?token=private#fragment"></script><script src="js/other.js"></script>'
   });
   const seen = [];
   const result = await captureReferencedXlabsScript(env, 'src_parent', 'races.js', {
@@ -37,12 +37,18 @@ test('X-Labs script capture archives only an allowlisted script referenced by th
   assert.equal(seen[0].init.redirect, 'manual');
   assert.equal(result.scriptName, 'races.js');
   assert.equal(result.parentSourceRecordId, 'src_parent');
+  assert.equal(result.url, 'https://kmtid.atgx.se/260906/js/races.js');
   assert.equal(result.normalizationStatus, 'not_implemented');
   const scriptRecord = db.prepare("SELECT source_type, external_id, source_url, quality_status, metadata_json FROM source_records WHERE source_type = 'xlabs_script'").get();
   assert.equal(scriptRecord.external_id, 'src_parent:races.js');
-  assert.equal(scriptRecord.source_url, 'https://kmtid.atgx.se/260906/js/races.js?token=private');
+  assert.equal(scriptRecord.source_url, 'https://kmtid.atgx.se/260906/js/races.js');
   assert.equal(scriptRecord.quality_status, 'captured_unmapped');
-  assert.equal(JSON.parse(scriptRecord.metadata_json).scriptName, 'races.js');
+  const metadata = JSON.parse(scriptRecord.metadata_json);
+  assert.equal(metadata.scriptName, 'races.js');
+  assert.equal(metadata.requestedUrl, 'https://kmtid.atgx.se/260906/js/races.js');
+  const run = db.prepare("SELECT metadata_json FROM import_runs WHERE source_type = 'xlabs_script_capture'").get();
+  assert.equal(JSON.stringify(run).includes('token=private'), false);
+  assert.equal(JSON.stringify(metadata).includes('token=private'), false);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM xlabs_data').get().n, 0);
 });
 
