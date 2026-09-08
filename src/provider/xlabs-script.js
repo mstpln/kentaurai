@@ -1,6 +1,6 @@
 import { archiveRawSnapshot } from '../raw.js';
 import { finishImportRun, startImportRun } from '../import/common.js';
-import { inspectXlabsHtml } from '../routes/xlabs-inspection.js';
+import { listResolvedXlabsScriptReferences } from '../routes/xlabs-inspection.js';
 
 const XLABS_HOST = 'kmtid.atgx.se';
 const MAX_SCRIPT_BYTES = 2 * 1024 * 1024;
@@ -27,8 +27,7 @@ function chooseScript(html, baseUrl, scriptName) {
   const requested = String(scriptName || '').trim();
   if (!ALLOWED_SCRIPT_NAMES.has(requested)) throw new Error('script_name must be races.js, calculator.js or main.js');
 
-  const inspection = inspectXlabsHtml(html, { baseUrl });
-  const match = inspection.scripts.externalSources.find((source) => {
+  const match = listResolvedXlabsScriptReferences(html, baseUrl).find((source) => {
     try {
       const url = validateXlabsUrl(source);
       return url.pathname.split('/').pop() === requested;
