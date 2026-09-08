@@ -212,6 +212,12 @@ function indexInsideRange(index, ranges) {
   return ranges.some((range) => range.start <= index && range.end >= index);
 }
 
+function nextNonWhitespace(text, index) {
+  let i = index;
+  while (i < text.length && /\s/.test(text[i])) i += 1;
+  return text[i] || null;
+}
+
 function numericPropertiesDirectlyInObject(text, object, propertyNames, objects, strings, comments) {
   const names = propertyNames.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
   const pattern = new RegExp(`(?:['"]?\\b(?:${names})\\b['"]?)\\s*[:=]\\s*['"]?(\\d{1,3})`, 'g');
@@ -224,7 +230,13 @@ function numericPropertiesDirectlyInObject(text, object, propertyNames, objects,
     if (childObjects.some((child) => child.start < absoluteIndex && child.end > absoluteIndex)) continue;
     if (indexInsideRange(absoluteIndex, comments)) continue;
     const containingString = strings.find((token) => token.start <= absoluteIndex && token.end >= absoluteIndex);
-    if (containingString && containingString.start !== absoluteIndex) continue;
+    if (containingString) {
+      const decodedKey = decodeJavascriptString(containingString.value);
+      const isPropertyKey = containingString.start === absoluteIndex
+        && propertyNames.includes(decodedKey)
+        && nextNonWhitespace(text, containingString.end + 1) === ':';
+      if (!isPropertyKey) continue;
+    }
     const value = Number(match[1]);
     if (Number.isInteger(value) && value > 0 && value <= 999 && !values.includes(value)) values.push(value);
   }
