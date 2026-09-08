@@ -105,7 +105,10 @@ async function loadNewestRacesScript(env, parentId) {
 
 function decodeJavascriptString(value) {
   return String(value || '')
-    .replace(/\\u\{([0-9a-fA-F]{1,6})\}/g, (_, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/\\u\{([0-9a-fA-F]{1,6})\}/g, (match, hex) => {
+      const code = Number.parseInt(hex, 16);
+      return code <= 0x10ffff ? String.fromCodePoint(code) : match;
+    })
     .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)))
     .replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)))
     .replace(/\\([\\'"`])/g, '$1');
@@ -194,7 +197,7 @@ function scanJavascriptObjectsAndStrings(script) {
 
 function trackIdsInObject(text) {
   const ids = [];
-  for (const match of text.matchAll(/\btrackId\b\s*[:=]\s*['"]?(\d{1,3})/g)) {
+  for (const match of text.matchAll(/(?:['"]?trackId['"]?)\s*[:=]\s*['"]?(\d{1,3})/g)) {
     const id = Number(match[1]);
     if (Number.isInteger(id) && id > 0 && id <= 999 && !ids.includes(id)) ids.push(id);
   }
@@ -203,7 +206,7 @@ function trackIdsInObject(text) {
 
 function raceNumbersInObject(text) {
   const values = [];
-  for (const match of text.matchAll(/(?:\braceNumber\b|\bnumber\b)\s*[:=]\s*['"]?(\d{1,2})/g)) {
+  for (const match of text.matchAll(/(?:['"]?(?:raceNumber|number)['"]?)\s*[:=]\s*['"]?(\d{1,2})/g)) {
     const value = Number(match[1]);
     if (Number.isInteger(value) && value > 0 && value <= 99 && !values.includes(value)) values.push(value);
   }
@@ -250,7 +253,7 @@ async function resolveXlabsTrackId(env, parentId, requestedTrackId, raceNumber) 
   if (!racesScript) throw new Error('captured X-Labs races.js is required to resolve the X-Labs track id');
   const candidates = trackIdsForExactRace(racesScript, canonicalTrackName, raceNumber);
   if (candidates.length !== 1) throw new Error('X-Labs track id could not be uniquely resolved from captured races.js for the requested race');
-  return { xlabsTrackId: candidates[0], canonicalTrackName, mappingStatus: 'resolved_from_races_script_and_race' };
+  return { xlabsTrackId: candidates[0], canonicalTrackName, mappingStatus: 'resolved_from_races_script' };
 }
 
 export function buildXlabsRaceFileName(date, trackId, raceNumber) {
