@@ -42,8 +42,8 @@ test('always includes the parent page even when many duplicate siblings exist', 
   const { env, db, objects } = createTestEnv();
   seedParent(db, objects, `<html><script>var path = '/from-parent/';</script></html>`);
   seedScript(db, objects, 'src_calc', 'calculate.js', `$.getJSON(path + fileName);`, '2099-01-01T00:01:00Z');
-  for (let i = 0; i < 20; i += 1) {
-    seedScript(db, objects, `src_dup_${i}`, 'main.js', `const somethingElse = ${i};`, `2099-01-01T00:00:${String(40 - i).padStart(2, '0')}Z`);
+  for (let i = 0; i < 60; i += 1) {
+    seedScript(db, objects, `src_dup_${i}`, 'main.js', `const somethingElse = ${i};`, `2099-01-01T00:${String(Math.floor(i / 60)).padStart(2, '0')}:${String(59 - (i % 60)).padStart(2, '0')}Z`);
   }
 
   const result = await resolveCapturedXlabsRequestPath(env, 'src_calc');
@@ -62,4 +62,36 @@ test('reports conflicting static path assignments instead of guessing', async ()
   assert.equal(result.status, 'conflict');
   assert.equal(result.resolvedBaseUrl, null);
   assert.equal(result.assignments.length >= 2, true);
+});
+
+test('ignores path assignments that exist only in comments', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedParent(db, objects, `<html><script>// var path = '/fake/';\nconst ok = true;</script></html>`);
+  seedScript(db, objects, 'src_calc', 'calculate.js', `$.getJSON(path + fileName);`, '2099-01-01T00:00:10Z');
+
+  const result = await resolveCapturedXlabsRequestPath(env, 'src_calc');
+  assert.equal(result.status, 'not_found');
+  assert.equal(result.assignments.length, 0);
+});
+
+test('does not resolve an off-host static path', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedParent(db, objects, `<html><script>var path = 'https://example.com/private?token=secret';</script></html>`);
+  seedScript(db, objects, 'src_calc', 'calculate.js', `$.getJSON(path + fileName);`, '2099-01-01T00:00:10Z');
+
+  const result = await resolveCapturedXlabsRequestPath(env, 'src_calc');
+  assert.equal(result.status, 'rejected_static');
+  assert.equal(result.resolvedBaseUrl, null);
+  assert.equal(result.assignments[0].parts[0].value, '[redacted_url]');
+});
+
+test('reports a valid static path plus dynamic assignment as ambiguous', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedParent(db, objects, `<html><script>var path = '/parent/';</script></html>`);
+  seedScript(db, objects, 'src_calc', 'calculate.js', `$.getJSON(path + fileName);`, '2099-01-01T00:00:10Z');
+  seedScript(db, objects, 'src_main', 'main.js', `path = choosePath();`, '2099-01-01T00:00:09Z');
+
+  const result = await resolveCapturedXlabsRequestPath(env, 'src_calc');
+  assert.equal(result.status, 'ambiguous');
+  assert.equal(result.resolvedBaseUrl, null);
 });
