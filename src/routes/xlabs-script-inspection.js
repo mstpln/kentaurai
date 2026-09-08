@@ -37,6 +37,11 @@ function sanitizeUrl(value, baseUrl) {
   }
 }
 
+function sanitizeLiteralComponent(value) {
+  const text = String(value || '').split(/[?#]/, 1)[0];
+  return compact(text, 120);
+}
+
 function count(text, pattern) {
   let total = 0;
   for (const _ of text.matchAll(pattern)) total += 1;
@@ -116,22 +121,29 @@ function firstArgument(text, openParenIndex) {
 function summarizeExpression(expression, baseUrl) {
   const text = String(expression || '').trim();
   if (!text) return null;
-  const identifiers = unique([...text.matchAll(/\b[A-Za-z_$][A-Za-z0-9_$]*\b/g)].map((m) => m[0]))
+
+  const singleLiteral = text.match(/^(['"`])([^'"`]*)\1$/);
+  if (singleLiteral) {
+    const resolvedUrl = sanitizeUrl(singleLiteral[2], baseUrl);
+    return {
+      expressionType: 'literal',
+      identifiers: [],
+      literals: resolvedUrl ? [{ kind: 'url', value: resolvedUrl }] : []
+    };
+  }
+
+  const withoutQuotedStrings = text.replace(/(['"`])(?:\\.|(?!\1).)*\1/g, ' ');
+  const identifiers = unique([...withoutQuotedStrings.matchAll(/\b[A-Za-z_$][A-Za-z0-9_$]*\b/g)].map((m) => m[0]))
     .filter((value) => !['true', 'false', 'null', 'undefined'].includes(value))
     .slice(0, 20);
   const literals = [];
   for (const match of text.matchAll(/(['"`])([^'"`]{0,500})\1/g)) {
-    const raw = match[2];
-    const resolvedUrl = sanitizeUrl(raw, baseUrl);
-    if (resolvedUrl) literals.push({ kind: 'url', value: resolvedUrl });
-    else {
-      const pathOnly = raw.split(/[?#]/, 1)[0];
-      if (pathOnly) literals.push({ kind: 'string', value: compact(pathOnly, 120) });
-    }
+    const value = sanitizeLiteralComponent(match[2]);
+    if (value) literals.push({ kind: 'string', value });
     if (literals.length >= 20) break;
   }
   return {
-    expressionType: literals.length === 1 && identifiers.length === 0 ? 'literal' : 'dynamic',
+    expressionType: 'dynamic',
     identifiers,
     literals
   };
