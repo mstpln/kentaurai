@@ -19,6 +19,16 @@ test('profile refinement uses approved icons, initials and navigation order', ()
   assert.match(html, /Tekniska interna statusvärden/);
 });
 
+test('statistics view preserves every stored aggregate performance measure', () => {
+  const html = renderAppPage();
+  const releaseStats = html.match(/<script id="kentaurai-complete-stats-script">([\s\S]*?)<\/script>/)?.[1] || '';
+  for (const label of [
+    'Starter med resultat','Vinster','Andraplatser','Tredjeplatser','Topp 3',
+    'Vinstprocent','Topp 3-procent','Prispengar','Galopper','Galopp %','Diskvalifikationer',
+    'Startmetod','Distans','Bana'
+  ]) assert.ok(releaseStats.includes(label), `missing ${label}`);
+});
+
 test('profile refinement removes technical observation metadata from the visible profile data set', () => {
   const html = renderAppPage();
   const dataViewMatch = html.match(/function dataView\(detail\)\{([\s\S]*?)\}\nfunction horsesView/);
