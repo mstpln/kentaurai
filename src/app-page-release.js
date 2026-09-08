@@ -15,8 +15,8 @@ const gameBackAfter = `app.innerHTML='<button class="back" id="backGames">${corn
 
 const exactBrandAlignment = `
 <style id="kentaurai-brand-cap-alignment">
-/* Keep the outer Sagittarius badge exactly one text cap-height tall. */
-.brand{font-size:31px!important}
+/* Keep the outer Sagittarius badge exactly one brand-font cap-height tall. */
+.brand{font-family:var(--font-brand)!important;font-size:31px!important}
 .brand-badge{width:1cap!important;height:1cap!important;flex-basis:1cap!important}
 .brand-icon{width:.72cap!important;height:.72cap!important}
 @media(max-width:760px){.brand{font-size:28px!important}}
