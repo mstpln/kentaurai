@@ -5,8 +5,10 @@ import { inspectXlabsHtml } from '../routes/xlabs-inspection.js';
 const XLABS_HOST = 'kmtid.atgx.se';
 const MAX_SCRIPT_BYTES = 2 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
-const ALLOWED_SCRIPT_NAMES = new Set(['races.js', 'calculate.js', 'main.js']);
-export const XLABS_SCRIPT_SELECTOR_VERSION = 'inspector-sources-v4';
+const PRIMARY_SCRIPT_NAMES = new Set(['races.js', 'calculate.js', 'main.js']);
+const CONTEXT_SCRIPT_NAMES = ['language.js', 'helper.js'];
+const ALL_INTERNAL_SCRIPT_NAMES = new Set([...PRIMARY_SCRIPT_NAMES, ...CONTEXT_SCRIPT_NAMES]);
+export const XLABS_SCRIPT_SELECTOR_VERSION = 'inspector-sources-v5';
 
 function validateXlabsUrl(value) {
   const url = new URL(value);
@@ -36,9 +38,14 @@ function safeScriptNames(sources) {
   return names;
 }
 
-function chooseScript(html, baseUrl, scriptName) {
+function chooseScript(html, baseUrl, scriptName, options = {}) {
   const requested = String(scriptName || '').trim();
-  if (!ALLOWED_SCRIPT_NAMES.has(requested)) throw new Error('script_name must be races.js, calculate.js or main.js');
+  const allowedNames = options.allowContextScripts ? ALL_INTERNAL_SCRIPT_NAMES : PRIMARY_SCRIPT_NAMES;
+  if (!allowedNames.has(requested)) {
+    throw new Error(options.allowContextScripts
+      ? 'script_name is not an allowed X-Labs application script'
+      : 'script_name must be races.js, calculate.js or main.js');
+  }
 
   const sources = inspectXlabsHtml(html, { baseUrl }).scripts.externalSources;
   const match = sources.find((source) => {
@@ -114,7 +121,7 @@ export async function captureReferencedXlabsScript(env, sourceRecordId, scriptNa
   const parentObject = await env.RAW_BUCKET.get(parent.raw_object_key);
   if (!parentObject) throw new Error('captured X-Labs raw object was not found');
   const parentHtml = await parentObject.text();
-  const selected = chooseScript(parentHtml, parent.source_url, scriptName);
+  const selected = chooseScript(parentHtml, parent.source_url, scriptName, options);
   const requestedUrl = selected.toString();
   const requestedUrlForProvenance = sanitizedUrl(requestedUrl);
   const run = await startImportRun(env, 'xlabs_script_capture', {
@@ -170,4 +177,31 @@ export async function captureReferencedXlabsScript(env, sourceRecordId, scriptNa
     await finishImportRun(env, run.id, counts, error);
     throw error;
   }
+}
+
+export async function captureXlabsContextScripts(env, scriptSourceRecordId, options = {}) {
+  if (!env.DB) throw new Error('DB is not configured');
+  const id = String(scriptSourceRecordId || '').trim();
+  if (!id) throw new Error('source_record_id is required');
+  const source = await env.DB.prepare(`
+    SELECT metadata_json
+    FROM source_records
+    WHERE id = ? AND source_type = 'xlabs_script'
+    LIMIT 1
+  `).bind(id).first();
+  if (!source) throw new Error('captured X-Labs script source record was not found');
+
+  let metadata = {};
+  try { metadata = JSON.parse(source.metadata_json || '{}'); } catch {}
+  const parentId = typeof metadata.parentSourceRecordId === 'string' ? metadata.parentSourceRecordId : '';
+  if (!parentId) throw new Error('captured X-Labs script is missing parent provenance');
+
+  const captures = [];
+  for (const scriptName of CONTEXT_SCRIPT_NAMES) {
+    captures.push(await captureReferencedXlabsScript(env, parentId, scriptName, {
+      ...options,
+      allowContextScripts: true
+    }));
+  }
+  return captures;
 }
