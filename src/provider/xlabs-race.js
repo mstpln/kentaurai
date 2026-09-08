@@ -103,8 +103,16 @@ async function loadNewestRacesScript(env, parentId) {
   return text;
 }
 
+function decodeJavascriptString(value) {
+  return String(value || '')
+    .replace(/\\u\{([0-9a-fA-F]{1,6})\}/g, (_, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)))
+    .replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)))
+    .replace(/\\([\\'"`])/g, '$1');
+}
+
 function normalizedTrackName(value) {
-  return String(value || '').normalize('NFKC').trim().toLocaleLowerCase('sv-SE');
+  return decodeJavascriptString(value).normalize('NFKC').trim().toLocaleLowerCase('sv-SE');
 }
 
 function scanJavascriptObjectsAndStrings(script) {
@@ -141,6 +149,7 @@ function scanJavascriptObjectsAndStrings(script) {
         continue;
       }
       if (ch === '\\') {
+        stringValue += '\\';
         escaped = true;
         continue;
       }
@@ -192,12 +201,22 @@ function trackIdsInObject(text) {
   return ids;
 }
 
-function trackIdsForExactName(script, trackName) {
+function raceNumbersInObject(text) {
+  const values = [];
+  for (const match of text.matchAll(/(?:\braceNumber\b|\bnumber\b)\s*[:=]\s*['"]?(\d{1,2})/g)) {
+    const value = Number(match[1]);
+    if (Number.isInteger(value) && value > 0 && value <= 99 && !values.includes(value)) values.push(value);
+  }
+  return values;
+}
+
+function trackIdsForExactRace(script, trackName, raceNumber) {
   const text = String(script || '');
   const needle = normalizedTrackName(trackName);
   if (!needle) return [];
   const { objects, strings } = scanJavascriptObjectsAndStrings(text);
-  const candidates = [];
+  const raceScoped = [];
+  const nameOnly = [];
 
   for (const token of strings) {
     if (token.template && token.value.includes('${')) continue;
@@ -206,25 +225,32 @@ function trackIdsForExactName(script, trackName) {
       .filter((object) => object.start < token.start && object.end > token.end)
       .sort((a, b) => (a.end - a.start) - (b.end - b.start));
     for (const object of containers) {
-      const ids = trackIdsInObject(text.slice(object.start, object.end + 1));
-      if (ids.length === 1) {
-        if (!candidates.includes(ids[0])) candidates.push(ids[0]);
+      const body = text.slice(object.start, object.end + 1);
+      const ids = trackIdsInObject(body);
+      if (ids.length !== 1) {
+        if (ids.length > 1) break;
+        continue;
+      }
+      const id = ids[0];
+      if (!nameOnly.includes(id)) nameOnly.push(id);
+      if (raceNumbersInObject(body).includes(raceNumber)) {
+        if (!raceScoped.includes(id)) raceScoped.push(id);
         break;
       }
-      if (ids.length > 1) break;
     }
   }
-  return candidates;
+  if (raceScoped.length) return raceScoped;
+  return nameOnly.length === 1 ? nameOnly : [];
 }
 
-async function resolveXlabsTrackId(env, parentId, requestedTrackId) {
+async function resolveXlabsTrackId(env, parentId, requestedTrackId, raceNumber) {
   const canonicalTrackName = await lookupCanonicalTrackName(env, requestedTrackId);
   if (!canonicalTrackName) throw new Error('official track id is not mapped to a canonical track');
   const racesScript = await loadNewestRacesScript(env, parentId);
   if (!racesScript) throw new Error('captured X-Labs races.js is required to resolve the X-Labs track id');
-  const candidates = trackIdsForExactName(racesScript, canonicalTrackName);
-  if (candidates.length !== 1) throw new Error('X-Labs track id could not be uniquely resolved from captured races.js');
-  return { xlabsTrackId: candidates[0], canonicalTrackName, mappingStatus: 'resolved_from_races_script' };
+  const candidates = trackIdsForExactRace(racesScript, canonicalTrackName, raceNumber);
+  if (candidates.length !== 1) throw new Error('X-Labs track id could not be uniquely resolved from captured races.js for the requested race');
+  return { xlabsTrackId: candidates[0], canonicalTrackName, mappingStatus: 'resolved_from_races_script_and_race' };
 }
 
 export function buildXlabsRaceFileName(date, trackId, raceNumber) {
@@ -325,7 +351,7 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
   const baseUrl = validateResolvedBaseUrl(pathResolution.resolvedBaseUrl, date);
   const requestedTrackId = positiveInteger(trackId, 'track_id', 999);
   const race = positiveInteger(raceNumber, 'race_number', 99);
-  const trackMapping = await resolveXlabsTrackId(env, parentId, requestedTrackId);
+  const trackMapping = await resolveXlabsTrackId(env, parentId, requestedTrackId, race);
   const xlabsTrackId = positiveInteger(trackMapping.xlabsTrackId, 'xlabs_track_id', 999);
   const fileName = buildXlabsRaceFileName(date, xlabsTrackId, race);
   const requestedUrl = new URL(fileName, baseUrl).toString();
