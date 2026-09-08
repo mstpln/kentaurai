@@ -30,7 +30,7 @@ function sanitizedUrl(value) {
 
 function scriptCandidates(html, baseUrl) {
   const candidates = [];
-  for (const match of String(html || '').matchAll(/<script\b([^>]*)>[\s\S]*?<\/script>/gi)) {
+  for (const match of String(html || '').matchAll(/<script\b([^>]*)>/gi)) {
     const src = attributeValue(match[1] || '', 'src');
     if (!src) continue;
     let resolved;
