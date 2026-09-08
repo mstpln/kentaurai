@@ -7,6 +7,7 @@ import { captureUpcomingOfficialGames, normalizeNextPendingOfficialGame } from '
 import { normalizeCapturedXlabsRace } from './import/xlabs-telemetry.js';
 import { normalizeCapturedOfficialRace } from './import/official-historical-race.js';
 import { getHistoricalBackfill, runHistoricalBackfillStep, startHistoricalBackfill } from './import/official-historical-backfill.js';
+import { ensureDailyXlabsJob, getXlabsBackfill, runXlabsBackfillStep, startXlabsBackfill } from './import/xlabs-backfill.js';
 import { captureCalendar, captureGame, captureRace } from './provider/official.js';
 import { captureXlabsDate } from './provider/xlabs.js';
 import { captureXlabsRaceJson } from './provider/xlabs-race.js';
@@ -30,6 +31,7 @@ import { htmlResponse, redirectResponse, renderAppPage, renderLoginPage } from '
 const BACKFILL_CRON = '* * * * *';
 const LIVE_MORNING_CRON = '15 5 * * *';
 const LIVE_EVENING_CRON = '15 17 * * *';
+const XLABS_DAILY_CRON = '30 4 * * *';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -195,6 +197,17 @@ async function handleFetch(request, env) {
     const body = await readJson(request);
     return json(await verifyCapturedXlabsNormalization(env, body.source_record_id));
   }
+  if (request.method === 'POST' && path === '/v1/xlabs/backfill/start') {
+    const body = await readJson(request);
+    return json(await startXlabsBackfill(env, body.start_date, body.end_date, { resume: body.resume === true }), 201);
+  }
+  if (request.method === 'POST' && path === '/v1/xlabs/backfill/step') {
+    const body = await readJson(request);
+    return json(await runXlabsBackfillStep(env, body.job_id));
+  }
+  if (request.method === 'GET' && path === '/v1/xlabs/backfill/status') {
+    return json(await getXlabsBackfill(env, url.searchParams.get('job_id')));
+  }
   if (request.method === 'POST' && path === '/v1/provider/normalize') {
     const body = await readJson(request);
     return json(await normalizeCapturedOfficialGameSequential(env, body.source_record_id, body.cursor ?? 0));
@@ -256,11 +269,14 @@ async function handleScheduled(controller, env) {
 
   if (controller.cron === BACKFILL_CRON) {
     parts.push(await runScheduledPart('historical_backfill', () => runHistoricalBackfillStep(env)));
+    parts.push(await runScheduledPart('xlabs_backfill', () => runXlabsBackfillStep(env)));
     parts.push(await runScheduledPart('live_normalize', () => normalizeNextPendingOfficialGame(env)));
   } else if (controller.cron === LIVE_MORNING_CRON) {
     parts.push(await runScheduledPart('live_capture_morning', () => captureUpcomingOfficialGames(env, controller.scheduledTime, { includeToday: true })));
   } else if (controller.cron === LIVE_EVENING_CRON) {
     parts.push(await runScheduledPart('live_capture_evening', () => captureUpcomingOfficialGames(env, controller.scheduledTime, { includeToday: false })));
+  } else if (controller.cron === XLABS_DAILY_CRON) {
+    parts.push(await runScheduledPart('xlabs_daily_job', () => ensureDailyXlabsJob(env, controller.scheduledTime)));
   } else {
     parts.push({ name: 'unknown_cron', ok: false, error: `unsupported cron ${controller.cron}` });
   }
