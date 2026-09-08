@@ -121,6 +121,28 @@ export async function captureUpcomingOfficialGames(env, scheduledTime, options =
   };
 }
 
+export async function completedNormalizationCursor(env, sourceRecordId) {
+  if (!env.DB) throw new Error('DB is not configured');
+  const sourceId = String(sourceRecordId || '').trim();
+  if (!sourceId) throw new Error('source_record_id is required');
+  const { results } = await env.DB.prepare(`
+    SELECT CAST(json_extract(metadata_json, '$.cursor') AS INTEGER) AS cursor
+    FROM import_runs
+    WHERE source_type = 'official_provider_normalize'
+      AND status = 'success'
+      AND json_extract(metadata_json, '$.stage') = 'entry'
+      AND json_extract(metadata_json, '$.sourceRecordId') = ?
+    ORDER BY cursor
+  `).bind(sourceId).all();
+
+  for (let index = 0; index < results.length; index += 1) {
+    if (Number(results[index].cursor) !== index) {
+      throw new Error('stored live normalization checkpoints are not contiguous');
+    }
+  }
+  return results.length;
+}
+
 export async function normalizeNextPendingOfficialGame(env) {
   if (!env.DB) throw new Error('DB is not configured');
   const source = await env.DB.prepare(`
@@ -133,12 +155,7 @@ export async function normalizeNextPendingOfficialGame(env) {
   `).bind(SOURCE_TYPE, PENDING_QUALITY).first();
   if (!source) return { status: 'idle', done: true };
 
-  const progress = await env.DB.prepare(`
-    SELECT COUNT(*) AS n
-    FROM normalized_observations
-    WHERE source_record_id = ? AND entity_type = 'race_entry'
-  `).bind(source.id).first();
-  const cursor = Number(progress?.n ?? 0);
+  const cursor = await completedNormalizationCursor(env, source.id);
   const normalized = await normalizeCapturedOfficialGameSequential(env, source.id, cursor);
   return {
     status: normalized.done ? 'completed_source' : 'running_source',
