@@ -195,20 +195,18 @@ function scanJavascriptObjectsAndStrings(script) {
   return { objects, strings };
 }
 
-function trackIdsInObject(text) {
-  const ids = [];
-  for (const match of text.matchAll(/(?:['"]?\btrackId\b['"]?)\s*[:=]\s*['"]?(\d{1,3})/g)) {
-    const id = Number(match[1]);
-    if (Number.isInteger(id) && id > 0 && id <= 999 && !ids.includes(id)) ids.push(id);
-  }
-  return ids;
-}
-
-function raceNumbersInObject(text) {
+function numericPropertiesDirectlyInObject(text, object, propertyNames, objects) {
+  const names = propertyNames.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const pattern = new RegExp(`(?:['"]?\\b(?:${names})\\b['"]?)\\s*[:=]\\s*['"]?(\\d{1,3})`, 'g');
+  const bodyStart = object.start + 1;
+  const body = text.slice(bodyStart, object.end);
+  const childObjects = objects.filter((candidate) => candidate.start > object.start && candidate.end < object.end);
   const values = [];
-  for (const match of text.matchAll(/(?:['"]?\b(?:raceNumber|number)\b['"]?)\s*[:=]\s*['"]?(\d{1,2})/g)) {
+  for (const match of body.matchAll(pattern)) {
+    const absoluteIndex = bodyStart + (match.index || 0);
+    if (childObjects.some((child) => child.start < absoluteIndex && child.end > absoluteIndex)) continue;
     const value = Number(match[1]);
-    if (Number.isInteger(value) && value > 0 && value <= 99 && !values.includes(value)) values.push(value);
+    if (Number.isInteger(value) && value > 0 && value <= 999 && !values.includes(value)) values.push(value);
   }
   return values;
 }
@@ -227,17 +225,30 @@ function trackIdsForExactRace(script, trackName, raceNumber) {
     const containers = objects
       .filter((object) => object.start < token.start && object.end > token.end)
       .sort((a, b) => (a.end - a.start) - (b.end - b.start));
+
+    let trackObject = null;
+    let trackId = null;
     for (const object of containers) {
-      const body = text.slice(object.start, object.end + 1);
-      const ids = trackIdsInObject(body);
-      if (ids.length !== 1) {
-        if (ids.length > 1) break;
-        continue;
+      const ids = numericPropertiesDirectlyInObject(text, object, ['trackId'], objects);
+      if (ids.length > 1) break;
+      if (ids.length === 1) {
+        trackObject = object;
+        trackId = ids[0];
+        break;
       }
-      const id = ids[0];
-      if (!nameOnly.includes(id)) nameOnly.push(id);
-      if (raceNumbersInObject(body).includes(raceNumber)) {
-        if (!raceScoped.includes(id)) raceScoped.push(id);
+    }
+    if (!trackObject || trackId == null) continue;
+    if (!nameOnly.includes(trackId)) nameOnly.push(trackId);
+
+    const raceContainers = objects
+      .filter((object) => object.start <= trackObject.start && object.end >= trackObject.end)
+      .sort((a, b) => (a.end - a.start) - (b.end - b.start));
+    for (const object of raceContainers) {
+      const numbers = numericPropertiesDirectlyInObject(text, object, ['raceNumber', 'number'], objects)
+        .filter((value) => value <= 99);
+      if (numbers.length > 1) break;
+      if (numbers.length === 1) {
+        if (numbers[0] === raceNumber && !raceScoped.includes(trackId)) raceScoped.push(trackId);
         break;
       }
     }
