@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS xlabs_backfill_jobs (
   id TEXT PRIMARY KEY,
+  scope TEXT NOT NULL DEFAULT 'historical_all' CHECK(scope IN ('historical_all', 'daily_v85_v86')),
   start_date TEXT NOT NULL,
   end_date TEXT NOT NULL,
   next_date TEXT NOT NULL,
@@ -20,4 +21,4 @@ CREATE TABLE IF NOT EXISTS xlabs_backfill_jobs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_xlabs_backfill_status
-  ON xlabs_backfill_jobs(status, created_at);
+  ON xlabs_backfill_jobs(status, scope, created_at);
