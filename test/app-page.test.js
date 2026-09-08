@@ -18,7 +18,7 @@ test('interface keeps navigation order, adds Spel, and retains global search', (
   assert.doesNotMatch(html, /ADMIN_TOKEN/);
 });
 
-test('approved brand treatment renders exact Sagittarius direction and compact proportions', () => {
+test('approved brand treatment renders exact Sagittarius direction and aligned badge treatment', () => {
   const html = renderAppPage();
   const login = renderLoginPage();
   assert.match(html, /KENTAUR<span>AI<\/span>/);
@@ -26,6 +26,7 @@ test('approved brand treatment renders exact Sagittarius direction and compact p
   assert.match(html, /class="brand-icon" viewBox="0 0 512 512"/);
   assert.match(html, /M267\.934 459\.625l-80\.013-80\.08/);
   assert.match(html, /--accent:#C79552/);
+  assert.match(html, /\.brand-badge\{width:24px!important;height:24px!important/);
 });
 
 test('trend navigation uses approved chart icon and Trend naming', () => {
@@ -40,17 +41,20 @@ test('trend navigation uses approved chart icon and Trend naming', () => {
   assert.match(html, /\['6m','6 mån'\]/);
   assert.match(html, /\['1y','1 år'\]/);
   assert.match(html, /\.period-badge\{border:0!important;border-radius:0!important/);
+  assert.match(html, /previousRenderStart/);
+  assert.match(html, /FINAL_ICONS\.trend/);
 });
 
-test('trainer and driver profile tiles keep their frame but use matching navigation symbols', () => {
+test('profile tiles keep their frame and display initials while category icons stay in navigation', () => {
   const html = renderAppPage();
-  assert.match(html, /M12 18V5/);
-  assert.match(html, /M12\.409 13\.017/);
-  assert.match(html, /function profileIcon\(type\)/);
-  assert.match(html, /type==='trainer'\)return POLISH_ICONS\.trainer/);
-  assert.match(html, /type==='driver'\)return POLISH_ICONS\.driver/);
-  assert.match(html, /return icon\('horse','profile-icon fill'\)/);
-  assert.match(html, /\.avatar\{font-size:0;color:var\(--accent-soft\)\}/);
+  assert.match(html, /INITIAL_STOP_WORDS/);
+  assert.match(html, /slice\(0,3\)/);
+  assert.match(html, /<div class=\"avatar\">'\+esc\(initials\(e\.name\)\)/);
+  assert.match(html, /M21\.378 12\.626/); // trainer clipboard/pen
+  assert.match(html, /M15 14c\.2-1/); // driver lightbulb
+  assert.match(html, /finalReplaceNavIcon\('trainers',FINAL_ICONS\.trainer\)/);
+  assert.match(html, /finalReplaceNavIcon\('drivers',FINAL_ICONS\.driver\)/);
+  assert.match(html, /\.avatar\{font-size:22px!important/);
 });
 
 test('logout control and route are absent from the production interface', () => {
@@ -62,10 +66,10 @@ test('logout control and route are absent from the production interface', () => 
 test('entity detail UI groups every stored measurement family', () => {
   const html = renderAppPage();
   for (const label of [
-    'Profil','Aktivitet','Datatäckning','Lopp & start','Klassflaggor','Resultat','Senaste marknad & odds',
+    'Profil','Datatäckning','Lopp & start','Klassflaggor','Resultat','Senaste marknad & odds',
     'Streckhistorik','Oddshistorik','Senaste utrustning','Utrustningshistorik','Senaste X-Labs','X-Labs segment',
     'X-Labs historik','Positioner','Beräknade features','Featurehistorik','Lagrade AI-bedömningar',
-    'Editorial signals','Förhållanden','Dagsprofil'
+    'Redaktionella signaler','Förhållanden','Dagsprofil'
   ]) assert.ok(html.includes(label), `missing ${label}`);
   for (const field of ['startsWithXLabs','startsWithPositions','startsWithFeatures','startsWithAi','startsWithEditorial','startsWithConditions']) assert.match(html, new RegExp(field));
 });
@@ -108,6 +112,6 @@ test('entity browsing still supports complete paginated lists', () => {
 test('all embedded browser application scripts are valid JavaScript', () => {
   const html = renderAppPage();
   const scripts = [...html.matchAll(/<script(?: [^>]*)?>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
-  assert.ok(scripts.length >= 3, 'expected base, polish and complete-data scripts');
+  assert.ok(scripts.length >= 4, 'expected base, polish, complete-data and final-refinement scripts');
   for (const script of scripts) assert.doesNotThrow(() => new vm.Script(script));
 });
