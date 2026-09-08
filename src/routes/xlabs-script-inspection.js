@@ -1,13 +1,13 @@
 const SOURCE_TYPE = 'xlabs_script';
 const MAX_SCRIPT_BYTES = 2 * 1024 * 1024;
 const MAX_ITEMS = 40;
-const MAX_SNIPPET = 240;
+const MAX_LABEL = 240;
 
 function unique(values) {
   return [...new Set(values.filter(Boolean))];
 }
 
-function compact(value, max = MAX_SNIPPET) {
+function compact(value, max = MAX_LABEL) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   if (!text) return null;
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
@@ -42,31 +42,6 @@ function count(text, pattern) {
   return total;
 }
 
-function nearby(text, index) {
-  const start = Math.max(0, index - 90);
-  const end = Math.min(text.length, index + 150);
-  return compact(text.slice(start, end));
-}
-
-function callSnippets(text) {
-  const patterns = [
-    ['fetch', /\bfetch\s*\(/g],
-    ['xhr', /\bXMLHttpRequest\b/g],
-    ['jquery_ajax', /\$\.ajax\s*\(/g],
-    ['jquery_get_json', /\$\.getJSON\s*\(/g],
-    ['jquery_get', /\$\.get\s*\(/g],
-    ['jquery_post', /\$\.post\s*\(/g]
-  ];
-  const items = [];
-  for (const [kind, pattern] of patterns) {
-    for (const match of text.matchAll(pattern)) {
-      items.push({ kind, snippet: nearby(text, match.index || 0) });
-      if (items.length >= MAX_ITEMS) return items;
-    }
-  }
-  return items;
-}
-
 function literalNetworkReferences(text, baseUrl) {
   const refs = [];
   const patterns = [
@@ -78,9 +53,8 @@ function literalNetworkReferences(text, baseUrl) {
   ];
   for (const [kind, pattern] of patterns) {
     for (const match of text.matchAll(pattern)) {
-      const raw = match[2];
-      const resolved = sanitizeUrl(raw, baseUrl);
-      refs.push({ kind, value: compact(raw, 180), resolvedUrl: resolved });
+      const resolvedUrl = sanitizeUrl(match[2], baseUrl);
+      if (resolvedUrl) refs.push({ kind, resolvedUrl });
       if (refs.length >= MAX_ITEMS) return refs;
     }
   }
@@ -125,7 +99,6 @@ export function inspectXlabsScriptText(script, options = {}) {
     },
     literalNetworkReferences: literalNetworkReferences(text, baseUrl),
     candidateEndpoints: candidateEndpoints(text, baseUrl),
-    callSnippets: callSnippets(text),
     keywordCounts: keywordCounts(text)
   };
 }
