@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import { renderAppPage } from '../src/app-page-final.js';
+import { renderAppPage } from '../src/app-page-release.js';
 import { toEntityAppView } from '../src/routes/entity-view.js';
 
 test('profile refinement uses approved icons, initials and navigation order', () => {
