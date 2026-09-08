@@ -84,9 +84,18 @@ export function listResolvedXlabsScriptReferences(html, baseUrl) {
   return unique(references).slice(0, MAX_LIST_ITEMS);
 }
 
+function scriptTagCounts(html) {
+  let inline = 0;
+  let external = 0;
+  for (const match of String(html || '').matchAll(/<script\b([^>]*)>/gi)) {
+    if (attributeValue(match[1] || '', 'src')) external += 1;
+    else inline += 1;
+  }
+  return { inline, external };
+}
+
 function scriptSummaries(html, baseUrl) {
   const scripts = [];
-  let inlineScripts = 0;
   let jsonScripts = 0;
   let fetchCalls = 0;
   let xhrMentions = 0;
@@ -95,15 +104,14 @@ function scriptSummaries(html, baseUrl) {
   let windowData = false;
   const candidateUrls = [];
   const externalReferences = listResolvedXlabsScriptReferences(html, baseUrl);
+  const tagCounts = scriptTagCounts(html);
 
   const pattern = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
   for (const match of html.matchAll(pattern)) {
     const attrs = match[1] || '';
     const body = match[2] || '';
-    const src = attributeValue(attrs, 'src');
     const type = (attributeValue(attrs, 'type') || '').toLowerCase();
     const id = attributeValue(attrs, 'id');
-    if (!src) inlineScripts += 1;
 
     fetchCalls += countMatches(body, /\bfetch\s*\(/g);
     xhrMentions += countMatches(body, /\bXMLHttpRequest\b/g);
@@ -145,8 +153,8 @@ function scriptSummaries(html, baseUrl) {
 
   return {
     total: countMatches(html, /<script\b/gi),
-    inline: inlineScripts,
-    external: externalReferences.length,
+    inline: tagCounts.inline,
+    external: tagCounts.external,
     externalSources: externalReferences.map((value) => normalizeDocumentReference(value, baseUrl)).filter(Boolean),
     jsonScripts,
     jsonScriptSummaries: scripts.slice(0, 10),
