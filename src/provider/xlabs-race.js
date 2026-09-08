@@ -6,12 +6,18 @@ import { resolveCapturedXlabsRequestPath } from '../routes/xlabs-path-resolution
 const XLABS_HOST = 'kmtid.atgx.se';
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_REDIRECTS = 2;
-const MAX_SAMPLE_ITEMS = 20;
+const MAX_SAMPLE_FIELDS = 20;
 const MAX_SAMPLE_DEPTH = 3;
 
 function positiveInteger(value, name, max) {
-  const number = Number(value);
-  if (!Number.isInteger(number) || number < 1 || number > max) throw new Error(`${name} must be an integer between 1 and ${max}`);
+  const text = typeof value === 'number'
+    ? String(value)
+    : typeof value === 'string'
+      ? value.trim()
+      : '';
+  if (!/^\d+$/.test(text)) throw new Error(`${name} must be an integer between 1 and ${max}`);
+  const number = Number(text);
+  if (!Number.isSafeInteger(number) || number < 1 || number > max) throw new Error(`${name} must be an integer between 1 and ${max}`);
   return number;
 }
 
@@ -125,22 +131,26 @@ async function fetchJsonText(url, fetchImpl) {
   }
 }
 
-function summarizeValue(value, depth = 0) {
+function summarizeValue(value, depth = 0, budget = { remaining: MAX_SAMPLE_FIELDS }) {
   if (value === null) return null;
   if (Array.isArray(value)) {
     return {
       type: 'array',
       length: value.length,
-      sample: depth < MAX_SAMPLE_DEPTH && value.length ? summarizeValue(value[0], depth + 1) : null
+      sample: depth < MAX_SAMPLE_DEPTH && value.length ? summarizeValue(value[0], depth + 1, budget) : null
     };
   }
   if (typeof value === 'object') {
-    const keys = Object.keys(value).sort().slice(0, MAX_SAMPLE_ITEMS);
+    const allKeys = Object.keys(value).sort();
+    const keys = [];
     const fields = {};
-    if (depth < MAX_SAMPLE_DEPTH) {
-      for (const key of keys) fields[key] = summarizeValue(value[key], depth + 1);
+    for (const key of allKeys) {
+      if (budget.remaining <= 0) break;
+      budget.remaining -= 1;
+      keys.push(key);
+      if (depth < MAX_SAMPLE_DEPTH) fields[key] = summarizeValue(value[key], depth + 1, budget);
     }
-    return { type: 'object', keys, fields };
+    return { type: 'object', keys, fields, truncated: keys.length < allKeys.length };
   }
   if (typeof value === 'string') return { type: 'string', example: value.slice(0, 120) };
   if (typeof value === 'number' || typeof value === 'boolean') return { type: typeof value, example: value };
@@ -211,6 +221,7 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
       reused: archived.reused,
       qualityStatus: 'captured_unmapped',
       normalizationStatus: 'not_implemented',
+      schemaSampleFieldLimit: MAX_SAMPLE_FIELDS,
       schemaSample: summarizeValue(fetched.parsed),
       normalizedRowsWritten: 0
     };
