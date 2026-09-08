@@ -6,6 +6,7 @@ const XLABS_HOST = 'kmtid.atgx.se';
 const MAX_SCRIPT_BYTES = 2 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
 const ALLOWED_SCRIPT_NAMES = new Set(['races.js', 'calculator.js', 'main.js']);
+export const XLABS_SCRIPT_SELECTOR_VERSION = 'inspector-sources-v3';
 
 function validateXlabsUrl(value) {
   const url = new URL(value);
@@ -23,6 +24,18 @@ function sanitizedUrl(value) {
   return url.toString();
 }
 
+function safeScriptNames(sources) {
+  const names = [];
+  for (const source of sources) {
+    try {
+      const url = validateXlabsUrl(source);
+      const name = url.pathname.split('/').pop();
+      if (name && !names.includes(name)) names.push(name);
+    } catch {}
+  }
+  return names;
+}
+
 function chooseScript(html, baseUrl, scriptName) {
   const requested = String(scriptName || '').trim();
   if (!ALLOWED_SCRIPT_NAMES.has(requested)) throw new Error('script_name must be races.js, calculator.js or main.js');
@@ -37,7 +50,10 @@ function chooseScript(html, baseUrl, scriptName) {
     }
   });
 
-  if (!match) throw new Error('requested X-Labs script was not referenced by the captured page');
+  if (!match) {
+    const available = safeScriptNames(sources).join(',') || 'none';
+    throw new Error(`requested X-Labs script was not referenced by the captured page [selector=${XLABS_SCRIPT_SELECTOR_VERSION}; requested=${requested}; available=${available}]`);
+  }
   return validateXlabsUrl(match);
 }
 
@@ -104,7 +120,8 @@ export async function captureReferencedXlabsScript(env, sourceRecordId, scriptNa
   const run = await startImportRun(env, 'xlabs_script_capture', {
     parentSourceRecordId: parent.id,
     scriptName,
-    requestedUrl: requestedUrlForProvenance
+    requestedUrl: requestedUrlForProvenance,
+    selectorVersion: XLABS_SCRIPT_SELECTOR_VERSION
   });
   const counts = { inserted: 0, updated: 0, skipped: 0, errors: 0 };
 
@@ -129,6 +146,7 @@ export async function captureReferencedXlabsScript(env, sourceRecordId, scriptNa
         scriptName,
         requestedUrl: requestedUrlForProvenance,
         redirectCount: fetched.redirectCount,
+        selectorVersion: XLABS_SCRIPT_SELECTOR_VERSION,
         normalizationStatus: 'not_implemented'
       }
     });
@@ -140,6 +158,7 @@ export async function captureReferencedXlabsScript(env, sourceRecordId, scriptNa
       sourceRecordId: archived.sourceRecordId,
       parentSourceRecordId: parent.id,
       scriptName,
+      selectorVersion: XLABS_SCRIPT_SELECTOR_VERSION,
       fetchedAt,
       url: finalUrlForProvenance,
       redirectCount: fetched.redirectCount,
