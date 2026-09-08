@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import { renderAppPage, renderLoginPage } from '../src/app-page-release.js';
+import { renderAppPage, renderLoginPage } from '../src/app-page-history.js';
 
 test('interface keeps navigation order, adds Spel, and retains global search', () => {
   const html = renderAppPage();
@@ -67,10 +67,21 @@ test('entity and game detail back controls use the corner-back arrow', () => {
   assert.match(html, /id=\"backGames\">.*?<span>'\+esc\(d\.round\.gameType\)/s);
 });
 
-test('release layer leaves exactly one initial application bootstrap', () => {
+test('production layer leaves exactly one initial application bootstrap', () => {
   const html = renderAppPage();
   assert.equal((html.match(/renderStart\(\)\.catch/g) || []).length, 1);
   assert.match(html, /id="kentaurai-release-bootstrap"/);
+});
+
+test('entity start and linked-horse tabs use paginated full-history APIs', () => {
+  const html = renderAppPage();
+  assert.match(html, /HISTORY_PAGE_SIZE=20/);
+  assert.match(html, /\/starts\?limit=/);
+  assert.match(html, /\/horses\?limit=/);
+  assert.match(html, /startHistoryOffsets/);
+  assert.match(html, /linkedHorseOffsets/);
+  assert.match(html, /historyprevPage/);
+  assert.match(html, /historynextPage/);
 });
 
 test('logout control and route are absent from the production interface', () => {
@@ -128,6 +139,6 @@ test('entity browsing still supports complete paginated lists', () => {
 test('all embedded browser application scripts are valid JavaScript', () => {
   const html = renderAppPage();
   const scripts = [...html.matchAll(/<script(?: [^>]*)?>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
-  assert.ok(scripts.length >= 4, 'expected base, polish, complete-data and final-refinement scripts');
+  assert.ok(scripts.length >= 5, 'expected base, refinement and historical paging scripts');
   for (const script of scripts) assert.doesNotThrow(() => new vm.Script(script));
 });
