@@ -8,6 +8,8 @@ import { captureXlabsRaceJson } from '../provider/xlabs-race.js';
 const BACKFILL_VERSION = 'xlabs-race-v1';
 const MAX_RANGE_DAYS = 1096;
 const NORMALIZED_QUALITY = 'normalized_verified_subset';
+const HISTORICAL_SCOPE = 'historical_all';
+const DAILY_SCOPE = 'daily_v85_v86';
 
 function addDays(date, days) {
   const value = new Date(`${validateXlabsDate(date)}T00:00:00Z`);
@@ -40,14 +42,14 @@ export async function getXlabsBackfill(env, jobId) {
   return visible;
 }
 
-export async function startXlabsBackfill(env, startDate, endDate, { resume = false } = {}) {
+async function startScopedXlabsBackfill(env, scope, startDate, endDate, { resume = false } = {}) {
   if (!env.DB) throw new Error('DB is not configured');
   const range = validateRange(startDate, endDate);
-  const id = stableId('xlabsbackfill', BACKFILL_VERSION, range.start, range.end);
+  const id = stableId('xlabsbackfill', BACKFILL_VERSION, scope, range.start, range.end);
   await env.DB.prepare(`
-    INSERT OR IGNORE INTO xlabs_backfill_jobs (id, start_date, end_date, next_date, status)
-    VALUES (?, ?, ?, ?, 'running')
-  `).bind(id, range.start, range.end, range.end).run();
+    INSERT OR IGNORE INTO xlabs_backfill_jobs (id, scope, start_date, end_date, next_date, status)
+    VALUES (?, ?, ?, ?, ?, 'running')
+  `).bind(id, scope, range.start, range.end, range.end).run();
   if (resume) {
     await env.DB.prepare(`
       UPDATE xlabs_backfill_jobs
@@ -59,11 +61,15 @@ export async function startXlabsBackfill(env, startDate, endDate, { resume = fal
   return getXlabsBackfill(env, id);
 }
 
+export async function startXlabsBackfill(env, startDate, endDate, options = {}) {
+  return startScopedXlabsBackfill(env, HISTORICAL_SCOPE, startDate, endDate, options);
+}
+
 export async function ensureDailyXlabsJob(env, scheduledTime = Date.now()) {
   const instant = new Date(scheduledTime);
   if (Number.isNaN(instant.getTime())) throw new Error('scheduled time is invalid');
   const yesterday = addDays(instant.toISOString().slice(0, 10), -1);
-  return startXlabsBackfill(env, yesterday, yesterday);
+  return startScopedXlabsBackfill(env, DAILY_SCOPE, yesterday, yesterday);
 }
 
 async function acquireLease(env, job) {
@@ -114,7 +120,16 @@ async function advanceDate(env, job, leaseToken, { unavailableDate = false } = {
   return completed;
 }
 
-async function racesForDate(env, date) {
+function validRaceRows(results) {
+  return results.filter((row) => {
+    const trackId = Number(row.track_id);
+    const raceNumber = Number(row.race_number);
+    return Number.isInteger(trackId) && trackId >= 1 && trackId <= 99 &&
+      Number.isInteger(raceNumber) && raceNumber >= 1 && raceNumber <= 99;
+  });
+}
+
+async function historicalRacesForDate(env, date) {
   const { results } = await env.DB.prepare(`
     SELECT r.id AS race_id, tx.external_id AS track_id, r.race_number
     FROM races r
@@ -127,12 +142,30 @@ async function racesForDate(env, date) {
       AND EXISTS (SELECT 1 FROM race_entries re WHERE re.race_id = r.id)
     ORDER BY CAST(tx.external_id AS INTEGER), r.race_number, r.id
   `).bind(date).all();
-  return results.filter((row) => {
-    const trackId = Number(row.track_id);
-    const raceNumber = Number(row.race_number);
-    return Number.isInteger(trackId) && trackId >= 1 && trackId <= 99 &&
-      Number.isInteger(raceNumber) && raceNumber >= 1 && raceNumber <= 99;
-  });
+  return validRaceRows(results);
+}
+
+async function dailyGameRacesForDate(env, date) {
+  const { results } = await env.DB.prepare(`
+    SELECT DISTINCT r.id AS race_id, tx.external_id AS track_id, r.race_number
+    FROM game_rounds gr
+    JOIN game_legs gl ON gl.game_round_id = gr.id
+    JOIN races r ON r.id = gl.race_id
+    JOIN track_external_ids tx ON tx.track_id = r.track_id
+    WHERE gr.round_date = ?
+      AND gr.game_type IN ('V85', 'V86')
+      AND tx.source_type = 'official'
+      AND r.race_number IS NOT NULL
+      AND EXISTS (SELECT 1 FROM race_entries re WHERE re.race_id = r.id)
+    ORDER BY CAST(tx.external_id AS INTEGER), r.race_number, r.id
+  `).bind(date).all();
+  return validRaceRows(results);
+}
+
+async function racesForJobDate(env, job) {
+  if (job.scope === DAILY_SCOPE) return dailyGameRacesForDate(env, job.next_date);
+  if (job.scope === HISTORICAL_SCOPE) return historicalRacesForDate(env, job.next_date);
+  throw new Error(`unsupported X-Labs backfill scope: ${job.scope}`);
 }
 
 async function latestSource(env, sourceType, externalId) {
@@ -215,7 +248,7 @@ export async function runXlabsBackfillStep(env, jobId = null, options = {}) {
     : await env.DB.prepare(`
         SELECT * FROM xlabs_backfill_jobs
         WHERE status = 'running'
-        ORDER BY CASE WHEN start_date = end_date THEN 0 ELSE 1 END, created_at
+        ORDER BY CASE scope WHEN 'daily_v85_v86' THEN 0 ELSE 1 END, created_at
         LIMIT 1
       `).first();
   if (!job) return { status: 'idle', done: true };
@@ -224,30 +257,36 @@ export async function runXlabsBackfillStep(env, jobId = null, options = {}) {
   if (!leaseToken) return { jobId: job.id, status: 'busy', done: false, reused: true };
 
   const run = await startImportRun(env, 'xlabs_historical_backfill_step', {
-    jobId: job.id, date: job.next_date, raceIndex: job.next_race_index, direction: 'newest_first', version: BACKFILL_VERSION
+    jobId: job.id,
+    scope: job.scope,
+    date: job.next_date,
+    raceIndex: job.next_race_index,
+    direction: 'newest_first',
+    version: BACKFILL_VERSION
   });
   const counts = { inserted: 0, updated: 0, skipped: 0, errors: 0 };
   try {
-    const isSingleDay = job.start_date === job.end_date;
-    if (!isSingleDay && !(await officialDateReady(env, job.next_date))) {
+    if (job.scope === HISTORICAL_SCOPE && !(await officialDateReady(env, job.next_date))) {
       await releaseLease(env, job, leaseToken);
       await finishImportRun(env, run.id, counts);
       return {
         importRunId: run.id,
         jobId: job.id,
+        scope: job.scope,
         status: 'waiting_for_official',
         checkpoint: { date: job.next_date, nextRaceIndex: job.next_race_index },
         done: false
       };
     }
 
-    const races = await racesForDate(env, job.next_date);
+    const races = await racesForJobDate(env, job);
     if (races.length === 0 || job.next_race_index >= races.length) {
       const completed = await advanceDate(env, job, leaseToken);
       await finishImportRun(env, run.id, counts);
       return {
         importRunId: run.id,
         jobId: job.id,
+        scope: job.scope,
         status: completed ? 'completed' : 'running',
         advancedDate: job.next_date,
         done: completed
@@ -261,6 +300,7 @@ export async function runXlabsBackfillStep(env, jobId = null, options = {}) {
       return {
         importRunId: run.id,
         jobId: job.id,
+        scope: job.scope,
         status: completed ? 'completed' : 'running',
         unavailableDate: job.next_date,
         done: completed
@@ -289,6 +329,7 @@ export async function runXlabsBackfillStep(env, jobId = null, options = {}) {
           return {
             importRunId: run.id,
             jobId: job.id,
+            scope: job.scope,
             status: 'running',
             checkpoint: { date: job.next_date, nextRaceIndex: nextIndex },
             raceId: race.race_id,
@@ -311,6 +352,7 @@ export async function runXlabsBackfillStep(env, jobId = null, options = {}) {
     return {
       importRunId: run.id,
       jobId: job.id,
+      scope: job.scope,
       status: 'running',
       checkpoint: { date: job.next_date, nextRaceIndex: nextIndex },
       raceId: race.race_id,
