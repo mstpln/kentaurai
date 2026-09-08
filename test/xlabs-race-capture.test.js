@@ -173,6 +173,25 @@ test('rejects invalid JSON even with an accepted content type', async () => {
   );
 });
 
+test('times out slow X-Labs race capture with a clear error and archives nothing', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedContext(db, objects);
+  seedOfficialTrack(db);
+  await assert.rejects(
+    () => captureXlabsRaceJson(env, 'src_calc', 7, 5, {
+      timeoutMs: 5,
+      fetchImpl: async (_url, init) => new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      })
+    }),
+    /timed out after 5ms/
+  );
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM source_records WHERE source_type = 'xlabs_race_json'`).get().n, 0);
+  const run = db.prepare(`SELECT status, error_count FROM import_runs WHERE source_type = 'xlabs_race_capture'`).get();
+  assert.equal(run.status, 'failed');
+  assert.equal(run.error_count, 1);
+});
+
 test('rejects same-host redirects that change the verified race file path', async () => {
   const { env, db, objects } = createTestEnv();
   seedContext(db, objects);
