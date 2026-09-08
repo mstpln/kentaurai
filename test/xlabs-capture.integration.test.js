@@ -9,6 +9,7 @@ test('X-Labs date URL is conservative and host locked', () => {
   assert.throws(() => buildXlabsDateUrl({ XLABS_BASE_URL: 'http://kmtid.atgx.se' }, '2026-09-06'), /must use https/);
   assert.throws(() => buildXlabsDateUrl({ XLABS_BASE_URL: 'https://example.com' }, '2026-09-06'), /must use kmtid\.atgx\.se/);
   assert.throws(() => buildXlabsDateUrl({ XLABS_BASE_URL: 'https://user:pass@kmtid.atgx.se' }, '2026-09-06'), /must not contain credentials/);
+  assert.throws(() => buildXlabsDateUrl({ XLABS_BASE_URL: 'https://kmtid.atgx.se:444' }, '2026-09-06'), /standard https port/);
 });
 
 test('X-Labs capture archives exact HTML without inventing normalized fields', async () => {
@@ -113,6 +114,18 @@ test('X-Labs capture rejects insecure redirects', async () => {
       fetchImpl: async () => new Response(null, { status: 301, headers: { location: 'http://kmtid.atgx.se/260906/' } })
     }),
     /redirect must use https/
+  );
+  assert.equal(objects.size, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM source_records').get().n, 0);
+});
+
+test('X-Labs capture rejects redirects to non-standard ports', async () => {
+  const { env, db, objects } = createTestEnv();
+  await assert.rejects(
+    () => captureXlabsDate(env, '2026-09-06', {
+      fetchImpl: async () => new Response(null, { status: 301, headers: { location: 'https://kmtid.atgx.se:444/260906/' } })
+    }),
+    /standard https port/
   );
   assert.equal(objects.size, 0);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM source_records').get().n, 0);
