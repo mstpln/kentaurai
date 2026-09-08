@@ -16,9 +16,12 @@ The current build contains:
 - private read-only KentaurAI interface at `/app`
 - global horse/trainer/driver search
 - paginated entity lists and grouped detail pages for horses, trainers and drivers
+- paginated full start-history reads per horse/trainer/driver, with all stored measurement families enriched only for the current page
+- paginated linked-horse history for trainer/driver profiles
 - Trend workspace with category/time-period controls
 - Spel area with Översikt / V85 / V86 plus saved-round post-race detail
 - complete presentation of currently stored measurement families on entity/start detail, while internal provenance remains backend-only
+- conservative X-Labs date-page raw-capture prototype; captured HTML is archived privately as `captured_unmapped` and no field mapping is trusted yet
 - secure app login with a separate `APP_PASSWORD` and HttpOnly session cookie
 - strict validation, idempotency and SQLite-backed integration QA
 
@@ -32,11 +35,11 @@ Bottom navigation order is:
 
 Trend is the start workspace. It switches between Tränare / Hästar / Kuskar and 2 weeks / 4 weeks / 3 months / 6 months / 1 year. Trend output remains unavailable until sufficient verified result history exists; the interface never fabricates rankings.
 
-Entity detail views group profile/activity data and measured start history instead of flattening every field into one page. Stored race/start/result facts, market/odds histories, equipment, X-Labs, positions, conditions, calculated features, AI analyses and structured editorial signals are separated into natural sections. Unknown facts remain null/unknown.
+Entity detail views group profile/activity data and measured start history instead of flattening every field into one page. Stored race/start/result facts, market/odds histories, equipment, X-Labs, positions, conditions, calculated features, AI analyses and structured editorial signals are separated into natural sections. Unknown facts remain null/unknown. Start history is paginated rather than capped to a fixed latest-100 window, so the same interface can support the planned multi-year backfill.
 
 Spel is separate from entity browsing. Översikt shows compact performance statistics, V85/V86 tabs list saved rounds, and each round has a dedicated post-race detail view. Saved systems preserve the exactly-three-spikes system rule.
 
-The visual system is minimal, dark and structured. The approved Sagittarius mark is used for the KentaurAI brand. Entity navigation uses consistent symbols: trainer = brain, horse = horse, driver = flexed arm.
+The visual system is minimal, dark and structured. The approved Sagittarius mark is used for the KentaurAI brand. Bottom navigation uses the approved chart icon for Trend, clipboard/pen for Tränare, horse for Hästar, lightbulb for Kuskar and ticket for Spel. Entity profile tiles use initials rather than category icons.
 
 ## Public-code / private-data boundary
 This repository contains code, migrations, tests, documentation and synthetic fixtures only.
@@ -64,6 +67,7 @@ Real source data belongs only in the private Cloudflare D1/R2 deployment or is s
 - `POST /v1/provider/capture` - Bearer ADMIN_TOKEN
 - `POST /v1/provider/normalize` - Bearer ADMIN_TOKEN
 - `POST /v1/provider/verify-normalization` - Bearer ADMIN_TOKEN
+- `POST /v1/xlabs/capture` - Bearer ADMIN_TOKEN; raw date-page capture only, no trusted normalization yet
 - `POST /v1/import/editorial` - Bearer ADMIN_TOKEN
 - `POST /v1/import/reference-round` - Bearer ADMIN_TOKEN
 - `POST /v1/import/raw` - Bearer ADMIN_TOKEN
@@ -72,7 +76,7 @@ Real source data belongs only in the private Cloudflare D1/R2 deployment or is s
 All `/v1/*` routes fail closed unless `ADMIN_TOKEN` is configured and supplied.
 
 ### Official-provider capture and normalization
-Calendar/day and game-by-id are the only live acquisition patterns currently wired. Captured responses are archived exactly to private R2 and recorded in D1 before any field mapping occurs.
+Calendar/day and game-by-id are the only official live acquisition patterns currently wired. Captured responses are archived exactly to private R2 and recorded in D1 before any field mapping occurs.
 
 The normalizer reads a previously captured game source record from private R2 and maps only the verified subset into normalized D1 tables. It preserves source timestamps and source-record references for observations, betting percentages, odds and equipment snapshots. Reprocessing the same captured source record is a no-op.
 
@@ -94,6 +98,11 @@ Verified mapping rules include:
 Scratch semantics have not yet been verified from a real scratched live entry. Current declared starts remain explicitly marked with scratch semantics unverified; the mapper does not invent scratch reasons or infer withdrawals from absence.
 
 Automatic live provider acquisition remains disabled.
+
+### X-Labs prototype
+The build plan treats X-Labs as high-value direct measurement data but explicitly states that the exact acquisition method must be verified in practice. The current prototype implements only the observed public date-page URL pattern on the locked `kmtid.atgx.se` HTTPS host. It blocks redirects, applies response-size checks and archives the exact HTML snapshot to private R2/source records.
+
+Captured X-Labs pages remain `captured_unmapped`. The prototype deliberately does **not** parse or write X-Labs measurement fields yet. A real small-sample raw-vs-page verification must establish the structured payload/field semantics before normalization is implemented. Missing X-Labs remains neutral and must never break an analysis pipeline.
 
 ## Reference-round import
 `kentaurai-reference-v1` is the pre-race reference contract. The validator requires exactly eight V85/V86 legs, complete analysis coverage, probabilities summing to 100% per leg, exactly three spikar in three different legs, one selected horse in every spike leg, and system row count equal to the product of selections.
