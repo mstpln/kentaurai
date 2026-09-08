@@ -6,11 +6,28 @@ async function sha256Hex(text) {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-export async function archiveRawPayload(env, { sourceType, externalId = null, sourceUrl = null, fetchedAt, payload, qualityStatus = 'unknown', rightsStatus = null, metadata = null }) {
-  const body = typeof payload === 'string' ? payload : JSON.stringify(payload);
-  const hash = await sha256Hex(body);
+function normalizedExtension(value) {
+  const extension = String(value || 'bin').toLowerCase();
+  if (!/^[a-z0-9]{1,10}$/.test(extension)) throw new Error('raw snapshot extension is invalid');
+  return extension;
+}
+
+export async function archiveRawSnapshot(env, {
+  sourceType,
+  externalId = null,
+  sourceUrl = null,
+  fetchedAt,
+  body,
+  extension = 'bin',
+  contentType = 'application/octet-stream',
+  qualityStatus = 'unknown',
+  rightsStatus = null,
+  metadata = null
+}) {
+  const rawBody = typeof body === 'string' ? body : JSON.stringify(body);
+  const hash = await sha256Hex(rawBody);
   const day = fetchedAt.slice(0, 10);
-  const objectKey = `raw/${sourceType}/${day}/${hash}.json`;
+  const objectKey = `raw/${sourceType}/${day}/${hash}.${normalizedExtension(extension)}`;
 
   if (externalId != null) {
     const existing = await env.DB.prepare(`
@@ -33,9 +50,9 @@ export async function archiveRawPayload(env, { sourceType, externalId = null, so
   }
 
   if (env.RAW_BUCKET) {
-    await env.RAW_BUCKET.put(objectKey, body, {
-      httpMetadata: { contentType: 'application/json' },
-      customMetadata: { sourceType, fetchedAt, contentHash: hash }
+    await env.RAW_BUCKET.put(objectKey, rawBody, {
+      httpMetadata: { contentType },
+      customMetadata: { sourceType, fetchedAt, contentHash: hash, contentType }
     });
   }
 
@@ -58,4 +75,28 @@ export async function archiveRawPayload(env, { sourceType, externalId = null, so
   ).run();
 
   return { sourceRecordId, objectKey, hash, reused: false };
+}
+
+export async function archiveRawPayload(env, {
+  sourceType,
+  externalId = null,
+  sourceUrl = null,
+  fetchedAt,
+  payload,
+  qualityStatus = 'unknown',
+  rightsStatus = null,
+  metadata = null
+}) {
+  return archiveRawSnapshot(env, {
+    sourceType,
+    externalId,
+    sourceUrl,
+    fetchedAt,
+    body: typeof payload === 'string' ? payload : JSON.stringify(payload),
+    extension: 'json',
+    contentType: 'application/json',
+    qualityStatus,
+    rightsStatus,
+    metadata
+  });
 }
