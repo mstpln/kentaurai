@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createTestEnv } from './helpers/d1.js';
 import {
   captureUpcomingOfficialGames,
+  completedNormalizationCursor,
   normalizeNextPendingOfficialGame,
   scheduledLiveDates,
   v85V86GameIdsFromCalendar
@@ -25,6 +26,13 @@ function calendar(date = TOMORROW) {
       V65: [{ id: `V65_${date}_999_1`, races: [] }]
     }
   };
+}
+
+function insertNormalizationRun(db, { id, sourceRecordId, cursor, status = 'success' }) {
+  db.prepare(`
+    INSERT INTO import_runs (id, source_type, started_at, finished_at, status, metadata_json)
+    VALUES (?, 'official_provider_normalize', '2099-01-15T17:15:00.000Z', '2099-01-15T17:15:01.000Z', ?, ?)
+  `).run(id, status, JSON.stringify({ sourceRecordId, stage: 'entry', cursor }));
 }
 
 test('scheduled live dates include race day in morning but exclude it in evening', () => {
@@ -93,4 +101,35 @@ test('pending normalizer ignores calendar-only captures', async () => {
   db.prepare(`INSERT INTO source_records (id, source_type, external_id, fetched_at, quality_status)
     VALUES ('src_calendar_only', 'official_provider', 'calendar:2099-01-16', '2099-01-15T17:15:00.000Z', 'captured_unmapped')`).run();
   assert.deepEqual(await normalizeNextPendingOfficialGame(env), { status: 'idle', done: true });
+});
+
+test('live normalization progress advances only after a successful entry run', async () => {
+  const { env, db } = createTestEnv();
+  const sourceRecordId = 'src_live_progress';
+  db.prepare(`
+    INSERT INTO source_records (id, source_type, external_id, fetched_at, quality_status)
+    VALUES (?, 'official_provider', 'game:V86_2099-01-16_999_1', '2099-01-15T17:15:00.000Z', 'captured_unmapped')
+  `).run(sourceRecordId);
+  db.prepare(`
+    INSERT INTO normalized_observations
+      (id, entity_type, entity_id, source_record_id, observed_at, fields_json, quality_status)
+    VALUES ('obs_partial_entry', 'race_entry', 'entry_partial', ?, '2099-01-15T17:15:00.500Z', '{}', 'normalized_verified_subset')
+  `).run(sourceRecordId);
+
+  assert.equal(await completedNormalizationCursor(env, sourceRecordId), 0);
+  insertNormalizationRun(db, { id: 'imp_failed_0', sourceRecordId, cursor: 0, status: 'failed' });
+  assert.equal(await completedNormalizationCursor(env, sourceRecordId), 0);
+  insertNormalizationRun(db, { id: 'imp_success_0', sourceRecordId, cursor: 0 });
+  assert.equal(await completedNormalizationCursor(env, sourceRecordId), 1);
+});
+
+test('live normalization checkpoints fail closed when successful cursors are not contiguous', async () => {
+  const { env, db } = createTestEnv();
+  const sourceRecordId = 'src_live_gap';
+  insertNormalizationRun(db, { id: 'imp_success_gap_0', sourceRecordId, cursor: 0 });
+  insertNormalizationRun(db, { id: 'imp_success_gap_2', sourceRecordId, cursor: 2 });
+  await assert.rejects(
+    () => completedNormalizationCursor(env, sourceRecordId),
+    /checkpoints are not contiguous/
+  );
 });
