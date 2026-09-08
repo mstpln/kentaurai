@@ -30,6 +30,21 @@ test('X-Labs inspector reports structural signals without returning page content
   assert.equal(JSON.stringify(result).includes('should-not-be-returned'), false);
 });
 
+test('X-Labs inspector reports sanitized iframe document references', () => {
+  const html = '<html><body><iframe id="race-frame" name="race" src="/frame/260906?token=private#secret"></iframe></body></html>';
+  const result = inspectXlabsHtml(html, { baseUrl: 'https://kmtid.atgx.se/260906/' });
+  assert.equal(result.counts.iframes, 1);
+  assert.ok(result.candidateDataChannels.includes('iframe_document'));
+  assert.deepEqual(result.iframes, [{
+    src: 'https://kmtid.atgx.se/frame/260906',
+    name: 'race',
+    id: 'race-frame'
+  }]);
+  const serialized = JSON.stringify(result);
+  assert.equal(serialized.includes('private'), false);
+  assert.equal(serialized.includes('secret'), false);
+});
+
 test('X-Labs inspector does not treat body-row th values as structural headers', () => {
   const result = inspectXlabsHtml('<table><tbody><tr><th>Private Horse Value</th><td>10.7</td></tr></tbody></table>');
   assert.deepEqual(result.tables[0].headers, []);
@@ -44,7 +59,7 @@ test('X-Labs inspector refuses HTML above the capture size boundary', () => {
 
 test('captured X-Labs inspection is source scoped, read-only and returns no raw HTML', async () => {
   const { env, db, objects } = createTestEnv();
-  const html = '<html><head><title>Stored synthetic</title></head><body><div data-race="x"></div></body></html>';
+  const html = '<html><head><title>Stored synthetic</title></head><body><iframe src="/embedded?token=private"></iframe><div data-race="x"></div></body></html>';
   const key = 'raw/xlabs/2099-01-01/synthetic.html';
   objects.set(key, { body: html, options: {} });
   db.prepare(`
@@ -62,6 +77,7 @@ test('captured X-Labs inspection is source scoped, read-only and returns no raw 
   assert.equal(result.qualityStatus, 'captured_unmapped');
   assert.equal(result.inspection.title, 'Stored synthetic');
   assert.equal(result.sourceUrl, 'https://kmtid.atgx.se/990101');
+  assert.deepEqual(result.inspection.iframes, [{ src: 'https://kmtid.atgx.se/embedded', name: null, id: null }]);
   assert.deepEqual(result.metadata, { kind: null, date: null, normalizationStatus: 'not_implemented' });
   assert.equal(result.mapperStatus, 'not_implemented');
   assert.equal(result.normalizedRowsWritten, 0);
