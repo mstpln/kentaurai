@@ -1,6 +1,5 @@
 const SOURCE_TYPE = 'xlabs_script';
 const XLABS_HOST = 'kmtid.atgx.se';
-const MAX_SIBLING_ROWS = 40;
 const MAX_UNIQUE_SIBLINGS = 7;
 const MAX_SOURCE_BYTES = 2 * 1024 * 1024;
 const MAX_ASSIGNMENTS = 16;
@@ -36,6 +35,12 @@ function safeUrl(value, baseUrl) {
   }
 }
 
+function sanitizePart(value, baseUrl) {
+  const raw = String(value || '');
+  if (/^(?:https?:)?\/\//i.test(raw)) return safeUrl(raw, baseUrl) || '[redacted_url]';
+  return compact(raw.split(/[?#]/, 1)[0]);
+}
+
 function byteLength(text) {
   return new TextEncoder().encode(text).byteLength;
 }
@@ -47,6 +52,65 @@ async function readRawText(env, key) {
   const text = await object.text();
   if (byteLength(text) > MAX_SOURCE_BYTES) throw new Error('captured X-Labs context source exceeded inspection size limit');
   return text;
+}
+
+function stripComments(value) {
+  const text = String(value || '').replace(/<!--[\s\S]*?-->/g, (match) => match.replace(/[^\n]/g, ' '));
+  let out = '';
+  let quote = null;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const next = text[i + 1];
+    if (lineComment) {
+      if (ch === '\n') {
+        lineComment = false;
+        out += '\n';
+      } else {
+        out += ' ';
+      }
+      continue;
+    }
+    if (blockComment) {
+      if (ch === '*' && next === '/') {
+        blockComment = false;
+        out += '  ';
+        i += 1;
+      } else {
+        out += ch === '\n' ? '\n' : ' ';
+      }
+      continue;
+    }
+    if (quote) {
+      out += ch;
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+    if (ch === '/' && next === '/') {
+      lineComment = true;
+      out += '  ';
+      i += 1;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      blockComment = true;
+      out += '  ';
+      i += 1;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
 }
 
 function assignedExpression(text, startIndex) {
@@ -80,13 +144,13 @@ function assignedExpression(text, startIndex) {
   return out.trim();
 }
 
-function tokenizeExpression(expression) {
+function tokenizeExpression(expression, baseUrl) {
   const text = String(expression || '');
   const parts = [];
   const pattern = /(['"`])([^'"`]{0,500})\1|\b[A-Za-z_$][A-Za-z0-9_$]*\b/g;
   for (const match of text.matchAll(pattern)) {
     if (match[1]) {
-      const value = compact(match[2]);
+      const value = sanitizePart(match[2], baseUrl);
       if (value !== null) parts.push({ kind: 'string', value });
     } else {
       let i = (match.index || 0) - 1;
@@ -125,21 +189,22 @@ function staticStringValue(expression) {
 }
 
 function findPathAssignments(text, source, baseUrl) {
+  const cleaned = stripComments(text);
   const matches = [];
   const patterns = [
-    /(?:^|[;{},()\n>])\s*(?:(?:const|let|var)\s+)?path\s*=\s*(?!=)/gm,
-    /(?:^|[;{},()\n>])\s*(?:window|globalThis)\.path\s*=\s*(?!=)/gm
+    /(?:^|[;{}\n>])\s*(?:(?:const|let|var)\s+)?path\s*=\s*(?!=)/gm,
+    /(?:^|[;{}\n>])\s*(?:window|globalThis)\.path\s*=\s*(?!=)/gm
   ];
   for (const pattern of patterns) {
-    for (const match of text.matchAll(pattern)) {
+    for (const match of cleaned.matchAll(pattern)) {
       const start = (match.index || 0) + match[0].length;
-      const expression = assignedExpression(text, start);
+      const expression = assignedExpression(cleaned, start);
       if (!expression) continue;
       const staticValue = staticStringValue(expression);
       matches.push({
         source,
         kind: staticValue === null ? 'dynamic' : 'static',
-        parts: tokenizeExpression(expression),
+        parts: tokenizeExpression(expression, baseUrl),
         resolvedBaseUrl: staticValue === null ? null : safeUrl(staticValue, baseUrl)
       });
       if (matches.length >= MAX_ASSIGNMENTS) return matches;
@@ -163,22 +228,28 @@ async function readDeterministicContext(env, source, metadata) {
   const prefix = `${parentId}:`;
   const siblings = await env.DB.prepare(`
     SELECT id, fetched_at, raw_object_key, metadata_json
-    FROM source_records
-    WHERE source_type = 'xlabs_script' AND substr(external_id, 1, ?) = ?
+    FROM (
+      SELECT id, external_id, fetched_at, raw_object_key, metadata_json,
+        ROW_NUMBER() OVER (PARTITION BY external_id ORDER BY fetched_at DESC, id DESC) AS rn
+      FROM source_records
+      WHERE source_type = 'xlabs_script' AND substr(external_id, 1, ?) = ?
+    )
+    WHERE rn = 1
     ORDER BY fetched_at DESC, id DESC
     LIMIT ?
-  `).bind(prefix.length, prefix, MAX_SIBLING_ROWS).all();
+  `).bind(prefix.length, prefix, MAX_UNIQUE_SIBLINGS + 1).all();
 
   const context = [];
   const targetText = await readRawText(env, source.raw_object_key);
   if (targetText) context.push({ source: 'target_script', text: targetText });
 
+  const targetScriptName = typeof metadata.scriptName === 'string' ? compact(metadata.scriptName, 80) : null;
   const seenNames = new Set();
   for (const row of siblings.results || []) {
     if (row.id === source.id || !row.raw_object_key) continue;
     const rowMetadata = parseMetadata(row.metadata_json);
     const scriptName = typeof rowMetadata.scriptName === 'string' ? compact(rowMetadata.scriptName, 80) : null;
-    if (!scriptName || seenNames.has(scriptName)) continue;
+    if (!scriptName || scriptName === targetScriptName || seenNames.has(scriptName)) continue;
     const text = await readRawText(env, row.raw_object_key);
     if (!text) continue;
     seenNames.add(scriptName);
@@ -215,14 +286,21 @@ export async function resolveCapturedXlabsRequestPath(env, sourceRecordId) {
   }
 
   const staticUrls = [...new Set(assignments.filter((item) => item.kind === 'static' && item.resolvedBaseUrl).map((item) => item.resolvedBaseUrl))];
+  const rejectedStatic = assignments.filter((item) => item.kind === 'static' && !item.resolvedBaseUrl);
   const dynamic = assignments.filter((item) => item.kind === 'dynamic');
   let status = 'not_found';
   let resolvedBaseUrl = null;
-  if (staticUrls.length === 1) {
+  if (staticUrls.length > 1) {
+    status = 'conflict';
+  } else if (staticUrls.length === 1 && (dynamic.length || rejectedStatic.length)) {
+    status = 'ambiguous';
+  } else if (staticUrls.length === 1) {
     status = 'resolved_static';
     resolvedBaseUrl = staticUrls[0];
-  } else if (staticUrls.length > 1) {
-    status = 'conflict';
+  } else if (rejectedStatic.length && dynamic.length) {
+    status = 'ambiguous';
+  } else if (rejectedStatic.length) {
+    status = 'rejected_static';
   } else if (dynamic.length) {
     status = 'dynamic';
   }
