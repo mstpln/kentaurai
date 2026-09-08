@@ -64,3 +64,22 @@ test('X-Labs capture rejects redirects and does not archive failed responses', a
   assert.equal(run.status, 'failed');
   assert.equal(run.error_count, 1);
 });
+
+test('X-Labs capture requires private raw storage and records the failed attempt', async () => {
+  const { env, db } = createTestEnv();
+  delete env.RAW_BUCKET;
+  await assert.rejects(
+    () => captureXlabsDate(env, '2026-09-06', {
+      fetchImpl: async () => new Response('<html></html>', {
+        status: 200,
+        headers: { 'content-type': 'text/html' }
+      })
+    }),
+    /RAW_BUCKET is not configured/
+  );
+  const run = db.prepare('SELECT source_type, status, error_count, error_json FROM import_runs').get();
+  assert.equal(run.source_type, 'xlabs_capture');
+  assert.equal(run.status, 'failed');
+  assert.equal(run.error_count, 1);
+  assert.match(run.error_json, /RAW_BUCKET is not configured/);
+});
