@@ -8,7 +8,8 @@ const migration2 = readFileSync(new URL('../migrations/0002_reference_round.sql'
 const migration3 = readFileSync(new URL('../migrations/0003_nullable_reference_prediction.sql', import.meta.url), 'utf8');
 const migration4 = readFileSync(new URL('../migrations/0004_official_live_observations.sql', import.meta.url), 'utf8');
 const migration5 = readFileSync(new URL('../migrations/0005_historical_backfill.sql', import.meta.url), 'utf8');
-const sql = `${migration1}\n${migration2}\n${migration3}\n${migration4}\n${migration5}`;
+const migration6 = readFileSync(new URL('../migrations/0006_xlabs_backfill.sql', import.meta.url), 'utf8');
+const sql = `${migration1}\n${migration2}\n${migration3}\n${migration4}\n${migration5}\n${migration6}`;
 
 test('core migrations apply cleanly and create required tables', () => {
   const db = new DatabaseSync(':memory:');
@@ -20,7 +21,7 @@ test('core migrations apply cleanly and create required tables', () => {
     'ai_race_analyses', 'ai_horse_predictions', 'systems', 'post_race_reviews', 'import_runs',
     'learning_hypotheses', 'learning_observations', 'model_change_log',
     'reference_round_exports', 'reference_observations', 'normalized_observations',
-    'historical_backfill_jobs'
+    'historical_backfill_jobs', 'xlabs_backfill_jobs'
   ]) {
     assert.ok(names.has(required), `missing ${required}`);
   }
