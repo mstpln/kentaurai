@@ -1,12 +1,19 @@
 const SOURCE_TYPE = 'xlabs';
 const MAX_LIST_ITEMS = 20;
+const MAX_LABEL_LENGTH = 120;
 
 function unique(values) {
   return [...new Set(values.filter(Boolean))];
 }
 
+function boundedText(value, max = MAX_LABEL_LENGTH) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!text) return null;
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
 function stripTags(value) {
-  return String(value || '')
+  return boundedText(String(value || '')
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
@@ -15,13 +22,13 @@ function stripTags(value) {
     .replace(/&lt;/gi, '<')
     .replace(/&gt;/gi, '>')
     .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/&#39;/gi, "'"));
 }
 
 function countMatches(text, pattern) {
-  return [...text.matchAll(pattern)].length;
+  let count = 0;
+  for (const _ of text.matchAll(pattern)) count += 1;
+  return count;
 }
 
 function attributeValue(attrs, name) {
@@ -36,16 +43,17 @@ function normalizeUrlCandidate(value) {
   try {
     if (/^https?:\/\//i.test(text)) {
       const url = new URL(text);
+      if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
       url.username = '';
       url.password = '';
       url.search = '';
       url.hash = '';
-      return url.toString();
+      return boundedText(url.toString(), 240);
     }
   } catch {
     return null;
   }
-  if (text.startsWith('/')) return text.split(/[?#]/, 1)[0];
+  if (text.startsWith('/') && !text.startsWith('//')) return boundedText(text.split(/[?#]/, 1)[0], 240);
   return null;
 }
 
@@ -53,6 +61,7 @@ function scriptSummaries(html) {
   const scripts = [];
   const srcs = [];
   let inlineScripts = 0;
+  let externalScripts = 0;
   let jsonScripts = 0;
   let fetchCalls = 0;
   let xhrMentions = 0;
@@ -68,8 +77,13 @@ function scriptSummaries(html) {
     const src = attributeValue(attrs, 'src');
     const type = (attributeValue(attrs, 'type') || '').toLowerCase();
     const id = attributeValue(attrs, 'id');
-    if (src) srcs.push(normalizeUrlCandidate(src) || src.split(/[?#]/, 1)[0]);
-    else inlineScripts += 1;
+    if (src) {
+      externalScripts += 1;
+      const normalizedSrc = normalizeUrlCandidate(src);
+      if (normalizedSrc) srcs.push(normalizedSrc);
+    } else {
+      inlineScripts += 1;
+    }
 
     fetchCalls += countMatches(body, /\bfetch\s*\(/g);
     xhrMentions += countMatches(body, /\bXMLHttpRequest\b/g);
@@ -84,7 +98,14 @@ function scriptSummaries(html) {
 
     if (type.includes('json') || id === '__NEXT_DATA__') {
       jsonScripts += 1;
-      const summary = { id: id || null, type: type || null, parseable: false, valueType: null, topLevelKeys: [], arrayLength: null };
+      const summary = {
+        id: boundedText(id, 80),
+        type: boundedText(type, 80),
+        parseable: false,
+        valueType: null,
+        topLevelKeys: [],
+        arrayLength: null
+      };
       try {
         const parsed = JSON.parse(body.trim());
         summary.parseable = true;
@@ -93,7 +114,7 @@ function scriptSummaries(html) {
           summary.arrayLength = parsed.length;
         } else if (parsed && typeof parsed === 'object') {
           summary.valueType = 'object';
-          summary.topLevelKeys = Object.keys(parsed).sort().slice(0, MAX_LIST_ITEMS);
+          summary.topLevelKeys = Object.keys(parsed).sort().slice(0, MAX_LIST_ITEMS).map((key) => boundedText(key, 80));
         } else {
           summary.valueType = typeof parsed;
         }
@@ -105,7 +126,7 @@ function scriptSummaries(html) {
   return {
     total: countMatches(html, /<script\b/gi),
     inline: inlineScripts,
-    external: srcs.length,
+    external: externalScripts,
     externalSources: unique(srcs).slice(0, MAX_LIST_ITEMS),
     jsonScripts,
     jsonScriptSummaries: scripts.slice(0, 10),
@@ -172,6 +193,17 @@ export function inspectXlabsHtml(html) {
   };
 }
 
+function safeMetadata(metadataJson) {
+  let parsed;
+  try { parsed = metadataJson ? JSON.parse(metadataJson) : null; } catch { return null; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  return {
+    kind: typeof parsed.kind === 'string' ? boundedText(parsed.kind, 80) : null,
+    date: typeof parsed.date === 'string' ? boundedText(parsed.date, 40) : null,
+    normalizationStatus: typeof parsed.normalizationStatus === 'string' ? boundedText(parsed.normalizationStatus, 80) : null
+  };
+}
+
 export async function inspectCapturedXlabs(env, sourceRecordId) {
   if (!env.DB) throw new Error('DB is not configured');
   if (!env.RAW_BUCKET?.get) throw new Error('RAW_BUCKET read access is not configured');
@@ -189,17 +221,15 @@ export async function inspectCapturedXlabs(env, sourceRecordId) {
   const object = await env.RAW_BUCKET.get(source.raw_object_key);
   if (!object) throw new Error('captured X-Labs raw object was not found');
   const html = await object.text();
-  let metadata = null;
-  try { metadata = source.metadata_json ? JSON.parse(source.metadata_json) : null; } catch {}
 
   return {
     sourceRecordId: source.id,
     externalId: source.external_id,
-    sourceUrl: source.source_url,
+    sourceUrl: normalizeUrlCandidate(source.source_url),
     fetchedAt: source.fetched_at,
     contentHash: source.content_hash,
     qualityStatus: source.quality_status,
-    metadata,
+    metadata: safeMetadata(source.metadata_json),
     inspection: inspectXlabsHtml(html),
     normalizedRowsWritten: 0,
     mapperStatus: 'not_implemented'
