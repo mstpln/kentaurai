@@ -110,13 +110,14 @@ export async function captureUpcomingOfficialGames(env, scheduledTime, options =
 
   const aggregateError = failures.length ? new Error(`${failures.length} scheduled live capture operation(s) failed`) : null;
   await finishImportRun(env, run.id, counts, aggregateError);
+  if (aggregateError) throw aggregateError;
   return {
     importRunId: run.id,
     mode: includeToday ? 'morning' : 'evening',
     dates,
     capturedGameIds,
-    failureCount: failures.length,
-    failures
+    failureCount: 0,
+    failures: []
   };
 }
 
