@@ -5,8 +5,8 @@ import { inspectXlabsHtml } from '../routes/xlabs-inspection.js';
 const XLABS_HOST = 'kmtid.atgx.se';
 const MAX_SCRIPT_BYTES = 2 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
-const ALLOWED_SCRIPT_NAMES = new Set(['races.js', 'calculator.js', 'main.js']);
-export const XLABS_SCRIPT_SELECTOR_VERSION = 'inspector-sources-v3';
+const ALLOWED_SCRIPT_NAMES = new Set(['races.js', 'calculate.js', 'main.js']);
+export const XLABS_SCRIPT_SELECTOR_VERSION = 'inspector-sources-v4';
 
 function validateXlabsUrl(value) {
   const url = new URL(value);
@@ -38,7 +38,7 @@ function safeScriptNames(sources) {
 
 function chooseScript(html, baseUrl, scriptName) {
   const requested = String(scriptName || '').trim();
-  if (!ALLOWED_SCRIPT_NAMES.has(requested)) throw new Error('script_name must be races.js, calculator.js or main.js');
+  if (!ALLOWED_SCRIPT_NAMES.has(requested)) throw new Error('script_name must be races.js, calculate.js or main.js');
 
   const sources = inspectXlabsHtml(html, { baseUrl }).scripts.externalSources;
   const match = sources.find((source) => {

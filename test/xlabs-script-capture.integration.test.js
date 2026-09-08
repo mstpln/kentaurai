@@ -30,14 +30,14 @@ async function captureWithSyntheticResponse(env, scriptName) {
 }
 
 test('X-Labs script capture selects each allowlisted script from sibling script tags', async () => {
-  for (const scriptName of ['races.js', 'calculator.js', 'main.js']) {
+  for (const scriptName of ['races.js', 'calculate.js', 'main.js']) {
     const { env, db, objects } = createTestEnv();
     seedParent({
       db,
       objects,
       html: [
         '<script src="js/races.js?token=private#fragment"></script>',
-        '<script src="js/calculator.js"></script>',
+        '<script src="js/calculate.js"></script>',
         '<script src="js/main.js"></script>'
       ].join('')
     });
@@ -59,8 +59,8 @@ test('X-Labs script capture selects each allowlisted script from sibling script 
   }
 });
 
-test('inspector-visible production-shaped script list is capture-eligible for calculator and main', async () => {
-  for (const scriptName of ['calculator.js', 'main.js']) {
+test('inspector-visible production-shaped script list is capture-eligible for calculate and main', async () => {
+  for (const scriptName of ['calculate.js', 'main.js']) {
     const { env, db, objects } = createTestEnv();
     seedParent({
       db,
@@ -73,7 +73,7 @@ test('inspector-visible production-shaped script list is capture-eligible for ca
         '<script src="js/language.js"></script>',
         '<script src="js/helper.js"></script>',
         '<script src="js/races.js"></script>',
-        '<script src="js/calculator.js"></script>',
+        '<script src="js/calculate.js"></script>',
         '<script src="js/main.js"></script>'
       ].join('')
     });
@@ -109,7 +109,7 @@ test('X-Labs script capture rejects scripts outside the narrow allowlist', async
   seedParent({ db, objects, html: '<script src="js/vendor.js"></script>' });
   await assert.rejects(
     () => captureReferencedXlabsScript(env, 'src_parent', 'vendor.js', { fetchImpl: async () => new Response('x') }),
-    /script_name must be races\.js, calculator\.js or main\.js/
+    /script_name must be races\.js, calculate\.js or main\.js/
   );
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM source_records WHERE source_type = 'xlabs_script'").get().n, 0);
 });

@@ -34,10 +34,10 @@ test('failed X-Labs selection reports selector version and available script name
   });
 
   await assert.rejects(
-    () => captureReferencedXlabsScript(env, 'src_diag', 'calculator.js', { fetchImpl: async () => new Response('x') }),
+    () => captureReferencedXlabsScript(env, 'src_diag', 'calculate.js', { fetchImpl: async () => new Response('x') }),
     (error) => {
       assert.match(error.message, new RegExp(`selector=${XLABS_SCRIPT_SELECTOR_VERSION}`));
-      assert.match(error.message, /requested=calculator\.js/);
+      assert.match(error.message, /requested=calculate\.js/);
       assert.match(error.message, /available=races\.js,main\.js/);
       assert.equal(error.message.includes('token=private'), false);
       return true;
