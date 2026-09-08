@@ -78,6 +78,27 @@ async function acquireLease(env, job) {
   return Number(result.meta?.changes ?? 0) === 1 ? token : null;
 }
 
+async function releaseLease(env, job, leaseToken) {
+  const result = await env.DB.prepare(`
+    UPDATE xlabs_backfill_jobs
+    SET lease_token = NULL, lease_until = NULL, last_run_at = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND lease_token = ?
+  `).bind(new Date().toISOString(), job.id, leaseToken).run();
+  if (Number(result.meta?.changes ?? 0) !== 1) throw new Error('X-Labs backfill lease was lost while releasing checkpoint');
+}
+
+async function officialDateReady(env, date) {
+  const row = await env.DB.prepare(`
+    SELECT id
+    FROM historical_backfill_jobs
+    WHERE start_date <= ? AND end_date >= ?
+      AND (status = 'completed' OR next_date < ?)
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).bind(date, date, date).first();
+  return Boolean(row?.id);
+}
+
 async function advanceDate(env, job, leaseToken, { unavailableDate = false } = {}) {
   const next = addDays(job.next_date, -1);
   const completed = next < job.start_date;
@@ -207,6 +228,19 @@ export async function runXlabsBackfillStep(env, jobId = null, options = {}) {
   });
   const counts = { inserted: 0, updated: 0, skipped: 0, errors: 0 };
   try {
+    const isSingleDay = job.start_date === job.end_date;
+    if (!isSingleDay && !(await officialDateReady(env, job.next_date))) {
+      await releaseLease(env, job, leaseToken);
+      await finishImportRun(env, run.id, counts);
+      return {
+        importRunId: run.id,
+        jobId: job.id,
+        status: 'waiting_for_official',
+        checkpoint: { date: job.next_date, nextRaceIndex: job.next_race_index },
+        done: false
+      };
+    }
+
     const races = await racesForDate(env, job.next_date);
     if (races.length === 0 || job.next_race_index >= races.length) {
       const completed = await advanceDate(env, job, leaseToken);
