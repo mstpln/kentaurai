@@ -2,7 +2,7 @@
 
 Version: 0.4.5
 Phase: historical data foundation / X-Labs vertical slice preparation
-Status: full historical paging and conservative X-Labs raw capture are implemented on the feature branch; automatic live acquisition and X-Labs normalization remain disabled
+Status: official vertical slice is verified; X-Labs date page and three referenced application scripts are privately captured and a sanitized script-inspection build is in progress; automatic live acquisition and X-Labs normalization remain disabled
 
 ## Verified foundation
 - D1 core schema, indexes and reference-round extension migrations are provisioned.
@@ -87,12 +87,15 @@ The historical page endpoint strips internal race-entry/race IDs from the browse
 
 ## X-Labs vertical slice preparation
 - The build plan explicitly leaves the exact X-Labs acquisition method open until real network/page behavior is verified.
-- A conservative raw-capture prototype now supports the observed date-page pattern on the locked HTTPS host `kmtid.atgx.se`.
-- Redirects are blocked, response size is bounded and the exact HTML response is archived to private R2/source records.
-- X-Labs captures are marked `captured_unmapped` with `normalizationStatus: not_implemented`.
+- The observed date page for the private sample has been captured successfully on the locked HTTPS host `kmtid.atgx.se`.
+- The referenced application scripts `races.js`, `calculate.js` and `main.js` have also been captured privately to R2 as `captured_unmapped` source records.
+- The script selector is locked to those three verified basenames and rejects arbitrary URLs/scripts.
+- A private read-only script inspection endpoint is being added to report request-mechanism counts, sanitized literal request URLs, sanitized endpoint candidates and coarse domain keywords without returning raw script bodies/snippets.
+- Query strings, fragments and credentials are stripped from inspection URL output.
+- X-Labs captures remain `captured_unmapped` with `normalizationStatus: not_implemented`.
 - The prototype writes **zero** rows to `xlabs_data`; no field mapping is trusted yet.
 - Missing X-Labs remains neutral and must never break historical or future analysis flows.
-- No production X-Labs capture has been authorized or performed by this build.
+- Automatic X-Labs acquisition/backfill remains disabled.
 
 ## Spel
 - Spel has exactly three tabs: Översikt, V85 and V86.
@@ -105,7 +108,7 @@ The historical page endpoint strips internal race-entry/race IDs from the browse
 ## Quality and privacy
 - GitHub contains code/schema/tests/docs/synthetic fixtures only.
 - No real racing payloads, private reference exports, database dumps, secrets or paid/private editorial provider identity/content may be committed.
-- X-Labs tests use synthetic HTML only; no real captured X-Labs payload is committed.
+- X-Labs tests use synthetic HTML/JavaScript only; no real captured X-Labs payload or script is committed.
 - Raw facts, deterministic calculations and AI judgments remain explicitly separated.
 - Model weights are not changed after a single round; learnings remain No change / Candidate / Confirmed.
 - Entity search/list filters treat SQL wildcard/escape characters literally.
@@ -114,18 +117,20 @@ The historical page endpoint strips internal race-entry/race IDs from the browse
 
 ## Current verification gate
 1. Full CI must pass on the exact feature-branch head.
-2. Review paginated start-history ordering, pagination boundaries, linked-horse completeness, app privacy and browser script validity.
-3. Review X-Labs URL validation, host lock, redirect blocking, response-size limits, exact raw preservation and the guarantee that no normalized X-Labs rows are written.
-4. Merge only after explicit user authorization.
-5. **Do not** run production X-Labs capture, historical backfill or enable automatic acquisition without explicit approval.
+2. Review private script-inspection output limits, sanitization, authentication and guarantee that it writes no normalized X-Labs rows.
+3. Inspect the three real captured application scripts privately and identify the actual data-loading path.
+4. Verify a small real sample against known starts before any normalized X-Labs field mapping is implemented.
+5. Merge only after explicit user authorization.
+6. **Do not** run X-Labs historical backfill or enable automatic acquisition without explicit approval.
 
 ## Next after this build
-1. Inspect one or more real X-Labs date pages/network calls privately and determine whether the stable source is structured JSON, embedded/static data or page parsing.
-2. Verify a small real sample against known starts and map only fields whose semantics are confirmed.
-3. Add raw-vs-normalized X-Labs verification for that sample.
-4. Verify the official historical-results acquisition path needed for ordinary Swedish races, not only V85/V86 game snapshots.
-5. Only then design and run a resumable 2-3 year historical backfill in private Cloudflare storage.
-6. Build deterministic Trend metrics/leaderboards after sufficient verified history exists.
+1. Inspect the three privately captured scripts and determine the stable data-loading endpoint/pattern.
+2. Capture the smallest necessary structured response privately if one exists.
+3. Verify 10-20 representative X-Labs facts against the visible page/reference data and map only confirmed semantics.
+4. Add raw-vs-normalized X-Labs verification for that sample.
+5. Verify the official historical-results acquisition path needed for ordinary Swedish races, not only V85/V86 game snapshots.
+6. Only then design and run a resumable 2-3 year historical backfill in private Cloudflare storage.
+7. Build deterministic Trend metrics/leaderboards after sufficient verified history exists.
 
 ## Not yet implemented
 - verified/persisted shared-person identity across trainer and driver roles; current UI role link is conservative exact-name matching only

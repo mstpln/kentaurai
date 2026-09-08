@@ -10,6 +10,7 @@ import { getRound } from './routes/rounds.js';
 import { createHypothesis } from './routes/learning.js';
 import { verifyCapturedOfficialNormalization } from './routes/official-verification.js';
 import { inspectCapturedXlabs } from './routes/xlabs-inspection.js';
+import { inspectCapturedXlabsScript } from './routes/xlabs-script-inspection.js';
 import { getEntityDetail, getEntitySummary, listEntities, searchEntities } from './routes/entities.js';
 import { getEntityStartHistory } from './routes/entity-history.js';
 import { getLinkedHorses } from './routes/entity-links.js';
@@ -147,6 +148,10 @@ async function handleFetch(request, env) {
   if (request.method === 'POST' && path === '/v1/xlabs/inspect') {
     const body = await readJson(request);
     return json(await inspectCapturedXlabs(env, body.source_record_id));
+  }
+  if (request.method === 'POST' && path === '/v1/xlabs/inspect-script') {
+    const body = await readJson(request);
+    return json(await inspectCapturedXlabsScript(env, body.source_record_id));
   }
   if (request.method === 'POST' && path === '/v1/provider/normalize') {
     const body = await readJson(request);
