@@ -46,6 +46,12 @@ export function validateOfficialRacePayload(value) {
   return race;
 }
 
+export function officialRaceHasFinalResults(value) {
+  const race = validateOfficialRacePayload(value);
+  if (race.starts.length === 0) return false;
+  return race.starts.every((start) => start.scratched === true || (start.result && typeof start.result === 'object' && !Array.isArray(start.result)));
+}
+
 function kmTimeText(value) {
   if (!value || typeof value !== 'object') return null;
   const minutes = finiteNumber(value.minutes);
@@ -242,6 +248,7 @@ export async function normalizeCapturedOfficialRace(env, sourceRecordId) {
     observedTracks: new Set()
   };
   try {
+    if (!officialRaceHasFinalResults(race)) throw new Error('official race results are not final');
     await ensureHistoricalRace(env, race, ctx);
     for (const start of race.starts) await mapHistoricalStart(env, race, start, ctx);
     await env.DB.prepare('UPDATE source_records SET quality_status = ? WHERE id = ?').bind(NORMALIZED_QUALITY, id).run();
