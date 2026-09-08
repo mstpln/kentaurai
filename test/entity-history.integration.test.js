@@ -53,3 +53,16 @@ test('linked horse history is complete and paginated independently of start page
   assert.equal(second.items[0].name, 'Beta Horse');
   assert.equal(second.hasMore, false);
 });
+
+test('linked horse start counts exclude scratched declarations without hiding the relationship', async () => {
+  const { env, db } = createTestEnv();
+  seed(db);
+  db.prepare(`INSERT INTO races (id, track_id, race_date, race_number, distance_m, start_method) VALUES ('race_4','track_1','2099-01-04',4,2140,'auto')`).run();
+  db.prepare(`INSERT INTO race_entries (id, race_id, horse_id, driver_id, trainer_id, start_number, scratched, actual_start_distance_m) VALUES ('entry_4','race_4','horse_2','driver_1','trainer_1',4,1,2140)`).run();
+
+  const data = await getLinkedHorses(env, 'trainers', 'trainer_1', { limit: 10, offset: 0 });
+  const beta = data.items.find((item) => item.name === 'Beta Horse');
+  assert.ok(beta);
+  assert.equal(beta.starts, 1);
+  assert.equal(beta.latestStartDate, '2099-01-04');
+});
