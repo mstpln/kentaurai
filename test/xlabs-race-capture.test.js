@@ -29,6 +29,7 @@ function seedContext(db, objects, path = 'json/') {
 test('builds the verified X-Labs race filename deterministically', () => {
   assert.equal(buildXlabsRaceFileName('2026-09-06', 7, 5), '09067105.json');
   assert.equal(buildXlabsRaceFileName('2026-12-31', 12, 14), '123112114.json');
+  assert.throws(() => buildXlabsRaceFileName('2026-02-30', 7, 5), /valid calendar date/);
   assert.throws(() => buildXlabsRaceFileName('2026-09-06', 0, 5), /track_id/);
   assert.throws(() => buildXlabsRaceFileName('2026-09-06', 7, 100), /race_number/);
 });
@@ -69,27 +70,54 @@ test('captures one resolved race JSON exactly and writes no normalized X-Labs ro
   assert.equal(stored[1].body, payload);
 });
 
-test('rejects a resolved base path outside the verified json directory', async () => {
+test('rejects a resolved base path outside the captured date json directory', async () => {
   const { env, db, objects } = createTestEnv();
-  seedContext(db, objects, 'other/');
+  seedContext(db, objects, '/other-date/json/');
   await assert.rejects(
     () => captureXlabsRaceJson(env, 'src_calc', 7, 5, { fetchImpl: async () => new Response('{}') }),
-    /must end in \/json\//
+    /must use \/260906\/json\//
   );
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM source_records WHERE source_type = 'xlabs_race_json'`).get().n, 0);
 });
 
-test('rejects invalid JSON without archiving a race payload', async () => {
+test('rejects unexpected content type without archiving a race payload', async () => {
   const { env, db, objects } = createTestEnv();
   seedContext(db, objects);
   await assert.rejects(
     () => captureXlabsRaceJson(env, 'src_calc', 7, 5, {
       fetchImpl: async () => new Response('<html>not json</html>', { status: 200, headers: { 'content-type': 'text/html' } })
     }),
-    /was not valid JSON/
+    /unexpected content type/
   );
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM source_records WHERE source_type = 'xlabs_race_json'`).get().n, 0);
   const run = db.prepare(`SELECT status, error_count FROM import_runs WHERE source_type = 'xlabs_race_capture'`).get();
   assert.equal(run.status, 'failed');
   assert.equal(run.error_count, 1);
+});
+
+test('rejects invalid JSON even with an accepted content type', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedContext(db, objects);
+  await assert.rejects(
+    () => captureXlabsRaceJson(env, 'src_calc', 7, 5, {
+      fetchImpl: async () => new Response('not-json', { status: 200, headers: { 'content-type': 'text/plain' } })
+    }),
+    /was not valid JSON/
+  );
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM source_records WHERE source_type = 'xlabs_race_json'`).get().n, 0);
+});
+
+test('rejects same-host redirects that change the verified race file path', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedContext(db, objects);
+  await assert.rejects(
+    () => captureXlabsRaceJson(env, 'src_calc', 7, 5, {
+      fetchImpl: async () => new Response(null, {
+        status: 302,
+        headers: { location: '/260906/json/different.json' }
+      })
+    }),
+    /must preserve the verified race file path/
+  );
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM source_records WHERE source_type = 'xlabs_race_json'`).get().n, 0);
 });
