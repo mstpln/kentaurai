@@ -123,24 +123,33 @@ function scanJavascriptObjectsAndStrings(script) {
   const objectStack = [];
   const objects = [];
   const strings = [];
+  const comments = [];
   let quote = null;
   let stringStart = -1;
   let stringValue = '';
   let escaped = false;
   let lineComment = false;
+  let lineCommentStart = -1;
   let blockComment = false;
+  let blockCommentStart = -1;
 
   for (let i = 0; i < text.length; i += 1) {
     const ch = text[i];
     const next = text[i + 1];
 
     if (lineComment) {
-      if (ch === '\n') lineComment = false;
+      if (ch === '\n') {
+        comments.push({ start: lineCommentStart, end: i - 1 });
+        lineComment = false;
+        lineCommentStart = -1;
+      }
       continue;
     }
     if (blockComment) {
       if (ch === '*' && next === '/') {
+        comments.push({ start: blockCommentStart, end: i + 1 });
         blockComment = false;
+        blockCommentStart = -1;
         i += 1;
       }
       continue;
@@ -168,11 +177,13 @@ function scanJavascriptObjectsAndStrings(script) {
     }
     if (ch === '/' && next === '/') {
       lineComment = true;
+      lineCommentStart = i;
       i += 1;
       continue;
     }
     if (ch === '/' && next === '*') {
       blockComment = true;
+      blockCommentStart = i;
       i += 1;
       continue;
     }
@@ -192,10 +203,16 @@ function scanJavascriptObjectsAndStrings(script) {
       if (start != null) objects.push({ start, end: i });
     }
   }
-  return { objects, strings };
+  if (lineComment) comments.push({ start: lineCommentStart, end: text.length - 1 });
+  if (blockComment) comments.push({ start: blockCommentStart, end: text.length - 1 });
+  return { objects, strings, comments };
 }
 
-function numericPropertiesDirectlyInObject(text, object, propertyNames, objects) {
+function indexInsideRange(index, ranges) {
+  return ranges.some((range) => range.start <= index && range.end >= index);
+}
+
+function numericPropertiesDirectlyInObject(text, object, propertyNames, objects, strings, comments) {
   const names = propertyNames.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
   const pattern = new RegExp(`(?:['"]?\\b(?:${names})\\b['"]?)\\s*[:=]\\s*['"]?(\\d{1,3})`, 'g');
   const bodyStart = object.start + 1;
@@ -205,6 +222,9 @@ function numericPropertiesDirectlyInObject(text, object, propertyNames, objects)
   for (const match of body.matchAll(pattern)) {
     const absoluteIndex = bodyStart + (match.index || 0);
     if (childObjects.some((child) => child.start < absoluteIndex && child.end > absoluteIndex)) continue;
+    if (indexInsideRange(absoluteIndex, comments)) continue;
+    const containingString = strings.find((token) => token.start <= absoluteIndex && token.end >= absoluteIndex);
+    if (containingString && containingString.start !== absoluteIndex) continue;
     const value = Number(match[1]);
     if (Number.isInteger(value) && value > 0 && value <= 999 && !values.includes(value)) values.push(value);
   }
@@ -215,11 +235,12 @@ function trackIdsForExactRace(script, trackName, raceNumber) {
   const text = String(script || '');
   const needle = normalizedTrackName(trackName);
   if (!needle) return [];
-  const { objects, strings } = scanJavascriptObjectsAndStrings(text);
+  const { objects, strings, comments } = scanJavascriptObjectsAndStrings(text);
   const raceScoped = [];
   const nameOnly = [];
 
   for (const token of strings) {
+    if (indexInsideRange(token.start, comments)) continue;
     if (token.template && token.value.includes('${')) continue;
     if (normalizedTrackName(token.value) !== needle) continue;
     const containers = objects
@@ -229,7 +250,7 @@ function trackIdsForExactRace(script, trackName, raceNumber) {
     let trackObject = null;
     let trackId = null;
     for (const object of containers) {
-      const ids = numericPropertiesDirectlyInObject(text, object, ['trackId'], objects);
+      const ids = numericPropertiesDirectlyInObject(text, object, ['trackId'], objects, strings, comments);
       if (ids.length > 1) break;
       if (ids.length === 1) {
         trackObject = object;
@@ -244,7 +265,7 @@ function trackIdsForExactRace(script, trackName, raceNumber) {
       .filter((object) => object.start <= trackObject.start && object.end >= trackObject.end)
       .sort((a, b) => (a.end - a.start) - (b.end - b.start));
     for (const object of raceContainers) {
-      const numbers = numericPropertiesDirectlyInObject(text, object, ['raceNumber', 'number'], objects)
+      const numbers = numericPropertiesDirectlyInObject(text, object, ['raceNumber', 'number'], objects, strings, comments)
         .filter((value) => value <= 99);
       if (numbers.length > 1) break;
       if (numbers.length === 1) {
