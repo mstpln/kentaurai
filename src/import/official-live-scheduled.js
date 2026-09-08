@@ -132,13 +132,20 @@ export async function normalizeNextPendingOfficialGame(env) {
   `).bind(SOURCE_TYPE, PENDING_QUALITY).first();
   if (!source) return { status: 'idle', done: true };
 
-  const normalized = await normalizeCapturedOfficialGameSequential(env, source.id);
+  const progress = await env.DB.prepare(`
+    SELECT COUNT(*) AS n
+    FROM normalized_observations
+    WHERE source_record_id = ? AND entity_type = 'race_entry'
+  `).bind(source.id).first();
+  const cursor = Number(progress?.n ?? 0);
+  const normalized = await normalizeCapturedOfficialGameSequential(env, source.id, cursor);
   return {
     status: normalized.done ? 'completed_source' : 'running_source',
     done: normalized.done === true,
     sourceRecordId: source.id,
     externalId: source.external_id,
     fetchedAt: source.fetched_at,
+    cursor,
     normalized
   };
 }
