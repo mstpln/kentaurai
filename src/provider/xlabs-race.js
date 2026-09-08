@@ -197,7 +197,7 @@ function scanJavascriptObjectsAndStrings(script) {
 
 function trackIdsInObject(text) {
   const ids = [];
-  for (const match of text.matchAll(/(?:['"]?trackId['"]?)\s*[:=]\s*['"]?(\d{1,3})/g)) {
+  for (const match of text.matchAll(/(?:['"]?\btrackId\b['"]?)\s*[:=]\s*['"]?(\d{1,3})/g)) {
     const id = Number(match[1]);
     if (Number.isInteger(id) && id > 0 && id <= 999 && !ids.includes(id)) ids.push(id);
   }
@@ -206,7 +206,7 @@ function trackIdsInObject(text) {
 
 function raceNumbersInObject(text) {
   const values = [];
-  for (const match of text.matchAll(/(?:['"]?(?:raceNumber|number)['"]?)\s*[:=]\s*['"]?(\d{1,2})/g)) {
+  for (const match of text.matchAll(/(?:['"]?\b(?:raceNumber|number)\b['"]?)\s*[:=]\s*['"]?(\d{1,2})/g)) {
     const value = Number(match[1]);
     if (Number.isInteger(value) && value > 0 && value <= 99 && !values.includes(value)) values.push(value);
   }
