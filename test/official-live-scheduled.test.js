@@ -120,6 +120,7 @@ test('live normalization progress advances only after a successful entry run', a
   insertNormalizationRun(db, { id: 'imp_failed_0', sourceRecordId, cursor: 0, status: 'failed' });
   assert.equal(await completedNormalizationCursor(env, sourceRecordId), 0);
   insertNormalizationRun(db, { id: 'imp_success_0', sourceRecordId, cursor: 0 });
+  insertNormalizationRun(db, { id: 'imp_success_0_duplicate', sourceRecordId, cursor: 0 });
   assert.equal(await completedNormalizationCursor(env, sourceRecordId), 1);
 });
 
