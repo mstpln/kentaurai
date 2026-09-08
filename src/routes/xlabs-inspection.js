@@ -38,24 +38,36 @@ function attributeValue(attrs, name) {
   return match ? (match[1] ?? match[2] ?? match[3] ?? null) : null;
 }
 
+function sanitizeHttpUrl(url) {
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+  url.username = '';
+  url.password = '';
+  url.search = '';
+  url.hash = '';
+  return boundedText(url.toString(), 240);
+}
+
 function normalizeUrlCandidate(value) {
   const text = String(value || '').trim();
   if (!text) return null;
   try {
-    if (/^https?:\/\//i.test(text)) {
-      const url = new URL(text);
-      if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
-      url.username = '';
-      url.password = '';
-      url.search = '';
-      url.hash = '';
-      return boundedText(url.toString(), 240);
-    }
+    if (/^https?:\/\//i.test(text)) return sanitizeHttpUrl(new URL(text));
   } catch {
     return null;
   }
   if (text.startsWith('/') && !text.startsWith('//')) return boundedText(text.split(/[?#]/, 1)[0], 240);
   return null;
+}
+
+function normalizeDocumentReference(value, baseUrl) {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  try {
+    const resolved = baseUrl ? new URL(text, baseUrl) : new URL(text);
+    return sanitizeHttpUrl(resolved);
+  } catch {
+    return null;
+  }
 }
 
 function scriptSummaries(html) {
@@ -140,6 +152,21 @@ function scriptSummaries(html) {
   };
 }
 
+function iframeSummaries(html, baseUrl) {
+  const frames = [];
+  for (const match of html.matchAll(/<iframe\b([^>]*)>/gi)) {
+    const attrs = match[1] || '';
+    const src = normalizeDocumentReference(attributeValue(attrs, 'src'), baseUrl);
+    frames.push({
+      src,
+      name: boundedText(attributeValue(attrs, 'name'), 80),
+      id: boundedText(attributeValue(attrs, 'id'), 80)
+    });
+    if (frames.length >= MAX_LIST_ITEMS) break;
+  }
+  return frames;
+}
+
 function tableSummaries(html) {
   const tables = [];
   for (const tableMatch of html.matchAll(/<table\b[^>]*>([\s\S]*?)<\/table>/gi)) {
@@ -165,7 +192,7 @@ function dataAttributes(html) {
   return unique(names).sort().slice(0, MAX_LIST_ITEMS);
 }
 
-export function inspectXlabsHtml(html) {
+export function inspectXlabsHtml(html, options = {}) {
   const text = String(html || '');
   if (!text.trim()) throw new Error('captured X-Labs HTML is empty');
   const byteLength = new TextEncoder().encode(text).byteLength;
@@ -173,11 +200,13 @@ export function inspectXlabsHtml(html) {
   const titleMatch = text.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
   const scripts = scriptSummaries(text);
   const tables = tableSummaries(text);
+  const iframes = iframeSummaries(text, options.baseUrl);
   const channels = [];
   if (tables.length) channels.push('html_table');
   if (scripts.jsonScripts) channels.push('embedded_json');
   if (scripts.fetchCalls || scripts.xhrMentions || scripts.apiMentions || scripts.candidateEndpoints.length) channels.push('network_or_api_reference');
   if (scripts.hasNextData || scripts.hasWindowAssignedData) channels.push('embedded_application_state');
+  if (iframes.some((frame) => frame.src)) channels.push('iframe_document');
   if (!channels.length) channels.push('static_html_or_unknown');
 
   return {
@@ -192,6 +221,7 @@ export function inspectXlabsHtml(html) {
     },
     candidateDataChannels: channels,
     scripts,
+    iframes,
     tables,
     dataAttributes: dataAttributes(text)
   };
@@ -234,7 +264,7 @@ export async function inspectCapturedXlabs(env, sourceRecordId) {
     contentHash: source.content_hash,
     qualityStatus: source.quality_status,
     metadata: safeMetadata(source.metadata_json),
-    inspection: inspectXlabsHtml(html),
+    inspection: inspectXlabsHtml(html, { baseUrl: source.source_url }),
     normalizedRowsWritten: 0,
     mapperStatus: 'not_implemented'
   };
