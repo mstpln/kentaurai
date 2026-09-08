@@ -1,11 +1,11 @@
 # Build state
 
 Version: 0.5.0
-Phase: verified official live/historical foundation with automatic V85/V86 acquisition
-Status: official calendar/game and ordinary-race acquisition are verified in production; the official multi-year backfill has been started and is running; a real X-Labs race object has been captured and normalized into verified-subset rows in production; automatic upcoming V85/V86 capture/normalization is implemented in PR #40 and awaits merge/deployment authorization
+Phase: verified official live/historical foundation with X-Labs scheduled acquisition/backfill build
+Status: official live acquisition is merged, deployed and production-smoke-tested; the official multi-year backfill is running; a real X-Labs race object has been captured and normalized in production; PR #41 implements scheduled current V85/V86 X-Labs catch-up plus a separate resumable historical X-Labs backfill and awaits merge/deployment authorization
 
 ## Verified foundation
-- D1 core schema, indexes and reference-round extension migrations are provisioned in production.
+- D1 core schema, indexes and reference-round extension migrations are provisioned in production through migration 0005.
 - R2/raw snapshot abstraction preserves exact private source payloads with source/import-run provenance.
 - Manual editorial structured import and `kentaurai-reference-v1` import paths are implemented with public/private separation.
 - Official-provider calendar/day and game capture are implemented with strict HTTPS/host/redirect/content validation.
@@ -20,17 +20,29 @@ Status: official calendar/game and ordinary-race acquisition are verified in pro
 - A one-day official historical production job completed 28 races with zero errors.
 - The production official backfill for 2023-09-08 through 2026-09-07 has been created and observed advancing from its persisted checkpoint with zero errors at the verification point.
 - A real X-Labs race object was captured successfully in production, normalized successfully, and stored as `normalized_verified_subset` with 10 normalized rows covering 10 race entries. The verification endpoint also completed with HTTP 200; the Cloudflare test panel did not expose its response body, so the internal `passed` field was not independently visible in that UI.
-- Automatic live acquisition is implemented for V85/V86 only: morning capture includes the race day and upcoming horizon, evening capture excludes the current day, and normalization advances from durable successful checkpoints.
+- Automatic official live acquisition has been production-smoke-tested: a new V86 snapshot was captured through `/v1/live/capture` and the minute scheduler automatically advanced its first normalization checkpoint.
 
-## Automatic live acquisition
+## Automatic official live acquisition
 - `15 5 * * *` captures the current UTC date plus the next seven dates and discovers only verified V85/V86 eight-leg games.
 - `15 17 * * *` captures upcoming dates but excludes the current date, preserving race-day morning as the final automatic same-day pre-race refresh.
-- `* * * * *` continues one historical backfill checkpoint and one pending live-normalization checkpoint per invocation.
+- `* * * * *` continues one official historical backfill checkpoint and one pending live-normalization checkpoint per invocation.
 - Calendar discovery requires a matching date, V85/V86 game identity, exactly eight race ids and same-date race identities before a game is fetched.
 - Raw calendar and game snapshots are archived before any normalization.
 - Partial capture failures are surfaced as failed import/orchestrator runs rather than reported as success.
 - Live normalization resumes only from successful contiguous entry checkpoints. A partially written entry, duplicate successful retry, or checkpoint gap cannot silently advance or stall the cursor.
 - Admin-only manual live capture/normalize endpoints remain available for explicit refreshes and operational recovery.
+
+## X-Labs scheduled acquisition and backfill in PR #41
+- Migration 0006 adds a separate `xlabs_backfill_jobs` checkpoint table with leases, date/race cursors, unavailable-coverage counters and bounded consecutive-error handling.
+- Historical X-Labs jobs use scope `historical_all`, run newest-first for up to 1,096 days and wait until the matching official-history date is complete before attempting that date.
+- Daily current-data jobs use scope `daily_v85_v86` and target only stored V85/V86 game legs from the previous UTC date. They therefore do not mistake a partially populated ordinary-race day for complete historical coverage.
+- `30 4 * * *` creates/reuses the previous-day V85/V86 X-Labs catch-up job. Daily jobs have priority over the long historical X-Labs job.
+- The existing minute orchestrator advances at most one X-Labs race checkpoint per invocation in addition to the existing official-history/live-normalization work.
+- Date page plus the verified script context are archived/reused before new race-object acquisition; raw race telemetry is archived before normalization.
+- Race/date HTTP 404 is classified as neutral unavailable X-Labs coverage and advances the X-Labs checkpoint without contaminating official facts or model state.
+- Structural, provenance, host/path, payload identity, timeout and normalization failures remain fail-closed and stop at the same checkpoint after three consecutive technical errors.
+- Admin-only `/v1/xlabs/backfill/start`, `/step` and `/status` operations support explicit production smoke tests, resume and monitoring.
+- Historical/current X-Labs acquisition remains complementary: missing X-Labs never invalidates official facts.
 
 ## Private interface
 - `/app` is a private read-only browser interface using `APP_PASSWORD` and a secure HttpOnly session cookie.
@@ -57,6 +69,7 @@ Status: official calendar/game and ordinary-race acquisition are verified in pro
 - The visible logout control and logout endpoint are removed; the private session still expires normally.
 - Approved Sagittarius KentaurAI brand mark remains unchanged; the circular badge uses optical sizing beside the KENTAURAI wordmark.
 - General UI remains minimal/dark with black, grey, brown and beige plus restrained warm accent color.
+- Installable PWA packaging is deliberately deferred until the active data/backfill builds are complete. The known mobile gap is that KentaurAI currently behaves as a browser/home-screen shortcut rather than a true standalone installed app and lacks a dedicated installed-app icon.
 
 ## Entity pages
 - Trainer and driver roles remain separate analytical pages because their measured data and interpretation differ.
@@ -107,7 +120,6 @@ The historical page endpoint strips internal race-entry/race IDs from the browse
 - The observed telemetry contract has no lane field, so slipstream remains null rather than inferred.
 - Raw-vs-normalized verification re-derives every mapped value and requires at least ten representative checks.
 - The earlier date-page and allowlisted script capture/inspection routes remain available for provenance and diagnostics.
-- Historical X-Labs acquisition is **not** part of the 0.5.0 official backfill. X-Labs remains complementary and missing coverage is neutral.
 - Production race-object capture and normalization have been exercised successfully on a real race object. The verification endpoint returned HTTP 200, while its JSON `passed` field could not be directly inspected in the Cloudflare test UI used for the production check.
 
 ## Spel
@@ -139,29 +151,31 @@ The historical page endpoint strips internal race-entry/race IDs from the browse
 - This does not claim historical market snapshots, private editorial material, AI analysis, race-position data or X-Labs telemetry where those sources were not captured.
 
 ## Current verification gate
-1. Full tests and CI must pass on the exact feature-branch/PR head.
-2. Automatic live acquisition must be smoke-tested in production after explicit merge/deployment authorization.
-3. Continue monitoring the already-running official multi-year backfill for checkpoint advancement and errors; no restart is needed while it remains healthy.
-4. Check/import the private reference round if it is still absent from production.
-5. Historical X-Labs acquisition remains a separately gated future capability and must not be described as part of the official backfill.
+1. PR #41 full tests/CI must pass on the exact final head and the exact diff must be reviewed until no blocking issues remain.
+2. After explicit merge authorization, migration 0006 must be applied before the Worker version containing X-Labs scheduling is deployed.
+3. A small safe production X-Labs backfill job must prove checkpoint creation, capture/normalization and neutral-unavailable handling before a multi-year X-Labs job is started.
+4. The multi-year X-Labs backfill must not be started without explicit user authorization after the production smoke gate passes.
+5. Continue monitoring the already-running official multi-year backfill independently.
+6. Check/import the private reference round if it is still absent from production.
 
 ## Next after this build
-1. After explicit authorization, merge/deploy the exact reviewed live-acquisition head.
-2. Confirm the scheduled/manual live path captures and incrementally normalizes a current V85/V86 round without same-day evening refreshes.
-3. Verify tomorrow's V86 has a fresh eight-leg production snapshot and the database/API exposes the expected structured facts for conversational analysis.
-4. Check/import the valid private reference round if still absent.
-5. Continue monitoring the running official backfill rather than creating another overlapping job.
-6. Evaluate separately resumable historical X-Labs acquisition only after its availability window and operational limits are verified; missing X-Labs must remain neutral.
-7. Build deterministic Trend metrics/leaderboards after sufficient verified history exists.
+1. Finish review/fixes/CI for PR #41.
+2. With explicit authorization, merge PR #41, apply migration 0006 and deploy the exact reviewed merge.
+3. Smoke-test a bounded current/historical X-Labs job in production.
+4. With explicit authorization, start the separate historical X-Labs backfill; it will follow official-history readiness rather than outrunning it.
+5. Verify tomorrow/current V85/V86 structured data remains healthy while the background jobs operate.
+6. Check/import the valid private reference round if still absent.
+7. After all active data/backfill builds are complete, build the installable PWA package: manifest, install metadata, standalone behavior and dedicated KentaurAI icons.
+8. Build deterministic Trend metrics/leaderboards after sufficient verified history exists.
 
-## Not yet implemented
+## Not yet implemented / not yet production-enabled
 - verified/persisted shared-person identity across trainer and driver roles; current UI role link is conservative exact-name matching only
 - verified live scratch/withdrawal mapping
 - additional official-provider endpoint patterns not yet observed
-- historical X-Labs acquisition/backfill and verified availability coverage
+- production migration/deployment and execution of the PR #41 X-Labs scheduler/backfill
 - historical trainer/driver/horse trend metrics and leaderboards
-- automatic post-race result collection/review orchestration
-- installable PWA packaging (web manifest, install metadata, standalone launch and dedicated app icons); the current private interface can still behave as a browser shortcut on mobile until this is added
+- automatic post-race review orchestration
+- installable PWA packaging (web manifest, install metadata, standalone launch and dedicated app icons)
 - additional winner-trip categories requiring facts not currently represented in the schema
 - dead-heat-specific presentation pending a verified source example
 - future feature-engine expansion
