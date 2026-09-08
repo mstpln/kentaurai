@@ -12,6 +12,7 @@ function providerBaseUrl(env) {
   if (url.protocol !== 'https:') throw new Error('X-Labs base URL must use https');
   if (url.username || url.password) throw new Error('X-Labs base URL must not contain credentials');
   if (url.hostname.toLowerCase() !== XLABS_HOST) throw new Error('X-Labs base URL must use kmtid.atgx.se');
+  if (url.port && url.port !== '443') throw new Error('X-Labs base URL must use the standard https port');
   url.pathname = url.pathname.replace(/\/$/, '');
   url.search = '';
   url.hash = '';
@@ -24,6 +25,7 @@ function validateRedirectUrl(currentUrl, location) {
   if (target.protocol !== 'https:') throw new Error('X-Labs redirect must use https');
   if (target.username || target.password) throw new Error('X-Labs redirect must not contain credentials');
   if (target.hostname.toLowerCase() !== XLABS_HOST) throw new Error('X-Labs redirect must stay on kmtid.atgx.se');
+  if (target.port && target.port !== '443') throw new Error('X-Labs redirect must use the standard https port');
   target.hash = '';
   return target.toString();
 }
