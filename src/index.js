@@ -5,6 +5,7 @@ import { importReferenceRound } from './import/reference-round-safe.js';
 import { normalizeCapturedOfficialGameSequential } from './import/official-live-sequential.js';
 import { captureCalendar, captureGame } from './provider/official.js';
 import { captureXlabsDate } from './provider/xlabs.js';
+import { captureXlabsRaceJson } from './provider/xlabs-race.js';
 import { captureReferencedXlabsScript, captureXlabsContextScripts, XLABS_SCRIPT_SELECTOR_VERSION } from './provider/xlabs-script.js';
 import { getRound } from './routes/rounds.js';
 import { createHypothesis } from './routes/learning.js';
@@ -141,6 +142,10 @@ async function handleFetch(request, env) {
   if (request.method === 'POST' && path === '/v1/xlabs/capture') {
     const body = await readJson(request);
     return json(await captureXlabsDate(env, body.date), 201);
+  }
+  if (request.method === 'POST' && path === '/v1/xlabs/capture-race-json') {
+    const body = await readJson(request);
+    return json(await captureXlabsRaceJson(env, body.source_record_id, body.track_id, body.race_number), 201);
   }
   if (request.method === 'POST' && path === '/v1/xlabs/capture-script') {
     const body = await readJson(request);
