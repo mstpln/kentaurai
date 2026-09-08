@@ -18,10 +18,10 @@ const silentInitialRender = `renderStart().catch(()=>{});`;
 
 const exactBrandAlignment = `
 <style id="kentaurai-brand-cap-alignment">
-/* Keep the outer Sagittarius badge exactly one brand-font cap-height tall. */
+/* Optical balance: the circular badge is slightly larger than literal cap-height so its visible ring reads at the same height as the KENTAURAI capitals. */
 .brand{font-family:var(--font-brand)!important;font-size:31px!important}
-.brand-badge{width:1cap!important;height:1cap!important;flex-basis:1cap!important}
-.brand-icon{width:.72cap!important;height:.72cap!important}
+.brand-badge{width:1.14cap!important;height:1.14cap!important;flex-basis:1.14cap!important}
+.brand-icon{width:.82cap!important;height:.82cap!important}
 @media(max-width:760px){.brand{font-size:28px!important}}
 @media(max-width:430px){.brand{font-size:27px!important}}
 </style>`;
@@ -29,8 +29,8 @@ const exactBrandAlignment = `
 const loginBrandAlignment = `
 <style id="kentaurai-login-brand-cap-alignment">
 .login .brand{font-family:var(--font-brand)!important;font-size:31px!important}
-.login .brand-badge{width:1cap!important;height:1cap!important;flex-basis:1cap!important}
-.login .brand-icon{width:.72cap!important;height:.72cap!important}
+.login .brand-badge{width:1.14cap!important;height:1.14cap!important;flex-basis:1.14cap!important}
+.login .brand-icon{width:.82cap!important;height:.82cap!important}
 </style>`;
 
 const completeStatsScript = `

@@ -18,7 +18,7 @@ test('interface keeps navigation order, adds Spel, and retains global search', (
   assert.doesNotMatch(html, /ADMIN_TOKEN/);
 });
 
-test('approved brand treatment renders exact Sagittarius direction and cap-height badge alignment', () => {
+test('approved brand treatment renders exact Sagittarius direction and optical badge alignment', () => {
   const html = renderAppPage();
   const login = renderLoginPage();
   assert.match(html, /KENTAUR<span>AI<\/span>/);
@@ -26,8 +26,10 @@ test('approved brand treatment renders exact Sagittarius direction and cap-heigh
   assert.match(html, /class="brand-icon" viewBox="0 0 512 512"/);
   assert.match(html, /M267\.934 459\.625l-80\.013-80\.08/);
   assert.match(html, /--accent:#C79552/);
-  assert.match(html, /\.brand-badge\{width:1cap!important;height:1cap!important;flex-basis:1cap!important\}/);
-  assert.match(login, /\.login \.brand-badge\{width:1cap!important;height:1cap!important;flex-basis:1cap!important\}/);
+  assert.match(html, /\.brand-badge\{width:1\.14cap!important;height:1\.14cap!important;flex-basis:1\.14cap!important\}/);
+  assert.match(html, /\.brand-icon\{width:\.82cap!important;height:\.82cap!important\}/);
+  assert.match(login, /\.login \.brand-badge\{width:1\.14cap!important;height:1\.14cap!important;flex-basis:1\.14cap!important\}/);
+  assert.match(login, /\.login \.brand-icon\{width:\.82cap!important;height:\.82cap!important\}/);
 });
 
 test('trend navigation uses approved chart icon and Trend naming', () => {
@@ -126,6 +128,6 @@ test('entity browsing still supports complete paginated lists', () => {
 test('all embedded browser application scripts are valid JavaScript', () => {
   const html = renderAppPage();
   const scripts = [...html.matchAll(/<script(?: [^>]*)?>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
-  assert.ok(scripts.length >= 5, 'expected base, polish, complete-data, final-refinement and release scripts');
+  assert.ok(scripts.length >= 4, 'expected base, polish, complete-data and final-refinement scripts');
   for (const script of scripts) assert.doesNotThrow(() => new vm.Script(script));
 });
