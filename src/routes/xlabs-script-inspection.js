@@ -212,7 +212,7 @@ function escapeRegExp(value) {
 
 function latestDefinition(text, identifier, beforeIndex, baseUrl) {
   const escaped = escapeRegExp(identifier);
-  const pattern = new RegExp(`(?:^|[;{}\\n])\\s*(?:(?:const|let|var)\\s+)?${escaped}\\s*=\\s*(?!=)`, 'gm');
+  const pattern = new RegExp(`(?:^|[;{}\\n>])\\s*(?:(?:const|let|var)\\s+)?${escaped}\\s*=\\s*(?!=)`, 'gm');
   let latest = null;
   for (const match of text.slice(0, beforeIndex).matchAll(pattern)) latest = match;
   if (!latest) return null;
@@ -341,18 +341,26 @@ async function readContextSources(env, source, metadata) {
 
 function contextDefinitionsForShape(shape, contextSources, baseUrl) {
   const results = [];
+  const seen = new Set();
   for (const identifier of shape.unresolvedIdentifiers || []) {
     for (const context of contextSources) {
-      const definition = latestDefinition(context.text, identifier, context.text.length, baseUrl);
-      if (!definition) continue;
-      results.push({ source: context.source, ...definition });
-      if (results.length >= MAX_DEFINITIONS) return results;
+      const definitions = definitionSummaries(context.text, [identifier], context.text.length, baseUrl);
+      if (!definitions.length) continue;
+      for (const definition of definitions) {
+        const key = `${context.source}:${definition.identifier}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        results.push({ source: context.source, ...definition });
+        if (results.length >= MAX_DEFINITIONS) return results;
+      }
+      break;
     }
   }
   return results;
 }
 
 function buildRequestRecipe(shape) {
+  const contextDefined = new Set((shape.contextDefinitions || []).map((definition) => definition.identifier));
   return {
     kind: shape.kind,
     requestParts: shape.parts || [],
@@ -367,7 +375,7 @@ function buildRequestRecipe(shape) {
       parts: definition.parts || [],
       identifiers: definition.identifiers || []
     })),
-    unresolvedIdentifiers: shape.unresolvedIdentifiers || []
+    unresolvedIdentifiers: (shape.unresolvedIdentifiers || []).filter((identifier) => !contextDefined.has(identifier))
   };
 }
 
