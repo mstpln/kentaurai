@@ -7,7 +7,6 @@ import { captureXlabsRaceJson } from '../provider/xlabs-race.js';
 
 const BACKFILL_VERSION = 'xlabs-race-v1';
 const MAX_RANGE_DAYS = 1096;
-const MAX_EMPTY_DATES_PER_STEP = 14;
 const NORMALIZED_QUALITY = 'normalized_verified_subset';
 
 function addDays(date, days) {
@@ -96,7 +95,7 @@ async function advanceDate(env, job, leaseToken, { unavailableDate = false } = {
 
 async function racesForDate(env, date) {
   const { results } = await env.DB.prepare(`
-    SELECT r.id AS race_id, CAST(tx.external_id AS INTEGER) AS track_id, r.race_number
+    SELECT r.id AS race_id, tx.external_id AS track_id, r.race_number
     FROM races r
     JOIN tracks t ON t.id = r.track_id
     JOIN track_external_ids tx ON tx.track_id = r.track_id
@@ -107,7 +106,12 @@ async function racesForDate(env, date) {
       AND EXISTS (SELECT 1 FROM race_entries re WHERE re.race_id = r.id)
     ORDER BY CAST(tx.external_id AS INTEGER), r.race_number, r.id
   `).bind(date).all();
-  return results.filter((row) => Number.isInteger(Number(row.track_id)) && Number(row.track_id) >= 1 && Number(row.track_id) <= 99 && Number.isInteger(Number(row.race_number)) && Number(row.race_number) >= 1 && Number(row.race_number) <= 99);
+  return results.filter((row) => {
+    const trackId = Number(row.track_id);
+    const raceNumber = Number(row.race_number);
+    return Number.isInteger(trackId) && trackId >= 1 && trackId <= 99 &&
+      Number.isInteger(raceNumber) && raceNumber >= 1 && raceNumber <= 99;
+  });
 }
 
 async function latestSource(env, sourceType, externalId) {
@@ -147,7 +151,7 @@ async function ensureDateContext(env, date, options, counts) {
     } else counts.skipped += 1;
     captures[scriptName] = script;
   }
-  return { unavailable: false, parentSourceRecordId: parent.id, calculateSourceRecordId: captures['calculate.js'].id };
+  return { unavailable: false, calculateSourceRecordId: captures['calculate.js'].id };
 }
 
 async function sourceForRace(env, date, trackId, raceNumber) {
@@ -185,7 +189,7 @@ async function recordCompletedRace(env, job, leaseToken, reused) {
 export async function runXlabsBackfillStep(env, jobId = null, options = {}) {
   if (!env.DB) throw new Error('DB is not configured');
   if (!env.RAW_BUCKET?.get || !env.RAW_BUCKET?.put) throw new Error('RAW_BUCKET read/write access is not configured');
-  let job = jobId
+  const job = jobId
     ? await loadJob(env, jobId)
     : await env.DB.prepare(`
         SELECT * FROM xlabs_backfill_jobs
@@ -203,85 +207,83 @@ export async function runXlabsBackfillStep(env, jobId = null, options = {}) {
   });
   const counts = { inserted: 0, updated: 0, skipped: 0, errors: 0 };
   try {
-    for (let skippedDates = 0; skippedDates < MAX_EMPTY_DATES_PER_STEP; skippedDates += 1) {
-      const races = await racesForDate(env, job.next_date);
-      if (races.length === 0) {
-        const completed = await advanceDate(env, job, leaseToken);
-        if (completed) {
-          await finishImportRun(env, run.id, counts);
-          return { importRunId: run.id, jobId: job.id, status: 'completed', done: true };
-        }
-        job = await loadJob(env, job.id);
-        const reacquired = await acquireLease(env, job);
-        if (!reacquired) throw new Error('X-Labs backfill could not reacquire lease after empty date');
-        job.lease_token = reacquired;
-        continue;
-      }
-
-      const context = await ensureDateContext(env, job.next_date, options, counts);
-      if (context.unavailable) {
-        const completed = await advanceDate(env, job, leaseToken, { unavailableDate: true });
-        await finishImportRun(env, run.id, counts);
-        return { importRunId: run.id, jobId: job.id, status: completed ? 'completed' : 'running', unavailableDate: job.next_date, done: completed };
-      }
-
-      if (job.next_race_index >= races.length) {
-        const completed = await advanceDate(env, job, leaseToken);
-        await finishImportRun(env, run.id, counts);
-        return { importRunId: run.id, jobId: job.id, status: completed ? 'completed' : 'running', done: completed };
-      }
-
-      const race = races[job.next_race_index];
-      let source = await sourceForRace(env, job.next_date, Number(race.track_id), Number(race.race_number));
-      let reused = Boolean(source?.quality_status === NORMALIZED_QUALITY);
-
-      if (!source) {
-        try {
-          const captured = await captureXlabsRaceJson(env, context.calculateSourceRecordId, Number(race.track_id), Number(race.race_number), {
-            fetchImpl: options.raceFetchImpl ?? options.fetchImpl,
-            timeoutMs: options.timeoutMs
-          });
-          source = { id: captured.sourceRecordId, quality_status: captured.qualityStatus };
-          counts.inserted += Number(!captured.reused);
-          counts.skipped += Number(captured.reused);
-        } catch (error) {
-          if (error?.code === 'XLABS_NOT_FOUND') {
-            const nextIndex = await recordUnavailableRace(env, job, leaseToken);
-            await finishImportRun(env, run.id, counts);
-            return {
-              importRunId: run.id,
-              jobId: job.id,
-              status: 'running',
-              checkpoint: { date: job.next_date, nextRaceIndex: nextIndex },
-              raceId: race.race_id,
-              unavailableRace: true,
-              done: false
-            };
-          }
-          throw error;
-        }
-      }
-
-      if (source.quality_status !== NORMALIZED_QUALITY) {
-        const normalized = await normalizeCapturedXlabsRace(env, source.id);
-        counts.updated += 1;
-        reused = normalized.counts.inserted === 0;
-      } else counts.skipped += 1;
-
-      const nextIndex = await recordCompletedRace(env, job, leaseToken, reused);
+    const races = await racesForDate(env, job.next_date);
+    if (races.length === 0 || job.next_race_index >= races.length) {
+      const completed = await advanceDate(env, job, leaseToken);
       await finishImportRun(env, run.id, counts);
       return {
         importRunId: run.id,
         jobId: job.id,
-        status: 'running',
-        checkpoint: { date: job.next_date, nextRaceIndex: nextIndex },
-        raceId: race.race_id,
-        sourceRecordId: source.id,
-        reused,
-        done: false
+        status: completed ? 'completed' : 'running',
+        advancedDate: job.next_date,
+        done: completed
       };
     }
-    throw new Error(`no normalized Swedish races found within ${MAX_EMPTY_DATES_PER_STEP} X-Labs checkpoint dates`);
+
+    const context = await ensureDateContext(env, job.next_date, options, counts);
+    if (context.unavailable) {
+      const completed = await advanceDate(env, job, leaseToken, { unavailableDate: true });
+      await finishImportRun(env, run.id, counts);
+      return {
+        importRunId: run.id,
+        jobId: job.id,
+        status: completed ? 'completed' : 'running',
+        unavailableDate: job.next_date,
+        done: completed
+      };
+    }
+
+    const race = races[job.next_race_index];
+    const trackId = Number(race.track_id);
+    const raceNumber = Number(race.race_number);
+    let source = await sourceForRace(env, job.next_date, trackId, raceNumber);
+    let reused = Boolean(source?.quality_status === NORMALIZED_QUALITY);
+
+    if (!source) {
+      try {
+        const captured = await captureXlabsRaceJson(env, context.calculateSourceRecordId, trackId, raceNumber, {
+          fetchImpl: options.raceFetchImpl ?? options.fetchImpl,
+          timeoutMs: options.timeoutMs
+        });
+        source = { id: captured.sourceRecordId, quality_status: captured.qualityStatus };
+        counts.inserted += Number(!captured.reused);
+        counts.skipped += Number(captured.reused);
+      } catch (error) {
+        if (error?.code === 'XLABS_NOT_FOUND') {
+          const nextIndex = await recordUnavailableRace(env, job, leaseToken);
+          await finishImportRun(env, run.id, counts);
+          return {
+            importRunId: run.id,
+            jobId: job.id,
+            status: 'running',
+            checkpoint: { date: job.next_date, nextRaceIndex: nextIndex },
+            raceId: race.race_id,
+            unavailableRace: true,
+            done: false
+          };
+        }
+        throw error;
+      }
+    }
+
+    if (source.quality_status !== NORMALIZED_QUALITY) {
+      const normalized = await normalizeCapturedXlabsRace(env, source.id);
+      counts.updated += 1;
+      reused = normalized.counts.inserted === 0;
+    } else counts.skipped += 1;
+
+    const nextIndex = await recordCompletedRace(env, job, leaseToken, reused);
+    await finishImportRun(env, run.id, counts);
+    return {
+      importRunId: run.id,
+      jobId: job.id,
+      status: 'running',
+      checkpoint: { date: job.next_date, nextRaceIndex: nextIndex },
+      raceId: race.race_id,
+      sourceRecordId: source.id,
+      reused,
+      done: false
+    };
   } catch (error) {
     counts.errors = 1;
     await env.DB.prepare(`
