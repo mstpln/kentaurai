@@ -23,8 +23,14 @@ const exactBrandAlignment = `
 @media(max-width:430px){.brand{font-size:27px!important}}
 </style>`;
 
+const completeStatsScript = `
+<script id="kentaurai-complete-stats-script">
+statsView=function(detail){const s=detail.stats||{};return '<div class="data-groups">'+dataSection('Resultat',[['Starter med resultat',s.resultStarts],['Vinster',s.wins],['Andraplatser',s.seconds],['Tredjeplatser',s.thirds],['Topp 3',s.top3],['Vinstprocent',pct(s.winRate)],['Topp 3-procent',pct(s.top3Rate)],['Prispengar',money(s.prizeSek)]])+dataSection('Galopp & diskvalifikation',[['Galopper',s.gallops],['Galopp %',pct(s.gallopRate)],['Diskvalifikationer',s.disqualifications]])+'<div class="breakdown-grid">'+breakdown('Startmetod',detail.breakdowns?.startMethods,r=>localStartMethod(r))+breakdown('Distans',detail.breakdowns?.distances,r=>r==='unknown'?'Okänd':r+' m')+breakdown('Bana',detail.breakdowns?.tracks)+'</div></div>'};
+</script>`;
+
 export function renderAppPage() {
   return renderFinalAppPage()
     .replace(gameBackBefore, gameBackAfter)
-    .replace('</head>', `${exactBrandAlignment}</head>`);
+    .replace('</head>', `${exactBrandAlignment}</head>`)
+    .replace('</body>', `${completeStatsScript}</body>`);
 }
