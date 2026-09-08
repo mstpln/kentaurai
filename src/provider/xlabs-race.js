@@ -1,5 +1,6 @@
 import { archiveRawSnapshot } from '../raw.js';
 import { finishImportRun, startImportRun } from '../import/common.js';
+import { validateXlabsDate } from './xlabs.js';
 import { resolveCapturedXlabsRequestPath } from '../routes/xlabs-path-resolution.js';
 
 const XLABS_HOST = 'kmtid.atgx.se';
@@ -14,13 +15,18 @@ function positiveInteger(value, name, max) {
   return number;
 }
 
-function validateResolvedBaseUrl(value) {
+function compactDate(date) {
+  return validateXlabsDate(date).slice(2).replaceAll('-', '');
+}
+
+function validateResolvedBaseUrl(value, date) {
   const url = new URL(value);
   if (url.protocol !== 'https:') throw new Error('resolved X-Labs race-data URL must use https');
   if (url.username || url.password) throw new Error('resolved X-Labs race-data URL must not contain credentials');
   if (url.hostname.toLowerCase() !== XLABS_HOST) throw new Error('resolved X-Labs race-data URL must use kmtid.atgx.se');
   if (url.port && url.port !== '443') throw new Error('resolved X-Labs race-data URL must use the standard https port');
-  if (!url.pathname.endsWith('/json/')) throw new Error('resolved X-Labs race-data URL must end in /json/');
+  const expectedPath = `/${compactDate(date)}/json/`;
+  if (url.pathname !== expectedPath) throw new Error(`resolved X-Labs race-data URL must use ${expectedPath}`);
   url.search = '';
   url.hash = '';
   return url;
@@ -57,25 +63,28 @@ async function loadCaptureContext(env, calculateSourceRecordId) {
   if (!parent) throw new Error('captured X-Labs parent source record was not found');
   const parentMetadata = parseMetadata(parent.metadata_json);
   const date = typeof parentMetadata.date === 'string' ? parentMetadata.date : null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date || '')) throw new Error('captured X-Labs parent source is missing a valid date');
+  try { validateXlabsDate(date); } catch { throw new Error('captured X-Labs parent source is missing a valid date'); }
   return { parentId, date };
 }
 
 export function buildXlabsRaceFileName(date, trackId, raceNumber) {
-  const match = String(date || '').match(/^\d{4}-(\d{2})-(\d{2})$/);
-  if (!match) throw new Error('date must use YYYY-MM-DD');
+  const normalized = validateXlabsDate(date);
   const track = positiveInteger(trackId, 'track_id', 999);
   const race = positiveInteger(raceNumber, 'race_number', 99);
-  return `${match[1]}${match[2]}${track}1${String(race).padStart(2, '0')}.json`;
+  const month = normalized.slice(5, 7);
+  const day = normalized.slice(8, 10);
+  return `${month}${day}${track}1${String(race).padStart(2, '0')}.json`;
 }
 
-function validateRedirectUrl(currentUrl, location) {
+function validateRedirectUrl(currentUrl, location, expectedPathname) {
   if (!location) throw new Error('X-Labs race-data redirect did not include a location');
   const target = new URL(location, currentUrl);
   if (target.protocol !== 'https:') throw new Error('X-Labs race-data redirect must use https');
   if (target.username || target.password) throw new Error('X-Labs race-data redirect must not contain credentials');
   if (target.hostname.toLowerCase() !== XLABS_HOST) throw new Error('X-Labs race-data redirect must stay on kmtid.atgx.se');
   if (target.port && target.port !== '443') throw new Error('X-Labs race-data redirect must use the standard https port');
+  if (target.pathname !== expectedPathname) throw new Error('X-Labs race-data redirect must preserve the verified race file path');
+  target.search = '';
   target.hash = '';
   return target.toString();
 }
@@ -83,6 +92,7 @@ function validateRedirectUrl(currentUrl, location) {
 async function fetchJsonText(url, fetchImpl) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12_000);
+  const expectedPathname = new URL(url).pathname;
   let currentUrl = url;
   let redirects = 0;
   try {
@@ -95,11 +105,13 @@ async function fetchJsonText(url, fetchImpl) {
       });
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         if (redirects >= MAX_REDIRECTS) throw new Error('X-Labs race-data capture exceeded redirect limit');
-        currentUrl = validateRedirectUrl(currentUrl, response.headers.get('location'));
+        currentUrl = validateRedirectUrl(currentUrl, response.headers.get('location'), expectedPathname);
         redirects += 1;
         continue;
       }
       if (!response.ok) throw new Error(`X-Labs race data returned HTTP ${response.status}`);
+      const type = (response.headers.get('content-type') || '').toLowerCase();
+      if (type && !type.includes('json') && !type.includes('text/plain')) throw new Error('X-Labs race-data response had an unexpected content type');
       const declared = Number(response.headers.get('content-length'));
       if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) throw new Error('X-Labs race-data response exceeded size limit');
       const body = await response.text();
@@ -146,7 +158,7 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
   if (pathResolution.status !== 'resolved_static' || !pathResolution.resolvedBaseUrl) {
     throw new Error(`X-Labs race-data path is not uniquely resolved (${pathResolution.status})`);
   }
-  const baseUrl = validateResolvedBaseUrl(pathResolution.resolvedBaseUrl);
+  const baseUrl = validateResolvedBaseUrl(pathResolution.resolvedBaseUrl, date);
   const track = positiveInteger(trackId, 'track_id', 999);
   const race = positiveInteger(raceNumber, 'race_number', 99);
   const fileName = buildXlabsRaceFileName(date, track, race);
