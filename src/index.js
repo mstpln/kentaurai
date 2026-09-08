@@ -5,7 +5,7 @@ import { importReferenceRound } from './import/reference-round-safe.js';
 import { normalizeCapturedOfficialGameSequential } from './import/official-live-sequential.js';
 import { captureCalendar, captureGame } from './provider/official.js';
 import { captureXlabsDate } from './provider/xlabs.js';
-import { captureReferencedXlabsScript } from './provider/xlabs-script.js';
+import { captureReferencedXlabsScript, XLABS_SCRIPT_SELECTOR_VERSION } from './provider/xlabs-script.js';
 import { getRound } from './routes/rounds.js';
 import { createHypothesis } from './routes/learning.js';
 import { verifyCapturedOfficialNormalization } from './routes/official-verification.js';
@@ -123,7 +123,7 @@ async function handleApp(request, env, url) {
 async function handleFetch(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
-  if (request.method === 'GET' && path === '/health') return json({ ok: true, service: 'kentaurai-api', version: '0.4.5' });
+  if (request.method === 'GET' && path === '/health') return json({ ok: true, service: 'kentaurai-api', version: '0.4.5', xlabsScriptSelector: XLABS_SCRIPT_SELECTOR_VERSION });
   if (path === '/') return redirectResponse('/app');
   if (path.startsWith('/app')) return handleApp(request, env, url);
   if (path.startsWith('/v1/')) {
