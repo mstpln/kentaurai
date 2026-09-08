@@ -2,6 +2,9 @@ const SOURCE_TYPE = 'xlabs_script';
 const MAX_SCRIPT_BYTES = 2 * 1024 * 1024;
 const MAX_ITEMS = 40;
 const MAX_LABEL = 240;
+const MAX_EXPRESSION_CHARS = 600;
+const MAX_DEFINITIONS = 12;
+const MAX_DEFINITION_DEPTH = 2;
 
 function unique(values) {
   return [...new Set(values.filter(Boolean))];
@@ -34,6 +37,16 @@ function sanitizeUrl(value, baseUrl) {
   } catch {
     return null;
   }
+}
+
+function sanitizeLiteralComponent(value, baseUrl) {
+  const raw = String(value || '');
+  if (/^(?:https?:)?\/\//i.test(raw)) {
+    const resolved = sanitizeUrl(raw, baseUrl);
+    if (resolved) return resolved;
+  }
+  const text = raw.split(/[?#]/, 1)[0];
+  return compact(text, 120);
 }
 
 function count(text, pattern) {
@@ -80,6 +93,164 @@ function keywordCounts(text) {
   return output;
 }
 
+function firstArgument(text, openParenIndex) {
+  let quote = null;
+  let escaped = false;
+  let depth = 0;
+  let out = '';
+  for (let i = openParenIndex + 1; i < text.length && out.length < MAX_EXPRESSION_CHARS; i += 1) {
+    const ch = text[i];
+    if (quote) {
+      out += ch;
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+    if (ch === '(' || ch === '[' || ch === '{') {
+      depth += 1;
+      out += ch;
+      continue;
+    }
+    if (ch === ')' && depth === 0) return out.trim();
+    if (ch === ',' && depth === 0) return out.trim();
+    if (ch === ')' || ch === ']' || ch === '}') depth = Math.max(0, depth - 1);
+    out += ch;
+  }
+  return out.trim();
+}
+
+function assignedExpression(text, startIndex) {
+  let quote = null;
+  let escaped = false;
+  let depth = 0;
+  let out = '';
+  for (let i = startIndex; i < text.length && out.length < MAX_EXPRESSION_CHARS; i += 1) {
+    const ch = text[i];
+    if (quote) {
+      out += ch;
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+    if (ch === '(' || ch === '[' || ch === '{') {
+      depth += 1;
+      out += ch;
+      continue;
+    }
+    if ((ch === ';' || ch === '\n') && depth === 0) return out.trim();
+    if (ch === ')' || ch === ']' || ch === '}') depth = Math.max(0, depth - 1);
+    out += ch;
+  }
+  return out.trim();
+}
+
+function summarizeExpression(expression, baseUrl) {
+  const text = String(expression || '').trim();
+  if (!text) return null;
+
+  const singleLiteral = text.match(/^(['"`])([^'"`]*)\1$/);
+  if (singleLiteral) {
+    const resolvedUrl = sanitizeUrl(singleLiteral[2], baseUrl);
+    return {
+      expressionType: 'literal',
+      identifiers: [],
+      literals: resolvedUrl ? [{ kind: 'url', value: resolvedUrl }] : []
+    };
+  }
+
+  const withoutQuotedStrings = text.replace(/(['"`])(?:\\.|(?!\1).)*\1/g, ' ');
+  const identifiers = unique([...withoutQuotedStrings.matchAll(/\b[A-Za-z_$][A-Za-z0-9_$]*\b/g)].map((m) => m[0]))
+    .filter((value) => !['true', 'false', 'null', 'undefined'].includes(value))
+    .slice(0, 20);
+  const literals = [];
+  for (const match of text.matchAll(/(['"`])([^'"`]{0,500})\1/g)) {
+    const value = sanitizeLiteralComponent(match[2], baseUrl);
+    if (value) literals.push({ kind: 'string', value });
+    if (literals.length >= 20) break;
+  }
+  return {
+    expressionType: 'dynamic',
+    identifiers,
+    literals
+  };
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function latestDefinition(text, identifier, beforeIndex, baseUrl) {
+  const escaped = escapeRegExp(identifier);
+  const pattern = new RegExp(`(?:^|[;{}\\n])\\s*(?:(?:const|let|var)\\s+)?${escaped}\\s*=\\s*(?!=)`, 'gm');
+  let latest = null;
+  for (const match of text.slice(0, beforeIndex).matchAll(pattern)) latest = match;
+  if (!latest) return null;
+  const expressionStart = (latest.index || 0) + latest[0].length;
+  const summary = summarizeExpression(assignedExpression(text, expressionStart), baseUrl);
+  return summary ? { identifier, ...summary } : null;
+}
+
+function definitionSummaries(text, identifiers, beforeIndex, baseUrl) {
+  const definitions = [];
+  const visited = new Set();
+  let frontier = identifiers.map((identifier) => ({ identifier, depth: 0 }));
+
+  while (frontier.length && definitions.length < MAX_DEFINITIONS) {
+    const next = [];
+    for (const item of frontier) {
+      if (visited.has(item.identifier) || item.depth >= MAX_DEFINITION_DEPTH) continue;
+      visited.add(item.identifier);
+      const definition = latestDefinition(text, item.identifier, beforeIndex, baseUrl);
+      if (!definition) continue;
+      definitions.push(definition);
+      for (const nested of definition.identifiers) {
+        if (!visited.has(nested)) next.push({ identifier: nested, depth: item.depth + 1 });
+      }
+      if (definitions.length >= MAX_DEFINITIONS) break;
+    }
+    frontier = next;
+  }
+  return definitions;
+}
+
+function requestArgumentShapes(text, baseUrl) {
+  const patterns = [
+    ['fetch', /\bfetch\s*\(/g],
+    ['jquery_get_json', /\$\.getJSON\s*\(/g],
+    ['jquery_get', /\$\.get\s*\(/g],
+    ['jquery_post', /\$\.post\s*\(/g]
+  ];
+  const items = [];
+  for (const [kind, pattern] of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const callIndex = match.index || 0;
+      const openParen = callIndex + match[0].lastIndexOf('(');
+      const summary = summarizeExpression(firstArgument(text, openParen), baseUrl);
+      if (summary) {
+        items.push({
+          kind,
+          ...summary,
+          definitions: definitionSummaries(text, summary.identifiers, callIndex, baseUrl)
+        });
+      }
+      if (items.length >= MAX_ITEMS) return items;
+    }
+  }
+  return items;
+}
+
 export function inspectXlabsScriptText(script, options = {}) {
   const text = String(script || '');
   if (!text.trim()) throw new Error('captured X-Labs script is empty');
@@ -98,6 +269,7 @@ export function inspectXlabsScriptText(script, options = {}) {
       jqueryPost: count(text, /\$\.post\s*\(/g)
     },
     literalNetworkReferences: literalNetworkReferences(text, baseUrl),
+    requestArgumentShapes: requestArgumentShapes(text, baseUrl),
     candidateEndpoints: candidateEndpoints(text, baseUrl),
     keywordCounts: keywordCounts(text)
   };
