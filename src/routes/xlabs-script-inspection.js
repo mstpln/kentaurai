@@ -2,6 +2,7 @@ const SOURCE_TYPE = 'xlabs_script';
 const MAX_SCRIPT_BYTES = 2 * 1024 * 1024;
 const MAX_ITEMS = 40;
 const MAX_LABEL = 240;
+const MAX_EXPRESSION_CHARS = 600;
 
 function unique(values) {
   return [...new Set(values.filter(Boolean))];
@@ -80,6 +81,81 @@ function keywordCounts(text) {
   return output;
 }
 
+function firstArgument(text, openParenIndex) {
+  let quote = null;
+  let escaped = false;
+  let depth = 0;
+  let out = '';
+  for (let i = openParenIndex + 1; i < text.length && out.length < MAX_EXPRESSION_CHARS; i += 1) {
+    const ch = text[i];
+    if (quote) {
+      out += ch;
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+    if (ch === '(' || ch === '[' || ch === '{') {
+      depth += 1;
+      out += ch;
+      continue;
+    }
+    if (ch === ')' && depth === 0) return out.trim();
+    if (ch === ',' && depth === 0) return out.trim();
+    if (ch === ')' || ch === ']' || ch === '}') depth = Math.max(0, depth - 1);
+    out += ch;
+  }
+  return out.trim();
+}
+
+function summarizeExpression(expression, baseUrl) {
+  const text = String(expression || '').trim();
+  if (!text) return null;
+  const identifiers = unique([...text.matchAll(/\b[A-Za-z_$][A-Za-z0-9_$]*\b/g)].map((m) => m[0]))
+    .filter((value) => !['true', 'false', 'null', 'undefined'].includes(value))
+    .slice(0, 20);
+  const literals = [];
+  for (const match of text.matchAll(/(['"`])([^'"`]{0,500})\1/g)) {
+    const raw = match[2];
+    const resolvedUrl = sanitizeUrl(raw, baseUrl);
+    if (resolvedUrl) literals.push({ kind: 'url', value: resolvedUrl });
+    else {
+      const pathOnly = raw.split(/[?#]/, 1)[0];
+      if (pathOnly) literals.push({ kind: 'string', value: compact(pathOnly, 120) });
+    }
+    if (literals.length >= 20) break;
+  }
+  return {
+    expressionType: literals.length === 1 && identifiers.length === 0 ? 'literal' : 'dynamic',
+    identifiers,
+    literals
+  };
+}
+
+function requestArgumentShapes(text, baseUrl) {
+  const patterns = [
+    ['fetch', /\bfetch\s*\(/g],
+    ['jquery_get_json', /\$\.getJSON\s*\(/g],
+    ['jquery_get', /\$\.get\s*\(/g],
+    ['jquery_post', /\$\.post\s*\(/g]
+  ];
+  const items = [];
+  for (const [kind, pattern] of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const openParen = (match.index || 0) + match[0].lastIndexOf('(');
+      const summary = summarizeExpression(firstArgument(text, openParen), baseUrl);
+      if (summary) items.push({ kind, ...summary });
+      if (items.length >= MAX_ITEMS) return items;
+    }
+  }
+  return items;
+}
+
 export function inspectXlabsScriptText(script, options = {}) {
   const text = String(script || '');
   if (!text.trim()) throw new Error('captured X-Labs script is empty');
@@ -98,6 +174,7 @@ export function inspectXlabsScriptText(script, options = {}) {
       jqueryPost: count(text, /\$\.post\s*\(/g)
     },
     literalNetworkReferences: literalNetworkReferences(text, baseUrl),
+    requestArgumentShapes: requestArgumentShapes(text, baseUrl),
     candidateEndpoints: candidateEndpoints(text, baseUrl),
     keywordCounts: keywordCounts(text)
   };
