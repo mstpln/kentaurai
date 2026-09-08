@@ -1,6 +1,7 @@
 const SOURCE_TYPE = 'xlabs';
 const MAX_LIST_ITEMS = 20;
 const MAX_LABEL_LENGTH = 120;
+const MAX_HTML_BYTES = 8 * 1024 * 1024;
 
 function unique(values) {
   return [...new Set(values.filter(Boolean))];
@@ -144,7 +145,8 @@ function tableSummaries(html) {
   for (const tableMatch of html.matchAll(/<table\b[^>]*>([\s\S]*?)<\/table>/gi)) {
     const tableHtml = tableMatch[1] || '';
     const headers = [];
-    for (const th of tableHtml.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/gi)) {
+    const thead = tableHtml.match(/<thead\b[^>]*>([\s\S]*?)<\/thead>/i)?.[1] || '';
+    for (const th of thead.matchAll(/<th\b[^>]*>([\s\S]*?)<\/th>/gi)) {
       const text = stripTags(th[1]);
       if (text) headers.push(text);
     }
@@ -166,6 +168,8 @@ function dataAttributes(html) {
 export function inspectXlabsHtml(html) {
   const text = String(html || '');
   if (!text.trim()) throw new Error('captured X-Labs HTML is empty');
+  const byteLength = new TextEncoder().encode(text).byteLength;
+  if (byteLength > MAX_HTML_BYTES) throw new Error('captured X-Labs HTML exceeded inspection size limit');
   const titleMatch = text.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
   const scripts = scriptSummaries(text);
   const tables = tableSummaries(text);
@@ -177,7 +181,7 @@ export function inspectXlabsHtml(html) {
   if (!channels.length) channels.push('static_html_or_unknown');
 
   return {
-    byteLength: new TextEncoder().encode(text).byteLength,
+    byteLength,
     title: titleMatch ? stripTags(titleMatch[1]) : null,
     counts: {
       tables: countMatches(text, /<table\b/gi),
