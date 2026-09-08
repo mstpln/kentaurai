@@ -22,6 +22,12 @@ function validateXlabsUrl(value) {
   return url;
 }
 
+function sanitizedUrl(value) {
+  const url = validateXlabsUrl(value);
+  url.search = '';
+  return url.toString();
+}
+
 function scriptCandidates(html, baseUrl) {
   const candidates = [];
   for (const match of String(html || '').matchAll(/<script\b([^>]*)>[\s\S]*?<\/script>/gi)) {
@@ -140,7 +146,7 @@ export async function captureReferencedXlabsScript(env, sourceRecordId, scriptNa
       parentSourceRecordId: parent.id,
       scriptName,
       fetchedAt,
-      url: fetched.finalUrl,
+      url: sanitizedUrl(fetched.finalUrl),
       redirectCount: fetched.redirectCount,
       reused: archived.reused,
       normalizationStatus: 'not_implemented'
