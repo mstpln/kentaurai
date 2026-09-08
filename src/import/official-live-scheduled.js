@@ -6,6 +6,8 @@ const GAME_TYPES = ['V85', 'V86'];
 const DEFAULT_DAYS_AHEAD = 7;
 const SOURCE_TYPE = 'official_provider';
 const PENDING_QUALITY = 'captured_unmapped';
+const AUTO_NORMALIZE_SOURCE_TYPE = 'official_live_normalize_auto';
+const MAX_AUTO_NORMALIZE_FAILURES = 3;
 
 function dateFromInstant(value) {
   const instant = new Date(value ?? Date.now());
@@ -143,27 +145,52 @@ export async function completedNormalizationCursor(env, sourceRecordId) {
   return results.length;
 }
 
+export async function selectPendingOfficialGameSource(env) {
+  if (!env.DB) throw new Error('DB is not configured');
+  return env.DB.prepare(`
+    SELECT sr.id, sr.external_id, sr.fetched_at
+    FROM source_records sr
+    WHERE sr.source_type = ? AND sr.quality_status = ?
+      AND (sr.external_id LIKE 'game:V85\\_%' ESCAPE '\\' OR sr.external_id LIKE 'game:V86\\_%' ESCAPE '\\')
+      AND (
+        SELECT COUNT(*)
+        FROM import_runs ir
+        WHERE ir.source_type = ?
+          AND ir.status = 'failed'
+          AND json_extract(ir.metadata_json, '$.sourceRecordId') = sr.id
+      ) < ?
+    ORDER BY sr.fetched_at, sr.id
+    LIMIT 1
+  `).bind(SOURCE_TYPE, PENDING_QUALITY, AUTO_NORMALIZE_SOURCE_TYPE, MAX_AUTO_NORMALIZE_FAILURES).first();
+}
+
 export async function normalizeNextPendingOfficialGame(env) {
   if (!env.DB) throw new Error('DB is not configured');
-  const source = await env.DB.prepare(`
-    SELECT id, external_id, fetched_at
-    FROM source_records
-    WHERE source_type = ? AND quality_status = ?
-      AND (external_id LIKE 'game:V85\\_%' ESCAPE '\\' OR external_id LIKE 'game:V86\\_%' ESCAPE '\\')
-    ORDER BY fetched_at, id
-    LIMIT 1
-  `).bind(SOURCE_TYPE, PENDING_QUALITY).first();
+  const source = await selectPendingOfficialGameSource(env);
   if (!source) return { status: 'idle', done: true };
 
   const cursor = await completedNormalizationCursor(env, source.id);
-  const normalized = await normalizeCapturedOfficialGameSequential(env, source.id, cursor);
-  return {
-    status: normalized.done ? 'completed_source' : 'running_source',
-    done: normalized.done === true,
+  const run = await startImportRun(env, AUTO_NORMALIZE_SOURCE_TYPE, {
     sourceRecordId: source.id,
     externalId: source.external_id,
-    fetchedAt: source.fetched_at,
-    cursor,
-    normalized
-  };
+    cursor
+  });
+  const counts = { inserted: 0, updated: 0, skipped: 0, errors: 0 };
+  try {
+    const normalized = await normalizeCapturedOfficialGameSequential(env, source.id, cursor);
+    await finishImportRun(env, run.id, counts);
+    return {
+      status: normalized.done ? 'completed_source' : 'running_source',
+      done: normalized.done === true,
+      sourceRecordId: source.id,
+      externalId: source.external_id,
+      fetchedAt: source.fetched_at,
+      cursor,
+      normalized
+    };
+  } catch (error) {
+    counts.errors = 1;
+    await finishImportRun(env, run.id, counts, error);
+    throw error;
+  }
 }
