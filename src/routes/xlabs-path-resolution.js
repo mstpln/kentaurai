@@ -161,6 +161,23 @@ function tokenizeExpression(expression, baseUrl) {
   return parts;
 }
 
+function hasTemplateInterpolation(value) {
+  let escaped = false;
+  for (let i = 0; i < value.length - 1; i += 1) {
+    const ch = value[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === '\\') {
+      escaped = true;
+      continue;
+    }
+    if (ch === '$' && value[i + 1] === '{') return true;
+  }
+  return false;
+}
+
 function staticStringValue(expression) {
   const text = String(expression || '').trim();
   if (!text) return null;
@@ -174,6 +191,7 @@ function staticStringValue(expression) {
     if (!match || match.index !== index) return null;
     if (expectString) {
       if (!match[1]) return null;
+      if (match[1] === '`' && hasTemplateInterpolation(match[2])) return null;
       strings.push(match[2].replace(/\\(['"`\\])/g, '$1'));
     } else if (match[0].trim() !== '+') return null;
     expectString = !expectString;
@@ -285,6 +303,14 @@ function pathParameterFunctions(text) {
   return found;
 }
 
+function isDirectFunctionCall(text, nameIndex) {
+  const immediate = text[nameIndex - 1];
+  if (immediate && /[A-Za-z0-9_$]/.test(immediate)) return false;
+  let i = nameIndex - 1;
+  while (i >= 0 && /\s/.test(text[i])) i -= 1;
+  return i < 0 || text[i] !== '.';
+}
+
 function findPathCallsiteValues(context, baseUrl) {
   const target = context.find((item) => item.source === 'target_script');
   if (!target) return [];
@@ -297,7 +323,9 @@ function findPathCallsiteValues(context, baseUrl) {
     for (const item of context) {
       const cleaned = stripComments(item.text);
       for (const match of cleaned.matchAll(callPattern)) {
-        const openParen = (match.index || 0) + match[0].lastIndexOf('(');
+        const nameIndex = match.index || 0;
+        if (!isDirectFunctionCall(cleaned, nameIndex)) continue;
+        const openParen = nameIndex + match[0].lastIndexOf('(');
         const closeParen = findMatching(cleaned, openParen, '(', ')');
         if (closeParen < 0) continue;
         const args = splitArguments(cleaned.slice(openParen + 1, closeParen));
