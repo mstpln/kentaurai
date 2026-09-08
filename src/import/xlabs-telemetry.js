@@ -24,9 +24,8 @@ function positiveInteger(value, name, max = Number.MAX_SAFE_INTEGER) {
 }
 
 function finiteNumber(value, name) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) throw new Error(`${name} must be a finite number`);
-  return number;
+  if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${name} must be a finite number`);
+  return value;
 }
 
 function normalizeFrames(payload, trackId, raceNumber) {
