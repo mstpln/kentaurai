@@ -64,10 +64,23 @@ test('dynamic concatenated request reports sanitized literal components and iden
   const shape = inspection.requestArgumentShapes[0];
   assert.equal(shape.kind, 'jquery_get_json');
   assert.equal(shape.expressionType, 'dynamic');
-  assert.ok(shape.identifiers.includes('selectedDate'));
-  assert.ok(shape.literals.some((x) => x.value === 'https://kmtid.atgx.se/data/'));
-  assert.ok(shape.literals.some((x) => x.value === 'https://kmtid.atgx.se/260906/races.json'));
+  assert.deepEqual(shape.identifiers, ['selectedDate']);
+  assert.deepEqual(shape.literals, [
+    { kind: 'string', value: '/data/' },
+    { kind: 'string', value: '/races.json' }
+  ]);
   assert.equal(JSON.stringify(shape).includes('auth=private'), false);
+});
+
+test('literal request still returns a sanitized resolved URL shape', () => {
+  const inspection = inspectXlabsScriptText(`$.getJSON('/data/races.json?secret=1');`, {
+    documentBaseUrl: 'https://kmtid.atgx.se/260906/'
+  });
+  const shape = inspection.requestArgumentShapes[0];
+  assert.equal(shape.expressionType, 'literal');
+  assert.deepEqual(shape.identifiers, []);
+  assert.deepEqual(shape.literals, [{ kind: 'url', value: 'https://kmtid.atgx.se/data/races.json' }]);
+  assert.equal(JSON.stringify(shape).includes('secret=1'), false);
 });
 
 test('captured script inspection reads only private xlabs_script records and writes no normalized rows', async () => {
