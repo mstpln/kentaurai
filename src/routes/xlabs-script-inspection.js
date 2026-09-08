@@ -307,13 +307,14 @@ async function readContextSources(env, source, metadata) {
   const parentId = typeof metadata.parentSourceRecordId === 'string' ? metadata.parentSourceRecordId : null;
   if (!parentId) return context;
 
+  const prefix = `${parentId}:`;
   const siblings = await env.DB.prepare(`
     SELECT id, raw_object_key, metadata_json
     FROM source_records
-    WHERE source_type = 'xlabs_script' AND external_id LIKE ?
+    WHERE source_type = 'xlabs_script' AND substr(external_id, 1, ?) = ?
     ORDER BY fetched_at DESC
     LIMIT ?
-  `).bind(`${parentId}:%`, MAX_CONTEXT_SOURCES).all();
+  `).bind(prefix.length, prefix, MAX_CONTEXT_SOURCES).all();
 
   for (const row of siblings.results || []) {
     if (!row?.raw_object_key || row.id === source.id) continue;
