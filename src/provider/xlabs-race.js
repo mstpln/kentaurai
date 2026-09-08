@@ -103,8 +103,19 @@ async function loadNewestRacesScript(env, parentId) {
   return text;
 }
 
+function decodeJavascriptString(value) {
+  return String(value || '')
+    .replace(/\\u\{([0-9a-fA-F]{1,6})\}/g, (match, hex) => {
+      const code = Number.parseInt(hex, 16);
+      return code <= 0x10ffff ? String.fromCodePoint(code) : match;
+    })
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)))
+    .replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)))
+    .replace(/\\([\\'"`])/g, '$1');
+}
+
 function normalizedTrackName(value) {
-  return String(value || '').normalize('NFKC').trim().toLocaleLowerCase('sv-SE');
+  return decodeJavascriptString(value).normalize('NFKC').trim().toLocaleLowerCase('sv-SE');
 }
 
 function scanJavascriptObjectsAndStrings(script) {
@@ -112,24 +123,33 @@ function scanJavascriptObjectsAndStrings(script) {
   const objectStack = [];
   const objects = [];
   const strings = [];
+  const comments = [];
   let quote = null;
   let stringStart = -1;
   let stringValue = '';
   let escaped = false;
   let lineComment = false;
+  let lineCommentStart = -1;
   let blockComment = false;
+  let blockCommentStart = -1;
 
   for (let i = 0; i < text.length; i += 1) {
     const ch = text[i];
     const next = text[i + 1];
 
     if (lineComment) {
-      if (ch === '\n') lineComment = false;
+      if (ch === '\n') {
+        comments.push({ start: lineCommentStart, end: i - 1 });
+        lineComment = false;
+        lineCommentStart = -1;
+      }
       continue;
     }
     if (blockComment) {
       if (ch === '*' && next === '/') {
+        comments.push({ start: blockCommentStart, end: i + 1 });
         blockComment = false;
+        blockCommentStart = -1;
         i += 1;
       }
       continue;
@@ -141,6 +161,7 @@ function scanJavascriptObjectsAndStrings(script) {
         continue;
       }
       if (ch === '\\') {
+        stringValue += '\\';
         escaped = true;
         continue;
       }
@@ -156,11 +177,13 @@ function scanJavascriptObjectsAndStrings(script) {
     }
     if (ch === '/' && next === '/') {
       lineComment = true;
+      lineCommentStart = i;
       i += 1;
       continue;
     }
     if (ch === '/' && next === '*') {
       blockComment = true;
+      blockCommentStart = i;
       i += 1;
       continue;
     }
@@ -180,50 +203,100 @@ function scanJavascriptObjectsAndStrings(script) {
       if (start != null) objects.push({ start, end: i });
     }
   }
-  return { objects, strings };
+  if (lineComment) comments.push({ start: lineCommentStart, end: text.length - 1 });
+  if (blockComment) comments.push({ start: blockCommentStart, end: text.length - 1 });
+  return { objects, strings, comments };
 }
 
-function trackIdsInObject(text) {
-  const ids = [];
-  for (const match of text.matchAll(/\btrackId\b\s*[:=]\s*['"]?(\d{1,3})/g)) {
-    const id = Number(match[1]);
-    if (Number.isInteger(id) && id > 0 && id <= 999 && !ids.includes(id)) ids.push(id);
+function indexInsideRange(index, ranges) {
+  return ranges.some((range) => range.start <= index && range.end >= index);
+}
+
+function nextNonWhitespace(text, index) {
+  let i = index;
+  while (i < text.length && /\s/.test(text[i])) i += 1;
+  return text[i] || null;
+}
+
+function numericPropertiesDirectlyInObject(text, object, propertyNames, objects, strings, comments) {
+  const names = propertyNames.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const pattern = new RegExp(`(?:['"]?\\b(?:${names})\\b['"]?)\\s*[:=]\\s*['"]?(\\d{1,3})`, 'g');
+  const bodyStart = object.start + 1;
+  const body = text.slice(bodyStart, object.end);
+  const childObjects = objects.filter((candidate) => candidate.start > object.start && candidate.end < object.end);
+  const values = [];
+  for (const match of body.matchAll(pattern)) {
+    const absoluteIndex = bodyStart + (match.index || 0);
+    if (childObjects.some((child) => child.start < absoluteIndex && child.end > absoluteIndex)) continue;
+    if (indexInsideRange(absoluteIndex, comments)) continue;
+    const containingString = strings.find((token) => token.start <= absoluteIndex && token.end >= absoluteIndex);
+    if (containingString) {
+      const decodedKey = decodeJavascriptString(containingString.value);
+      const isPropertyKey = containingString.start === absoluteIndex
+        && propertyNames.includes(decodedKey)
+        && nextNonWhitespace(text, containingString.end + 1) === ':';
+      if (!isPropertyKey) continue;
+    }
+    const value = Number(match[1]);
+    if (Number.isInteger(value) && value > 0 && value <= 999 && !values.includes(value)) values.push(value);
   }
-  return ids;
+  return values;
 }
 
-function trackIdsForExactName(script, trackName) {
+function trackIdsForExactRace(script, trackName, raceNumber) {
   const text = String(script || '');
   const needle = normalizedTrackName(trackName);
   if (!needle) return [];
-  const { objects, strings } = scanJavascriptObjectsAndStrings(text);
-  const candidates = [];
+  const { objects, strings, comments } = scanJavascriptObjectsAndStrings(text);
+  const raceScoped = [];
+  const nameOnly = [];
 
   for (const token of strings) {
+    if (indexInsideRange(token.start, comments)) continue;
     if (token.template && token.value.includes('${')) continue;
     if (normalizedTrackName(token.value) !== needle) continue;
     const containers = objects
       .filter((object) => object.start < token.start && object.end > token.end)
       .sort((a, b) => (a.end - a.start) - (b.end - b.start));
+
+    let trackObject = null;
+    let trackId = null;
     for (const object of containers) {
-      const ids = trackIdsInObject(text.slice(object.start, object.end + 1));
+      const ids = numericPropertiesDirectlyInObject(text, object, ['trackId'], objects, strings, comments);
+      if (ids.length > 1) break;
       if (ids.length === 1) {
-        if (!candidates.includes(ids[0])) candidates.push(ids[0]);
+        trackObject = object;
+        trackId = ids[0];
         break;
       }
-      if (ids.length > 1) break;
+    }
+    if (!trackObject || trackId == null) continue;
+    if (!nameOnly.includes(trackId)) nameOnly.push(trackId);
+
+    const raceContainers = objects
+      .filter((object) => object.start <= trackObject.start && object.end >= trackObject.end)
+      .sort((a, b) => (a.end - a.start) - (b.end - b.start));
+    for (const object of raceContainers) {
+      const numbers = numericPropertiesDirectlyInObject(text, object, ['raceNumber', 'number'], objects, strings, comments)
+        .filter((value) => value <= 99);
+      if (numbers.length > 1) break;
+      if (numbers.length === 1) {
+        if (numbers[0] === raceNumber && !raceScoped.includes(trackId)) raceScoped.push(trackId);
+        break;
+      }
     }
   }
-  return candidates;
+  if (raceScoped.length) return raceScoped;
+  return nameOnly.length === 1 ? nameOnly : [];
 }
 
-async function resolveXlabsTrackId(env, parentId, requestedTrackId) {
+async function resolveXlabsTrackId(env, parentId, requestedTrackId, raceNumber) {
   const canonicalTrackName = await lookupCanonicalTrackName(env, requestedTrackId);
   if (!canonicalTrackName) throw new Error('official track id is not mapped to a canonical track');
   const racesScript = await loadNewestRacesScript(env, parentId);
   if (!racesScript) throw new Error('captured X-Labs races.js is required to resolve the X-Labs track id');
-  const candidates = trackIdsForExactName(racesScript, canonicalTrackName);
-  if (candidates.length !== 1) throw new Error('X-Labs track id could not be uniquely resolved from captured races.js');
+  const candidates = trackIdsForExactRace(racesScript, canonicalTrackName, raceNumber);
+  if (candidates.length !== 1) throw new Error('X-Labs track id could not be uniquely resolved from captured races.js for the requested race');
   return { xlabsTrackId: candidates[0], canonicalTrackName, mappingStatus: 'resolved_from_races_script' };
 }
 
@@ -325,7 +398,7 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
   const baseUrl = validateResolvedBaseUrl(pathResolution.resolvedBaseUrl, date);
   const requestedTrackId = positiveInteger(trackId, 'track_id', 999);
   const race = positiveInteger(raceNumber, 'race_number', 99);
-  const trackMapping = await resolveXlabsTrackId(env, parentId, requestedTrackId);
+  const trackMapping = await resolveXlabsTrackId(env, parentId, requestedTrackId, race);
   const xlabsTrackId = positiveInteger(trackMapping.xlabsTrackId, 'xlabs_track_id', 999);
   const fileName = buildXlabsRaceFileName(date, xlabsTrackId, race);
   const requestedUrl = new URL(fileName, baseUrl).toString();
