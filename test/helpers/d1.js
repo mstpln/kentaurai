@@ -28,7 +28,8 @@ export function createTestEnv() {
     '../../migrations/0002_reference_round.sql',
     '../../migrations/0003_nullable_reference_prediction.sql',
     '../../migrations/0004_official_live_observations.sql',
-    '../../migrations/0005_historical_backfill.sql'
+    '../../migrations/0005_historical_backfill.sql',
+    '../../migrations/0006_xlabs_backfill.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }
