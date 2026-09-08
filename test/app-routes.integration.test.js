@@ -42,6 +42,40 @@ test('entity list route threads limit and offset into paginated response', async
   assert.equal(data.items[0].name, 'Beta Trainer');
 });
 
+test('historical entity routes are session-private and paginate starts and linked horses', async () => {
+  const { env, db } = createTestEnv();
+  env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
+  db.prepare(`INSERT INTO tracks (id, canonical_name, country_code) VALUES ('track_h','History Track','SE')`).run();
+  db.prepare(`INSERT INTO trainers (id, canonical_name, country_code) VALUES ('trainer_h','History Trainer','SE')`).run();
+  db.prepare(`INSERT INTO drivers (id, canonical_name, country_code) VALUES ('driver_h','History Driver','SE')`).run();
+  db.prepare(`INSERT INTO horses (id, canonical_name, country_code) VALUES ('horse_h1','History Horse One','SE'),('horse_h2','History Horse Two','SE')`).run();
+  for (const [i, horse] of [[1,'horse_h1'],[2,'horse_h2']]) {
+    db.prepare(`INSERT INTO races (id, track_id, race_date, race_number, distance_m, start_method) VALUES (?, 'track_h', ?, ?, 2140, 'auto')`).run(`race_h${i}`, `2099-02-0${i}`, i);
+    db.prepare(`INSERT INTO race_entries (id, race_id, horse_id, driver_id, trainer_id, start_number, actual_start_distance_m) VALUES (?, ?, ?, 'driver_h', 'trainer_h', ?, 2140)`).run(`entry_h${i}`, `race_h${i}`, horse, i);
+  }
+  const cookie = (await createAppSessionCookie(env)).split(';')[0];
+
+  let response = await worker.fetch(new Request('https://example.test/app/api/entities/trainers/trainer_h/starts?limit=1&offset=1', { headers: { cookie } }), env);
+  assert.equal(response.status, 200);
+  let data = await response.json();
+  assert.equal(data.total, 2);
+  assert.equal(data.limit, 1);
+  assert.equal(data.offset, 1);
+  assert.equal(data.items.length, 1);
+  assert.equal(data.items[0].horse_name, 'History Horse One');
+  assert.equal('entry_id' in data.items[0], false);
+
+  response = await worker.fetch(new Request('https://example.test/app/api/entities/trainers/trainer_h/horses?limit=1&offset=0', { headers: { cookie } }), env);
+  assert.equal(response.status, 200);
+  data = await response.json();
+  assert.equal(data.total, 2);
+  assert.equal(data.items.length, 1);
+  assert.equal(data.hasMore, true);
+
+  response = await worker.fetch(new Request('https://example.test/app/api/entities/trainers/trainer_h/starts?limit=1&offset=0'), env);
+  assert.equal(response.status, 401);
+});
+
 test('game history routes are private and return round-based structures', async () => {
   const { env, db } = createTestEnv();
   env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';

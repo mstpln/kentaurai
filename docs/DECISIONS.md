@@ -21,13 +21,24 @@
 8. Entity detail views expose all relevant data families already stored/measured by the current schema, while internal IDs/provenance remain backend concerns rather than normal UI content.
 9. Factual race/start/result/market/equipment/X-Labs/position/condition data is presented separately from calculated features, AI analyses and editorial signals.
 10. Multiple timestamped observations remain available as histories rather than silently collapsing all data to one current value; a latest value may be highlighted for convenience.
-11. The interface is read-only and private.
-12. Browser access uses a separate `APP_PASSWORD` secret and secure HttpOnly session cookie. `ADMIN_TOKEN` remains reserved for operational APIs and is never exposed to the interface.
-13. There is no visible logout control; the private session expires normally.
-14. Visual direction is minimal and strongly structured, using black/grey/brown/beige as the base with restrained warm accent color and clear card/divider/tab separation.
-15. The approved Sagittarius KentaurAI brand stays separate from entity navigation symbolism.
-16. Entity symbols are consistent between bottom navigation and detail-header tiles: trainer = brain, horse = horse, driver = flexed arm. The existing framed detail tile remains.
-17. Trend uses the approved chart-line symbol and the singular label `Trend` in both navigation and page heading.
+11. Entity start history is paginated and must support the complete stored history rather than being permanently capped to a latest-N window. Enrichment of betting, odds, equipment, X-Labs, positions, features, AI and editorial data is done only for the current history page to keep D1 reads bounded.
+12. Trainer/driver linked-horse lists are paginated independently from start history so older horse relationships remain discoverable after multi-year backfill.
+13. The interface is read-only and private.
+14. Browser access uses a separate `APP_PASSWORD` secret and secure HttpOnly session cookie. `ADMIN_TOKEN` remains reserved for operational APIs and is never exposed to the interface.
+15. There is no visible logout control; the private session expires normally.
+16. Visual direction is minimal and strongly structured, using black/grey/brown/beige as the base with restrained warm accent color and clear card/divider/tab separation.
+17. The approved Sagittarius KentaurAI brand stays separate from entity navigation symbolism.
+18. Bottom-navigation symbols are Trend = approved chart-line, Tränare = clipboard/pen, Hästar = horse, Kuskar = lightbulb, Spel = ticket. Entity profile tiles use initials rather than category symbols.
+19. Trend uses the approved chart-line symbol and the singular label `Trend` in both navigation and page heading.
+
+## Historical data and X-Labs
+1. Historical starter/result data is imported once, stored permanently and updated incrementally. The planned backfill remains approximately 2-3 years of Swedish racing, with older starts fetched selectively when useful for active horse profiles.
+2. Race entry/start remains the central relational point linking horse, race, driver, trainer, result, equipment, market and X-Labs measurements.
+3. X-Labs is complementary direct measurement data and is never mandatory. Missing X-Labs is neutral.
+4. The exact X-Labs acquisition method is an implementation question that must be verified against real observed network/page behavior before a normalizer is trusted.
+5. The first X-Labs implementation is therefore raw-capture only: HTTPS host locked, redirects blocked, size checked, exact response archived to private R2/source records and marked `captured_unmapped`.
+6. No X-Labs measurement field is written to normalized D1 until a real small-sample verification establishes the source semantics and stable extraction method.
+7. Historical backfill must not begin at full scale until the X-Labs vertical slice and official historical mapping are validated on representative samples.
 
 ## Spel and post-race analysis
 1. Every V85/V86 system has exactly three spikar in three different legs, with one selected horse in each spike leg.

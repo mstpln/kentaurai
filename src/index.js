@@ -4,15 +4,18 @@ import { importEditorial } from './import/editorial.js';
 import { importReferenceRound } from './import/reference-round-safe.js';
 import { normalizeCapturedOfficialGameSequential } from './import/official-live-sequential.js';
 import { captureCalendar, captureGame } from './provider/official.js';
+import { captureXlabsDate } from './provider/xlabs.js';
 import { getRound } from './routes/rounds.js';
 import { createHypothesis } from './routes/learning.js';
 import { verifyCapturedOfficialNormalization } from './routes/official-verification.js';
 import { getEntityDetail, getEntitySummary, listEntities, searchEntities } from './routes/entities.js';
+import { getEntityStartHistory } from './routes/entity-history.js';
+import { getLinkedHorses } from './routes/entity-links.js';
 import { toEntityAppView } from './routes/entity-view.js';
 import { getGameHistoryDetail, listGameHistory } from './routes/games.js';
 import { getGameHistorySummary } from './routes/game-summary.js';
 import { appAuthConfigured, appPasswordMatches, createAppSessionCookie, hasValidAppSession } from './app-auth.js';
-import { htmlResponse, redirectResponse, renderAppPage, renderLoginPage } from './app-page-release.js';
+import { htmlResponse, redirectResponse, renderAppPage, renderLoginPage } from './app-page-history.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -54,6 +57,22 @@ async function handleAppApi(request, env, url) {
   if (request.method === 'GET' && gameDetailMatch) {
     const data = await getGameHistoryDetail(env, decodeURIComponent(gameDetailMatch[1]));
     return data ? json(data) : json({ error: 'not_found' }, 404);
+  }
+
+  const historyMatch = path.match(/^\/app\/api\/entities\/(horses|trainers|drivers)\/([^/]+)\/starts$/);
+  if (request.method === 'GET' && historyMatch) {
+    return json(await getEntityStartHistory(env, historyMatch[1], decodeURIComponent(historyMatch[2]), {
+      limit: url.searchParams.get('limit'),
+      offset: url.searchParams.get('offset')
+    }));
+  }
+
+  const linkedHorsesMatch = path.match(/^\/app\/api\/entities\/(trainers|drivers)\/([^/]+)\/horses$/);
+  if (request.method === 'GET' && linkedHorsesMatch) {
+    return json(await getLinkedHorses(env, linkedHorsesMatch[1], decodeURIComponent(linkedHorsesMatch[2]), {
+      limit: url.searchParams.get('limit'),
+      offset: url.searchParams.get('offset')
+    }));
   }
 
   const detailMatch = path.match(/^\/app\/api\/entities\/(horses|trainers|drivers)\/([^/]+)$/);
@@ -115,6 +134,10 @@ async function handleFetch(request, env) {
     return data ? json(data) : json({ error: 'not_found' }, 404);
   }
   if (request.method === 'POST' && path === '/v1/provider/capture') return json(await handleProviderCapture(env, await readJson(request)), 201);
+  if (request.method === 'POST' && path === '/v1/xlabs/capture') {
+    const body = await readJson(request);
+    return json(await captureXlabsDate(env, body.date), 201);
+  }
   if (request.method === 'POST' && path === '/v1/provider/normalize') {
     const body = await readJson(request);
     return json(await normalizeCapturedOfficialGameSequential(env, body.source_record_id, body.cursor ?? 0));

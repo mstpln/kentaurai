@@ -1,8 +1,8 @@
 # Build state
 
 Version: 0.4.5
-Phase: interface foundation on verified official data layer
-Status: Entity-profile and navigation refinement is under final review; automatic live acquisition remains disabled
+Phase: historical data foundation / X-Labs vertical slice preparation
+Status: full historical paging and conservative X-Labs raw capture are implemented on the feature branch; automatic live acquisition and X-Labs normalization remain disabled
 
 ## Verified foundation
 - D1 core schema, indexes and reference-round extension migrations are provisioned.
@@ -24,34 +24,37 @@ Status: Entity-profile and navigation refinement is under final review; automati
 - `/v1/*` remains operational/admin-token protected.
 - Global search covers horses, trainers and drivers.
 - Entity lists are paginated and preserve list position when opening/returning from details.
+- Entity **Starter** tabs now read paginated historical pages instead of relying on the old latest-100 detail payload.
+- Each historical start page is enriched with the stored betting, odds, equipment, X-Labs, positions, features, AI and editorial histories for only that page, keeping D1 work bounded as history grows.
+- Trainer/driver **Hästar** tabs use a separate paginated linked-horse query so older horse relationships remain discoverable after multi-year backfill.
 - Internal provider/source IDs are not primary user-facing content.
 - Missing facts and unsupported derived values remain null/unknown.
 
 ## Navigation and visual direction
 - Bottom navigation is: **Trend -> Tränare -> Hästar -> Kuskar -> Spel**.
-- Trend uses the approved chart-line symbol shown in the production-feedback reference, including the Trend empty state.
-- Tränare uses the approved Lucide clipboard/pen symbol, Hästar keeps the horse symbol, and Kuskar uses the approved Lucide lightbulb symbol.
-- Entity detail tiles retain the existing framed square and display entity initials rather than category icons.
+- Trend uses the approved chart-line symbol, including the Trend empty state.
+- Tränare uses the approved clipboard/pen symbol, Hästar keeps the horse symbol, and Kuskar uses the approved lightbulb symbol.
+- Entity detail tiles retain the framed square and display entity initials rather than category icons.
 - Initials use up to three meaningful name words; one-word names use the first two letters. Small connector words are skipped where possible.
 - The Trend page header is singular **Trend**.
 - Trend category controls remain Tränare / Hästar / Kuskar with 2 veckor / 4 veckor / 3 mån / 6 mån / 1 år.
 - The timeframe shown inside the trend panel header is plain text, not an outlined pill.
 - Entity detail back navigation uses the approved corner/back-arrow treatment.
 - The visible logout control and logout endpoint are removed; the private session still expires normally.
-- Approved Sagittarius KentaurAI brand mark remains unchanged; its badge is visually aligned to the KENTAURAI wordmark rather than sitting taller than the text.
+- Approved Sagittarius KentaurAI brand mark remains unchanged; the circular badge uses optical sizing beside the KENTAURAI wordmark.
 - General UI remains minimal/dark with black, grey, brown and beige plus restrained warm accent color.
 
 ## Entity pages
 - Trainer and driver roles remain separate analytical pages because their measured data and interpretation differ.
 - A person who appears in both roles can move between the trainer and driver profiles through a small `Tränare · Kusk` role line under the name.
-- Current cross-role navigation is deliberately conservative: it is offered only when the private entity search finds exactly one counterpart with the same canonical name. This is a UI convenience, not a persisted shared-person identity assertion.
+- Current cross-role navigation is deliberately conservative: it is offered only when private entity search finds exactly one counterpart with the same canonical name. This is a UI convenience, not a persisted shared-person identity assertion.
 - A durable shared-person identity must not be introduced until source-backed or manually verified identity semantics are available.
 - Person detail tabs are **Statistik -> Starter -> Hästar -> Data**.
 - Horse detail tabs are **Statistik -> Starter -> Utrustning -> Data**.
 - Horse names in linked-horse lists and start history are navigable to the horse profile.
 - The Data tab contains user-relevant profile/database facts and coverage; raw observation timestamps and internal normalization-quality labels are retained for provenance but intentionally hidden from normal profile presentation.
 
-## Entity data coverage in 0.4.5
+## Entity data coverage
 Entity detail APIs and views expose the normalized/measured data already represented by the current schema, grouped so high-volume data does not become one continuous wall of fields.
 
 ### Profile and activity
@@ -59,13 +62,13 @@ Entity detail APIs and views expose the normalized/measured data already represe
 - horse sex, birth year/observed age, breed, color, trainer, owner, breeder and pedigree
 - horse career earnings and record when stored
 - person location, birth year and licence when present in normalized observations
-- database starts, result starts, wins, seconds, thirds, top-3, win/top-3 rates, gallops, **gallop rate**, disqualifications and prize money
+- database starts, result starts, wins, seconds, thirds, top-3, win/top-3 rates, gallops, gallop rate, disqualifications and prize money
 - gallop rate uses completed/result starts as its denominator and remains null when there are no result starts
 - scratched declarations are tracked separately and excluded from start/performance denominators
 - V85 and V86 start counts
 - deterministic breakdowns by start method, distance and track
 
-### Per-start facts and histories
+### Paginated per-start facts and histories
 - race/game/date/leg, race name/number, track, scheduled time, distance, start method, field size, declared starters, first prize, class/class flags and race/source status
 - start number, lane, tier, handicap, actual start distance, back row, inner lane, springspar and scratch fields
 - placing, finish time, km time, prize, gallop, disqualification, distance behind winner, official odds and result status
@@ -76,13 +79,20 @@ Entity detail APIs and views expose the normalized/measured data already represe
 - race-position observations including supported trip/position flags, traffic events and structured event data
 - race conditions including track status, temperature, wind, precipitation, weather and day profile
 - calculated analysis features with uncertainty/data-quality/version context plus feature history
-- stored AI analyses/predictions shown in a separate section from facts/calculated features
+- stored AI analyses/predictions shown separately from facts/calculated features
 - structured editorial signals shown separately from factual and calculated data
 - data-coverage counts explicitly show which actual non-scratched starts have market, odds, equipment, X-Labs, positions, features, AI, editorial or race-condition data
 
-Arbitrary structured fields are displayed as readable key/value groups rather than raw JSON where practical. Internal feature provenance is retained in the backend but intentionally not rendered as normal user-facing data.
+The historical page endpoint strips internal race-entry/race IDs from the browser response while retaining `horse_id` where needed for in-app navigation. Structured source/provenance internals remain backend-only.
 
-Current entity-detail start retrieval is deliberately bounded to the latest 100 linked race entries per entity. This is sufficient for the present vertical-slice dataset but is not the final historical-browsing contract; paginated full-history retrieval must be added before the planned 2–3 year backfill.
+## X-Labs vertical slice preparation
+- The build plan explicitly leaves the exact X-Labs acquisition method open until real network/page behavior is verified.
+- A conservative raw-capture prototype now supports the observed date-page pattern on the locked HTTPS host `kmtid.atgx.se`.
+- Redirects are blocked, response size is bounded and the exact HTML response is archived to private R2/source records.
+- X-Labs captures are marked `captured_unmapped` with `normalizationStatus: not_implemented`.
+- The prototype writes **zero** rows to `xlabs_data`; no field mapping is trusted yet.
+- Missing X-Labs remains neutral and must never break historical or future analysis flows.
+- No production X-Labs capture has been authorized or performed by this build.
 
 ## Spel
 - Spel has exactly three tabs: Översikt, V85 and V86.
@@ -95,6 +105,7 @@ Current entity-detail start retrieval is deliberately bounded to the latest 100 
 ## Quality and privacy
 - GitHub contains code/schema/tests/docs/synthetic fixtures only.
 - No real racing payloads, private reference exports, database dumps, secrets or paid/private editorial provider identity/content may be committed.
+- X-Labs tests use synthetic HTML only; no real captured X-Labs payload is committed.
 - Raw facts, deterministic calculations and AI judgments remain explicitly separated.
 - Model weights are not changed after a single round; learnings remain No change / Candidate / Confirmed.
 - Entity search/list filters treat SQL wildcard/escape characters literally.
@@ -102,23 +113,33 @@ Current entity-detail start retrieval is deliberately bounded to the latest 100 
 - Scratched entries are excluded from performance and coverage denominators.
 
 ## Current verification gate
-1. Full CI must pass on the exact final PR #14 head.
-2. Exact diff must be reviewed for initials, role-link behavior, data semantics, gallop-rate denominator, navigation, icon consistency, privacy, responsive layout and existing route preservation.
-3. Merge only after explicit user authorization.
-4. After deployment, visually verify logo alignment, bottom-navigation icons, Trend empty state, back arrows, representative trainer/driver dual-role navigation, clickable horse names and entity tabs on desktop and mobile.
+1. Full CI must pass on the exact feature-branch head.
+2. Review paginated start-history ordering, pagination boundaries, linked-horse completeness, app privacy and browser script validity.
+3. Review X-Labs URL validation, host lock, redirect blocking, response-size limits, exact raw preservation and the guarantee that no normalized X-Labs rows are written.
+4. Merge only after explicit user authorization.
+5. **Do not** run production X-Labs capture, historical backfill or enable automatic acquisition without explicit approval.
+
+## Next after this build
+1. Inspect one or more real X-Labs date pages/network calls privately and determine whether the stable source is structured JSON, embedded/static data or page parsing.
+2. Verify a small real sample against known starts and map only fields whose semantics are confirmed.
+3. Add raw-vs-normalized X-Labs verification for that sample.
+4. Verify the official historical-results acquisition path needed for ordinary Swedish races, not only V85/V86 game snapshots.
+5. Only then design and run a resumable 2-3 year historical backfill in private Cloudflare storage.
+6. Build deterministic Trend metrics/leaderboards after sufficient verified history exists.
 
 ## Not yet implemented
 - verified/persisted shared-person identity across trainer and driver roles; current UI role link is conservative exact-name matching only
-- paginated entity-detail history beyond the current latest-100 window; required before historical backfill
 - verified live scratch/withdrawal mapping
 - automatic live provider acquisition
 - additional official-provider endpoint patterns not yet observed
+- verified X-Labs normalized mapper
+- X-Labs raw-vs-normalized verification gate
+- official ordinary-race historical acquisition/backfill adapter
+- 2-3 year historical backfill
 - historical trainer/driver/horse trend metrics and leaderboards
 - automatic post-race result collection/review orchestration
 - additional winner-trip categories requiring facts not currently represented in the schema
 - dead-heat-specific presentation pending a verified source example
-- X-Labs acquisition adapter
-- 2-3 year historical backfill
 - future feature-engine expansion
 - KentaurAI AI analysis runner
 - system optimizer
