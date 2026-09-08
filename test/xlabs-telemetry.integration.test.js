@@ -64,6 +64,24 @@ test('maps only entries with sufficient telemetry coverage and leaves unverified
   assert.equal(result.rows[0].slipstreamM, null);
 });
 
+test('rejects missing or coercible telemetry numbers instead of silently turning them into zero', () => {
+  const missing = syntheticTelemetry({ includeSecond: false });
+  missing[0].targets[0].posX = null;
+  assert.throws(() => mapXlabsTelemetryMeasurements(missing, {
+    trackId: 7,
+    raceNumber: 5,
+    entries: [{ race_entry_id: 'entry_1', start_number: 1, actual_start_distance_m: 1000, race_distance_m: 1000 }]
+  }), /posX must be a finite number/);
+
+  const stringValue = syntheticTelemetry({ includeSecond: false });
+  stringValue[0].targets[0].distanceToFinish = '1100';
+  assert.throws(() => mapXlabsTelemetryMeasurements(stringValue, {
+    trackId: 7,
+    raceNumber: 5,
+    entries: [{ race_entry_id: 'entry_1', start_number: 1, actual_start_distance_m: 1000, race_distance_m: 1000 }]
+  }), /distanceToFinish must be a finite number/);
+});
+
 test('normalizes captured telemetry idempotently and verifies raw against every accepted field', async () => {
   const { env, db, objects } = createTestEnv();
   seedOfficialRace(db);
