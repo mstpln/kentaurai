@@ -3,13 +3,17 @@ import { archiveRawPayload } from './raw.js';
 import { importEditorial } from './import/editorial.js';
 import { importReferenceRound } from './import/reference-round-safe.js';
 import { normalizeCapturedOfficialGameSequential } from './import/official-live-sequential.js';
-import { captureCalendar, captureGame } from './provider/official.js';
+import { normalizeCapturedXlabsRace } from './import/xlabs-telemetry.js';
+import { normalizeCapturedOfficialRace } from './import/official-historical-race.js';
+import { getHistoricalBackfill, runHistoricalBackfillStep, startHistoricalBackfill } from './import/official-historical-backfill.js';
+import { captureCalendar, captureGame, captureRace } from './provider/official.js';
 import { captureXlabsDate } from './provider/xlabs.js';
 import { captureXlabsRaceJson } from './provider/xlabs-race.js';
 import { captureReferencedXlabsScript, captureXlabsContextScripts, XLABS_SCRIPT_SELECTOR_VERSION } from './provider/xlabs-script.js';
 import { getRound } from './routes/rounds.js';
 import { createHypothesis } from './routes/learning.js';
 import { verifyCapturedOfficialNormalization } from './routes/official-verification.js';
+import { verifyCapturedXlabsNormalization } from './routes/xlabs-verification.js';
 import { inspectCapturedXlabs } from './routes/xlabs-inspection.js';
 import { inspectCapturedXlabsScript } from './routes/xlabs-script-inspection.js';
 import { resolveCapturedXlabsRequestPath } from './routes/xlabs-path-resolution.js';
@@ -39,7 +43,8 @@ async function handleProviderCapture(env, body) {
   const kind = String(body.kind || '').toLowerCase();
   if (kind === 'calendar') return captureCalendar(env, body.date);
   if (kind === 'game') return captureGame(env, body.game_id);
-  throw new Error('kind must be calendar or game');
+  if (kind === 'race') return captureRace(env, body.race_id);
+  throw new Error('kind must be calendar, game or race');
 }
 
 async function handleAppApi(request, env, url) {
@@ -126,7 +131,7 @@ async function handleApp(request, env, url) {
 async function handleFetch(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
-  if (request.method === 'GET' && path === '/health') return json({ ok: true, service: 'kentaurai-api', version: '0.4.5', xlabsScriptSelector: XLABS_SCRIPT_SELECTOR_VERSION });
+  if (request.method === 'GET' && path === '/health') return json({ ok: true, service: 'kentaurai-api', version: '0.5.0', xlabsScriptSelector: XLABS_SCRIPT_SELECTOR_VERSION });
   if (path === '/') return redirectResponse('/app');
   if (path.startsWith('/app')) return handleApp(request, env, url);
   if (path.startsWith('/v1/')) {
@@ -167,13 +172,36 @@ async function handleFetch(request, env) {
     const body = await readJson(request);
     return json(await resolveCapturedXlabsRequestPath(env, body.source_record_id));
   }
+  if (request.method === 'POST' && path === '/v1/xlabs/normalize') {
+    const body = await readJson(request);
+    return json(await normalizeCapturedXlabsRace(env, body.source_record_id));
+  }
+  if (request.method === 'POST' && path === '/v1/xlabs/verify-normalization') {
+    const body = await readJson(request);
+    return json(await verifyCapturedXlabsNormalization(env, body.source_record_id));
+  }
   if (request.method === 'POST' && path === '/v1/provider/normalize') {
     const body = await readJson(request);
     return json(await normalizeCapturedOfficialGameSequential(env, body.source_record_id, body.cursor ?? 0));
   }
+  if (request.method === 'POST' && path === '/v1/provider/normalize-race') {
+    const body = await readJson(request);
+    return json(await normalizeCapturedOfficialRace(env, body.source_record_id));
+  }
   if (request.method === 'POST' && path === '/v1/provider/verify-normalization') {
     const body = await readJson(request);
     return json(await verifyCapturedOfficialNormalization(env, body.source_record_id));
+  }
+  if (request.method === 'POST' && path === '/v1/historical/backfill/start') {
+    const body = await readJson(request);
+    return json(await startHistoricalBackfill(env, body.start_date, body.end_date, { resume: body.resume === true }), 201);
+  }
+  if (request.method === 'POST' && path === '/v1/historical/backfill/step') {
+    const body = await readJson(request);
+    return json(await runHistoricalBackfillStep(env, body.job_id));
+  }
+  if (request.method === 'GET' && path === '/v1/historical/backfill/status') {
+    return json(await getHistoricalBackfill(env, url.searchParams.get('job_id')));
   }
   if (request.method === 'POST' && path === '/v1/import/editorial') return json(await importEditorial(env, await readJson(request)), 201);
   if (request.method === 'POST' && path === '/v1/import/reference-round') return json(await importReferenceRound(env, await readJson(request)), 201);
@@ -199,8 +227,10 @@ async function handleFetch(request, env) {
 async function handleScheduled(controller, env) {
   const now = new Date(controller.scheduledTime || Date.now()).toISOString();
   const id = `cron_${crypto.randomUUID()}`;
+  const backfill = await runHistoricalBackfillStep(env);
+  if (backfill.status === 'idle') return;
   await env.DB.prepare(`INSERT INTO import_runs (id, source_type, started_at, finished_at, status, metadata_json) VALUES (?, 'scheduled_orchestrator', ?, ?, 'success', ?)`)
-    .bind(id, now, now, JSON.stringify({ cron: controller.cron, phase: '1C_verified_mapper_no_automatic_live_calls' })).run();
+    .bind(id, now, new Date().toISOString(), JSON.stringify({ cron: controller.cron, backfill })).run();
 }
 
 export default {
