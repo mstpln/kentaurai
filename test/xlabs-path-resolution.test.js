@@ -95,3 +95,75 @@ test('reports a valid static path plus dynamic assignment as ambiguous', async (
   assert.equal(result.status, 'ambiguous');
   assert.equal(result.resolvedBaseUrl, null);
 });
+
+test('resolves path passed as a function argument from a sibling script', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedParent(db, objects);
+  seedScript(db, objects, 'src_calc', 'calculate.js', `
+    function loadRace(race, path) {
+      const fileName = '0906121.json';
+      $.getJSON(path + fileName);
+    }
+  `, '2099-01-01T00:00:10Z');
+  seedScript(db, objects, 'src_main', 'main.js', `loadRace(currentRace, 'json/');`, '2099-01-01T00:00:09Z');
+
+  const result = await resolveCapturedXlabsRequestPath(env, 'src_calc');
+  assert.equal(result.status, 'resolved_static');
+  assert.equal(result.resolvedBaseUrl, 'https://kmtid.atgx.se/260906/json/');
+  assert.ok(result.assignments.some((x) => x.origin === 'function_argument' && x.functionName === 'loadRace'));
+});
+
+test('resolves path passed from the captured parent page into a function', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedParent(db, objects, `<html><script>showCalculation(activeRace, './data/');</script></html>`);
+  seedScript(db, objects, 'src_calc', 'calculate.js', `
+    function showCalculation(race, path) {
+      $.getJSON(path + fileName);
+    }
+  `, '2099-01-01T00:00:10Z');
+
+  const result = await resolveCapturedXlabsRequestPath(env, 'src_calc');
+  assert.equal(result.status, 'resolved_static');
+  assert.equal(result.resolvedBaseUrl, 'https://kmtid.atgx.se/260906/data/');
+  assert.ok(result.assignments.some((x) => x.source === 'parent_page' && x.origin === 'function_argument'));
+});
+
+test('does not guess when function call sites pass different path values', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedParent(db, objects);
+  seedScript(db, objects, 'src_calc', 'calculate.js', `
+    function loadRace(path) { $.getJSON(path + fileName); }
+  `, '2099-01-01T00:00:10Z');
+  seedScript(db, objects, 'src_main', 'main.js', `loadRace('/a/'); loadRace('/b/');`, '2099-01-01T00:00:09Z');
+
+  const result = await resolveCapturedXlabsRequestPath(env, 'src_calc');
+  assert.equal(result.status, 'conflict');
+  assert.equal(result.resolvedBaseUrl, null);
+});
+
+test('ignores same-named object methods when tracing direct function calls', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedParent(db, objects);
+  seedScript(db, objects, 'src_calc', 'calculate.js', `
+    function loadRace(path) { $.getJSON(path + fileName); }
+  `, '2099-01-01T00:00:10Z');
+  seedScript(db, objects, 'src_main', 'main.js', `other.loadRace('/wrong/'); loadRace('/right/');`, '2099-01-01T00:00:09Z');
+
+  const result = await resolveCapturedXlabsRequestPath(env, 'src_calc');
+  assert.equal(result.status, 'resolved_static');
+  assert.equal(result.resolvedBaseUrl, 'https://kmtid.atgx.se/right/');
+  assert.equal(result.assignments.some((x) => x.resolvedBaseUrl === 'https://kmtid.atgx.se/wrong/'), false);
+});
+
+test('treats interpolated template path arguments as dynamic', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedParent(db, objects);
+  seedScript(db, objects, 'src_calc', 'calculate.js', `
+    function loadRace(path) { $.getJSON(path + fileName); }
+  `, '2099-01-01T00:00:10Z');
+  seedScript(db, objects, 'src_main', 'main.js', 'loadRace(`/data/${folder}/`);', '2099-01-01T00:00:09Z');
+
+  const result = await resolveCapturedXlabsRequestPath(env, 'src_calc');
+  assert.equal(result.status, 'dynamic');
+  assert.equal(result.resolvedBaseUrl, null);
+});
