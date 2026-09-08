@@ -21,7 +21,7 @@ General interface icons and the horse symbol are adapted from Phosphor Icons.
 
 ## Lucide Icons
 
-The trainer brain and driver flexed-arm symbols are adapted from Lucide Icons.
+Selected interface symbols, including the trainer clipboard/pen, driver lightbulb, and corner-back arrow, are adapted from Lucide Icons.
 
 - Source: https://github.com/lucide-icons/lucide
 - License: ISC

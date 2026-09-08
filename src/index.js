@@ -12,7 +12,7 @@ import { toEntityAppView } from './routes/entity-view.js';
 import { getGameHistoryDetail, listGameHistory } from './routes/games.js';
 import { getGameHistorySummary } from './routes/game-summary.js';
 import { appAuthConfigured, appPasswordMatches, createAppSessionCookie, hasValidAppSession } from './app-auth.js';
-import { htmlResponse, redirectResponse, renderAppPage, renderLoginPage } from './app-page-final.js';
+import { htmlResponse, redirectResponse, renderAppPage, renderLoginPage } from './app-page-release.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -128,7 +128,16 @@ async function handleFetch(request, env) {
   if (request.method === 'POST' && path === '/v1/import/raw') {
     const body = await readJson(request);
     const fetchedAt = body.fetched_at || new Date().toISOString();
-    const result = await archiveRawPayload(env, { sourceType: String(body.source_type || 'manual'), externalId: body.external_id || null, sourceUrl: body.source_url || null, fetchedAt, payload: body.payload, qualityStatus: body.quality_status || 'unknown', rightsStatus: body.rights_status || null, metadata: body.metadata || null });
+    const result = await archiveRawPayload(env, {
+      sourceType: String(body.source_type || 'manual'),
+      externalId: body.external_id || null,
+      sourceUrl: body.source_url || null,
+      fetchedAt,
+      payload: body.payload,
+      qualityStatus: body.quality_status || 'unknown',
+      rightsStatus: body.rights_status || null,
+      metadata: body.metadata || null
+    });
     return json(result, 201);
   }
   if (request.method === 'POST' && path === '/v1/learning/hypotheses') return json(await createHypothesis(env, await readJson(request)), 201);
@@ -144,8 +153,14 @@ async function handleScheduled(controller, env) {
 
 export default {
   async fetch(request, env) {
-    try { return await handleFetch(request, env); }
-    catch (error) { console.error(error); return json({ error: 'request_failed', message: error.message }, 400); }
+    try {
+      return await handleFetch(request, env);
+    } catch (error) {
+      console.error(error);
+      return json({ error: 'request_failed', message: error.message }, 400);
+    }
   },
-  async scheduled(controller, env, ctx) { ctx.waitUntil(handleScheduled(controller, env)); }
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(handleScheduled(controller, env));
+  }
 };

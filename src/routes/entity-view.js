@@ -64,10 +64,19 @@ function safeStart(start) {
   };
 }
 
+function appStats(stats) {
+  const safe = { ...(stats || {}) };
+  const resultStarts = Number(safe.resultStarts || 0);
+  const gallops = Number(safe.gallops || 0);
+  safe.gallopRate = resultStarts > 0 ? gallops / resultStarts : null;
+  return safe;
+}
+
 export function toEntityAppView(detail) {
   if (!detail) return detail;
   return {
     ...detail,
+    stats: appStats(detail.stats),
     latestObservation: safeObservation(detail.latestObservation),
     starts: (detail.starts || []).map(safeStart)
   };
