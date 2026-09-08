@@ -3,8 +3,9 @@ const MAX_SCRIPT_BYTES = 2 * 1024 * 1024;
 const MAX_ITEMS = 40;
 const MAX_LABEL = 240;
 const MAX_EXPRESSION_CHARS = 600;
-const MAX_DEFINITIONS = 12;
-const MAX_DEFINITION_DEPTH = 2;
+const MAX_DEFINITIONS = 16;
+const MAX_DEFINITION_DEPTH = 4;
+const MAX_CONTEXT_SOURCES = 8;
 
 function unique(values) {
   return [...new Set(values.filter(Boolean))];
@@ -45,8 +46,7 @@ function sanitizeLiteralComponent(value, baseUrl) {
     const resolved = sanitizeUrl(raw, baseUrl);
     if (resolved) return resolved;
   }
-  const text = raw.split(/[?#]/, 1)[0];
-  return compact(text, 120);
+  return compact(raw.split(/[?#]/, 1)[0], 120);
 }
 
 function count(text, pattern) {
@@ -156,6 +156,23 @@ function assignedExpression(text, startIndex) {
   return out.trim();
 }
 
+function expressionParts(expression, baseUrl) {
+  const text = String(expression || '');
+  const parts = [];
+  const tokenPattern = /(['"`])([^'"`]{0,500})\1|\b[A-Za-z_$][A-Za-z0-9_$]*\b/g;
+  const ignored = new Set(['true', 'false', 'null', 'undefined', 'const', 'let', 'var', 'return', 'function', 'if', 'else', 'new']);
+  for (const match of text.matchAll(tokenPattern)) {
+    if (match[1]) {
+      const value = sanitizeLiteralComponent(match[2], baseUrl);
+      if (value) parts.push({ kind: 'string', value });
+    } else if (!ignored.has(match[0])) {
+      parts.push({ kind: 'identifier', value: match[0] });
+    }
+    if (parts.length >= 30) break;
+  }
+  return parts;
+}
+
 function summarizeExpression(expression, baseUrl) {
   const text = String(expression || '').trim();
   if (!text) return null;
@@ -166,7 +183,8 @@ function summarizeExpression(expression, baseUrl) {
     return {
       expressionType: 'literal',
       identifiers: [],
-      literals: resolvedUrl ? [{ kind: 'url', value: resolvedUrl }] : []
+      literals: resolvedUrl ? [{ kind: 'url', value: resolvedUrl }] : [],
+      parts: resolvedUrl ? [{ kind: 'url', value: resolvedUrl }] : []
     };
   }
 
@@ -183,7 +201,8 @@ function summarizeExpression(expression, baseUrl) {
   return {
     expressionType: 'dynamic',
     identifiers,
-    literals
+    literals,
+    parts: expressionParts(text, baseUrl)
   };
 }
 
@@ -193,7 +212,7 @@ function escapeRegExp(value) {
 
 function latestDefinition(text, identifier, beforeIndex, baseUrl) {
   const escaped = escapeRegExp(identifier);
-  const pattern = new RegExp(`(?:^|[;{}\\n])\\s*(?:(?:const|let|var)\\s+)?${escaped}\\s*=\\s*(?!=)`, 'gm');
+  const pattern = new RegExp(`(?:^|[;{}\\n>])\\s*(?:(?:const|let|var)\\s+)?${escaped}\\s*=\\s*(?!=)`, 'gm');
   let latest = null;
   for (const match of text.slice(0, beforeIndex).matchAll(pattern)) latest = match;
   if (!latest) return null;
@@ -225,6 +244,15 @@ function definitionSummaries(text, identifiers, beforeIndex, baseUrl) {
   return definitions;
 }
 
+function unresolvedIdentifiers(shape) {
+  const referenced = new Set(shape.identifiers || []);
+  for (const definition of shape.definitions || []) {
+    for (const identifier of definition.identifiers || []) referenced.add(identifier);
+  }
+  const defined = new Set((shape.definitions || []).map((definition) => definition.identifier));
+  return [...referenced].filter((identifier) => !defined.has(identifier)).slice(0, 20);
+}
+
 function requestArgumentShapes(text, baseUrl) {
   const patterns = [
     ['fetch', /\bfetch\s*\(/g],
@@ -239,11 +267,10 @@ function requestArgumentShapes(text, baseUrl) {
       const openParen = callIndex + match[0].lastIndexOf('(');
       const summary = summarizeExpression(firstArgument(text, openParen), baseUrl);
       if (summary) {
-        items.push({
-          kind,
-          ...summary,
-          definitions: definitionSummaries(text, summary.identifiers, callIndex, baseUrl)
-        });
+        const definitions = definitionSummaries(text, summary.identifiers, callIndex, baseUrl);
+        const shape = { kind, ...summary, definitions };
+        shape.unresolvedIdentifiers = unresolvedIdentifiers(shape);
+        items.push(shape);
       }
       if (items.length >= MAX_ITEMS) return items;
     }
@@ -275,6 +302,84 @@ export function inspectXlabsScriptText(script, options = {}) {
   };
 }
 
+async function readContextSources(env, source, metadata) {
+  const context = [];
+  const parentId = typeof metadata.parentSourceRecordId === 'string' ? metadata.parentSourceRecordId : null;
+  if (!parentId) return context;
+
+  const prefix = `${parentId}:`;
+  const siblings = await env.DB.prepare(`
+    SELECT id, raw_object_key, metadata_json
+    FROM source_records
+    WHERE source_type = 'xlabs_script' AND substr(external_id, 1, ?) = ?
+    ORDER BY fetched_at DESC
+    LIMIT ?
+  `).bind(prefix.length, prefix, MAX_CONTEXT_SOURCES).all();
+
+  for (const row of siblings.results || []) {
+    if (!row?.raw_object_key || row.id === source.id) continue;
+    const object = await env.RAW_BUCKET.get(row.raw_object_key);
+    if (!object) continue;
+    const siblingMetadata = parseMetadata(row.metadata_json);
+    context.push({
+      source: typeof siblingMetadata.scriptName === 'string' ? compact(siblingMetadata.scriptName, 80) : 'captured_script',
+      text: await object.text()
+    });
+  }
+
+  const parent = await env.DB.prepare(`
+    SELECT source_url, raw_object_key
+    FROM source_records
+    WHERE id = ? AND source_type = 'xlabs'
+    LIMIT 1
+  `).bind(parentId).first();
+  if (parent?.raw_object_key) {
+    const object = await env.RAW_BUCKET.get(parent.raw_object_key);
+    if (object) context.push({ source: 'parent_page', text: await object.text() });
+  }
+  return context.slice(0, MAX_CONTEXT_SOURCES);
+}
+
+function contextDefinitionsForShape(shape, contextSources, baseUrl) {
+  const results = [];
+  const seen = new Set();
+  for (const identifier of shape.unresolvedIdentifiers || []) {
+    for (const context of contextSources) {
+      const definitions = definitionSummaries(context.text, [identifier], context.text.length, baseUrl);
+      if (!definitions.length) continue;
+      for (const definition of definitions) {
+        const key = `${context.source}:${definition.identifier}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        results.push({ source: context.source, ...definition });
+        if (results.length >= MAX_DEFINITIONS) return results;
+      }
+      break;
+    }
+  }
+  return results;
+}
+
+function buildRequestRecipe(shape) {
+  const contextDefined = new Set((shape.contextDefinitions || []).map((definition) => definition.identifier));
+  return {
+    kind: shape.kind,
+    requestParts: shape.parts || [],
+    localDefinitions: (shape.definitions || []).map((definition) => ({
+      identifier: definition.identifier,
+      parts: definition.parts || [],
+      identifiers: definition.identifiers || []
+    })),
+    contextDefinitions: (shape.contextDefinitions || []).map((definition) => ({
+      source: definition.source,
+      identifier: definition.identifier,
+      parts: definition.parts || [],
+      identifiers: definition.identifiers || []
+    })),
+    unresolvedIdentifiers: (shape.unresolvedIdentifiers || []).filter((identifier) => !contextDefined.has(identifier))
+  };
+}
+
 export async function inspectCapturedXlabsScript(env, sourceRecordId) {
   if (!env.DB) throw new Error('DB is not configured');
   if (!env.RAW_BUCKET?.get) throw new Error('RAW_BUCKET read access is not configured');
@@ -301,6 +406,13 @@ export async function inspectCapturedXlabsScript(env, sourceRecordId) {
     documentBaseUrl = parent?.source_url || null;
   }
 
+  const inspection = inspectXlabsScriptText(script, { sourceUrl: source.source_url, documentBaseUrl });
+  const contextSources = await readContextSources(env, source, metadata);
+  for (const shape of inspection.requestArgumentShapes) {
+    shape.contextDefinitions = contextDefinitionsForShape(shape, contextSources, documentBaseUrl || source.source_url);
+    shape.requestRecipe = buildRequestRecipe(shape);
+  }
+
   return {
     sourceRecordId: source.id,
     scriptName: typeof metadata.scriptName === 'string' ? compact(metadata.scriptName, 80) : null,
@@ -309,7 +421,7 @@ export async function inspectCapturedXlabsScript(env, sourceRecordId) {
     contentHash: source.content_hash,
     qualityStatus: source.quality_status,
     parentSourceRecordId: typeof metadata.parentSourceRecordId === 'string' ? metadata.parentSourceRecordId : null,
-    inspection: inspectXlabsScriptText(script, { sourceUrl: source.source_url, documentBaseUrl }),
+    inspection,
     normalizedRowsWritten: 0,
     mapperStatus: 'not_implemented'
   };
