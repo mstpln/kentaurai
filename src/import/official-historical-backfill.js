@@ -1,9 +1,11 @@
 import { stableId } from '../ids.js';
 import { finishImportRun, startImportRun } from './common.js';
-import { normalizeCapturedOfficialRace } from './official-historical-race.js';
+import { normalizeCapturedOfficialRace, officialRaceHasFinalResults } from './official-historical-race.js';
 import { captureCalendar, captureRace, validateIsoDate } from '../provider/official.js';
 
 const SOURCE_TYPE = 'official_provider';
+const NORMALIZED_QUALITY = 'normalized_verified_subset';
+const BACKFILL_VERSION = 'official-se-trot-v2';
 const MAX_RANGE_DAYS = 1096;
 const MAX_EMPTY_DATES_PER_STEP = 14;
 
@@ -69,15 +71,15 @@ export function swedishTrottingRaceIds(calendar) {
 export async function startHistoricalBackfill(env, startDate, endDate, { resume = false } = {}) {
   if (!env.DB) throw new Error('DB is not configured');
   const range = validateRange(startDate, endDate);
-  const id = stableId('backfill', 'official-se-trot-v1', range.start, range.end);
+  const id = stableId('backfill', BACKFILL_VERSION, range.start, range.end);
   await env.DB.prepare(`
     INSERT OR IGNORE INTO historical_backfill_jobs (id, start_date, end_date, next_date, status)
     VALUES (?, ?, ?, ?, 'running')
-  `).bind(id, range.start, range.end, range.start).run();
+  `).bind(id, range.start, range.end, range.end).run();
   if (resume) {
     await env.DB.prepare(`
       UPDATE historical_backfill_jobs
-      SET status = CASE WHEN next_date <= end_date THEN 'running' ELSE status END,
+      SET status = CASE WHEN next_date >= start_date THEN 'running' ELSE status END,
           consecutive_errors = 0, last_error = NULL, updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND status = 'failed'
     `).bind(id).run();
@@ -111,8 +113,8 @@ async function acquireLease(env, job) {
 }
 
 async function advanceDate(env, job, leaseToken) {
-  const next = addDays(job.next_date, 1);
-  const completed = next > job.end_date;
+  const next = addDays(job.next_date, -1);
+  const completed = next < job.start_date;
   const result = await env.DB.prepare(`
     UPDATE historical_backfill_jobs
     SET next_date = ?, next_race_index = 0, processed_dates = processed_dates + 1,
@@ -127,6 +129,25 @@ async function advanceDate(env, job, leaseToken) {
   return completed;
 }
 
+async function chooseRaceSource(env, raceId, options, counts) {
+  const source = await sourceForIdentity(env, `race:${raceId}`);
+  if (source?.quality_status === NORMALIZED_QUALITY) return source;
+
+  if (source) {
+    const cachedPayload = await loadJsonObject(env, source, 'official race');
+    if (officialRaceHasFinalResults(cachedPayload)) return source;
+  }
+
+  const captured = await captureRace(env, raceId, { fetchImpl: options.fetchImpl });
+  counts.inserted += Number(!captured.reused);
+  counts.skipped += Number(captured.reused);
+  return {
+    id: captured.sourceRecordId,
+    raw_object_key: captured.rawObjectKey,
+    quality_status: 'captured_unmapped'
+  };
+}
+
 export async function runHistoricalBackfillStep(env, jobId = null, options = {}) {
   if (!env.DB) throw new Error('DB is not configured');
   if (!env.RAW_BUCKET?.get || !env.RAW_BUCKET?.put) throw new Error('RAW_BUCKET read/write access is not configured');
@@ -139,7 +160,7 @@ export async function runHistoricalBackfillStep(env, jobId = null, options = {})
   if (!leaseToken) return { jobId: job.id, status: 'busy', done: false, reused: true };
 
   const run = await startImportRun(env, 'official_historical_backfill_step', {
-    jobId: job.id, date: job.next_date, raceIndex: job.next_race_index
+    jobId: job.id, date: job.next_date, raceIndex: job.next_race_index, direction: 'newest_first', version: BACKFILL_VERSION
   });
   const counts = { inserted: 0, updated: 0, skipped: 0, errors: 0 };
   try {
@@ -147,8 +168,9 @@ export async function runHistoricalBackfillStep(env, jobId = null, options = {})
       let calendarSource = await sourceForIdentity(env, `calendar:${job.next_date}`);
       if (!calendarSource) {
         const captured = await captureCalendar(env, job.next_date, { fetchImpl: options.fetchImpl });
-        calendarSource = await sourceForIdentity(env, `calendar:${job.next_date}`) || { id: captured.sourceRecordId, raw_object_key: captured.rawObjectKey };
-        counts.inserted += 1;
+        calendarSource = { id: captured.sourceRecordId, raw_object_key: captured.rawObjectKey, quality_status: 'captured_unmapped' };
+        counts.inserted += Number(!captured.reused);
+        counts.skipped += Number(captured.reused);
       } else {
         counts.skipped += 1;
       }
@@ -165,12 +187,7 @@ export async function runHistoricalBackfillStep(env, jobId = null, options = {})
       }
 
       const raceId = raceIds[job.next_race_index];
-      let raceSource = await sourceForIdentity(env, `race:${raceId}`);
-      if (!raceSource) {
-        const captured = await captureRace(env, raceId, { fetchImpl: options.fetchImpl });
-        raceSource = await sourceForIdentity(env, `race:${raceId}`) || { id: captured.sourceRecordId, quality_status: 'captured_unmapped' };
-        counts.inserted += 1;
-      }
+      const raceSource = await chooseRaceSource(env, raceId, options, counts);
       const normalized = await normalizeCapturedOfficialRace(env, raceSource.id);
       if (normalized.reused) counts.skipped += 1;
       else counts.updated += 1;
