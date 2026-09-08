@@ -70,7 +70,7 @@ function normalizeDocumentReference(value, baseUrl) {
   }
 }
 
-function scriptSummaries(html) {
+function scriptSummaries(html, baseUrl) {
   const scripts = [];
   const srcs = [];
   let inlineScripts = 0;
@@ -92,7 +92,7 @@ function scriptSummaries(html) {
     const id = attributeValue(attrs, 'id');
     if (src) {
       externalScripts += 1;
-      const normalizedSrc = normalizeUrlCandidate(src);
+      const normalizedSrc = normalizeDocumentReference(src, baseUrl);
       if (normalizedSrc) srcs.push(normalizedSrc);
     } else {
       inlineScripts += 1;
@@ -198,13 +198,14 @@ export function inspectXlabsHtml(html, options = {}) {
   const byteLength = new TextEncoder().encode(text).byteLength;
   if (byteLength > MAX_HTML_BYTES) throw new Error('captured X-Labs HTML exceeded inspection size limit');
   const titleMatch = text.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
-  const scripts = scriptSummaries(text);
+  const scripts = scriptSummaries(text, options.baseUrl);
   const tables = tableSummaries(text);
   const iframes = iframeSummaries(text, options.baseUrl);
   const channels = [];
   if (tables.length) channels.push('html_table');
   if (scripts.jsonScripts) channels.push('embedded_json');
   if (scripts.fetchCalls || scripts.xhrMentions || scripts.apiMentions || scripts.candidateEndpoints.length) channels.push('network_or_api_reference');
+  if (scripts.externalSources.length) channels.push('external_script');
   if (scripts.hasNextData || scripts.hasWindowAssignedData) channels.push('embedded_application_state');
   if (iframes.some((frame) => frame.src)) channels.push('iframe_document');
   if (!channels.length) channels.push('static_html_or_unknown');
