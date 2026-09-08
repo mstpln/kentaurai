@@ -149,11 +149,27 @@ function assignedExpression(text, startIndex) {
       out += ch;
       continue;
     }
-    if ((ch === ';' || ch === '\n') && depth === 0) return out.trim();
+    if ((ch === ';' || ch === ',' || ch === '\n') && depth === 0) return out.trim();
     if (ch === ')' || ch === ']' || ch === '}') depth = Math.max(0, depth - 1);
     out += ch;
   }
   return out.trim();
+}
+
+function isMemberIdentifier(text, index) {
+  let i = index - 1;
+  while (i >= 0 && /\s/.test(text[i])) i -= 1;
+  return i >= 0 && text[i] === '.';
+}
+
+function freeIdentifiers(text) {
+  const ignored = new Set(['true', 'false', 'null', 'undefined', 'const', 'let', 'var', 'return', 'function', 'if', 'else', 'new']);
+  const values = [];
+  for (const match of text.matchAll(/\b[A-Za-z_$][A-Za-z0-9_$]*\b/g)) {
+    if (ignored.has(match[0]) || isMemberIdentifier(text, match.index || 0)) continue;
+    values.push(match[0]);
+  }
+  return unique(values);
 }
 
 function expressionParts(expression, baseUrl) {
@@ -165,7 +181,7 @@ function expressionParts(expression, baseUrl) {
     if (match[1]) {
       const value = sanitizeLiteralComponent(match[2], baseUrl);
       if (value) parts.push({ kind: 'string', value });
-    } else if (!ignored.has(match[0])) {
+    } else if (!ignored.has(match[0]) && !isMemberIdentifier(text, match.index || 0)) {
       parts.push({ kind: 'identifier', value: match[0] });
     }
     if (parts.length >= 30) break;
@@ -189,9 +205,7 @@ function summarizeExpression(expression, baseUrl) {
   }
 
   const withoutQuotedStrings = text.replace(/(['"`])(?:\\.|(?!\1).)*\1/g, ' ');
-  const identifiers = unique([...withoutQuotedStrings.matchAll(/\b[A-Za-z_$][A-Za-z0-9_$]*\b/g)].map((m) => m[0]))
-    .filter((value) => !['true', 'false', 'null', 'undefined'].includes(value))
-    .slice(0, 20);
+  const identifiers = freeIdentifiers(withoutQuotedStrings).slice(0, 20);
   const literals = [];
   for (const match of text.matchAll(/(['"`])([^'"`]{0,500})\1/g)) {
     const value = sanitizeLiteralComponent(match[2], baseUrl);
@@ -212,7 +226,7 @@ function escapeRegExp(value) {
 
 function latestDefinition(text, identifier, beforeIndex, baseUrl) {
   const escaped = escapeRegExp(identifier);
-  const pattern = new RegExp(`(?:^|[;{}\\n>])\\s*(?:(?:const|let|var)\\s+)?${escaped}\\s*=\\s*(?!=)`, 'gm');
+  const pattern = new RegExp(`(?:^|[;{},()\\n>])\\s*(?:(?:const|let|var)\\s+)?${escaped}\\s*=\\s*(?!=)`, 'gm');
   let latest = null;
   for (const match of text.slice(0, beforeIndex).matchAll(pattern)) latest = match;
   if (!latest) return null;
