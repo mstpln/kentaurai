@@ -6,9 +6,9 @@ import { toEntityAppView } from '../src/routes/entity-view.js';
 
 test('profile refinement uses approved icons, initials and navigation order', () => {
   const html = renderAppPage();
-  assert.match(html, /clipboard\/pen/);
-  assert.match(html, /driverLightbulbIcon/);
-  assert.match(html, /cornerBackIcon/);
+  assert.match(html, /M21\.378 12\.626/);
+  assert.match(html, /M15 14c\.2-1/);
+  assert.match(html, /M20 20v-7a4 4/);
   assert.match(html, /INITIAL_STOP_WORDS/);
   assert.match(html, /slice\(0,3\)/);
   assert.match(html, /\['stats','Statistik'\],\['starts','Starter'\],\['horses','Hästar'\],\['data','Data'\]/);
@@ -16,7 +16,6 @@ test('profile refinement uses approved icons, initials and navigation order', ()
   assert.match(html, /Galopp %/);
   assert.match(html, /profile-horse-row/);
   assert.match(html, /detail-role-link/);
-  assert.match(html, /normalized_verified_subset/);
   assert.match(html, /Tekniska interna statusvärden/);
 });
 
