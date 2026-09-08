@@ -59,13 +59,13 @@ async function fetchText(url, fetchImpl) {
 
 export async function captureXlabsDate(env, date, options = {}) {
   if (!env.DB) throw new Error('DB is not configured');
-  if (!env.RAW_BUCKET) throw new Error('RAW_BUCKET is not configured');
   const normalized = validateXlabsDate(date);
   const url = buildXlabsDateUrl(env, normalized);
   const run = await startImportRun(env, 'xlabs_capture', { kind: 'date_page', date: normalized, sourceUrl: url });
   const counts = { inserted: 0, updated: 0, skipped: 0, errors: 0 };
 
   try {
+    if (!env.RAW_BUCKET) throw new Error('RAW_BUCKET is not configured');
     const fetchedAt = new Date().toISOString();
     const body = await fetchText(url, options.fetchImpl || fetch);
     const archived = await archiveRawSnapshot(env, {
