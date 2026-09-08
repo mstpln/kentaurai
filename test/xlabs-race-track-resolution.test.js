@@ -52,8 +52,17 @@ test('uses requested race number to disambiguate repeated track names in races.j
   });
 
   assert.equal(result.xlabsTrackId, 42);
-  assert.equal(result.trackMappingStatus, 'resolved_from_races_script_and_race');
+  assert.equal(result.trackMappingStatus, 'resolved_from_races_script');
   assert.deepEqual(seen, ['https://kmtid.atgx.se/260906/json/090642105.json']);
+});
+
+test('supports quoted JavaScript object keys when resolving the requested race', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedBase(db, objects, `const races = [{ "number": 5, "trackId": 42, "trackName": "Jägersro" }];`);
+  const result = await captureXlabsRaceJson(env, 'src_calc', 7, 5, {
+    fetchImpl: async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
+  });
+  assert.equal(result.xlabsTrackId, 42);
 });
 
 test('decodes escaped unicode in captured track-name literals', async () => {
