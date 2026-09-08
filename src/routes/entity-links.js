@@ -36,7 +36,7 @@ export async function getLinkedHorses(env, type, id, options = {}) {
     SELECT
       h.id,
       h.canonical_name AS name,
-      COUNT(*) AS starts,
+      SUM(CASE WHEN re.scratched = 0 THEN 1 ELSE 0 END) AS starts,
       MAX(r.race_date) AS latest_start_date
     FROM race_entries re
     JOIN horses h ON h.id = re.horse_id
