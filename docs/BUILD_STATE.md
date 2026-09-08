@@ -2,7 +2,7 @@
 
 Version: 0.4.5
 Phase: interface foundation on verified official data layer
-Status: Trend/navigation polish and measured entity-data presentation are review-clean for the current data phase; automatic live acquisition remains disabled
+Status: Entity-profile and navigation refinement is under final review; automatic live acquisition remains disabled
 
 ## Verified foundation
 - D1 core schema, indexes and reference-round extension migrations are provisioned.
@@ -29,15 +29,27 @@ Status: Trend/navigation polish and measured entity-data presentation are review
 
 ## Navigation and visual direction
 - Bottom navigation is: **Trend -> Tränare -> Hästar -> Kuskar -> Spel**.
-- Trend uses the approved chart-line symbol shown in the production-feedback reference.
-- Tränare uses a brain symbol, Hästar keeps the horse symbol, and Kuskar uses the approved flexed-arm symbol.
-- Entity detail tiles retain the existing framed square; initials are replaced by the same entity-type symbol used in bottom navigation.
+- Trend uses the approved chart-line symbol shown in the production-feedback reference, including the Trend empty state.
+- Tränare uses the approved Lucide clipboard/pen symbol, Hästar keeps the horse symbol, and Kuskar uses the approved Lucide lightbulb symbol.
+- Entity detail tiles retain the existing framed square and display entity initials rather than category icons.
+- Initials use up to three meaningful name words; one-word names use the first two letters. Small connector words are skipped where possible.
 - The Trend page header is singular **Trend**.
 - Trend category controls remain Tränare / Hästar / Kuskar with 2 veckor / 4 veckor / 3 mån / 6 mån / 1 år.
 - The timeframe shown inside the trend panel header is plain text, not an outlined pill.
+- Entity detail back navigation uses the approved corner/back-arrow treatment.
 - The visible logout control and logout endpoint are removed; the private session still expires normally.
-- Approved Sagittarius KentaurAI brand mark remains unchanged.
+- Approved Sagittarius KentaurAI brand mark remains unchanged; its badge is visually aligned to the KENTAURAI wordmark rather than sitting taller than the text.
 - General UI remains minimal/dark with black, grey, brown and beige plus restrained warm accent color.
+
+## Entity pages
+- Trainer and driver roles remain separate analytical pages because their measured data and interpretation differ.
+- A person who appears in both roles can move between the trainer and driver profiles through a small `Tränare · Kusk` role line under the name.
+- Current cross-role navigation is deliberately conservative: it is offered only when the private entity search finds exactly one counterpart with the same canonical name. This is a UI convenience, not a persisted shared-person identity assertion.
+- A durable shared-person identity must not be introduced until source-backed or manually verified identity semantics are available.
+- Person detail tabs are **Statistik -> Starter -> Hästar -> Data**.
+- Horse detail tabs are **Statistik -> Starter -> Utrustning -> Data**.
+- Horse names in linked-horse lists and start history are navigable to the horse profile.
+- The Data tab contains user-relevant profile/database facts and coverage; raw observation timestamps and internal normalization-quality labels are retained for provenance but intentionally hidden from normal profile presentation.
 
 ## Entity data coverage in 0.4.5
 Entity detail APIs and views expose the normalized/measured data already represented by the current schema, grouped so high-volume data does not become one continuous wall of fields.
@@ -47,7 +59,8 @@ Entity detail APIs and views expose the normalized/measured data already represe
 - horse sex, birth year/observed age, breed, color, trainer, owner, breeder and pedigree
 - horse career earnings and record when stored
 - person location, birth year and licence when present in normalized observations
-- database starts, result starts, wins, seconds, thirds, top-3, win/top-3 rates, gallops, disqualifications and prize money
+- database starts, result starts, wins, seconds, thirds, top-3, win/top-3 rates, gallops, **gallop rate**, disqualifications and prize money
+- gallop rate uses completed/result starts as its denominator and remains null when there are no result starts
 - scratched declarations are tracked separately and excluded from start/performance denominators
 - V85 and V86 start counts
 - deterministic breakdowns by start method, distance and track
@@ -84,17 +97,18 @@ Current entity-detail start retrieval is deliberately bounded to the latest 100 
 - No real racing payloads, private reference exports, database dumps, secrets or paid/private editorial provider identity/content may be committed.
 - Raw facts, deterministic calculations and AI judgments remain explicitly separated.
 - Model weights are not changed after a single round; learnings remain No change / Candidate / Confirmed.
-- Review fixed literal SQL wildcard/escape handling in entity search/list filters.
-- Review replaced multiplicative multi-history coverage joins with per-entry `EXISTS` checks to avoid cross-product growth as histories accumulate.
-- Review added regression coverage for wildcard escaping and scratched-entry statistics.
+- Entity search/list filters treat SQL wildcard/escape characters literally.
+- Data-coverage queries use per-entry `EXISTS` checks to avoid cross-product growth as histories accumulate.
+- Scratched entries are excluded from performance and coverage denominators.
 
 ## Current verification gate
-1. Full CI must pass on the exact final PR #13 head.
-2. Exact diff must be reviewed for data completeness, null semantics, query correctness, privacy, read-only behavior, responsive layout and existing route preservation.
+1. Full CI must pass on the exact final PR #14 head.
+2. Exact diff must be reviewed for initials, role-link behavior, data semantics, gallop-rate denominator, navigation, icon consistency, privacy, responsive layout and existing route preservation.
 3. Merge only after explicit user authorization.
-4. After deployment, visually verify Trend/nav icons, plain timeframe label and representative trainer/horse/driver detail pages on desktop and mobile.
+4. After deployment, visually verify logo alignment, bottom-navigation icons, Trend empty state, back arrows, representative trainer/driver dual-role navigation, clickable horse names and entity tabs on desktop and mobile.
 
 ## Not yet implemented
+- verified/persisted shared-person identity across trainer and driver roles; current UI role link is conservative exact-name matching only
 - paginated entity-detail history beyond the current latest-100 window; required before historical backfill
 - verified live scratch/withdrawal mapping
 - automatic live provider acquisition
