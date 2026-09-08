@@ -41,7 +41,7 @@ test('script text inspection identifies request mechanisms and sanitized endpoin
   assert.ok(inspection.keywordCounts.horse > 0);
 });
 
-test('dynamic getJSON request exposes only safe argument structure', () => {
+test('dynamic getJSON request traces safe latest variable definition', () => {
   const inspection = inspectXlabsScriptText(`
     const endpoint = '/data/' + selectedDate + '/races.json?token=secret';
     $.getJSON(endpoint, function (payload) { return payload; });
@@ -50,10 +50,37 @@ test('dynamic getJSON request exposes only safe argument structure', () => {
   assert.equal(inspection.networkCounts.jqueryGetJson, 1);
   assert.equal(inspection.literalNetworkReferences.length, 0);
   assert.equal(inspection.requestArgumentShapes.length, 1);
-  assert.equal(inspection.requestArgumentShapes[0].kind, 'jquery_get_json');
-  assert.equal(inspection.requestArgumentShapes[0].expressionType, 'dynamic');
-  assert.deepEqual(inspection.requestArgumentShapes[0].identifiers, ['endpoint']);
-  assert.equal(JSON.stringify(inspection.requestArgumentShapes).includes('token=secret'), false);
+  const shape = inspection.requestArgumentShapes[0];
+  assert.equal(shape.kind, 'jquery_get_json');
+  assert.equal(shape.expressionType, 'dynamic');
+  assert.deepEqual(shape.identifiers, ['endpoint']);
+  assert.equal(shape.definitions.length, 1);
+  assert.equal(shape.definitions[0].identifier, 'endpoint');
+  assert.deepEqual(shape.definitions[0].identifiers, ['selectedDate']);
+  assert.deepEqual(shape.definitions[0].literals, [
+    { kind: 'string', value: '/data/' },
+    { kind: 'string', value: '/races.json' }
+  ]);
+  assert.equal(JSON.stringify(shape).includes('token=secret'), false);
+});
+
+test('dynamic request follows a second safe definition level', () => {
+  const inspection = inspectXlabsScriptText(`
+    const datePath = '/260906/';
+    const endpoint = datePath + 'data.json?secret=1';
+    $.getJSON(endpoint);
+  `, { documentBaseUrl: 'https://kmtid.atgx.se/260906/' });
+
+  const shape = inspection.requestArgumentShapes[0];
+  assert.deepEqual(shape.identifiers, ['endpoint']);
+  assert.equal(shape.definitions.length, 2);
+  assert.equal(shape.definitions[0].identifier, 'endpoint');
+  assert.deepEqual(shape.definitions[0].identifiers, ['datePath']);
+  assert.deepEqual(shape.definitions[0].literals, [{ kind: 'string', value: 'data.json' }]);
+  assert.equal(shape.definitions[1].identifier, 'datePath');
+  assert.equal(shape.definitions[1].expressionType, 'literal');
+  assert.deepEqual(shape.definitions[1].literals, [{ kind: 'url', value: 'https://kmtid.atgx.se/260906/' }]);
+  assert.equal(JSON.stringify(shape).includes('secret=1'), false);
 });
 
 test('dynamic concatenated request reports sanitized literal components and identifiers', () => {
@@ -69,6 +96,7 @@ test('dynamic concatenated request reports sanitized literal components and iden
     { kind: 'string', value: '/data/' },
     { kind: 'string', value: '/races.json' }
   ]);
+  assert.deepEqual(shape.definitions, []);
   assert.equal(JSON.stringify(shape).includes('auth=private'), false);
 });
 
@@ -80,7 +108,19 @@ test('literal request still returns a sanitized resolved URL shape', () => {
   assert.equal(shape.expressionType, 'literal');
   assert.deepEqual(shape.identifiers, []);
   assert.deepEqual(shape.literals, [{ kind: 'url', value: 'https://kmtid.atgx.se/data/races.json' }]);
+  assert.deepEqual(shape.definitions, []);
   assert.equal(JSON.stringify(shape).includes('secret=1'), false);
+});
+
+test('dynamic absolute URL components strip credentials and query data', () => {
+  const inspection = inspectXlabsScriptText(`
+    const endpoint = 'https://user:pass@kmtid.atgx.se/data/?token=secret' + selectedDate;
+    $.getJSON(endpoint);
+  `, { documentBaseUrl: 'https://kmtid.atgx.se/260906/' });
+  const serialized = JSON.stringify(inspection.requestArgumentShapes[0]);
+  assert.equal(serialized.includes('user:pass'), false);
+  assert.equal(serialized.includes('token=secret'), false);
+  assert.ok(serialized.includes('https://kmtid.atgx.se/data/'));
 });
 
 test('captured script inspection reads only private xlabs_script records and writes no normalized rows', async () => {
