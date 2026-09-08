@@ -74,6 +74,23 @@ test('does not mistake homeTrackId or startNumber for the exact race properties'
   assert.equal(result.xlabsTrackId, 42);
 });
 
+test('ignores nested starter numbers when resolving the race number', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedBase(db, objects, `const races = [
+    { number: 4, track: { trackId: 41, trackName: 'Jägersro' }, starts: [{ number: 5 }] },
+    { number: 5, track: { trackId: 42, trackName: 'Jägersro' }, starts: [{ number: 1 }] }
+  ];`);
+  const seen = [];
+  const result = await captureXlabsRaceJson(env, 'src_calc', 7, 5, {
+    fetchImpl: async (url) => {
+      seen.push(url);
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+    }
+  });
+  assert.equal(result.xlabsTrackId, 42);
+  assert.deepEqual(seen, ['https://kmtid.atgx.se/260906/json/090642105.json']);
+});
+
 test('decodes escaped unicode in captured track-name literals', async () => {
   const { env, db, objects } = createTestEnv();
   seedBase(db, objects, String.raw`const races = [{ number: 5, trackId: 42, trackName: 'J\u00e4gersro' }];`);
