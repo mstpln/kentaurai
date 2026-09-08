@@ -2,10 +2,10 @@
 
 Version: 0.5.0
 Phase: verified official live/historical foundation with automatic V85/V86 acquisition
-Status: official calendar/game and ordinary-race acquisition are verified; resumable historical backfill and automatic upcoming V85/V86 capture/normalization are implemented; the X-Labs production race-capture gate remains to be completed before the full multi-year backfill is started
+Status: official calendar/game and ordinary-race acquisition are verified in production; the official multi-year backfill has been started and is running; a real X-Labs race object has been captured and normalized into verified-subset rows in production; automatic upcoming V85/V86 capture/normalization is implemented in PR #40 and awaits merge/deployment authorization
 
 ## Verified foundation
-- D1 core schema, indexes and reference-round extension migrations are provisioned.
+- D1 core schema, indexes and reference-round extension migrations are provisioned in production.
 - R2/raw snapshot abstraction preserves exact private source payloads with source/import-run provenance.
 - Manual editorial structured import and `kentaurai-reference-v1` import paths are implemented with public/private separation.
 - Official-provider calendar/day and game capture are implemented with strict HTTPS/host/redirect/content validation.
@@ -15,8 +15,11 @@ Status: official calendar/game and ordinary-race acquisition are verified; resum
 - Multi-track rounds do not invent a primary track.
 - Live scratch semantics remain explicitly unverified.
 - Production normalization is cursor/chunk based to stay within Worker request budgets.
-- Raw-vs-normalized verification passed 60/60 checks on the accepted official vertical slice.
+- Raw-vs-normalized verification passed 60/60 checks on the accepted official vertical slice in test coverage.
 - Official ordinary-race production capture/normalization has been exercised successfully on representative records.
+- A one-day official historical production job completed 28 races with zero errors.
+- The production official backfill for 2023-09-08 through 2026-09-07 has been created and observed advancing from its persisted checkpoint with zero errors at the verification point.
+- A real X-Labs race object was captured successfully in production, normalized successfully, and stored as `normalized_verified_subset` with 10 normalized rows covering 10 race entries. The verification endpoint also completed with HTTP 200; the Cloudflare test panel did not expose its response body, so the internal `passed` field was not independently visible in that UI.
 - Automatic live acquisition is implemented for V85/V86 only: morning capture includes the race day and upcoming horizon, evening capture excludes the current day, and normalization advances from durable successful checkpoints.
 
 ## Automatic live acquisition
@@ -26,7 +29,7 @@ Status: official calendar/game and ordinary-race acquisition are verified; resum
 - Calendar discovery requires a matching date, V85/V86 game identity, exactly eight race ids and same-date race identities before a game is fetched.
 - Raw calendar and game snapshots are archived before any normalization.
 - Partial capture failures are surfaced as failed import/orchestrator runs rather than reported as success.
-- Live normalization resumes only from successful contiguous entry checkpoints. A partially written entry or a checkpoint gap cannot silently advance the cursor.
+- Live normalization resumes only from successful contiguous entry checkpoints. A partially written entry, duplicate successful retry, or checkpoint gap cannot silently advance or stall the cursor.
 - Admin-only manual live capture/normalize endpoints remain available for explicit refreshes and operational recovery.
 
 ## Private interface
@@ -105,7 +108,7 @@ The historical page endpoint strips internal race-entry/race IDs from the browse
 - Raw-vs-normalized verification re-derives every mapped value and requires at least ten representative checks.
 - The earlier date-page and allowlisted script capture/inspection routes remain available for provenance and diagnostics.
 - Historical X-Labs acquisition is **not** part of the 0.5.0 official backfill. X-Labs remains complementary and missing coverage is neutral.
-- Production race-object capture/normalization/verification is still an explicit gate before full-scale historical backfill.
+- Production race-object capture and normalization have been exercised successfully on a real race object. The verification endpoint returned HTTP 200, while its JSON `passed` field could not be directly inspected in the Cloudflare test UI used for the production check.
 
 ## Spel
 - Spel has exactly three tabs: Översikt, V85 and V86.
@@ -132,21 +135,22 @@ The historical page endpoint strips internal race-entry/race IDs from the browse
 - Stored coverage includes race/track identity, horse, trainer, driver, start position/distance, explicit scratch state, reported equipment and official result facts available in the source.
 - Persistent date/race checkpoints, an atomic lease and deterministic source reuse make jobs restart-safe and prevent overlapping checkpoint work.
 - One race is processed per scheduled step. Three consecutive source/normalization failures stop the job at the same checkpoint for an explicit resume.
+- The production multi-year job for 2023-09-08 through 2026-09-07 is running newest-first from persisted checkpoints.
 - This does not claim historical market snapshots, private editorial material, AI analysis, race-position data or X-Labs telemetry where those sources were not captured.
 
 ## Current verification gate
 1. Full tests and CI must pass on the exact feature-branch/PR head.
 2. Automatic live acquisition must be smoke-tested in production after explicit merge/deployment authorization.
-3. The private real X-Labs race-object sample must complete capture, normalization and raw-vs-normalized verification in production.
-4. The official ordinary-race production gate has passed on representative records; the full multi-year job remains intentionally not started until the remaining vertical-slice gate is complete.
+3. Continue monitoring the already-running official multi-year backfill for checkpoint advancement and errors; no restart is needed while it remains healthy.
+4. Check/import the private reference round if it is still absent from production.
 5. Historical X-Labs acquisition remains a separately gated future capability and must not be described as part of the official backfill.
 
 ## Next after this build
 1. After explicit authorization, merge/deploy the exact reviewed live-acquisition head.
 2. Confirm the scheduled/manual live path captures and incrementally normalizes a current V85/V86 round without same-day evening refreshes.
-3. Complete the private X-Labs race capture -> normalize -> verify production gate.
+3. Verify tomorrow's V86 has a fresh eight-leg production snapshot and the database/API exposes the expected structured facts for conversational analysis.
 4. Check/import the valid private reference round if still absent.
-5. Start the official 2-3 year backfill and monitor its persisted checkpoint/error counters.
+5. Continue monitoring the running official backfill rather than creating another overlapping job.
 6. Evaluate separately resumable historical X-Labs acquisition only after its availability window and operational limits are verified; missing X-Labs must remain neutral.
 7. Build deterministic Trend metrics/leaderboards after sufficient verified history exists.
 
@@ -154,11 +158,10 @@ The historical page endpoint strips internal race-entry/race IDs from the browse
 - verified/persisted shared-person identity across trainer and driver roles; current UI role link is conservative exact-name matching only
 - verified live scratch/withdrawal mapping
 - additional official-provider endpoint patterns not yet observed
-- completed production X-Labs race-object capture/normalization verification gate
-- production execution of the full official 2-3 year historical backfill
 - historical X-Labs acquisition/backfill and verified availability coverage
 - historical trainer/driver/horse trend metrics and leaderboards
 - automatic post-race result collection/review orchestration
+- installable PWA packaging (web manifest, install metadata, standalone launch and dedicated app icons); the current private interface can still behave as a browser shortcut on mobile until this is added
 - additional winner-trip categories requiring facts not currently represented in the schema
 - dead-heat-specific presentation pending a verified source example
 - future feature-engine expansion
