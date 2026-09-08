@@ -27,6 +27,7 @@ test('approved brand treatment renders exact Sagittarius direction and cap-heigh
   assert.match(html, /M267\.934 459\.625l-80\.013-80\.08/);
   assert.match(html, /--accent:#C79552/);
   assert.match(html, /\.brand-badge\{width:1cap!important;height:1cap!important;flex-basis:1cap!important\}/);
+  assert.match(login, /\.login \.brand-badge\{width:1cap!important;height:1cap!important;flex-basis:1cap!important\}/);
 });
 
 test('trend navigation uses approved chart icon and Trend naming', () => {
@@ -50,8 +51,8 @@ test('profile tiles keep their frame and display initials while category icons s
   assert.match(html, /INITIAL_STOP_WORDS/);
   assert.match(html, /slice\(0,3\)/);
   assert.match(html, /<div class=\"avatar\">'\+esc\(initials\(e\.name\)\)/);
-  assert.match(html, /M21\.378 12\.626/); // trainer clipboard/pen
-  assert.match(html, /M15 14c\.2-1/); // driver lightbulb
+  assert.match(html, /M21\.378 12\.626/);
+  assert.match(html, /M15 14c\.2-1/);
   assert.match(html, /finalReplaceNavIcon\('trainers',FINAL_ICONS\.trainer\)/);
   assert.match(html, /finalReplaceNavIcon\('drivers',FINAL_ICONS\.driver\)/);
   assert.match(html, /\.avatar\{font-size:22px!important/);
@@ -62,6 +63,12 @@ test('entity and game detail back controls use the corner-back arrow', () => {
   assert.match(html, /M20 20v-7a4 4/);
   assert.doesNotMatch(html, /id="backGames">←/);
   assert.match(html, /id=\"backGames\">.*?<span>'\+esc\(d\.round\.gameType\)/s);
+});
+
+test('release layer leaves exactly one initial application bootstrap', () => {
+  const html = renderAppPage();
+  assert.equal((html.match(/renderStart\(\)\.catch/g) || []).length, 1);
+  assert.match(html, /id="kentaurai-release-bootstrap"/);
 });
 
 test('logout control and route are absent from the production interface', () => {
@@ -119,6 +126,6 @@ test('entity browsing still supports complete paginated lists', () => {
 test('all embedded browser application scripts are valid JavaScript', () => {
   const html = renderAppPage();
   const scripts = [...html.matchAll(/<script(?: [^>]*)?>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
-  assert.ok(scripts.length >= 4, 'expected base, polish, complete-data and final-refinement scripts');
+  assert.ok(scripts.length >= 5, 'expected base, polish, complete-data, final-refinement and release scripts');
   for (const script of scripts) assert.doesNotThrow(() => new vm.Script(script));
 });
