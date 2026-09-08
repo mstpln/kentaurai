@@ -14,42 +14,63 @@ function seedParent({ db, objects, html, sourceUrl = 'https://kmtid.atgx.se/2609
   `).run(sourceUrl, key);
 }
 
-test('X-Labs script capture archives only an allowlisted script referenced by the parent page', async () => {
-  const { env, db, objects } = createTestEnv();
-  seedParent({
-    db,
-    objects,
-    html: '<script src="js/races.js?token=private#fragment"></script><script src="js/other.js"></script>'
-  });
+async function captureWithSyntheticResponse(env, scriptName) {
   const seen = [];
-  const result = await captureReferencedXlabsScript(env, 'src_parent', 'races.js', {
+  const result = await captureReferencedXlabsScript(env, 'src_parent', scriptName, {
     fetchImpl: async (url, init) => {
       seen.push({ url, init });
-      return new Response('const synthetic = true;', {
+      return new Response(`const ${scriptName.replace('.js', '')} = true;`, {
         status: 200,
         headers: { 'content-type': 'application/javascript' }
       });
     }
   });
+  return { result, seen };
+}
 
-  assert.equal(seen.length, 1);
+test('X-Labs script capture selects each allowlisted script from sibling script tags', async () => {
+  for (const scriptName of ['races.js', 'calculator.js', 'main.js']) {
+    const { env, db, objects } = createTestEnv();
+    seedParent({
+      db,
+      objects,
+      html: [
+        '<script src="js/races.js?token=private#fragment"></script>',
+        '<script src="js/calculator.js"></script>',
+        '<script src="js/main.js"></script>'
+      ].join('')
+    });
+
+    const { result, seen } = await captureWithSyntheticResponse(env, scriptName);
+    assert.equal(seen.length, 1);
+    assert.equal(new URL(seen[0].url).pathname.endsWith(`/js/${scriptName}`), true);
+    assert.equal(seen[0].init.redirect, 'manual');
+    assert.equal(result.scriptName, scriptName);
+    assert.equal(result.parentSourceRecordId, 'src_parent');
+    assert.equal(result.url, `https://kmtid.atgx.se/260906/js/${scriptName}`);
+    assert.equal(result.normalizationStatus, 'not_implemented');
+    const scriptRecord = db.prepare("SELECT source_type, external_id, source_url, quality_status, metadata_json FROM source_records WHERE source_type = 'xlabs_script'").get();
+    assert.equal(scriptRecord.external_id, `src_parent:${scriptName}`);
+    assert.equal(scriptRecord.source_url, `https://kmtid.atgx.se/260906/js/${scriptName}`);
+    assert.equal(scriptRecord.quality_status, 'captured_unmapped');
+    assert.equal(JSON.parse(scriptRecord.metadata_json).scriptName, scriptName);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM xlabs_data').get().n, 0);
+  }
+});
+
+test('X-Labs script capture strips query and fragment data from provenance', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedParent({ db, objects, html: '<script src="js/races.js?token=private#fragment"></script>' });
+  const { result, seen } = await captureWithSyntheticResponse(env, 'races.js');
   assert.equal(seen[0].url, 'https://kmtid.atgx.se/260906/js/races.js?token=private');
-  assert.equal(seen[0].init.redirect, 'manual');
-  assert.equal(result.scriptName, 'races.js');
-  assert.equal(result.parentSourceRecordId, 'src_parent');
   assert.equal(result.url, 'https://kmtid.atgx.se/260906/js/races.js');
-  assert.equal(result.normalizationStatus, 'not_implemented');
-  const scriptRecord = db.prepare("SELECT source_type, external_id, source_url, quality_status, metadata_json FROM source_records WHERE source_type = 'xlabs_script'").get();
-  assert.equal(scriptRecord.external_id, 'src_parent:races.js');
+  const scriptRecord = db.prepare("SELECT source_url, metadata_json FROM source_records WHERE source_type = 'xlabs_script'").get();
   assert.equal(scriptRecord.source_url, 'https://kmtid.atgx.se/260906/js/races.js');
-  assert.equal(scriptRecord.quality_status, 'captured_unmapped');
   const metadata = JSON.parse(scriptRecord.metadata_json);
-  assert.equal(metadata.scriptName, 'races.js');
   assert.equal(metadata.requestedUrl, 'https://kmtid.atgx.se/260906/js/races.js');
   const run = db.prepare("SELECT metadata_json FROM import_runs WHERE source_type = 'xlabs_script_capture'").get();
   assert.equal(JSON.stringify(run).includes('token=private'), false);
   assert.equal(JSON.stringify(metadata).includes('token=private'), false);
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM xlabs_data').get().n, 0);
 });
 
 test('X-Labs script capture rejects scripts outside the narrow allowlist', async () => {
