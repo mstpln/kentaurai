@@ -107,20 +107,22 @@ export async function captureReferencedXlabsScript(env, sourceRecordId, scriptNa
   const parentHtml = await parentObject.text();
   const selected = chooseScript(parentHtml, parent.source_url, scriptName);
   const requestedUrl = selected.toString();
+  const requestedUrlForProvenance = sanitizedUrl(requestedUrl);
   const run = await startImportRun(env, 'xlabs_script_capture', {
     parentSourceRecordId: parent.id,
     scriptName,
-    requestedUrl
+    requestedUrl: requestedUrlForProvenance
   });
   const counts = { inserted: 0, updated: 0, skipped: 0, errors: 0 };
 
   try {
     const fetchedAt = new Date().toISOString();
     const fetched = await fetchScript(requestedUrl, options.fetchImpl || fetch);
+    const finalUrlForProvenance = sanitizedUrl(fetched.finalUrl);
     const archived = await archiveRawSnapshot(env, {
       sourceType: 'xlabs_script',
       externalId: `${parent.id}:${scriptName}`,
-      sourceUrl: fetched.finalUrl,
+      sourceUrl: finalUrlForProvenance,
       fetchedAt,
       body: fetched.body,
       extension: 'js',
@@ -132,7 +134,7 @@ export async function captureReferencedXlabsScript(env, sourceRecordId, scriptNa
         parentSourceRecordId: parent.id,
         parentExternalId: parent.external_id,
         scriptName,
-        requestedUrl,
+        requestedUrl: requestedUrlForProvenance,
         redirectCount: fetched.redirectCount,
         normalizationStatus: 'not_implemented'
       }
@@ -146,7 +148,7 @@ export async function captureReferencedXlabsScript(env, sourceRecordId, scriptNa
       parentSourceRecordId: parent.id,
       scriptName,
       fetchedAt,
-      url: sanitizedUrl(fetched.finalUrl),
+      url: finalUrlForProvenance,
       redirectCount: fetched.redirectCount,
       reused: archived.reused,
       normalizationStatus: 'not_implemented'
