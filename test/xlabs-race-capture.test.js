@@ -32,6 +32,9 @@ test('builds the verified X-Labs race filename deterministically', () => {
   assert.throws(() => buildXlabsRaceFileName('2026-02-30', 7, 5), /valid calendar date/);
   assert.throws(() => buildXlabsRaceFileName('2026-09-06', 0, 5), /track_id/);
   assert.throws(() => buildXlabsRaceFileName('2026-09-06', 7, 100), /race_number/);
+  assert.throws(() => buildXlabsRaceFileName('2026-09-06', '7abc', 5), /track_id/);
+  assert.throws(() => buildXlabsRaceFileName('2026-09-06', '', 5), /track_id/);
+  assert.throws(() => buildXlabsRaceFileName('2026-09-06', 7, '5abc'), /race_number/);
 });
 
 test('captures one resolved race JSON exactly and writes no normalized X-Labs rows', async () => {
@@ -56,6 +59,7 @@ test('captures one resolved race JSON exactly and writes no normalized X-Labs ro
   assert.equal(result.normalizedRowsWritten, 0);
   assert.equal(result.schemaSample.type, 'object');
   assert.ok(result.schemaSample.keys.includes('horses'));
+  assert.equal(result.schemaSampleFieldLimit, 20);
 
   const source = db.prepare(`SELECT source_type, external_id, source_url, quality_status, metadata_json FROM source_records WHERE source_type = 'xlabs_race_json'`).get();
   assert.equal(source.source_type, 'xlabs_race_json');
@@ -68,6 +72,28 @@ test('captures one resolved race JSON exactly and writes no normalized X-Labs ro
   const stored = [...objects.entries()].find(([key]) => key.includes('/xlabs_race_json/'));
   assert.ok(stored);
   assert.equal(stored[1].body, payload);
+});
+
+test('bounds the returned schema sample across nested objects', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedContext(db, objects);
+  const wide = {};
+  for (let i = 0; i < 50; i += 1) wide[`field_${String(i).padStart(2, '0')}`] = i;
+  const payload = JSON.stringify({ race: wide, horse: wide, extra: wide });
+  const result = await captureXlabsRaceJson(env, 'src_calc', 7, 5, {
+    fetchImpl: async () => new Response(payload, { status: 200, headers: { 'content-type': 'application/json' } })
+  });
+
+  function countKeys(node) {
+    if (!node || typeof node !== 'object') return 0;
+    let count = Array.isArray(node.keys) ? node.keys.length : 0;
+    if (node.fields) for (const child of Object.values(node.fields)) count += countKeys(child);
+    if (node.sample) count += countKeys(node.sample);
+    return count;
+  }
+
+  assert.ok(countKeys(result.schemaSample) <= 20);
+  assert.equal(result.schemaSampleFieldLimit, 20);
 });
 
 test('rejects a resolved base path outside the captured date json directory', async () => {
