@@ -20,6 +20,11 @@ function seedOfficialRace(db, date = DATE) {
     VALUES ('entry_1','race_5','horse_1',1,1000),('entry_2','race_5','horse_2',2,1000)`).run();
 }
 
+function seedV86Round(db) {
+  db.prepare(`INSERT INTO game_rounds (id, game_type, round_date) VALUES ('V86_2099-01-02_7_1','V86',?)`).run(DATE);
+  db.prepare(`INSERT INTO game_legs (game_round_id,leg_number,race_id) VALUES ('V86_2099-01-02_7_1',1,'race_5')`).run();
+}
+
 function seedOfficialCoverage(db, { start = DATE, end = DATE, next = '2099-01-01', status = 'running' } = {}) {
   db.prepare(`INSERT INTO historical_backfill_jobs
     (id,start_date,end_date,next_date,status)
@@ -62,14 +67,33 @@ function telemetryPayload() {
   }));
 }
 
-test('daily X-Labs scheduling creates a stable job for yesterday', async () => {
+test('daily X-Labs scheduling creates a stable V85/V86-only job for yesterday', async () => {
   const { env } = createTestEnv();
   const first = await ensureDailyXlabsJob(env, '2099-01-03T04:30:00.000Z');
   const second = await ensureDailyXlabsJob(env, '2099-01-03T04:30:30.000Z');
   assert.equal(first.id, second.id);
+  assert.equal(first.scope, 'daily_v85_v86');
   assert.equal(first.start_date, DATE);
   assert.equal(first.end_date, DATE);
   assert.equal(first.status, 'running');
+});
+
+test('daily X-Labs job processes a normalized V86 leg without waiting for full official history', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedOfficialRace(db);
+  seedV86Round(db);
+  seedXlabsContext(db, objects);
+  await ensureDailyXlabsJob(env, '2099-01-03T04:30:00.000Z');
+
+  const result = await runXlabsBackfillStep(env, null, {
+    raceFetchImpl: async () => new Response(JSON.stringify(telemetryPayload()), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    })
+  });
+  assert.equal(result.scope, 'daily_v85_v86');
+  assert.equal(result.raceId, 'race_5');
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM xlabs_data`).get().n, 2);
 });
 
 test('multi-day X-Labs history waits until official backfill has completed the checkpoint date', async () => {
@@ -79,6 +103,7 @@ test('multi-day X-Labs history waits until official backfill has completed the c
   seedOfficialCoverage(db, { start: '2099-01-01', end: DATE, next: DATE, status: 'running' });
 
   const result = await runXlabsBackfillStep(env);
+  assert.equal(result.scope, 'historical_all');
   assert.equal(result.status, 'waiting_for_official');
   const job = db.prepare(`SELECT next_date,next_race_index,processed_races,consecutive_errors,lease_token FROM xlabs_backfill_jobs`).get();
   assert.equal(job.next_date, DATE);
@@ -103,6 +128,7 @@ test('captures and normalizes one available X-Labs race from a verified official
   });
 
   assert.equal(result.raceId, 'race_5');
+  assert.equal(result.scope, 'historical_all');
   assert.equal(result.checkpoint.nextRaceIndex, 1);
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM xlabs_data`).get().n, 2);
   assert.equal(db.prepare(`SELECT quality_status FROM source_records WHERE source_type='xlabs_race_json'`).get().quality_status, 'normalized_verified_subset');
@@ -133,9 +159,10 @@ test('404 race objects are neutral missing coverage and advance the checkpoint',
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM xlabs_data`).get().n, 0);
 });
 
-test('404 date pages are neutral missing coverage and complete a single-day job', async () => {
+test('404 date pages are neutral missing coverage and complete a ready single-day historical job', async () => {
   const { env, db } = createTestEnv();
   seedOfficialRace(db);
+  seedOfficialCoverage(db);
   await startXlabsBackfill(env, DATE, DATE);
 
   const result = await runXlabsBackfillStep(env, null, {
@@ -167,6 +194,7 @@ test('X-Labs backfill admin routes require ADMIN_TOKEN and expose stable status'
   response = await worker.fetch(request(env.ADMIN_TOKEN), env);
   assert.equal(response.status, 201);
   const created = await response.json();
+  assert.equal(created.scope, 'historical_all');
   assert.equal(created.start_date, DATE);
   assert.equal(created.end_date, DATE);
 
