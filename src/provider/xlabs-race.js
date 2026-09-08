@@ -8,6 +8,7 @@ const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_REDIRECTS = 2;
 const MAX_SAMPLE_FIELDS = 20;
 const MAX_SAMPLE_DEPTH = 3;
+const XLABS_FETCH_TIMEOUT_MS = 30_000;
 
 function positiveInteger(value, name, max) {
   const text = typeof value === 'number'
@@ -158,9 +159,9 @@ async function readBoundedText(response) {
   return parts.join('');
 }
 
-async function fetchJsonText(url, fetchImpl) {
+async function fetchJsonText(url, fetchImpl, timeoutMs = XLABS_FETCH_TIMEOUT_MS) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 12_000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const expectedPathname = new URL(url).pathname;
   let currentUrl = url;
   let redirects = 0;
@@ -188,6 +189,9 @@ async function fetchJsonText(url, fetchImpl) {
       try { parsed = JSON.parse(body); } catch { throw new Error('X-Labs race-data response was not valid JSON'); }
       return { body, parsed, finalUrl: currentUrl, redirectCount: redirects };
     }
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error(`X-Labs race-data capture timed out after ${timeoutMs}ms`);
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
@@ -245,7 +249,7 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
 
   try {
     const fetchedAt = new Date().toISOString();
-    const fetched = await fetchJsonText(requestedUrl, options.fetchImpl || fetch);
+    const fetched = await fetchJsonText(requestedUrl, options.fetchImpl || fetch, options.timeoutMs ?? XLABS_FETCH_TIMEOUT_MS);
     validateXlabsRacePayload(fetched.parsed, xlabsTrackId, race);
     const archived = await archiveRawSnapshot(env, {
       sourceType: 'xlabs_race_json',
