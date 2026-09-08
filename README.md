@@ -21,7 +21,8 @@ The current build contains:
 - Trend workspace with category/time-period controls
 - Spel area with Översikt / V85 / V86 plus saved-round post-race detail
 - complete presentation of currently stored measurement families on entity/start detail, while internal provenance remains backend-only
-- conservative X-Labs date-page raw-capture prototype; captured HTML is archived privately as `captured_unmapped` and no field mapping is trusted yet
+- conservative X-Labs date-page and referenced-script raw capture; captured source remains private `captured_unmapped` data and no field mapping is trusted yet
+- private sanitized X-Labs script inspection for request mechanisms and endpoint clues without returning raw script bodies
 - secure app login with a separate `APP_PASSWORD` and HttpOnly session cookie
 - strict validation, idempotency and SQLite-backed integration QA
 
@@ -68,6 +69,9 @@ Real source data belongs only in the private Cloudflare D1/R2 deployment or is s
 - `POST /v1/provider/normalize` - Bearer ADMIN_TOKEN
 - `POST /v1/provider/verify-normalization` - Bearer ADMIN_TOKEN
 - `POST /v1/xlabs/capture` - Bearer ADMIN_TOKEN; raw date-page capture only, no trusted normalization yet
+- `POST /v1/xlabs/capture-script` - Bearer ADMIN_TOKEN; captures an allowlisted referenced X-Labs script to private R2
+- `POST /v1/xlabs/inspect` - Bearer ADMIN_TOKEN; sanitized structural inspection of a captured X-Labs date page
+- `POST /v1/xlabs/inspect-script` - Bearer ADMIN_TOKEN; sanitized read-only inspection of a captured X-Labs script for request mechanisms and endpoint candidates
 - `POST /v1/import/editorial` - Bearer ADMIN_TOKEN
 - `POST /v1/import/reference-round` - Bearer ADMIN_TOKEN
 - `POST /v1/import/raw` - Bearer ADMIN_TOKEN
@@ -100,9 +104,11 @@ Scratch semantics have not yet been verified from a real scratched live entry. C
 Automatic live provider acquisition remains disabled.
 
 ### X-Labs prototype
-The build plan treats X-Labs as high-value direct measurement data but explicitly states that the exact acquisition method must be verified in practice. The current prototype implements only the observed public date-page URL pattern on the locked `kmtid.atgx.se` HTTPS host. It blocks redirects, applies response-size checks and archives the exact HTML snapshot to private R2/source records.
+The build plan treats X-Labs as high-value direct measurement data but explicitly states that the exact acquisition method must be verified in practice. The current prototype implements the observed public date-page pattern on the locked `kmtid.atgx.se` HTTPS host plus narrow capture of the verified referenced application scripts `races.js`, `calculate.js` and `main.js`. Exact captures are archived privately in R2/source records.
 
-Captured X-Labs pages remain `captured_unmapped`. The prototype deliberately does **not** parse or write X-Labs measurement fields yet. A real small-sample raw-vs-page verification must establish the structured payload/field semantics before normalization is implemented. Missing X-Labs remains neutral and must never break an analysis pipeline.
+The script-inspection endpoint is read-only. It reports bounded counts of common browser request mechanisms, sanitized literal request URLs, sanitized candidate endpoint strings and coarse keyword counts. It does not return the raw script body, query strings, credentials or arbitrary nearby source snippets.
+
+Captured X-Labs pages and scripts remain `captured_unmapped`. The prototype deliberately does **not** parse or write X-Labs measurement fields yet. A real small-sample raw-vs-page verification must establish the structured payload/field semantics before normalization is implemented. Missing X-Labs remains neutral and must never break an analysis pipeline.
 
 ## Reference-round import
 `kentaurai-reference-v1` is the pre-race reference contract. The validator requires exactly eight V85/V86 legs, complete analysis coverage, probabilities summing to 100% per leg, exactly three spikar in three different legs, one selected horse in every spike leg, and system row count equal to the product of selections.
