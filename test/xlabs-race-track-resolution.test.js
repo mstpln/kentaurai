@@ -65,6 +65,15 @@ test('supports quoted JavaScript object keys when resolving the requested race',
   assert.equal(result.xlabsTrackId, 42);
 });
 
+test('does not mistake homeTrackId or startNumber for the exact race properties', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedBase(db, objects, `const races = [{ number: 5, trackId: 42, trackName: 'Jägersro', homeTrackId: 99, startNumber: 8 }];`);
+  const result = await captureXlabsRaceJson(env, 'src_calc', 7, 5, {
+    fetchImpl: async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
+  });
+  assert.equal(result.xlabsTrackId, 42);
+});
+
 test('decodes escaped unicode in captured track-name literals', async () => {
   const { env, db, objects } = createTestEnv();
   seedBase(db, objects, String.raw`const races = [{ number: 5, trackId: 42, trackName: 'J\u00e4gersro' }];`);
