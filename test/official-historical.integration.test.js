@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createTestEnv } from './helpers/d1.js';
 import worker from '../src/index.js';
-import { normalizeCapturedOfficialRace, validateOfficialRacePayload } from '../src/import/official-historical-race.js';
+import { normalizeCapturedOfficialRace, officialRaceHasFinalResults, validateOfficialRacePayload } from '../src/import/official-historical-race.js';
 import { runHistoricalBackfillStep, startHistoricalBackfill, swedishTrottingRaceIds } from '../src/import/official-historical-backfill.js';
 
 const DATE = '2099-04-10';
@@ -12,21 +12,22 @@ function person(id, firstName, lastName) {
   return { id, firstName, lastName, homeTrack: { id: 7, name: 'Synthetic Park' } };
 }
 
-function racePayload() {
+function racePayload(date = DATE) {
+  const raceId = `${date}_7_5`;
   return {
-    id: RACE_ID,
+    id: raceId,
     name: 'Synthetic ordinary race',
-    date: DATE,
+    date,
     number: 5,
     distance: 2140,
     startMethod: 'auto',
-    startTime: `${DATE}T15:00:20`,
-    scheduledStartTime: `${DATE}T15:00:00`,
+    startTime: `${date}T15:00:20`,
+    scheduledStartTime: `${date}T15:00:00`,
     status: 'results',
     track: { id: 7, name: 'Synthetic Park', countryCode: 'SE', sportSystemCode: 'S' },
     starts: [
       {
-        id: `${RACE_ID}_1`,
+        id: `${raceId}_1`,
         number: 1,
         postPosition: 1,
         distance: 2140,
@@ -52,7 +53,7 @@ function racePayload() {
         }
       },
       {
-        id: `${RACE_ID}_8`,
+        id: `${raceId}_8`,
         number: 8,
         scratched: true,
         postPosition: 8,
@@ -65,13 +66,14 @@ function racePayload() {
   };
 }
 
-function calendarPayload() {
+function calendarPayload(date = DATE) {
+  const raceId = `${date}_7_5`;
   return {
-    date: DATE,
+    date,
     tracks: [
-      { id: 7, name: 'Synthetic Park', countryCode: 'SE', sport: 'trot', races: [{ id: RACE_ID, number: 5 }] },
-      { id: 45, name: 'Synthetic Gallop', countryCode: 'SE', sport: 'gallop', races: [{ id: `${DATE}_45_1` }] },
-      { id: 96, name: 'Synthetic Foreign', countryCode: 'NO', sport: 'trot', races: [{ id: `${DATE}_96_1` }] }
+      { id: 7, name: 'Synthetic Park', countryCode: 'SE', sport: 'trot', races: [{ id: raceId, number: 5 }] },
+      { id: 45, name: 'Synthetic Gallop', countryCode: 'SE', sport: 'gallop', races: [{ id: `${date}_45_1` }] },
+      { id: 96, name: 'Synthetic Foreign', countryCode: 'NO', sport: 'trot', races: [{ id: `${date}_96_1` }] }
     ],
     games: {}
   };
@@ -81,18 +83,19 @@ function jsonResponse(value) {
   return new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
 }
 
-function seedRaceSource(db, objects, id = 'src_historical') {
-  const key = 'raw/official_provider/synthetic-race.json';
-  objects.set(key, { body: JSON.stringify(racePayload()), options: {} });
+function seedRaceSource(db, objects, id = 'src_historical', payload = racePayload()) {
+  const key = `raw/official_provider/${id}.json`;
+  objects.set(key, { body: JSON.stringify(payload), options: {} });
   db.prepare(`INSERT INTO source_records
     (id, source_type, external_id, source_url, fetched_at, raw_object_key, content_hash, quality_status)
-    VALUES (?, 'official_provider', ?, ?, ?, ?, 'synthetic-hash', 'captured_unmapped')`)
-    .run(id, `race:${RACE_ID}`, `https://www.atg.se/services/racinginfo/v1/api/races/${RACE_ID}`, `${DATE}T18:00:00Z`, key);
+    VALUES (?, 'official_provider', ?, ?, ?, ?, ?, 'captured_unmapped')`)
+    .run(id, `race:${payload.id}`, `https://www.atg.se/services/racinginfo/v1/api/races/${payload.id}`, `${payload.date}T18:00:00Z`, key, `synthetic-hash-${id}`);
   return id;
 }
 
 test('validates exact official ordinary-race identity and selects only Swedish trot', () => {
   assert.equal(validateOfficialRacePayload(racePayload()).id, RACE_ID);
+  assert.equal(officialRaceHasFinalResults(racePayload()), true);
   assert.deepEqual(swedishTrottingRaceIds(calendarPayload()), [RACE_ID]);
   const mismatch = racePayload();
   mismatch.track.id = 8;
@@ -124,6 +127,18 @@ test('normalizes ordinary historical results, equipment and verified scratches i
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM race_entries').get().n, 2);
 });
 
+test('incomplete ordinary race capture fails closed before historical facts are normalized', async () => {
+  const { env, db, objects } = createTestEnv();
+  const incomplete = racePayload();
+  incomplete.status = 'ongoing';
+  delete incomplete.starts[0].result;
+  seedRaceSource(db, objects, 'src_incomplete', incomplete);
+  assert.equal(officialRaceHasFinalResults(incomplete), false);
+  await assert.rejects(() => normalizeCapturedOfficialRace(env, 'src_incomplete'), /results are not final/);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM races').get().n, 0);
+  assert.equal(db.prepare(`SELECT quality_status FROM source_records WHERE id = 'src_incomplete'`).get().quality_status, 'captured_unmapped');
+});
+
 test('backfill checkpoint captures one race per step, resumes and completes without duplicates', async () => {
   const { env, db } = createTestEnv();
   const fetched = [];
@@ -135,6 +150,7 @@ test('backfill checkpoint captures one race per step, resumes and completes with
   };
   const job = await startHistoricalBackfill(env, DATE, DATE);
   assert.equal(job.status, 'running');
+  assert.equal(job.next_date, DATE);
 
   const first = await runHistoricalBackfillStep(env, job.id, { fetchImpl });
   assert.equal(first.raceId, RACE_ID);
@@ -147,6 +163,53 @@ test('backfill checkpoint captures one race per step, resumes and completes with
   assert.equal(fetched.filter((url) => url.includes('/races/')).length, 1);
   const stored = db.prepare('SELECT status, processed_dates, processed_races, consecutive_errors FROM historical_backfill_jobs WHERE id = ?').get(job.id);
   assert.deepEqual({ ...stored }, { status: 'completed', processed_dates: 1, processed_races: 1, consecutive_errors: 0 });
+});
+
+test('multi-day backfill starts with the newest date and then moves backward', async () => {
+  const { env } = createTestEnv();
+  const EARLIER = '2099-04-09';
+  const calendarDates = [];
+  const fetchImpl = async (url) => {
+    if (url.includes('/calendar/day/')) {
+      const date = url.split('/').pop();
+      calendarDates.push(date);
+      return jsonResponse(calendarPayload(date));
+    }
+    if (url.includes('/races/')) {
+      const raceId = url.split('/').pop();
+      return jsonResponse(racePayload(raceId.slice(0, 10)));
+    }
+    throw new Error(`unexpected URL ${url}`);
+  };
+  const job = await startHistoricalBackfill(env, EARLIER, DATE);
+  assert.equal(job.next_date, DATE);
+  const newest = await runHistoricalBackfillStep(env, job.id, { fetchImpl });
+  assert.equal(newest.raceId, RACE_ID);
+  const older = await runHistoricalBackfillStep(env, job.id, { fetchImpl });
+  assert.equal(older.raceId, `${EARLIER}_7_5`);
+  assert.deepEqual(calendarDates, [DATE, EARLIER]);
+});
+
+test('backfill refreshes an incomplete cached race before normalizing it', async () => {
+  const { env, db, objects } = createTestEnv();
+  const incomplete = racePayload();
+  delete incomplete.starts[0].result;
+  seedRaceSource(db, objects, 'src_stale', incomplete);
+  let raceFetches = 0;
+  const fetchImpl = async (url) => {
+    if (url.includes('/calendar/day/')) return jsonResponse(calendarPayload());
+    if (url.includes('/races/')) {
+      raceFetches += 1;
+      return jsonResponse(racePayload());
+    }
+    throw new Error(`unexpected URL ${url}`);
+  };
+  const job = await startHistoricalBackfill(env, DATE, DATE);
+  const result = await runHistoricalBackfillStep(env, job.id, { fetchImpl });
+  assert.equal(result.raceId, RACE_ID);
+  assert.equal(raceFetches, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM races').get().n, 1);
+  assert.equal(db.prepare(`SELECT quality_status FROM source_records WHERE id = 'src_stale'`).get().quality_status, 'captured_unmapped');
 });
 
 test('historical operational routes remain behind ADMIN_TOKEN', async () => {
