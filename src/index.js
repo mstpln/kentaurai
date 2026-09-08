@@ -10,6 +10,7 @@ import { createHypothesis } from './routes/learning.js';
 import { verifyCapturedOfficialNormalization } from './routes/official-verification.js';
 import { getEntityDetail, getEntitySummary, listEntities, searchEntities } from './routes/entities.js';
 import { getEntityStartHistory } from './routes/entity-history.js';
+import { getLinkedHorses } from './routes/entity-links.js';
 import { toEntityAppView } from './routes/entity-view.js';
 import { getGameHistoryDetail, listGameHistory } from './routes/games.js';
 import { getGameHistorySummary } from './routes/game-summary.js';
@@ -61,6 +62,14 @@ async function handleAppApi(request, env, url) {
   const historyMatch = path.match(/^\/app\/api\/entities\/(horses|trainers|drivers)\/([^/]+)\/starts$/);
   if (request.method === 'GET' && historyMatch) {
     return json(await getEntityStartHistory(env, historyMatch[1], decodeURIComponent(historyMatch[2]), {
+      limit: url.searchParams.get('limit'),
+      offset: url.searchParams.get('offset')
+    }));
+  }
+
+  const linkedHorsesMatch = path.match(/^\/app\/api\/entities\/(trainers|drivers)\/([^/]+)\/horses$/);
+  if (request.method === 'GET' && linkedHorsesMatch) {
+    return json(await getLinkedHorses(env, linkedHorsesMatch[1], decodeURIComponent(linkedHorsesMatch[2]), {
       limit: url.searchParams.get('limit'),
       offset: url.searchParams.get('offset')
     }));
