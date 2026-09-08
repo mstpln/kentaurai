@@ -1,16 +1,11 @@
 import { archiveRawSnapshot } from '../raw.js';
 import { finishImportRun, startImportRun } from '../import/common.js';
+import { listResolvedXlabsScriptReferences } from '../routes/xlabs-inspection.js';
 
 const XLABS_HOST = 'kmtid.atgx.se';
 const MAX_SCRIPT_BYTES = 2 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
 const ALLOWED_SCRIPT_NAMES = new Set(['races.js', 'calculator.js', 'main.js']);
-
-function attributeValue(attrs, name) {
-  const pattern = new RegExp(`\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i');
-  const match = String(attrs || '').match(pattern);
-  return match ? (match[1] ?? match[2] ?? match[3] ?? null) : null;
-}
 
 function validateXlabsUrl(value) {
   const url = new URL(value);
@@ -28,24 +23,21 @@ function sanitizedUrl(value) {
   return url.toString();
 }
 
-function scriptCandidates(html, baseUrl) {
-  const candidates = [];
-  for (const match of String(html || '').matchAll(/<script\b([^>]*)>/gi)) {
-    const src = attributeValue(match[1] || '', 'src');
-    if (!src) continue;
-    let resolved;
-    try { resolved = validateXlabsUrl(new URL(src, baseUrl).toString()); } catch { continue; }
-    candidates.push(resolved);
-  }
-  return candidates;
-}
-
 function chooseScript(html, baseUrl, scriptName) {
   const requested = String(scriptName || '').trim();
   if (!ALLOWED_SCRIPT_NAMES.has(requested)) throw new Error('script_name must be races.js, calculator.js or main.js');
-  const match = scriptCandidates(html, baseUrl).find((url) => url.pathname.split('/').pop() === requested);
+
+  const match = listResolvedXlabsScriptReferences(html, baseUrl).find((source) => {
+    try {
+      const url = validateXlabsUrl(source);
+      return url.pathname.split('/').pop() === requested;
+    } catch {
+      return false;
+    }
+  });
+
   if (!match) throw new Error('requested X-Labs script was not referenced by the captured page');
-  return match;
+  return validateXlabsUrl(match);
 }
 
 function validateRedirect(currentUrl, location) {

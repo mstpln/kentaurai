@@ -70,11 +70,32 @@ function normalizeDocumentReference(value, baseUrl) {
   }
 }
 
+export function listResolvedXlabsScriptReferences(html, baseUrl) {
+  const references = [];
+  for (const match of String(html || '').matchAll(/<script\b([^>]*)>/gi)) {
+    const src = attributeValue(match[1] || '', 'src');
+    if (!src) continue;
+    try {
+      const resolved = baseUrl ? new URL(src, baseUrl) : new URL(src);
+      if (resolved.protocol !== 'https:' && resolved.protocol !== 'http:') continue;
+      references.push(resolved.toString());
+    } catch {}
+  }
+  return unique(references).slice(0, MAX_LIST_ITEMS);
+}
+
+function scriptTagCounts(html) {
+  let inline = 0;
+  let external = 0;
+  for (const match of String(html || '').matchAll(/<script\b([^>]*)>/gi)) {
+    if (attributeValue(match[1] || '', 'src')) external += 1;
+    else inline += 1;
+  }
+  return { inline, external };
+}
+
 function scriptSummaries(html, baseUrl) {
   const scripts = [];
-  const srcs = [];
-  let inlineScripts = 0;
-  let externalScripts = 0;
   let jsonScripts = 0;
   let fetchCalls = 0;
   let xhrMentions = 0;
@@ -82,21 +103,15 @@ function scriptSummaries(html, baseUrl) {
   let nextData = false;
   let windowData = false;
   const candidateUrls = [];
+  const externalReferences = listResolvedXlabsScriptReferences(html, baseUrl);
+  const tagCounts = scriptTagCounts(html);
 
   const pattern = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
   for (const match of html.matchAll(pattern)) {
     const attrs = match[1] || '';
     const body = match[2] || '';
-    const src = attributeValue(attrs, 'src');
     const type = (attributeValue(attrs, 'type') || '').toLowerCase();
     const id = attributeValue(attrs, 'id');
-    if (src) {
-      externalScripts += 1;
-      const normalizedSrc = normalizeDocumentReference(src, baseUrl);
-      if (normalizedSrc) srcs.push(normalizedSrc);
-    } else {
-      inlineScripts += 1;
-    }
 
     fetchCalls += countMatches(body, /\bfetch\s*\(/g);
     xhrMentions += countMatches(body, /\bXMLHttpRequest\b/g);
@@ -138,9 +153,9 @@ function scriptSummaries(html, baseUrl) {
 
   return {
     total: countMatches(html, /<script\b/gi),
-    inline: inlineScripts,
-    external: externalScripts,
-    externalSources: unique(srcs).slice(0, MAX_LIST_ITEMS),
+    inline: tagCounts.inline,
+    external: tagCounts.external,
+    externalSources: externalReferences.map((value) => normalizeDocumentReference(value, baseUrl)).filter(Boolean),
     jsonScripts,
     jsonScriptSummaries: scripts.slice(0, 10),
     fetchCalls,
@@ -177,10 +192,7 @@ function tableSummaries(html) {
       const text = stripTags(th[1]);
       if (text) headers.push(text);
     }
-    tables.push({
-      headers: unique(headers).slice(0, MAX_LIST_ITEMS),
-      rowCount: countMatches(tableHtml, /<tr\b/gi)
-    });
+    tables.push({ headers: unique(headers).slice(0, MAX_LIST_ITEMS), rowCount: countMatches(tableHtml, /<tr\b/gi) });
     if (tables.length >= 10) break;
   }
   return tables;
@@ -213,13 +225,7 @@ export function inspectXlabsHtml(html, options = {}) {
   return {
     byteLength,
     title: titleMatch ? stripTags(titleMatch[1]) : null,
-    counts: {
-      tables: countMatches(text, /<table\b/gi),
-      rows: countMatches(text, /<tr\b/gi),
-      forms: countMatches(text, /<form\b/gi),
-      iframes: countMatches(text, /<iframe\b/gi),
-      links: countMatches(text, /<a\b/gi)
-    },
+    counts: { tables: countMatches(text, /<table\b/gi), rows: countMatches(text, /<tr\b/gi), forms: countMatches(text, /<form\b/gi), iframes: countMatches(text, /<iframe\b/gi), links: countMatches(text, /<a\b/gi) },
     candidateDataChannels: channels,
     scripts,
     iframes,
