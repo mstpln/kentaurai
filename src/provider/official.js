@@ -5,6 +5,7 @@ import { finishImportRun, startImportRun } from '../import/common.js';
 const DEFAULT_BASE_URL = 'https://www.atg.se/services/racinginfo/v1/api';
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_GAME_ID_LENGTH = 160;
+const RACE_ID_PATTERN = /^(\d{4}-\d{2}-\d{2})_(\d{1,3})_(\d{1,2})$/;
 
 function assertOfficialHostname(url) {
   const host = url.hostname.toLowerCase();
@@ -46,12 +47,54 @@ export function validateGameId(value) {
   return id;
 }
 
+export function validateRaceId(value) {
+  const id = String(value || '').trim();
+  const match = RACE_ID_PATTERN.exec(id);
+  if (!match) throw new Error('race id has an unsupported format');
+  validateIsoDate(match[1]);
+  const trackId = Number(match[2]);
+  const raceNumber = Number(match[3]);
+  if (!Number.isInteger(trackId) || trackId < 1 || trackId > 999 ||
+      !Number.isInteger(raceNumber) || raceNumber < 1 || raceNumber > 99) {
+    throw new Error('race id has an unsupported format');
+  }
+  return id;
+}
+
 export function buildCalendarUrl(env, date) {
   return `${providerBaseUrl(env)}/calendar/day/${encodeURIComponent(validateIsoDate(date))}`;
 }
 
 export function buildGameUrl(env, gameId) {
   return `${providerBaseUrl(env)}/games/${encodeURIComponent(validateGameId(gameId))}`;
+}
+
+export function buildRaceUrl(env, raceId) {
+  return `${providerBaseUrl(env)}/races/${encodeURIComponent(validateRaceId(raceId))}`;
+}
+
+async function readBoundedText(response) {
+  if (!response.body?.getReader) {
+    const text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) throw new Error('official provider response exceeded size limit');
+    return text;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const parts = [];
+  let bytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > MAX_RESPONSE_BYTES) {
+      await reader.cancel();
+      throw new Error('official provider response exceeded size limit');
+    }
+    parts.push(decoder.decode(value, { stream: true }));
+  }
+  parts.push(decoder.decode());
+  return parts.join('');
 }
 
 async function fetchJson(url, fetchImpl) {
@@ -81,10 +124,7 @@ async function fetchJson(url, fetchImpl) {
     }
   }
 
-  const rawText = await response.text();
-  if (new TextEncoder().encode(rawText).byteLength > MAX_RESPONSE_BYTES) {
-    throw new Error('official provider response exceeded size limit');
-  }
+  const rawText = await readBoundedText(response);
 
   try {
     const payload = JSON.parse(rawText);
@@ -160,6 +200,16 @@ export async function captureGame(env, gameId, options = {}) {
     kind: 'game',
     identity: normalized,
     url: buildGameUrl(env, normalized),
+    fetchImpl: options.fetchImpl
+  });
+}
+
+export async function captureRace(env, raceId, options = {}) {
+  const normalized = validateRaceId(raceId);
+  return capture(env, {
+    kind: 'race',
+    identity: normalized,
+    url: buildRaceUrl(env, normalized),
     fetchImpl: options.fetchImpl
   });
 }

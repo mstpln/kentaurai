@@ -23,7 +23,7 @@ function seedScript(db, objects, id, scriptName, script, parentSourceRecordId = 
 
 test('request recipe preserves ordered dynamic parts', () => {
   const inspection = inspectXlabsScriptText(`
-    const fileName = monthString + dayString + trackNumber + '1' + raceNumberString + '.json';
+    const fileName = '1' + monthString + dayString + trackNumber + raceNumberString + '.json';
     $.getJSON(path + fileName);
   `, { documentBaseUrl: 'https://kmtid.atgx.se/260906/' });
   const shape = inspection.requestArgumentShapes[0];
@@ -32,6 +32,7 @@ test('request recipe preserves ordered dynamic parts', () => {
     { kind: 'identifier', value: 'fileName' }
   ]);
   const fileName = shape.definitions.find((x) => x.identifier === 'fileName');
+  assert.equal(fileName.parts[0].value, '1');
   assert.equal(fileName.parts.at(-1).value, '.json');
 });
 
@@ -39,7 +40,7 @@ test('captured inspection resolves path from sibling script', async () => {
   const { env, db, objects } = createTestEnv();
   seedParent(db, objects);
   seedScript(db, objects, 'src_calc', 'calculate.js', `
-    const fileName = monthString + dayString + trackNumber + '1' + raceNumberString + '.json';
+    const fileName = '1' + monthString + dayString + trackNumber + raceNumberString + '.json';
     $.getJSON(path + fileName);
   `);
   seedScript(db, objects, 'src_main', 'main.js', `const path = '/data/';`);

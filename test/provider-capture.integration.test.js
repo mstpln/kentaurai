@@ -4,6 +4,8 @@ import { createTestEnv } from './helpers/d1.js';
 import {
   buildCalendarUrl,
   buildGameUrl,
+  buildRaceUrl,
+  captureRace,
   captureCalendar,
   validateIsoDate
 } from '../src/provider/official.js';
@@ -29,6 +31,12 @@ test('official provider URL builders only accept expected inputs', () => {
     buildGameUrl(env, 'V86_live-round_ABC123'),
     'https://www.atg.se/services/racinginfo/v1/api/games/V86_live-round_ABC123'
   );
+  assert.equal(
+    buildRaceUrl(env, '2026-09-07_7_5'),
+    'https://www.atg.se/services/racinginfo/v1/api/races/2026-09-07_7_5'
+  );
+  assert.throws(() => buildRaceUrl(env, '2026-09-07_0_5'), /unsupported format/);
+  assert.throws(() => buildRaceUrl(env, '2026-02-30_7_5'), /valid calendar date/);
   assert.throws(() => validateIsoDate('2026-02-30'), /valid calendar date/);
   assert.throws(() => buildGameUrl(env, '../../secret'), /unsupported format/);
   assert.throws(() => buildGameUrl(env, `V85_${'a'.repeat(200)}`), /unsupported format/);
@@ -44,6 +52,23 @@ test('official provider URL builders only accept expected inputs', () => {
     () => buildCalendarUrl({ OFFICIAL_PROVIDER_BASE_URL: 'https://example.com/api' }, '2026-09-07'),
     /must use an atg\.se host/
   );
+});
+
+test('official ordinary-race capture uses the verified race endpoint and private archive', async () => {
+  const { env, db, objects } = createTestEnv();
+  const payload = { id: '2026-09-07_7_5', date: '2026-09-07', number: 5, track: { id: 7, name: 'Synthetic' }, starts: [] };
+  const result = await captureRace(env, payload.id, {
+    fetchImpl: async (url) => {
+      assert.match(url, /\/races\/2026-09-07_7_5$/);
+      return jsonResponse(payload);
+    }
+  });
+  assert.equal(result.kind, 'race');
+  assert.equal(result.identity, payload.id);
+  assert.equal(objects.size, 1);
+  const source = db.prepare('SELECT external_id, quality_status FROM source_records').get();
+  assert.equal(source.external_id, `race:${payload.id}`);
+  assert.equal(source.quality_status, 'captured_unmapped');
 });
 
 test('official calendar capture archives the exact JSON and records a successful run', async () => {

@@ -4,11 +4,10 @@ import { validateXlabsDate } from './xlabs.js';
 import { resolveCapturedXlabsRequestPath } from '../routes/xlabs-path-resolution.js';
 
 const XLABS_HOST = 'kmtid.atgx.se';
-const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_REDIRECTS = 2;
 const MAX_SAMPLE_FIELDS = 20;
 const MAX_SAMPLE_DEPTH = 3;
-const MAX_RACES_SCRIPT_BYTES = 2 * 1024 * 1024;
 
 function positiveInteger(value, name, max) {
   const text = typeof value === 'number'
@@ -86,227 +85,40 @@ async function lookupCanonicalTrackName(env, externalTrackId) {
   return name || null;
 }
 
-async function loadNewestRacesScript(env, parentId) {
-  const row = await env.DB.prepare(`
-    SELECT raw_object_key
-    FROM source_records
-    WHERE source_type = 'xlabs_script'
-      AND external_id = ?
-    ORDER BY fetched_at DESC, id DESC
-    LIMIT 1
-  `).bind(`${parentId}:races.js`).first();
-  if (!row?.raw_object_key) return null;
-  const object = await env.RAW_BUCKET.get(row.raw_object_key);
-  if (!object) return null;
-  const text = await object.text();
-  if (new TextEncoder().encode(text).byteLength > MAX_RACES_SCRIPT_BYTES) throw new Error('captured X-Labs races.js exceeded mapping size limit');
-  return text;
-}
-
-function decodeJavascriptString(value) {
-  return String(value || '')
-    .replace(/\\u\{([0-9a-fA-F]{1,6})\}/g, (match, hex) => {
-      const code = Number.parseInt(hex, 16);
-      return code <= 0x10ffff ? String.fromCodePoint(code) : match;
-    })
-    .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)))
-    .replace(/\\x([0-9a-fA-F]{2})/g, (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)))
-    .replace(/\\([\\'"`])/g, '$1');
-}
-
-function normalizedTrackName(value) {
-  return decodeJavascriptString(value).normalize('NFKC').trim().toLocaleLowerCase('sv-SE');
-}
-
-function scanJavascriptObjectsAndStrings(script) {
-  const text = String(script || '');
-  const objectStack = [];
-  const objects = [];
-  const strings = [];
-  const comments = [];
-  let quote = null;
-  let stringStart = -1;
-  let stringValue = '';
-  let escaped = false;
-  let lineComment = false;
-  let lineCommentStart = -1;
-  let blockComment = false;
-  let blockCommentStart = -1;
-
-  for (let i = 0; i < text.length; i += 1) {
-    const ch = text[i];
-    const next = text[i + 1];
-
-    if (lineComment) {
-      if (ch === '\n') {
-        comments.push({ start: lineCommentStart, end: i - 1 });
-        lineComment = false;
-        lineCommentStart = -1;
-      }
-      continue;
-    }
-    if (blockComment) {
-      if (ch === '*' && next === '/') {
-        comments.push({ start: blockCommentStart, end: i + 1 });
-        blockComment = false;
-        blockCommentStart = -1;
-        i += 1;
-      }
-      continue;
-    }
-    if (quote) {
-      if (escaped) {
-        stringValue += ch;
-        escaped = false;
-        continue;
-      }
-      if (ch === '\\') {
-        stringValue += '\\';
-        escaped = true;
-        continue;
-      }
-      if (ch === quote) {
-        strings.push({ start: stringStart, end: i, value: stringValue, template: quote === '`' });
-        quote = null;
-        stringStart = -1;
-        stringValue = '';
-        continue;
-      }
-      stringValue += ch;
-      continue;
-    }
-    if (ch === '/' && next === '/') {
-      lineComment = true;
-      lineCommentStart = i;
-      i += 1;
-      continue;
-    }
-    if (ch === '/' && next === '*') {
-      blockComment = true;
-      blockCommentStart = i;
-      i += 1;
-      continue;
-    }
-    if (ch === '"' || ch === "'" || ch === '`') {
-      quote = ch;
-      stringStart = i;
-      stringValue = '';
-      escaped = false;
-      continue;
-    }
-    if (ch === '{') {
-      objectStack.push(i);
-      continue;
-    }
-    if (ch === '}') {
-      const start = objectStack.pop();
-      if (start != null) objects.push({ start, end: i });
-    }
-  }
-  if (lineComment) comments.push({ start: lineCommentStart, end: text.length - 1 });
-  if (blockComment) comments.push({ start: blockCommentStart, end: text.length - 1 });
-  return { objects, strings, comments };
-}
-
-function indexInsideRange(index, ranges) {
-  return ranges.some((range) => range.start <= index && range.end >= index);
-}
-
-function nextNonWhitespace(text, index) {
-  let i = index;
-  while (i < text.length && /\s/.test(text[i])) i += 1;
-  return text[i] || null;
-}
-
-function numericPropertiesDirectlyInObject(text, object, propertyNames, objects, strings, comments) {
-  const names = propertyNames.map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const pattern = new RegExp(`(?:['"]?\\b(?:${names})\\b['"]?)\\s*[:=]\\s*['"]?(\\d{1,3})`, 'g');
-  const bodyStart = object.start + 1;
-  const body = text.slice(bodyStart, object.end);
-  const childObjects = objects.filter((candidate) => candidate.start > object.start && candidate.end < object.end);
-  const values = [];
-  for (const match of body.matchAll(pattern)) {
-    const absoluteIndex = bodyStart + (match.index || 0);
-    if (childObjects.some((child) => child.start < absoluteIndex && child.end > absoluteIndex)) continue;
-    if (indexInsideRange(absoluteIndex, comments)) continue;
-    const containingString = strings.find((token) => token.start <= absoluteIndex && token.end >= absoluteIndex);
-    if (containingString) {
-      const decodedKey = decodeJavascriptString(containingString.value);
-      const isPropertyKey = containingString.start === absoluteIndex
-        && propertyNames.includes(decodedKey)
-        && nextNonWhitespace(text, containingString.end + 1) === ':';
-      if (!isPropertyKey) continue;
-    }
-    const value = Number(match[1]);
-    if (Number.isInteger(value) && value > 0 && value <= 999 && !values.includes(value)) values.push(value);
-  }
-  return values;
-}
-
-function trackIdsForExactRace(script, trackName, raceNumber) {
-  const text = String(script || '');
-  const needle = normalizedTrackName(trackName);
-  if (!needle) return [];
-  const { objects, strings, comments } = scanJavascriptObjectsAndStrings(text);
-  const raceScoped = [];
-  const nameOnly = [];
-
-  for (const token of strings) {
-    if (indexInsideRange(token.start, comments)) continue;
-    if (token.template && token.value.includes('${')) continue;
-    if (normalizedTrackName(token.value) !== needle) continue;
-    const containers = objects
-      .filter((object) => object.start < token.start && object.end > token.end)
-      .sort((a, b) => (a.end - a.start) - (b.end - b.start));
-
-    let trackObject = null;
-    let trackId = null;
-    for (const object of containers) {
-      const ids = numericPropertiesDirectlyInObject(text, object, ['trackId'], objects, strings, comments);
-      if (ids.length > 1) break;
-      if (ids.length === 1) {
-        trackObject = object;
-        trackId = ids[0];
-        break;
-      }
-    }
-    if (!trackObject || trackId == null) continue;
-    if (!nameOnly.includes(trackId)) nameOnly.push(trackId);
-
-    const raceContainers = objects
-      .filter((object) => object.start <= trackObject.start && object.end >= trackObject.end)
-      .sort((a, b) => (a.end - a.start) - (b.end - b.start));
-    for (const object of raceContainers) {
-      const numbers = numericPropertiesDirectlyInObject(text, object, ['raceNumber', 'number'], objects, strings, comments)
-        .filter((value) => value <= 99);
-      if (numbers.length > 1) break;
-      if (numbers.length === 1) {
-        if (numbers[0] === raceNumber && !raceScoped.includes(trackId)) raceScoped.push(trackId);
-        break;
-      }
-    }
-  }
-  if (raceScoped.length) return raceScoped;
-  return nameOnly.length === 1 ? nameOnly : [];
-}
-
-async function resolveXlabsTrackId(env, parentId, requestedTrackId, raceNumber) {
+async function resolveXlabsTrackId(env, requestedTrackId) {
   const canonicalTrackName = await lookupCanonicalTrackName(env, requestedTrackId);
   if (!canonicalTrackName) throw new Error('official track id is not mapped to a canonical track');
-  const racesScript = await loadNewestRacesScript(env, parentId);
-  if (!racesScript) throw new Error('captured X-Labs races.js is required to resolve the X-Labs track id');
-  const candidates = trackIdsForExactRace(racesScript, canonicalTrackName, raceNumber);
-  if (candidates.length !== 1) throw new Error('X-Labs track id could not be uniquely resolved from captured races.js for the requested race');
-  return { xlabsTrackId: candidates[0], canonicalTrackName, mappingStatus: 'resolved_from_races_script' };
+  return {
+    xlabsTrackId: requestedTrackId,
+    canonicalTrackName,
+    mappingStatus: 'observed_official_track_id_with_payload_guard'
+  };
 }
 
 export function buildXlabsRaceFileName(date, trackId, raceNumber) {
   const normalized = validateXlabsDate(date);
-  const track = positiveInteger(trackId, 'track_id', 999);
+  const track = positiveInteger(trackId, 'track_id', 99);
   const race = positiveInteger(raceNumber, 'race_number', 99);
   const month = normalized.slice(5, 7);
   const day = normalized.slice(8, 10);
-  return `${month}${day}${track}1${String(race).padStart(2, '0')}.json`;
+  return `1${month}${day}${String(track).padStart(2, '0')}${String(race).padStart(2, '0')}.json`;
+}
+
+export function validateXlabsRacePayload(payload, trackId, raceNumber) {
+  if (!Array.isArray(payload) || payload.length === 0) throw new Error('X-Labs race data must be a non-empty telemetry-frame array');
+  const track = positiveInteger(trackId, 'xlabs_track_id', 99);
+  const race = positiveInteger(raceNumber, 'race_number', 99);
+  for (let index = 0; index < payload.length; index += 1) {
+    const frame = payload[index];
+    if (!frame || typeof frame !== 'object' || Array.isArray(frame)) throw new Error(`X-Labs telemetry frame ${index} must be an object`);
+    if (frame.trackId !== track) throw new Error(`X-Labs telemetry frame ${index} has an unexpected trackId`);
+    if (frame.raceNumber !== race) throw new Error(`X-Labs telemetry frame ${index} has an unexpected raceNumber`);
+    if (!Array.isArray(frame.targets)) throw new Error(`X-Labs telemetry frame ${index} targets must be an array`);
+    if (typeof frame.timestamp !== 'string' || !Number.isFinite(Date.parse(frame.timestamp))) {
+      throw new Error(`X-Labs telemetry frame ${index} has an invalid timestamp`);
+    }
+  }
+  return payload;
 }
 
 function validateRedirectUrl(currentUrl, location, expectedPathname) {
@@ -320,6 +132,30 @@ function validateRedirectUrl(currentUrl, location, expectedPathname) {
   target.search = '';
   target.hash = '';
   return target.toString();
+}
+
+async function readBoundedText(response) {
+  if (!response.body?.getReader) {
+    const text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) throw new Error('X-Labs race-data response exceeded size limit');
+    return text;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const parts = [];
+  let bytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > MAX_RESPONSE_BYTES) {
+      await reader.cancel();
+      throw new Error('X-Labs race-data response exceeded size limit');
+    }
+    parts.push(decoder.decode(value, { stream: true }));
+  }
+  parts.push(decoder.decode());
+  return parts.join('');
 }
 
 async function fetchJsonText(url, fetchImpl) {
@@ -347,8 +183,7 @@ async function fetchJsonText(url, fetchImpl) {
       if (type && !type.includes('json') && !type.includes('text/plain')) throw new Error('X-Labs race-data response had an unexpected content type');
       const declared = Number(response.headers.get('content-length'));
       if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) throw new Error('X-Labs race-data response exceeded size limit');
-      const body = await response.text();
-      if (new TextEncoder().encode(body).byteLength > MAX_RESPONSE_BYTES) throw new Error('X-Labs race-data response exceeded size limit');
+      const body = await readBoundedText(response);
       let parsed;
       try { parsed = JSON.parse(body); } catch { throw new Error('X-Labs race-data response was not valid JSON'); }
       return { body, parsed, finalUrl: currentUrl, redirectCount: redirects };
@@ -396,10 +231,10 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
     throw new Error(`X-Labs race-data path is not uniquely resolved (${pathResolution.status})`);
   }
   const baseUrl = validateResolvedBaseUrl(pathResolution.resolvedBaseUrl, date);
-  const requestedTrackId = positiveInteger(trackId, 'track_id', 999);
+  const requestedTrackId = positiveInteger(trackId, 'track_id', 99);
   const race = positiveInteger(raceNumber, 'race_number', 99);
-  const trackMapping = await resolveXlabsTrackId(env, parentId, requestedTrackId, race);
-  const xlabsTrackId = positiveInteger(trackMapping.xlabsTrackId, 'xlabs_track_id', 999);
+  const trackMapping = await resolveXlabsTrackId(env, requestedTrackId);
+  const xlabsTrackId = positiveInteger(trackMapping.xlabsTrackId, 'xlabs_track_id', 99);
   const fileName = buildXlabsRaceFileName(date, xlabsTrackId, race);
   const requestedUrl = new URL(fileName, baseUrl).toString();
   const run = await startImportRun(env, 'xlabs_race_capture', {
@@ -411,6 +246,7 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
   try {
     const fetchedAt = new Date().toISOString();
     const fetched = await fetchJsonText(requestedUrl, options.fetchImpl || fetch);
+    validateXlabsRacePayload(fetched.parsed, xlabsTrackId, race);
     const archived = await archiveRawSnapshot(env, {
       sourceType: 'xlabs_race_json',
       externalId: `${date}:${xlabsTrackId}:${race}`,
@@ -434,7 +270,8 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
         calculateSourceRecordId: sourceId,
         requestedUrl,
         redirectCount: fetched.redirectCount,
-        normalizationStatus: 'not_implemented'
+        acquisitionRecipe: '1MMDDTTRR.json',
+        normalizationStatus: 'available_verified_subset'
       }
     });
     if (archived.reused) counts.skipped = 1;
@@ -455,7 +292,7 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
       redirectCount: fetched.redirectCount,
       reused: archived.reused,
       qualityStatus: 'captured_unmapped',
-      normalizationStatus: 'not_implemented',
+      normalizationStatus: 'available_verified_subset',
       schemaSampleFieldLimit: MAX_SAMPLE_FIELDS,
       schemaSample: summarizeValue(fetched.parsed),
       normalizedRowsWritten: 0

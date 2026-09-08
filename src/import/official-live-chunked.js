@@ -7,13 +7,13 @@ const EXTERNAL_SOURCE = 'official';
 const NORMALIZED_QUALITY = 'normalized_verified_subset';
 const ENTRY_QUALITY = 'official_declared_start_scratch_unverified';
 
-function maybeText(value) {
+export function maybeText(value) {
   if (typeof value !== 'string') return null;
   const text = value.trim();
   return text || null;
 }
 
-function finiteNumber(value) {
+export function finiteNumber(value) {
   if (value == null || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
@@ -36,7 +36,7 @@ function observationId(entityType, entityId, sourceRecordId) {
   return stableId('obs', entityType, entityId, sourceRecordId);
 }
 
-async function recordObservation(env, counts, entityType, entityId, sourceRecordId, observedAt, fields, qualityStatus = NORMALIZED_QUALITY) {
+export async function recordObservation(env, counts, entityType, entityId, sourceRecordId, observedAt, fields, qualityStatus = NORMALIZED_QUALITY) {
   const result = await env.DB.prepare(`
     INSERT OR IGNORE INTO normalized_observations
       (id, entity_type, entity_id, source_record_id, observed_at, fields_json, quality_status)
@@ -64,7 +64,7 @@ async function resolveMappedEntity(env, externalTable, idColumn, entityTable, ex
   return row || null;
 }
 
-async function upsertTrack(env, trackValue, ctx, { observe = false } = {}) {
+export async function upsertTrack(env, trackValue, ctx, { observe = false } = {}) {
   if (!trackValue || typeof trackValue !== 'object') return null;
   const ext = String(trackValue.id ?? '').trim();
   const name = maybeText(trackValue.name);
@@ -126,7 +126,7 @@ async function upsertTrack(env, trackValue, ctx, { observe = false } = {}) {
   return id;
 }
 
-async function upsertPerson(env, kind, personValue, ctx) {
+export async function upsertPerson(env, kind, personValue, ctx) {
   if (!personValue || typeof personValue !== 'object' || personValue.id == null) return null;
   const name = personName(personValue);
   if (!name) return null;
@@ -179,7 +179,7 @@ async function upsertPerson(env, kind, personValue, ctx) {
   return id;
 }
 
-async function upsertHorse(env, horse, trainerId, ctx) {
+export async function upsertHorse(env, horse, trainerId, ctx) {
   const ext = String(horse.id);
   const name = maybeText(horse.name);
   if (!name) throw new Error('horse name is required');
@@ -254,7 +254,7 @@ async function upsertHorse(env, horse, trainerId, ctx) {
   return id;
 }
 
-function startPosition(race, start) {
+export function startPosition(race, start) {
   const actualDistance = finiteNumber(start.distance);
   const raceDistance = finiteNumber(race.distance);
   const lane = finiteNumber(start.postPosition);
@@ -343,7 +343,7 @@ async function ensureRoundAndRace(env, game, race, legNumber, ctx) {
   });
 }
 
-async function insertEquipment(env, raceEntryId, horse, ctx) {
+export async function insertEquipment(env, raceEntryId, horse, ctx) {
   const shoes = horse.shoes && typeof horse.shoes === 'object' ? horse.shoes : null;
   const sulky = horse.sulky && typeof horse.sulky === 'object' ? horse.sulky : null;
   if (!shoes && !sulky) return;
