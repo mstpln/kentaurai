@@ -126,7 +126,7 @@ export async function completedNormalizationCursor(env, sourceRecordId) {
   const sourceId = String(sourceRecordId || '').trim();
   if (!sourceId) throw new Error('source_record_id is required');
   const { results } = await env.DB.prepare(`
-    SELECT CAST(json_extract(metadata_json, '$.cursor') AS INTEGER) AS cursor
+    SELECT DISTINCT CAST(json_extract(metadata_json, '$.cursor') AS INTEGER) AS cursor
     FROM import_runs
     WHERE source_type = 'official_provider_normalize'
       AND status = 'success'
