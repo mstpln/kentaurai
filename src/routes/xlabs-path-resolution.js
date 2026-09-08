@@ -69,9 +69,7 @@ function stripComments(value) {
       if (ch === '\n') {
         lineComment = false;
         out += '\n';
-      } else {
-        out += ' ';
-      }
+      } else out += ' ';
       continue;
     }
     if (blockComment) {
@@ -79,9 +77,7 @@ function stripComments(value) {
         blockComment = false;
         out += '  ';
         i += 1;
-      } else {
-        out += ch === '\n' ? '\n' : ' ';
-      }
+      } else out += ch === '\n' ? '\n' : ' ';
       continue;
     }
     if (quote) {
@@ -179,9 +175,7 @@ function staticStringValue(expression) {
     if (expectString) {
       if (!match[1]) return null;
       strings.push(match[2].replace(/\\(['"`\\])/g, '$1'));
-    } else if (match[0].trim() !== '+') {
-      return null;
-    }
+    } else if (match[0].trim() !== '+') return null;
     expectString = !expectString;
     index = tokenPattern.lastIndex;
   }
@@ -203,6 +197,7 @@ function findPathAssignments(text, source, baseUrl) {
       const staticValue = staticStringValue(expression);
       matches.push({
         source,
+        origin: 'assignment',
         kind: staticValue === null ? 'dynamic' : 'static',
         parts: tokenizeExpression(expression, baseUrl),
         resolvedBaseUrl: staticValue === null ? null : safeUrl(staticValue, baseUrl)
@@ -211,6 +206,119 @@ function findPathAssignments(text, source, baseUrl) {
     }
   }
   return matches;
+}
+
+function findMatching(text, openIndex, openChar, closeChar) {
+  let quote = null;
+  let escaped = false;
+  let depth = 0;
+  for (let i = openIndex; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+      continue;
+    }
+    if (ch === openChar) depth += 1;
+    else if (ch === closeChar) {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function splitArguments(text) {
+  const args = [];
+  let quote = null;
+  let escaped = false;
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+      continue;
+    }
+    if (ch === '(' || ch === '[' || ch === '{') depth += 1;
+    else if (ch === ')' || ch === ']' || ch === '}') depth = Math.max(0, depth - 1);
+    else if (ch === ',' && depth === 0) {
+      args.push(text.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  args.push(text.slice(start).trim());
+  return args;
+}
+
+function pathParameterFunctions(text) {
+  const cleaned = stripComments(text);
+  const found = [];
+  const patterns = [
+    /\bfunction\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(([^)]*)\)\s*\{/g,
+    /\b(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*function\s*\(([^)]*)\)\s*\{/g
+  ];
+  for (const pattern of patterns) {
+    for (const match of cleaned.matchAll(pattern)) {
+      const params = match[2].split(',').map((x) => x.trim()).filter(Boolean);
+      const pathIndex = params.indexOf('path');
+      if (pathIndex < 0) continue;
+      const openBrace = (match.index || 0) + match[0].lastIndexOf('{');
+      const closeBrace = findMatching(cleaned, openBrace, '{', '}');
+      if (closeBrace < 0) continue;
+      const body = cleaned.slice(openBrace + 1, closeBrace);
+      if (!/\$\.getJSON\s*\(\s*path\s*\+/.test(body)) continue;
+      found.push({ name: match[1], pathIndex });
+    }
+  }
+  return found;
+}
+
+function findPathCallsiteValues(context, baseUrl) {
+  const target = context.find((item) => item.source === 'target_script');
+  if (!target) return [];
+  const functions = pathParameterFunctions(target.text);
+  if (!functions.length) return [];
+  const results = [];
+
+  for (const fn of functions) {
+    const callPattern = new RegExp(`\\b${fn.name}\\s*\\(`, 'g');
+    for (const item of context) {
+      const cleaned = stripComments(item.text);
+      for (const match of cleaned.matchAll(callPattern)) {
+        const openParen = (match.index || 0) + match[0].lastIndexOf('(');
+        const closeParen = findMatching(cleaned, openParen, '(', ')');
+        if (closeParen < 0) continue;
+        const args = splitArguments(cleaned.slice(openParen + 1, closeParen));
+        if (fn.pathIndex >= args.length) continue;
+        const expression = args[fn.pathIndex];
+        if (!expression || expression === 'path') continue;
+        const staticValue = staticStringValue(expression);
+        results.push({
+          source: item.source,
+          origin: 'function_argument',
+          functionName: fn.name,
+          argumentIndex: fn.pathIndex,
+          kind: staticValue === null ? 'dynamic' : 'static',
+          parts: tokenizeExpression(expression, baseUrl),
+          resolvedBaseUrl: staticValue === null ? null : safeUrl(staticValue, baseUrl)
+        });
+        if (results.length >= MAX_ASSIGNMENTS) return results;
+      }
+    }
+  }
+  return results;
 }
 
 async function readDeterministicContext(env, source, metadata) {
@@ -284,26 +392,21 @@ export async function resolveCapturedXlabsRequestPath(env, sourceRecordId) {
     assignments.push(...findPathAssignments(item.text, item.source, parentUrl));
     if (assignments.length >= MAX_ASSIGNMENTS) break;
   }
+  if (assignments.length < MAX_ASSIGNMENTS) assignments.push(...findPathCallsiteValues(context, parentUrl).slice(0, MAX_ASSIGNMENTS - assignments.length));
 
   const staticUrls = [...new Set(assignments.filter((item) => item.kind === 'static' && item.resolvedBaseUrl).map((item) => item.resolvedBaseUrl))];
   const rejectedStatic = assignments.filter((item) => item.kind === 'static' && !item.resolvedBaseUrl);
   const dynamic = assignments.filter((item) => item.kind === 'dynamic');
   let status = 'not_found';
   let resolvedBaseUrl = null;
-  if (staticUrls.length > 1) {
-    status = 'conflict';
-  } else if (staticUrls.length === 1 && (dynamic.length || rejectedStatic.length)) {
-    status = 'ambiguous';
-  } else if (staticUrls.length === 1) {
+  if (staticUrls.length > 1) status = 'conflict';
+  else if (staticUrls.length === 1 && (dynamic.length || rejectedStatic.length)) status = 'ambiguous';
+  else if (staticUrls.length === 1) {
     status = 'resolved_static';
     resolvedBaseUrl = staticUrls[0];
-  } else if (rejectedStatic.length && dynamic.length) {
-    status = 'ambiguous';
-  } else if (rejectedStatic.length) {
-    status = 'rejected_static';
-  } else if (dynamic.length) {
-    status = 'dynamic';
-  }
+  } else if (rejectedStatic.length && dynamic.length) status = 'ambiguous';
+  else if (rejectedStatic.length) status = 'rejected_static';
+  else if (dynamic.length) status = 'dynamic';
 
   return {
     sourceRecordId: source.id,
