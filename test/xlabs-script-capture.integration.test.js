@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import worker from '../src/index.js';
 import { createTestEnv } from './helpers/d1.js';
 import { captureReferencedXlabsScript } from '../src/provider/xlabs-script.js';
+import { inspectCapturedXlabs } from '../src/routes/xlabs-inspection.js';
 
 function seedParent({ db, objects, html, sourceUrl = 'https://kmtid.atgx.se/260906/' }) {
   const key = 'raw/xlabs/2099-01-01/parent.html';
@@ -58,11 +59,41 @@ test('X-Labs script capture selects each allowlisted script from sibling script 
   }
 });
 
-test('X-Labs script capture strips query and fragment data from provenance', async () => {
+test('inspector-visible production-shaped script list is capture-eligible for calculator and main', async () => {
+  for (const scriptName of ['calculator.js', 'main.js']) {
+    const { env, db, objects } = createTestEnv();
+    seedParent({
+      db,
+      objects,
+      html: [
+        '<script src="js/vendor/modernizr-2.7.1.min.js"></script>',
+        '<script src="js/Chart.bundle.min.js"></script>',
+        '<script src="js/vendor/jquery-2.1.0.min.js"></script>',
+        '<script src="js/moment.js"></script>',
+        '<script src="js/language.js"></script>',
+        '<script src="js/helper.js"></script>',
+        '<script src="js/races.js"></script>',
+        '<script src="js/calculator.js"></script>',
+        '<script src="js/main.js"></script>'
+      ].join('')
+    });
+
+    const inspected = await inspectCapturedXlabs(env, 'src_parent');
+    assert.ok(inspected.inspection.scripts.externalSources.includes(`https://kmtid.atgx.se/260906/js/${scriptName}`));
+
+    const { result, seen } = await captureWithSyntheticResponse(env, scriptName);
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].url, `https://kmtid.atgx.se/260906/js/${scriptName}`);
+    assert.equal(result.scriptName, scriptName);
+    assert.equal(result.url, `https://kmtid.atgx.se/260906/js/${scriptName}`);
+  }
+});
+
+test('X-Labs script capture strips query and fragment data before fetch and provenance', async () => {
   const { env, db, objects } = createTestEnv();
   seedParent({ db, objects, html: '<script src="js/races.js?token=private#fragment"></script>' });
   const { result, seen } = await captureWithSyntheticResponse(env, 'races.js');
-  assert.equal(seen[0].url, 'https://kmtid.atgx.se/260906/js/races.js?token=private');
+  assert.equal(seen[0].url, 'https://kmtid.atgx.se/260906/js/races.js');
   assert.equal(result.url, 'https://kmtid.atgx.se/260906/js/races.js');
   const scriptRecord = db.prepare("SELECT source_url, metadata_json FROM source_records WHERE source_type = 'xlabs_script'").get();
   assert.equal(scriptRecord.source_url, 'https://kmtid.atgx.se/260906/js/races.js');
