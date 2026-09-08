@@ -3,6 +3,7 @@ import { archiveRawPayload } from './raw.js';
 import { importEditorial } from './import/editorial.js';
 import { importReferenceRound } from './import/reference-round-safe.js';
 import { normalizeCapturedOfficialGameSequential } from './import/official-live-sequential.js';
+import { captureUpcomingOfficialGames, normalizeNextPendingOfficialGame } from './import/official-live-scheduled.js';
 import { normalizeCapturedXlabsRace } from './import/xlabs-telemetry.js';
 import { normalizeCapturedOfficialRace } from './import/official-historical-race.js';
 import { getHistoricalBackfill, runHistoricalBackfillStep, startHistoricalBackfill } from './import/official-historical-backfill.js';
@@ -25,6 +26,10 @@ import { getGameHistoryDetail, listGameHistory } from './routes/games.js';
 import { getGameHistorySummary } from './routes/game-summary.js';
 import { appAuthConfigured, appPasswordMatches, createAppSessionCookie, hasValidAppSession } from './app-auth.js';
 import { htmlResponse, redirectResponse, renderAppPage, renderLoginPage } from './app-page-history.js';
+
+const BACKFILL_CRON = '* * * * *';
+const LIVE_MORNING_CRON = '15 5 * * *';
+const LIVE_EVENING_CRON = '15 17 * * *';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -144,6 +149,16 @@ async function handleFetch(request, env) {
     return data ? json(data) : json({ error: 'not_found' }, 404);
   }
   if (request.method === 'POST' && path === '/v1/provider/capture') return json(await handleProviderCapture(env, await readJson(request)), 201);
+  if (request.method === 'POST' && path === '/v1/live/capture') {
+    const body = await readJson(request);
+    return json(await captureUpcomingOfficialGames(env, body.scheduled_at ?? Date.now(), {
+      includeToday: body.include_today !== false,
+      daysAhead: body.days_ahead
+    }), 201);
+  }
+  if (request.method === 'POST' && path === '/v1/live/normalize-next') {
+    return json(await normalizeNextPendingOfficialGame(env));
+  }
   if (request.method === 'POST' && path === '/v1/xlabs/capture') {
     const body = await readJson(request);
     return json(await captureXlabsDate(env, body.date), 201);
@@ -224,13 +239,46 @@ async function handleFetch(request, env) {
   return json({ error: 'not_found' }, 404);
 }
 
+async function runScheduledPart(name, fn) {
+  try {
+    return { name, ok: true, result: await fn() };
+  } catch (error) {
+    console.error(error);
+    return { name, ok: false, error: String(error.message).slice(0, 1000) };
+  }
+}
+
 async function handleScheduled(controller, env) {
-  const now = new Date(controller.scheduledTime || Date.now()).toISOString();
+  const scheduledAt = new Date(controller.scheduledTime || Date.now()).toISOString();
+  const startedAt = new Date().toISOString();
   const id = `cron_${crypto.randomUUID()}`;
-  const backfill = await runHistoricalBackfillStep(env);
-  if (backfill.status === 'idle') return;
-  await env.DB.prepare(`INSERT INTO import_runs (id, source_type, started_at, finished_at, status, metadata_json) VALUES (?, 'scheduled_orchestrator', ?, ?, 'success', ?)`)
-    .bind(id, now, new Date().toISOString(), JSON.stringify({ cron: controller.cron, backfill })).run();
+  const parts = [];
+
+  if (controller.cron === BACKFILL_CRON) {
+    parts.push(await runScheduledPart('historical_backfill', () => runHistoricalBackfillStep(env)));
+    parts.push(await runScheduledPart('live_normalize', () => normalizeNextPendingOfficialGame(env)));
+  } else if (controller.cron === LIVE_MORNING_CRON) {
+    parts.push(await runScheduledPart('live_capture_morning', () => captureUpcomingOfficialGames(env, controller.scheduledTime, { includeToday: true })));
+  } else if (controller.cron === LIVE_EVENING_CRON) {
+    parts.push(await runScheduledPart('live_capture_evening', () => captureUpcomingOfficialGames(env, controller.scheduledTime, { includeToday: false })));
+  } else {
+    parts.push({ name: 'unknown_cron', ok: false, error: `unsupported cron ${controller.cron}` });
+  }
+
+  const failures = parts.filter((part) => !part.ok);
+  await env.DB.prepare(`
+    INSERT INTO import_runs
+      (id, source_type, started_at, finished_at, status, error_count, error_json, metadata_json)
+    VALUES (?, 'scheduled_orchestrator', ?, ?, ?, ?, ?, ?)
+  `).bind(
+    id,
+    startedAt,
+    new Date().toISOString(),
+    failures.length ? 'failed' : 'success',
+    failures.length,
+    failures.length ? JSON.stringify(failures.map(({ name, error }) => ({ name, error }))) : null,
+    JSON.stringify({ cron: controller.cron, scheduledAt, parts })
+  ).run();
 }
 
 export default {

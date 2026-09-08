@@ -63,8 +63,9 @@
 8. Multi-track rounds do not invent a primary track.
 9. Conflicting canonical names for the same official external ID preserve the existing canonical value and flag the new observation as `source_conflict`.
 10. Live scratch semantics remain unimplemented until a real scratched/withdrawn response is observed. Declared starts are marked with that limitation rather than guessed.
-11. Automatic live acquisition remains disabled until a later explicit build enables it.
-12. The official-provider vertical slice is accepted only after raw-vs-normalized production verification passes without mismatches for the verified subset.
+11. Automatic live acquisition uses only the verified V85/V86 calendar/day and game endpoints. The morning run includes same-day and upcoming rounds; the evening run excludes same-day rounds so race-day morning remains the final automatic pre-race refresh. Manual admin refresh remains available for late changes.
+12. Automatic live normalization advances only from successful contiguous source-backed entry checkpoints and fails closed on gaps or partial work.
+13. The official-provider vertical slice is accepted only after raw-vs-normalized production verification passes without mismatches for the verified subset.
 
 ## Manual editorial flow
 1. Editorial content is reviewed outside KentaurAI using an authorized user workflow.

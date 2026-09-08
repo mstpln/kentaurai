@@ -3,14 +3,16 @@
 Private V85/V86 data, analysis backend and read-only intelligence interface with a public codebase.
 
 ## Current build
-Version 0.5.0 adds verified X-Labs telemetry normalization and a resumable ordinary-race history pipeline. Real provider payloads and private reference/editorial data remain outside the public repository; GitHub contains code, migrations, tests, documentation and synthetic fixtures only.
+Version 0.5.0 contains the verified official/X-Labs data foundation, resumable ordinary-race history pipeline and automatic official V85/V86 pre-race acquisition. Real provider payloads and private reference/editorial data remain outside the public repository; GitHub contains code, migrations, tests, documentation and synthetic fixtures only.
 
 The current build contains:
 - D1 normalized relational schema and provenance model
 - R2 exact raw-snapshot support
 - private import APIs for reference-round and structured editorial data
-- private official-provider calendar/day and game capture
+- private official-provider calendar/day, game and ordinary-race capture
 - verified official-game normalizer for the observed live payload shape
+- automatic upcoming V85/V86 calendar/game capture twice daily with race-day morning as the final automatic same-day refresh
+- bounded, resumable automatic normalization of captured V85/V86 game snapshots
 - immutable normalized observations plus timestamped betting/odds/equipment snapshots
 - private raw-vs-normalized verification endpoint
 - private read-only KentaurAI interface at `/app`
@@ -22,7 +24,6 @@ The current build contains:
 - Spel area with Översikt / V85 / V86 plus saved-round post-race detail
 - complete presentation of currently stored measurement families on entity/start detail, while internal provenance remains backend-only
 - verified X-Labs race-telemetry capture, normalization and raw-vs-normalized checks; exact payloads remain private
-- ordinary Swedish trotting-race capture and result normalization through the observed official race endpoint
 - persistent three-year-capable historical backfill jobs with idempotent source reuse, checkpoints, bounded retries and scheduled continuation
 - private sanitized X-Labs script inspection for request mechanisms and endpoint clues without returning raw script bodies
 - secure app login with a separate `APP_PASSWORD` and HttpOnly session cookie
@@ -71,6 +72,8 @@ Real source data belongs only in the private Cloudflare D1/R2 deployment or is s
 - `POST /v1/provider/normalize` - Bearer ADMIN_TOKEN
 - `POST /v1/provider/normalize-race` - Bearer ADMIN_TOKEN
 - `POST /v1/provider/verify-normalization` - Bearer ADMIN_TOKEN
+- `POST /v1/live/capture` - Bearer ADMIN_TOKEN; explicit upcoming V85/V86 calendar/game refresh
+- `POST /v1/live/normalize-next` - Bearer ADMIN_TOKEN; advances the next pending captured V85/V86 source from its durable successful checkpoint
 - `POST /v1/xlabs/capture` - Bearer ADMIN_TOKEN; raw date-page capture for provenance/diagnostics
 - `POST /v1/xlabs/capture-script` - Bearer ADMIN_TOKEN; captures an allowlisted referenced X-Labs script to private R2
 - `POST /v1/xlabs/capture-race-json` - Bearer ADMIN_TOKEN; captures one browser-verified telemetry object
@@ -87,6 +90,13 @@ Real source data belongs only in the private Cloudflare D1/R2 deployment or is s
 - `GET /v1/historical/backfill/status?job_id=...` - Bearer ADMIN_TOKEN
 
 All `/v1/*` routes fail closed unless `ADMIN_TOKEN` is configured and supplied.
+
+### Automatic V85/V86 acquisition
+The configured schedules are `15 5 * * *` and `15 17 * * *` in UTC. The morning run captures the current date plus the next seven dates. The evening run starts from the next date and therefore never changes the current race-day snapshot automatically after the morning refresh. Late changes can still be handled through the admin-only manual refresh path.
+
+Each calendar snapshot is archived privately before game discovery. Discovery accepts only V85/V86 identities for the requested date with exactly eight same-date race ids. Each discovered game is then captured through the same verified official provider path and archived before normalization. A partial date/game capture failure marks the scheduled operation as failed rather than silently reporting success.
+
+Captured game normalization is intentionally bounded to one entry checkpoint per minute. Progress is derived from successful contiguous normalization runs, not merely from partially written entity observations. This means a failed per-entry operation cannot cause the next scheduled invocation to skip unfinished betting, odds or equipment facts.
 
 ### Official-provider capture and normalization
 Calendar/day, game-by-id and ordinary race-by-id are wired from observed official browser traffic. Captured responses are archived exactly to private R2 and recorded in D1 before any field mapping occurs.
