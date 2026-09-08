@@ -1,8 +1,8 @@
 # Build state
 
-Version: 0.4.5
-Phase: historical data foundation / X-Labs vertical slice preparation
-Status: official vertical slice is verified; X-Labs date page and three referenced application scripts are privately captured and a sanitized script-inspection build is in progress; automatic live acquisition and X-Labs normalization remain disabled
+Version: 0.5.0
+Phase: verified X-Labs vertical slice / official historical data foundation
+Status: the X-Labs race-object recipe and normalized subset are verified on a private real sample; ordinary official race acquisition and a resumable 1,096-day Swedish-trotting backfill are implemented; production migration, deployment and backfill remain gated on explicit merge authorization
 
 ## Verified foundation
 - D1 core schema, indexes and reference-round extension migrations are provisioned.
@@ -85,17 +85,15 @@ Entity detail APIs and views expose the normalized/measured data already represe
 
 The historical page endpoint strips internal race-entry/race IDs from the browser response while retaining `horse_id` where needed for in-app navigation. Structured source/provenance internals remain backend-only.
 
-## X-Labs vertical slice preparation
-- The build plan explicitly leaves the exact X-Labs acquisition method open until real network/page behavior is verified.
-- The observed date page for the private sample has been captured successfully on the locked HTTPS host `kmtid.atgx.se`.
-- The referenced application scripts `races.js`, `calculate.js` and `main.js` have also been captured privately to R2 as `captured_unmapped` source records.
-- The script selector is locked to those three verified basenames and rejects arbitrary URLs/scripts.
-- A private read-only script inspection endpoint is being added to report request-mechanism counts, sanitized literal request URLs, sanitized endpoint candidates and coarse domain keywords without returning raw script bodies/snippets.
-- Query strings, fragments and credentials are stripped from inspection URL output.
-- X-Labs captures remain `captured_unmapped` with `normalizationStatus: not_implemented`.
-- The prototype writes **zero** rows to `xlabs_data`; no field mapping is trusted yet.
-- Missing X-Labs remains neutral and must never break historical or future analysis flows.
-- Automatic X-Labs acquisition/backfill remains disabled.
+## X-Labs verified vertical slice
+- Browser network inspection established the race-object recipe `1MMDDTTRR.json` on the locked HTTPS host `kmtid.atgx.se`.
+- Every captured telemetry frame must match the requested official track id and race number before the raw object is archived.
+- The verified mapper reproduces first/last section pace, travelled distance, extra distance and converted kilometre time from the private raw object.
+- At least 99% target-frame coverage is required per starter; unsupported or insufficient measurements remain absent.
+- The observed telemetry contract has no lane field, so slipstream remains null rather than inferred.
+- Raw-vs-normalized verification re-derives every mapped value and requires at least ten representative checks.
+- The earlier date-page and allowlisted script capture/inspection routes remain available for provenance and diagnostics.
+- Historical X-Labs acquisition is **not** part of the 0.5.0 backfill. X-Labs remains complementary and missing coverage is neutral.
 
 ## Spel
 - Spel has exactly three tabs: Översikt, V85 and V86.
@@ -115,32 +113,38 @@ The historical page endpoint strips internal race-entry/race IDs from the browse
 - Data-coverage queries use per-entry `EXISTS` checks to avoid cross-product growth as histories accumulate.
 - Scratched entries are excluded from performance and coverage denominators.
 
+## Official historical coverage in 0.5.0
+- The date range is inclusive and capped at 1,096 days, covering up to three years per job.
+- Daily official calendars select only tracks marked `countryCode=SE` and `sport=trot`.
+- Each selected ordinary race is captured from the observed official race endpoint, archived privately and normalized idempotently.
+- Stored coverage includes race/track identity, horse, trainer, driver, start position/distance, explicit scratch state, reported equipment and official result facts available in the source.
+- Persistent date/race checkpoints, an atomic lease and deterministic source reuse make jobs restart-safe and prevent overlapping checkpoint work.
+- One race is processed per scheduled step. Three consecutive source/normalization failures stop the job at the same checkpoint for an explicit resume.
+- This does not claim historical market snapshots, private editorial material, AI analysis, race-position data or X-Labs telemetry where those sources were not captured.
+
 ## Current verification gate
-1. Full CI must pass on the exact feature-branch head.
-2. Review private script-inspection output limits, sanitization, authentication and guarantee that it writes no normalized X-Labs rows.
-3. Inspect the three real captured application scripts privately and identify the actual data-loading path.
-4. Verify a small real sample against known starts before any normalized X-Labs field mapping is implemented.
-5. Merge only after explicit user authorization.
-6. **Do not** run X-Labs historical backfill or enable automatic acquisition without explicit approval.
+1. Full tests and Wrangler dry-run must pass on the exact feature-branch head.
+2. The private real X-Labs sample must pass raw-vs-normalized production verification after deployment.
+3. The official ordinary-race capture/normalizer must be verified on representative production records before the multi-year job is started.
+4. Merge, migration, deployment and production backfill require explicit user authorization.
+5. Historical X-Labs acquisition remains a separately gated future capability; it must not be described as part of the official backfill.
 
 ## Next after this build
-1. Inspect the three privately captured scripts and determine the stable data-loading endpoint/pattern.
-2. Capture the smallest necessary structured response privately if one exists.
-3. Verify 10-20 representative X-Labs facts against the visible page/reference data and map only confirmed semantics.
-4. Add raw-vs-normalized X-Labs verification for that sample.
-5. Verify the official historical-results acquisition path needed for ordinary Swedish races, not only V85/V86 game snapshots.
-6. Only then design and run a resumable 2-3 year historical backfill in private Cloudflare storage.
-7. Build deterministic Trend metrics/leaderboards after sufficient verified history exists.
+1. After explicit authorization, apply migration 0005 and deploy the exact merge commit.
+2. Run the private real-source X-Labs and official historical production verification gates.
+3. Import the valid private reference round if still absent and start the official 2-3 year backfill.
+4. Monitor the persisted checkpoint/error counters and resume only from the stored cursor if intervention is needed.
+5. Evaluate a separately resumable historical X-Labs acquisition only after its availability window and operational limits are verified; missing X-Labs must remain neutral.
+6. Build deterministic Trend metrics/leaderboards after sufficient verified history exists.
 
 ## Not yet implemented
 - verified/persisted shared-person identity across trainer and driver roles; current UI role link is conservative exact-name matching only
 - verified live scratch/withdrawal mapping
 - automatic live provider acquisition
 - additional official-provider endpoint patterns not yet observed
-- verified X-Labs normalized mapper
-- X-Labs raw-vs-normalized verification gate
-- official ordinary-race historical acquisition/backfill adapter
-- 2-3 year historical backfill
+- production execution of the verified X-Labs raw-vs-normalized gate
+- production migration/deployment and execution of the official 2-3 year historical backfill
+- historical X-Labs acquisition/backfill and verified availability coverage
 - historical trainer/driver/horse trend metrics and leaderboards
 - automatic post-race result collection/review orchestration
 - additional winner-trip categories requiring facts not currently represented in the schema

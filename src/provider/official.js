@@ -137,7 +137,7 @@ async function fetchJson(url, fetchImpl) {
   }
 }
 
-async function capture(env, { kind, identity, url, fetchImpl = fetch }) {
+async function capture(env, { kind, identity, url, fetchImpl = fetch, validatePayload = null }) {
   if (!env.DB) throw new Error('DB is not configured');
 
   const run = await startImportRun(env, 'official_provider_capture', {
@@ -152,6 +152,7 @@ async function capture(env, { kind, identity, url, fetchImpl = fetch }) {
 
     const fetchedAt = new Date().toISOString();
     const { payload, rawText } = await fetchJson(url, fetchImpl);
+    if (validatePayload) validatePayload(payload);
     const archived = await archiveRawPayload(env, {
       sourceType: 'official_provider',
       externalId: `${kind}:${identity}`,
@@ -190,7 +191,12 @@ export async function captureCalendar(env, date, options = {}) {
     kind: 'calendar',
     identity: normalized,
     url: buildCalendarUrl(env, normalized),
-    fetchImpl: options.fetchImpl
+    fetchImpl: options.fetchImpl,
+    validatePayload(payload) {
+      if (payload.date !== normalized || !Array.isArray(payload.tracks)) {
+        throw new Error('official calendar payload does not match the requested date');
+      }
+    }
   });
 }
 
@@ -206,10 +212,18 @@ export async function captureGame(env, gameId, options = {}) {
 
 export async function captureRace(env, raceId, options = {}) {
   const normalized = validateRaceId(raceId);
+  const [date, trackId, raceNumber] = normalized.split('_');
   return capture(env, {
     kind: 'race',
     identity: normalized,
     url: buildRaceUrl(env, normalized),
-    fetchImpl: options.fetchImpl
+    fetchImpl: options.fetchImpl,
+    validatePayload(payload) {
+      if (payload.id !== normalized || payload.date !== date ||
+          Number(payload.track?.id) !== Number(trackId) || Number(payload.number) !== Number(raceNumber)) {
+        throw new Error('official race payload does not match the requested race');
+      }
+      if (!Array.isArray(payload.starts)) throw new Error('official race payload starts must be an array');
+    }
   });
 }

@@ -71,7 +71,7 @@ Real source data belongs only in the private Cloudflare D1/R2 deployment or is s
 - `POST /v1/provider/normalize` - Bearer ADMIN_TOKEN
 - `POST /v1/provider/normalize-race` - Bearer ADMIN_TOKEN
 - `POST /v1/provider/verify-normalization` - Bearer ADMIN_TOKEN
-- `POST /v1/xlabs/capture` - Bearer ADMIN_TOKEN; raw date-page capture only, no trusted normalization yet
+- `POST /v1/xlabs/capture` - Bearer ADMIN_TOKEN; raw date-page capture for provenance/diagnostics
 - `POST /v1/xlabs/capture-script` - Bearer ADMIN_TOKEN; captures an allowlisted referenced X-Labs script to private R2
 - `POST /v1/xlabs/capture-race-json` - Bearer ADMIN_TOKEN; captures one browser-verified telemetry object
 - `POST /v1/xlabs/normalize` - Bearer ADMIN_TOKEN; maps the verified telemetry subset
@@ -111,6 +111,8 @@ Verified mapping rules include:
 Ordinary historical race payloads expose an explicit boolean `scratched`; that field is mapped as verified. The V85/V86 live-game mapper remains conservative where its own captured payload does not establish scratch semantics.
 
 Historical acquisition filters calendar data to Swedish trotting tracks, deduplicates race identifiers and processes one race per checkpoint. Jobs persist their date/race cursor in D1, retry the same checkpoint up to three consecutive failures, reuse already captured or normalized sources, and continue from the minute schedule. A job range is capped at 1,096 days.
+
+This 0.5.0 historical job covers official starter/result history only. It does not claim historical X-Labs coverage: X-Labs remains an optional measurement layer, and a separately resumable historical acquisition path must be verified before it can be enabled.
 
 ### X-Labs telemetry
 Browser network inspection established the actual race-object recipe as `1MMDDTTRR.json`, where `TT` is the zero-padded official track id and `RR` is the zero-padded race number. The payload is a time-ordered array of telemetry frames with `trackId`, `raceNumber`, `timestamp` and target positions. Capture validates every frame against the requested race before archiving it privately.

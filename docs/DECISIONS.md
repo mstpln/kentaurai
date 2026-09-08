@@ -36,9 +36,13 @@
 2. Race entry/start remains the central relational point linking horse, race, driver, trainer, result, equipment, market and X-Labs measurements.
 3. X-Labs is complementary direct measurement data and is never mandatory. Missing X-Labs is neutral.
 4. The exact X-Labs acquisition method is an implementation question that must be verified against real observed network/page behavior before a normalizer is trusted.
-5. The first X-Labs implementation is therefore raw-capture only: HTTPS host locked, redirects blocked, size checked, exact response archived to private R2/source records and marked `captured_unmapped`.
-6. No X-Labs measurement field is written to normalized D1 until a real small-sample verification establishes the source semantics and stable extraction method.
+5. The first X-Labs implementation was deliberately raw-capture only: HTTPS host locked, redirects blocked, size checked, exact response archived to private R2/source records and marked `captured_unmapped`.
+6. No X-Labs measurement field could be written to normalized D1 until a real small-sample verification established the source semantics and stable extraction method; that gate is now enforced by the verified telemetry mapper and raw-vs-normalized verifier.
 7. Historical backfill must not begin at full scale until the X-Labs vertical slice and official historical mapping are validated on representative samples.
+8. Browser verification established the X-Labs race-object recipe as `1MMDDTTRR.json`; official numeric track identity is accepted only with an every-frame payload identity guard.
+9. The verified X-Labs subset consists of reproducible section pace, travelled/extra distance and converted kilometre time. Slipstream remains null because the observed telemetry has no lane field.
+10. The mandatory V1 multi-year foundation is the official Swedish-trotting starter/result history. Historical X-Labs acquisition is a separate optional layer: it is not implied by completion of the official backfill and must not delay or invalidate official facts when unavailable.
+11. The official historical job is date/race checkpointed, idempotent and lease-protected. It processes one ordinary race per scheduled step and stops at the same checkpoint after three consecutive failures so an explicit resume cannot skip facts.
 
 ## Spel and post-race analysis
 1. Every V85/V86 system has exactly three spikar in three different legs, with one selected horse in each spike leg.

@@ -172,3 +172,28 @@ test('an active backfill lease prevents overlapping checkpoint work', async () =
   assert.equal(result.status, 'busy');
   assert.equal(result.reused, true);
 });
+
+test('three failures stop at the same checkpoint and explicit resume continues it', async () => {
+  const { env, db } = createTestEnv();
+  const job = await startHistoricalBackfill(env, DATE, DATE);
+  const failingFetch = async () => new Response('temporarily unavailable', { status: 503 });
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await assert.rejects(() => runHistoricalBackfillStep(env, job.id, { fetchImpl: failingFetch }), /HTTP 503/);
+    const state = db.prepare('SELECT status, next_date, next_race_index, consecutive_errors FROM historical_backfill_jobs WHERE id = ?').get(job.id);
+    assert.equal(state.next_date, DATE);
+    assert.equal(state.next_race_index, 0);
+    assert.equal(state.consecutive_errors, attempt);
+    assert.equal(state.status, attempt === 3 ? 'failed' : 'running');
+  }
+
+  const resumed = await startHistoricalBackfill(env, DATE, DATE, { resume: true });
+  assert.equal(resumed.status, 'running');
+  assert.equal(resumed.next_date, DATE);
+  assert.equal(resumed.next_race_index, 0);
+  const successfulFetch = async (url) => url.includes('/calendar/day/')
+    ? jsonResponse(calendarPayload())
+    : jsonResponse(racePayload());
+  const result = await runHistoricalBackfillStep(env, job.id, { fetchImpl: successfulFetch });
+  assert.equal(result.raceId, RACE_ID);
+  assert.equal(result.checkpoint.nextRaceIndex, 1);
+});

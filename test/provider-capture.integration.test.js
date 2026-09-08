@@ -71,9 +71,31 @@ test('official ordinary-race capture uses the verified race endpoint and private
   assert.equal(source.quality_status, 'captured_unmapped');
 });
 
+test('official historical capture rejects mismatched identities before private archive', async () => {
+  const { env, db, objects } = createTestEnv();
+  await assert.rejects(
+    captureCalendar(env, '2099-04-10', {
+      fetchImpl: async () => jsonResponse({ date: '2099-04-11', tracks: [] })
+    }),
+    /does not match the requested date/
+  );
+  await assert.rejects(
+    captureRace(env, '2099-04-10_7_5', {
+      fetchImpl: async () => jsonResponse({
+        id: '2099-04-10_7_6', date: '2099-04-10', number: 6,
+        track: { id: 7, name: 'Synthetic Park' }, starts: []
+      })
+    }),
+    /does not match the requested race/
+  );
+  assert.equal(objects.size, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM source_records WHERE source_type = 'official_provider'").get().n, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM import_runs WHERE source_type = 'official_provider_capture' AND status = 'failed'").get().n, 2);
+});
+
 test('official calendar capture archives the exact JSON and records a successful run', async () => {
   const { env, db, objects } = createTestEnv();
-  const rawBody = '{\n  "games": { "V85": [{"id":"synthetic"}] },\n  "tracks": [{"id":5,"name":"Synthetic Track"}]\n}\n';
+  const rawBody = '{\n  "date": "2026-09-07",\n  "games": { "V85": [{"id":"synthetic"}] },\n  "tracks": [{"id":5,"name":"Synthetic Track"}]\n}\n';
   const seen = [];
   const result = await captureCalendar(env, '2026-09-07', {
     fetchImpl: async (url, init) => {
