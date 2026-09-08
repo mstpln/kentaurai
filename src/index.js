@@ -15,7 +15,7 @@ import { toEntityAppView } from './routes/entity-view.js';
 import { getGameHistoryDetail, listGameHistory } from './routes/games.js';
 import { getGameHistorySummary } from './routes/game-summary.js';
 import { appAuthConfigured, appPasswordMatches, createAppSessionCookie, hasValidAppSession } from './app-auth.js';
-import { htmlResponse, redirectResponse, renderAppPage, renderLoginPage } from './app-page-release.js';
+import { htmlResponse, redirectResponse, renderAppPage, renderLoginPage } from './app-page-history.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
