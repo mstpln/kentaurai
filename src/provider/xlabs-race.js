@@ -9,7 +9,6 @@ const MAX_REDIRECTS = 2;
 const MAX_SAMPLE_FIELDS = 20;
 const MAX_SAMPLE_DEPTH = 3;
 const MAX_RACES_SCRIPT_BYTES = 2 * 1024 * 1024;
-const TRACK_CONTEXT_WINDOW = 1800;
 
 function positiveInteger(value, name, max) {
   const text = typeof value === 'number'
@@ -76,16 +75,15 @@ async function loadCaptureContext(env, calculateSourceRecordId) {
 }
 
 async function lookupCanonicalTrackName(env, externalTrackId) {
-  const rows = await env.DB.prepare(`
-    SELECT DISTINCT t.canonical_name AS name
+  const row = await env.DB.prepare(`
+    SELECT t.canonical_name AS name
     FROM track_external_ids x
     JOIN tracks t ON t.id = x.track_id
-    WHERE x.external_id = ?
-    ORDER BY t.canonical_name
-    LIMIT 3
-  `).bind(String(externalTrackId)).all();
-  const names = [...new Set((rows.results || []).map((row) => String(row?.name || '').trim()).filter(Boolean))];
-  return names.length === 1 ? names[0] : null;
+    WHERE x.source_type = 'official' AND x.external_id = ?
+    LIMIT 1
+  `).bind(String(externalTrackId)).first();
+  const name = String(row?.name || '').trim();
+  return name || null;
 }
 
 async function loadNewestRacesScript(env, parentId) {
@@ -105,40 +103,128 @@ async function loadNewestRacesScript(env, parentId) {
   return text;
 }
 
-function trackIdsNearName(script, trackName) {
+function normalizedTrackName(value) {
+  return String(value || '').normalize('NFKC').trim().toLocaleLowerCase('sv-SE');
+}
+
+function scanJavascriptObjectsAndStrings(script) {
   const text = String(script || '');
-  const needle = String(trackName || '').trim().toLocaleLowerCase('sv-SE');
-  if (!needle) return [];
-  const lower = text.toLocaleLowerCase('sv-SE');
-  const ids = [];
-  let from = 0;
-  while (from < lower.length) {
-    const index = lower.indexOf(needle, from);
-    if (index < 0) break;
-    const start = Math.max(0, index - TRACK_CONTEXT_WINDOW);
-    const end = Math.min(text.length, index + needle.length + TRACK_CONTEXT_WINDOW);
-    const snippet = text.slice(start, end);
-    for (const match of snippet.matchAll(/\btrackId\b\s*[:=]\s*['"]?(\d{1,3})/g)) {
-      const id = Number(match[1]);
-      if (Number.isInteger(id) && id > 0 && id <= 999 && !ids.includes(id)) ids.push(id);
+  const objectStack = [];
+  const objects = [];
+  const strings = [];
+  let quote = null;
+  let stringStart = -1;
+  let stringValue = '';
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const next = text[i + 1];
+
+    if (lineComment) {
+      if (ch === '\n') lineComment = false;
+      continue;
     }
-    from = index + needle.length;
-    if (ids.length > 8) break;
+    if (blockComment) {
+      if (ch === '*' && next === '/') {
+        blockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+    if (quote) {
+      if (escaped) {
+        stringValue += ch;
+        escaped = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (ch === quote) {
+        strings.push({ start: stringStart, end: i, value: stringValue, template: quote === '`' });
+        quote = null;
+        stringStart = -1;
+        stringValue = '';
+        continue;
+      }
+      stringValue += ch;
+      continue;
+    }
+    if (ch === '/' && next === '/') {
+      lineComment = true;
+      i += 1;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      blockComment = true;
+      i += 1;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+      stringStart = i;
+      stringValue = '';
+      escaped = false;
+      continue;
+    }
+    if (ch === '{') {
+      objectStack.push(i);
+      continue;
+    }
+    if (ch === '}') {
+      const start = objectStack.pop();
+      if (start != null) objects.push({ start, end: i });
+    }
+  }
+  return { objects, strings };
+}
+
+function trackIdsInObject(text) {
+  const ids = [];
+  for (const match of text.matchAll(/\btrackId\b\s*[:=]\s*['"]?(\d{1,3})/g)) {
+    const id = Number(match[1]);
+    if (Number.isInteger(id) && id > 0 && id <= 999 && !ids.includes(id)) ids.push(id);
   }
   return ids;
 }
 
+function trackIdsForExactName(script, trackName) {
+  const text = String(script || '');
+  const needle = normalizedTrackName(trackName);
+  if (!needle) return [];
+  const { objects, strings } = scanJavascriptObjectsAndStrings(text);
+  const candidates = [];
+
+  for (const token of strings) {
+    if (token.template && token.value.includes('${')) continue;
+    if (normalizedTrackName(token.value) !== needle) continue;
+    const containers = objects
+      .filter((object) => object.start < token.start && object.end > token.end)
+      .sort((a, b) => (a.end - a.start) - (b.end - b.start));
+    for (const object of containers) {
+      const ids = trackIdsInObject(text.slice(object.start, object.end + 1));
+      if (ids.length === 1) {
+        if (!candidates.includes(ids[0])) candidates.push(ids[0]);
+        break;
+      }
+      if (ids.length > 1) break;
+    }
+  }
+  return candidates;
+}
+
 async function resolveXlabsTrackId(env, parentId, requestedTrackId) {
   const canonicalTrackName = await lookupCanonicalTrackName(env, requestedTrackId);
-  if (!canonicalTrackName) return { xlabsTrackId: requestedTrackId, canonicalTrackName: null, mappingStatus: 'not_available' };
+  if (!canonicalTrackName) throw new Error('official track id is not mapped to a canonical track');
   const racesScript = await loadNewestRacesScript(env, parentId);
-  if (!racesScript) return { xlabsTrackId: requestedTrackId, canonicalTrackName, mappingStatus: 'races_script_missing' };
-  const candidates = trackIdsNearName(racesScript, canonicalTrackName);
-  if (candidates.length === 1) {
-    return { xlabsTrackId: candidates[0], canonicalTrackName, mappingStatus: 'resolved_from_races_script' };
-  }
-  if (candidates.length > 1) throw new Error('X-Labs track id could not be uniquely resolved from captured races.js');
-  return { xlabsTrackId: requestedTrackId, canonicalTrackName, mappingStatus: 'name_not_found' };
+  if (!racesScript) throw new Error('captured X-Labs races.js is required to resolve the X-Labs track id');
+  const candidates = trackIdsForExactName(racesScript, canonicalTrackName);
+  if (candidates.length !== 1) throw new Error('X-Labs track id could not be uniquely resolved from captured races.js');
+  return { xlabsTrackId: candidates[0], canonicalTrackName, mappingStatus: 'resolved_from_races_script' };
 }
 
 export function buildXlabsRaceFileName(date, trackId, raceNumber) {
