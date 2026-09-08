@@ -91,6 +91,22 @@ test('ignores nested starter numbers when resolving the race number', async () =
   assert.deepEqual(seen, ['https://kmtid.atgx.se/260906/json/090642105.json']);
 });
 
+test('ignores misleading property-looking text in comments and string values', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedBase(db, objects, `const races = [{
+    number: 5,
+    trackId: 42,
+    trackName: 'Jägersro',
+    note: 'trackId: 99 number: 8',
+    /* trackId: 77, number: 9 */
+    other: true
+  }];`);
+  const result = await captureXlabsRaceJson(env, 'src_calc', 7, 5, {
+    fetchImpl: async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
+  });
+  assert.equal(result.xlabsTrackId, 42);
+});
+
 test('decodes escaped unicode in captured track-name literals', async () => {
   const { env, db, objects } = createTestEnv();
   seedBase(db, objects, String.raw`const races = [{ number: 5, trackId: 42, trackName: 'J\u00e4gersro' }];`);
