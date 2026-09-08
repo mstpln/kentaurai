@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import { renderAppPage, renderLoginPage } from '../src/app-page-final.js';
+import { renderAppPage, renderLoginPage } from '../src/app-page-release.js';
 
 test('interface keeps navigation order, adds Spel, and retains global search', () => {
   const html = renderAppPage();
@@ -18,7 +18,7 @@ test('interface keeps navigation order, adds Spel, and retains global search', (
   assert.doesNotMatch(html, /ADMIN_TOKEN/);
 });
 
-test('approved brand treatment renders exact Sagittarius direction and aligned badge treatment', () => {
+test('approved brand treatment renders exact Sagittarius direction and cap-height badge alignment', () => {
   const html = renderAppPage();
   const login = renderLoginPage();
   assert.match(html, /KENTAUR<span>AI<\/span>/);
@@ -26,7 +26,7 @@ test('approved brand treatment renders exact Sagittarius direction and aligned b
   assert.match(html, /class="brand-icon" viewBox="0 0 512 512"/);
   assert.match(html, /M267\.934 459\.625l-80\.013-80\.08/);
   assert.match(html, /--accent:#C79552/);
-  assert.match(html, /\.brand-badge\{width:24px!important;height:24px!important/);
+  assert.match(html, /\.brand-badge\{width:1cap!important;height:1cap!important;flex-basis:1cap!important\}/);
 });
 
 test('trend navigation uses approved chart icon and Trend naming', () => {
@@ -55,6 +55,13 @@ test('profile tiles keep their frame and display initials while category icons s
   assert.match(html, /finalReplaceNavIcon\('trainers',FINAL_ICONS\.trainer\)/);
   assert.match(html, /finalReplaceNavIcon\('drivers',FINAL_ICONS\.driver\)/);
   assert.match(html, /\.avatar\{font-size:22px!important/);
+});
+
+test('entity and game detail back controls use the corner-back arrow', () => {
+  const html = renderAppPage();
+  assert.match(html, /M20 20v-7a4 4/);
+  assert.doesNotMatch(html, /id="backGames">←/);
+  assert.match(html, /id=\"backGames\">.*?<span>'\+esc\(d\.round\.gameType\)/s);
 });
 
 test('logout control and route are absent from the production interface', () => {
