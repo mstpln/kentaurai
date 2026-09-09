@@ -9,6 +9,7 @@ const MAX_REDIRECTS = 2;
 const MAX_SAMPLE_FIELDS = 20;
 const MAX_SAMPLE_DEPTH = 3;
 const XLABS_FETCH_TIMEOUT_MS = 30_000;
+const MAX_FAST_CONTEXT_BYTES = 512 * 1024;
 
 function positiveInteger(value, name, max) {
   const text = typeof value === 'number'
@@ -39,6 +40,19 @@ function validateResolvedBaseUrl(value, date) {
   return url;
 }
 
+function validateCapturedDatePageUrl(value, date) {
+  let url;
+  try { url = new URL(value); } catch { return null; }
+  if (url.protocol !== 'https:') return null;
+  if (url.username || url.password) return null;
+  if (url.hostname.toLowerCase() !== XLABS_HOST) return null;
+  if (url.port && url.port !== '443') return null;
+  const expected = `/${compactDate(date)}`;
+  if (url.pathname !== expected && url.pathname !== `${expected}/`) return null;
+  if (url.search || url.hash) return null;
+  return url;
+}
+
 function parseMetadata(value) {
   try {
     const parsed = value ? JSON.parse(value) : null;
@@ -50,7 +64,7 @@ function parseMetadata(value) {
 
 async function loadCaptureContext(env, calculateSourceRecordId) {
   const source = await env.DB.prepare(`
-    SELECT id, metadata_json
+    SELECT id, raw_object_key, metadata_json
     FROM source_records
     WHERE id = ? AND source_type = 'xlabs_script'
     LIMIT 1
@@ -62,7 +76,7 @@ async function loadCaptureContext(env, calculateSourceRecordId) {
   if (!parentId) throw new Error('captured X-Labs calculate script is missing parent provenance');
 
   const parent = await env.DB.prepare(`
-    SELECT id, metadata_json
+    SELECT id, source_url, metadata_json
     FROM source_records
     WHERE id = ? AND source_type = 'xlabs'
     LIMIT 1
@@ -71,7 +85,221 @@ async function loadCaptureContext(env, calculateSourceRecordId) {
   const parentMetadata = parseMetadata(parent.metadata_json);
   const date = typeof parentMetadata.date === 'string' ? parentMetadata.date : null;
   try { validateXlabsDate(date); } catch { throw new Error('captured X-Labs parent source is missing a valid date'); }
-  return { parentId, date };
+  return {
+    parentId,
+    parentSourceUrl: parent.source_url,
+    calculateRawObjectKey: source.raw_object_key,
+    date
+  };
+}
+
+async function readFastContextText(env, key) {
+  if (!key) return null;
+  const object = await env.RAW_BUCKET.get(key);
+  if (!object) return null;
+  const text = await object.text();
+  if (new TextEncoder().encode(text).byteLength > MAX_FAST_CONTEXT_BYTES) return null;
+  return text;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function maskStringsAndComments(value) {
+  const text = String(value || '');
+  let out = '';
+  let quote = null;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const next = text[i + 1];
+    if (lineComment) {
+      if (ch === '\n') {
+        lineComment = false;
+        out += '\n';
+      } else out += ' ';
+      continue;
+    }
+    if (blockComment) {
+      if (ch === '*' && next === '/') {
+        blockComment = false;
+        out += '  ';
+        i += 1;
+      } else out += ch === '\n' ? '\n' : ' ';
+      continue;
+    }
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+        out += ' ';
+      } else if (ch === '\\') {
+        escaped = true;
+        out += ' ';
+      } else if (ch === quote) {
+        quote = null;
+        out += ch;
+      } else {
+        out += ch === '\n' ? '\n' : ' ';
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+    if (ch === '/' && next === '/') {
+      lineComment = true;
+      out += '  ';
+      i += 1;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      blockComment = true;
+      out += '  ';
+      i += 1;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+function findMatching(text, openIndex, openChar, closeChar) {
+  let depth = 0;
+  for (let i = openIndex; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === openChar) depth += 1;
+    else if (ch === closeChar) {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function splitArguments(text) {
+  const args = [];
+  let quote = null;
+  let escaped = false;
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+      continue;
+    }
+    if (ch === '(' || ch === '[' || ch === '{') depth += 1;
+    else if (ch === ')' || ch === ']' || ch === '}') depth = Math.max(0, depth - 1);
+    else if (ch === ',' && depth === 0) {
+      args.push(text.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  args.push(text.slice(start).trim());
+  return args;
+}
+
+function staticJsonPathArgument(value) {
+  const text = String(value || '').trim();
+  const match = /^(['"])json\/\1$/.exec(text);
+  return Boolean(match);
+}
+
+function isDirectFunctionCall(maskedText, nameIndex) {
+  const immediate = maskedText[nameIndex - 1];
+  if (immediate && /[A-Za-z0-9_$]/.test(immediate)) return false;
+  let i = nameIndex - 1;
+  while (i >= 0 && /\s/.test(maskedText[i])) i -= 1;
+  return i < 0 || maskedText[i] !== '.';
+}
+
+function calculatePathFunctions(calculateText) {
+  if (!calculateText) return [];
+  const masked = maskStringsAndComments(calculateText);
+  const found = [];
+  const pattern = /\bfunction\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(([^)]*)\)\s*\{/g;
+  for (const match of masked.matchAll(pattern)) {
+    const params = match[2].split(',').map((part) => part.trim()).filter(Boolean);
+    const pathIndex = params.indexOf('path');
+    if (pathIndex < 0) continue;
+    const openBrace = (match.index || 0) + match[0].lastIndexOf('{');
+    const closeBrace = findMatching(masked, openBrace, '{', '}');
+    if (closeBrace < 0) continue;
+    const body = masked.slice(openBrace + 1, closeBrace);
+    if (!/\$\.getJSON\s*\(\s*path\s*\+/.test(body)) continue;
+    found.push({ name: match[1], pathIndex });
+  }
+  return found;
+}
+
+function mainUsesOnlyJsonPath(mainText, fn) {
+  if (!mainText || !fn) return false;
+  const masked = maskStringsAndComments(mainText);
+  const callPattern = new RegExp(`\\b${escapeRegExp(fn.name)}\\s*\\(`, 'g');
+  let seen = false;
+  for (const match of masked.matchAll(callPattern)) {
+    const nameIndex = match.index || 0;
+    if (!isDirectFunctionCall(masked, nameIndex)) continue;
+    const openParen = nameIndex + match[0].lastIndexOf('(');
+    const closeParen = findMatching(masked, openParen, '(', ')');
+    if (closeParen < 0) return false;
+    const args = splitArguments(String(mainText).slice(openParen + 1, closeParen));
+    if (fn.pathIndex >= args.length || !staticJsonPathArgument(args[fn.pathIndex])) return false;
+    seen = true;
+  }
+  return seen;
+}
+
+function uniqueVerifiedJsonPathFunction(calculateText, mainText) {
+  const verified = calculatePathFunctions(calculateText).filter((fn) => mainUsesOnlyJsonPath(mainText, fn));
+  return verified.length === 1 ? verified[0].name : null;
+}
+
+async function verifiedCapturedContextBaseUrl(env, context) {
+  if (!validateCapturedDatePageUrl(context.parentSourceUrl, context.date)) return null;
+  const sibling = await env.DB.prepare(`
+    SELECT raw_object_key
+    FROM source_records
+    WHERE source_type = 'xlabs_script'
+      AND external_id = ?
+      AND raw_object_key IS NOT NULL
+    ORDER BY fetched_at DESC, id DESC
+    LIMIT 1
+  `).bind(`${context.parentId}:main.js`).first();
+  if (!sibling?.raw_object_key) return null;
+
+  const [calculateText, mainText] = await Promise.all([
+    readFastContextText(env, context.calculateRawObjectKey),
+    readFastContextText(env, sibling.raw_object_key)
+  ]);
+  if (!uniqueVerifiedJsonPathFunction(calculateText, mainText)) return null;
+  return validateResolvedBaseUrl(`https://${XLABS_HOST}/${compactDate(context.date)}/json/`, context.date);
+}
+
+async function resolveRaceBaseUrl(env, sourceId, context) {
+  const verified = await verifiedCapturedContextBaseUrl(env, context);
+  if (verified) return { baseUrl: verified, resolution: 'verified_captured_context' };
+
+  const pathResolution = await resolveCapturedXlabsRequestPath(env, sourceId);
+  if (pathResolution.status !== 'resolved_static' || !pathResolution.resolvedBaseUrl) {
+    throw new Error(`X-Labs race-data path is not uniquely resolved (${pathResolution.status})`);
+  }
+  return {
+    baseUrl: validateResolvedBaseUrl(pathResolution.resolvedBaseUrl, context.date),
+    resolution: 'script_path_resolution'
+  };
 }
 
 async function lookupCanonicalTrackName(env, externalTrackId) {
@@ -235,12 +463,9 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
   const sourceId = String(calculateSourceRecordId || '').trim();
   if (!sourceId) throw new Error('source_record_id is required');
 
-  const { parentId, date } = await loadCaptureContext(env, sourceId);
-  const pathResolution = await resolveCapturedXlabsRequestPath(env, sourceId);
-  if (pathResolution.status !== 'resolved_static' || !pathResolution.resolvedBaseUrl) {
-    throw new Error(`X-Labs race-data path is not uniquely resolved (${pathResolution.status})`);
-  }
-  const baseUrl = validateResolvedBaseUrl(pathResolution.resolvedBaseUrl, date);
+  const context = await loadCaptureContext(env, sourceId);
+  const { parentId, date } = context;
+  const { baseUrl, resolution } = await resolveRaceBaseUrl(env, sourceId, context);
   const requestedTrackId = positiveInteger(trackId, 'track_id', 99);
   const race = positiveInteger(raceNumber, 'race_number', 99);
   const trackMapping = await resolveXlabsTrackId(env, requestedTrackId);
@@ -249,7 +474,8 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
   const requestedUrl = new URL(fileName, baseUrl).toString();
   const run = await startImportRun(env, 'xlabs_race_capture', {
     kind: 'race_json', parentSourceRecordId: parentId, calculateSourceRecordId: sourceId, date,
-    requestedTrackId, xlabsTrackId, raceNumber: race, trackMappingStatus: trackMapping.mappingStatus
+    requestedTrackId, xlabsTrackId, raceNumber: race, trackMappingStatus: trackMapping.mappingStatus,
+    pathResolution: resolution
   });
   const counts = { inserted: 0, updated: 0, skipped: 0, errors: 0 };
 
@@ -280,6 +506,7 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
         calculateSourceRecordId: sourceId,
         requestedUrl,
         redirectCount: fetched.redirectCount,
+        pathResolution: resolution,
         acquisitionRecipe: '1MMDDTTRR.json',
         normalizationStatus: 'available_verified_subset'
       }
@@ -295,6 +522,7 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
       requestedTrackId,
       xlabsTrackId,
       trackMappingStatus: trackMapping.mappingStatus,
+      pathResolution: resolution,
       raceNumber: race,
       fileName,
       requestedUrl,
