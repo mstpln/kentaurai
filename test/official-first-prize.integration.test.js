@@ -59,6 +59,31 @@ test('unknown or malformed prize text stays null', () => {
   assert.equal(db.prepare('SELECT first_prize_sek FROM races WHERE id = ?').get('race_prize_unknown').first_prize_sek, null);
 });
 
+test('later conflicting official prize observations do not overwrite the first stored fact', () => {
+  const { db } = createTestEnv();
+  insertRace(db, 'race_prize_conflict');
+  insertSource(db, 'source_prize_conflict_1');
+  insertRaceObservation(
+    db,
+    'obs_prize_conflict_1',
+    'race_prize_conflict',
+    'source_prize_conflict_1',
+    'Pris: 80.000-40.000-20.000 kr (3 prisplacerade).'
+  );
+  assert.equal(db.prepare('SELECT first_prize_sek FROM races WHERE id = ?').get('race_prize_conflict').first_prize_sek, 80000);
+
+  insertSource(db, 'source_prize_conflict_2');
+  insertRaceObservation(
+    db,
+    'obs_prize_conflict_2',
+    'race_prize_conflict',
+    'source_prize_conflict_2',
+    'Pris: 90.000-45.000-22.500 kr (3 prisplacerade).'
+  );
+  assert.equal(db.prepare('SELECT first_prize_sek FROM races WHERE id = ?').get('race_prize_conflict').first_prize_sek, 80000);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM normalized_observations WHERE entity_id = 'race_prize_conflict' AND entity_type = 'race'`).get().n, 2);
+});
+
 test('migration repairs already-normalized official race observations without refetching', () => {
   const db = new DatabaseSync(':memory:');
   for (const migration of [
