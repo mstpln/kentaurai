@@ -27,6 +27,19 @@ test('core migrations apply cleanly and create required tables', () => {
   }
 });
 
+test('X-Labs backfill migration persists scope, retry scheduling and lease checkpoints', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(sql);
+  const columns = new Set(db.prepare('PRAGMA table_info(xlabs_backfill_jobs)').all().map((r) => r.name));
+  for (const required of ['scope', 'next_date', 'next_race_index', 'retry_after', 'lease_token', 'lease_until']) {
+    assert.ok(columns.has(required), `missing xlabs_backfill_jobs.${required}`);
+  }
+  assert.throws(() => db.prepare(`
+    INSERT INTO xlabs_backfill_jobs (id, scope, start_date, end_date, next_date)
+    VALUES ('bad-scope', 'unsupported', '2099-01-01', '2099-01-01', '2099-01-01')
+  `).run(), /CHECK constraint failed/);
+});
+
 test('reference migration adds captured factual fields without changing raw/analysis separation', () => {
   const db = new DatabaseSync(':memory:');
   db.exec(sql);
