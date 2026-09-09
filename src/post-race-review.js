@@ -1,4 +1,6 @@
-import { randomId } from './ids.js';
+import { stableId } from './ids.js';
+
+const REVIEW_VERSION = 'deterministic-v1';
 
 function asNumber(value) {
   return value == null ? null : Number(value);
@@ -21,7 +23,7 @@ async function candidateRound(env, roundId = null) {
       AND EXISTS (
         SELECT 1 FROM systems s
         WHERE s.game_round_id = gr.id
-          AND NOT EXISTS (SELECT 1 FROM post_race_reviews prr WHERE prr.system_id = s.id)
+          AND (SELECT COUNT(DISTINCT prr.race_id) FROM post_race_reviews prr WHERE prr.system_id = s.id) < 8
       )
     ORDER BY gr.round_date ASC, gr.id ASC
     LIMIT 1
@@ -103,7 +105,7 @@ function reviewForLeg(leg) {
     selectedWinner,
     errorType,
     review: {
-      reviewVersion: 'deterministic-v1',
+      reviewVersion: REVIEW_VERSION,
       classification: errorType ? 'candidate_learning' : 'no_change',
       isSpikeLeg,
       selectedCount: leg.selections.length,
@@ -116,8 +118,8 @@ function reviewForLeg(leg) {
 }
 
 async function reviewSystem(env, round, system) {
-  const existing = await env.DB.prepare('SELECT COUNT(*) AS count FROM post_race_reviews WHERE system_id = ?').bind(system.id).first();
-  if (Number(existing?.count || 0) > 0) return { systemId: system.id, status: 'already_reviewed', reviews: 0 };
+  const existing = await env.DB.prepare('SELECT COUNT(DISTINCT race_id) AS count FROM post_race_reviews WHERE system_id = ?').bind(system.id).first();
+  if (Number(existing?.count || 0) >= 8) return { systemId: system.id, status: 'already_reviewed', reviews: 0 };
 
   const legs = await legsForSystem(env, round.id, system.id);
   if (legs.length !== 8) throw new Error(`round ${round.id} does not have exactly eight settled legs`);
@@ -126,21 +128,25 @@ async function reviewSystem(env, round, system) {
   let inserted = 0;
   for (const leg of legs) {
     const result = reviewForLeg(leg);
-    await env.DB.prepare(`
-      INSERT INTO post_race_reviews
+    const id = stableId('review', REVIEW_VERSION, system.id, leg.raceId);
+    const write = await env.DB.prepare(`
+      INSERT OR IGNORE INTO post_race_reviews
         (id, game_round_id, race_id, race_entry_id, system_id, model_version_id,
          winner_rank, winner_probability, winner_market_percent, selected_in_system,
          error_type, scenario_match, review_json, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
     `).bind(
-      randomId('review'), round.id, leg.raceId, leg.winnerEntryId, system.id,
+      id, round.id, leg.raceId, leg.winnerEntryId, system.id,
       system.model_version_id || null, leg.winnerRank, leg.winnerProbability,
       leg.selections.find((selection) => selection.raceEntryId === leg.winnerEntryId)?.marketPercent ?? null,
       result.selectedWinner ? 1 : 0, result.errorType, JSON.stringify(result.review), now
     ).run();
-    inserted += 1;
+    inserted += Number(write.meta?.changes ?? 0);
   }
-  return { systemId: system.id, status: 'reviewed', reviews: inserted };
+
+  const completed = await env.DB.prepare('SELECT COUNT(DISTINCT race_id) AS count FROM post_race_reviews WHERE system_id = ?').bind(system.id).first();
+  if (Number(completed?.count || 0) !== 8) throw new Error(`post-race review for system ${system.id} did not reach eight settled legs`);
+  return { systemId: system.id, status: inserted ? 'reviewed' : 'already_reviewed', reviews: inserted };
 }
 
 export async function runNextPostRaceReview(env, options = {}) {
