@@ -29,9 +29,9 @@ jobs:
           trap 'rm -f "$response_file"' EXIT
           sql=$(cat <<'SQL'
           WITH target AS (
-            SELECT id,game_round_id,source_record_id,export_version,captured_at,race_count,entry_count FROM reference_round_exports ORDER BY created_at DESC LIMIT 1
+            SELECT id,game_round_id,source_record_id,export_version,race_count,entry_count FROM reference_round_exports ORDER BY created_at DESC LIMIT 1
           ), analyses AS (
-            SELECT a.id FROM target t JOIN game_legs gl ON gl.game_round_id=t.game_round_id JOIN ai_race_analyses a ON a.race_id=gl.race_id AND a.data_snapshot_at=t.captured_at
+            SELECT a.id FROM target t JOIN game_legs gl ON gl.game_round_id=t.game_round_id JOIN ai_race_analyses a ON a.race_id=gl.race_id
           ), systems_for_round AS (
             SELECT s.id,s.spike_count FROM target t JOIN systems s ON s.game_round_id=t.game_round_id
           )
