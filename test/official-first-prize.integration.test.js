@@ -9,11 +9,11 @@ function insertRace(db, id) {
     .run(id, '2099-03-01', 1);
 }
 
-function insertSource(db, id) {
+function insertSource(db, id, raceId, fetchedAt = '2099-03-01T10:00:00Z') {
   db.prepare(`INSERT INTO source_records
     (id, source_type, external_id, fetched_at, quality_status)
-    VALUES (?, 'official_provider', ?, '2099-03-01T10:00:00Z', 'captured_unmapped')`)
-    .run(id, `race:${id}`);
+    VALUES (?, 'official_provider', ?, ?, 'captured_unmapped')`)
+    .run(id, `race:${raceId}`, fetchedAt);
 }
 
 function insertRaceObservation(db, observationId, raceId, sourceId, prizeText) {
@@ -26,7 +26,7 @@ function insertRaceObservation(db, observationId, raceId, sourceId, prizeText) {
 test('official race observation maps the first advertised prize amount', () => {
   const { db } = createTestEnv();
   insertRace(db, 'race_prize_60k');
-  insertSource(db, 'source_prize_60k');
+  insertSource(db, 'source_prize_60k', 'race_prize_60k');
   insertRaceObservation(
     db,
     'obs_prize_60k',
@@ -40,7 +40,7 @@ test('official race observation maps the first advertised prize amount', () => {
 test('official first-prize mapping supports million-level Swedish thousands formatting', () => {
   const { db } = createTestEnv();
   insertRace(db, 'race_prize_1m');
-  insertSource(db, 'source_prize_1m');
+  insertSource(db, 'source_prize_1m', 'race_prize_1m');
   insertRaceObservation(
     db,
     'obs_prize_1m',
@@ -54,15 +54,29 @@ test('official first-prize mapping supports million-level Swedish thousands form
 test('unknown or malformed prize text stays null', () => {
   const { db } = createTestEnv();
   insertRace(db, 'race_prize_unknown');
-  insertSource(db, 'source_prize_unknown');
+  insertSource(db, 'source_prize_unknown', 'race_prize_unknown');
   insertRaceObservation(db, 'obs_prize_unknown', 'race_prize_unknown', 'source_prize_unknown', 'Bonuspris enligt särskilda villkor.');
   assert.equal(db.prepare('SELECT first_prize_sek FROM races WHERE id = ?').get('race_prize_unknown').first_prize_sek, null);
+});
+
+test('mismatched source provenance cannot populate a race first prize', () => {
+  const { db } = createTestEnv();
+  insertRace(db, 'race_prize_target');
+  insertSource(db, 'source_prize_wrong', 'different_race');
+  insertRaceObservation(
+    db,
+    'obs_prize_wrong',
+    'race_prize_target',
+    'source_prize_wrong',
+    'Pris: 70.000-35.000-17.500 kr (3 prisplacerade).'
+  );
+  assert.equal(db.prepare('SELECT first_prize_sek FROM races WHERE id = ?').get('race_prize_target').first_prize_sek, null);
 });
 
 test('later conflicting official prize observations do not overwrite the first stored fact', () => {
   const { db } = createTestEnv();
   insertRace(db, 'race_prize_conflict');
-  insertSource(db, 'source_prize_conflict_1');
+  insertSource(db, 'source_prize_conflict_1', 'race_prize_conflict');
   insertRaceObservation(
     db,
     'obs_prize_conflict_1',
@@ -72,7 +86,7 @@ test('later conflicting official prize observations do not overwrite the first s
   );
   assert.equal(db.prepare('SELECT first_prize_sek FROM races WHERE id = ?').get('race_prize_conflict').first_prize_sek, 80000);
 
-  insertSource(db, 'source_prize_conflict_2');
+  insertSource(db, 'source_prize_conflict_2', 'race_prize_conflict', '2099-03-01T11:00:00Z');
   insertRaceObservation(
     db,
     'obs_prize_conflict_2',
@@ -98,7 +112,7 @@ test('migration repairs already-normalized official race observations without re
   }
 
   insertRace(db, 'race_prize_existing');
-  insertSource(db, 'source_prize_existing');
+  insertSource(db, 'source_prize_existing', 'race_prize_existing');
   insertRaceObservation(
     db,
     'obs_prize_existing',
