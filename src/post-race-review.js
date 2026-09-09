@@ -14,11 +14,13 @@ async function candidateRound(env, roundId = null) {
     WHERE gr.game_type IN ('V85','V86')
       ${filter}
       AND (SELECT COUNT(*) FROM game_legs gl WHERE gl.game_round_id = gr.id) = 8
-      AND (SELECT COUNT(DISTINCT gl.leg_number)
+      AND (SELECT COUNT(*)
            FROM game_legs gl
-           JOIN race_entries re ON re.race_id = gl.race_id
-           JOIN race_results rr ON rr.race_entry_id = re.id AND rr.placing = 1
-           WHERE gl.game_round_id = gr.id) = 8
+           WHERE gl.game_round_id = gr.id
+             AND (SELECT COUNT(*)
+                  FROM race_entries re
+                  JOIN race_results rr ON rr.race_entry_id = re.id AND rr.placing = 1
+                  WHERE re.race_id = gl.race_id) = 1) = 8
       AND EXISTS (SELECT 1 FROM systems s WHERE s.game_round_id = gr.id)
       AND EXISTS (
         SELECT 1 FROM systems s
@@ -122,7 +124,7 @@ async function reviewSystem(env, round, system) {
   if (Number(existing?.count || 0) >= 8) return { systemId: system.id, status: 'already_reviewed', reviews: 0 };
 
   const legs = await legsForSystem(env, round.id, system.id);
-  if (legs.length !== 8) throw new Error(`round ${round.id} does not have exactly eight settled legs`);
+  if (legs.length !== 8) throw new Error(`round ${round.id} does not have exactly eight unambiguous settled legs`);
 
   const now = new Date().toISOString();
   let inserted = 0;
