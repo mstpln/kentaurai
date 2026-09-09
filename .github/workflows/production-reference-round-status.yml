@@ -1,0 +1,58 @@
+name: Check production reference-round status
+run-name: Check production reference-round status — @${{ github.actor }}
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - ops/reference-round-production-check-v061
+    paths:
+      - .github/workflows/production-reference-round-status.yml
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Query production reference-round count
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          D1_DATABASE_ID: d8189e0e-6127-4ef2-88cc-534cb2217340
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "CLOUDFLARE_API_TOKEN is not configured"; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "CLOUDFLARE_ACCOUNT_ID is not configured"; exit 1; }
+          echo "::add-mask::$CLOUDFLARE_API_TOKEN"
+
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$D1_DATABASE_ID/query"
+          response_file="$(mktemp)"
+          trap 'rm -f "$response_file"' EXIT
+          sql='SELECT COUNT(*) AS reference_exports FROM reference_round_exports;'
+
+          code="$(curl --silent --show-error --output "$response_file" --write-out '%{http_code}' \
+            --request POST \
+            --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            --header 'Content-Type: application/json' \
+            --data "$(jq -cn --arg sql "$sql" '{sql:$sql}')" \
+            "$api")"
+
+          [[ "$code" == "200" ]] || { echo "Cloudflare D1 query failed (HTTP $code)"; exit 1; }
+          jq -e '.success == true and (.result | length == 1) and .result[0].success == true' "$response_file" > /dev/null || {
+            echo "Cloudflare D1 query returned an unsuccessful result"
+            exit 1
+          }
+
+          count="$(jq -r '.result[0].results[0].reference_exports' "$response_file")"
+          [[ "$count" =~ ^[0-9]+$ ]] || { echo "Unexpected reference-round count"; exit 1; }
+
+          echo "Reference-round exports in production: $count"
+          if (( count > 0 )); then
+            echo "Production reference-round state: present"
+          else
+            echo "Production reference-round state: absent"
+          fi
