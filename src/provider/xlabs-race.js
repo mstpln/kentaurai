@@ -106,24 +106,165 @@ function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function uniqueJsonPathCallName(mainText) {
-  const names = [];
-  const pattern = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(\s*(['"])json\/\2\s*\)/g;
-  for (const match of String(mainText || '').matchAll(pattern)) {
-    if (!names.includes(match[1])) names.push(match[1]);
-    if (names.length > 1) return null;
+function maskStringsAndComments(value) {
+  const text = String(value || '');
+  let out = '';
+  let quote = null;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    const next = text[i + 1];
+    if (lineComment) {
+      if (ch === '\n') {
+        lineComment = false;
+        out += '\n';
+      } else out += ' ';
+      continue;
+    }
+    if (blockComment) {
+      if (ch === '*' && next === '/') {
+        blockComment = false;
+        out += '  ';
+        i += 1;
+      } else out += ch === '\n' ? '\n' : ' ';
+      continue;
+    }
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+        out += ' ';
+      } else if (ch === '\\') {
+        escaped = true;
+        out += ' ';
+      } else if (ch === quote) {
+        quote = null;
+        out += ch;
+      } else {
+        out += ch === '\n' ? '\n' : ' ';
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+    if (ch === '/' && next === '/') {
+      lineComment = true;
+      out += '  ';
+      i += 1;
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      blockComment = true;
+      out += '  ';
+      i += 1;
+      continue;
+    }
+    out += ch;
   }
-  return names.length === 1 ? names[0] : null;
+  return out;
 }
 
-function calculateScriptSupportsPathCall(calculateText, functionName) {
-  if (!calculateText || !functionName) return false;
-  const name = escapeRegExp(functionName);
-  const declaration = new RegExp(`\\bfunction\\s+${name}\\s*\\(([^)]*)\\)\\s*\\{([\\s\\S]{0,6000})`, 'm').exec(calculateText);
-  if (!declaration) return false;
-  const params = declaration[1].split(',').map((part) => part.trim()).filter(Boolean);
-  if (!params.includes('path')) return false;
-  return /\$\.getJSON\s*\(\s*path\s*\+/.test(declaration[2]);
+function findMatching(text, openIndex, openChar, closeChar) {
+  let depth = 0;
+  for (let i = openIndex; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === openChar) depth += 1;
+    else if (ch === closeChar) {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function splitArguments(text) {
+  const args = [];
+  let quote = null;
+  let escaped = false;
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+      continue;
+    }
+    if (ch === '(' || ch === '[' || ch === '{') depth += 1;
+    else if (ch === ')' || ch === ']' || ch === '}') depth = Math.max(0, depth - 1);
+    else if (ch === ',' && depth === 0) {
+      args.push(text.slice(start, i).trim());
+      start = i + 1;
+    }
+  }
+  args.push(text.slice(start).trim());
+  return args;
+}
+
+function staticJsonPathArgument(value) {
+  const text = String(value || '').trim();
+  const match = /^(['"])json\/\1$/.exec(text);
+  return Boolean(match);
+}
+
+function isDirectFunctionCall(maskedText, nameIndex) {
+  const immediate = maskedText[nameIndex - 1];
+  if (immediate && /[A-Za-z0-9_$]/.test(immediate)) return false;
+  let i = nameIndex - 1;
+  while (i >= 0 && /\s/.test(maskedText[i])) i -= 1;
+  return i < 0 || maskedText[i] !== '.';
+}
+
+function calculatePathFunctions(calculateText) {
+  if (!calculateText) return [];
+  const masked = maskStringsAndComments(calculateText);
+  const found = [];
+  const pattern = /\bfunction\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(([^)]*)\)\s*\{/g;
+  for (const match of masked.matchAll(pattern)) {
+    const params = match[2].split(',').map((part) => part.trim()).filter(Boolean);
+    const pathIndex = params.indexOf('path');
+    if (pathIndex < 0) continue;
+    const openBrace = (match.index || 0) + match[0].lastIndexOf('{');
+    const closeBrace = findMatching(masked, openBrace, '{', '}');
+    if (closeBrace < 0) continue;
+    const body = masked.slice(openBrace + 1, closeBrace);
+    if (!/\$\.getJSON\s*\(\s*path\s*\+/.test(body)) continue;
+    found.push({ name: match[1], pathIndex });
+  }
+  return found;
+}
+
+function mainUsesOnlyJsonPath(mainText, fn) {
+  if (!mainText || !fn) return false;
+  const masked = maskStringsAndComments(mainText);
+  const callPattern = new RegExp(`\\b${escapeRegExp(fn.name)}\\s*\\(`, 'g');
+  let seen = false;
+  for (const match of masked.matchAll(callPattern)) {
+    const nameIndex = match.index || 0;
+    if (!isDirectFunctionCall(masked, nameIndex)) continue;
+    const openParen = nameIndex + match[0].lastIndexOf('(');
+    const closeParen = findMatching(masked, openParen, '(', ')');
+    if (closeParen < 0) return false;
+    const args = splitArguments(String(mainText).slice(openParen + 1, closeParen));
+    if (fn.pathIndex >= args.length || !staticJsonPathArgument(args[fn.pathIndex])) return false;
+    seen = true;
+  }
+  return seen;
+}
+
+function uniqueVerifiedJsonPathFunction(calculateText, mainText) {
+  const verified = calculatePathFunctions(calculateText).filter((fn) => mainUsesOnlyJsonPath(mainText, fn));
+  return verified.length === 1 ? verified[0].name : null;
 }
 
 async function verifiedCapturedContextBaseUrl(env, context) {
@@ -143,8 +284,7 @@ async function verifiedCapturedContextBaseUrl(env, context) {
     readFastContextText(env, context.calculateRawObjectKey),
     readFastContextText(env, sibling.raw_object_key)
   ]);
-  const functionName = uniqueJsonPathCallName(mainText);
-  if (!functionName || !calculateScriptSupportsPathCall(calculateText, functionName)) return null;
+  if (!uniqueVerifiedJsonPathFunction(calculateText, mainText)) return null;
   return validateResolvedBaseUrl(`https://${XLABS_HOST}/${compactDate(context.date)}/json/`, context.date);
 }
 
