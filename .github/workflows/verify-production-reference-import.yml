@@ -2,10 +2,8 @@ name: Verify production reference import
 
 on:
   push:
-    branches:
-      - ops/verify-reference-import-v063
-    paths:
-      - .github/workflows/verify-production-reference-import.yml
+    branches: [ops/verify-reference-import-v063]
+    paths: [.github/workflows/verify-production-reference-import.yml]
 
 permissions:
   contents: read
@@ -23,40 +21,41 @@ jobs:
           D1_DATABASE_ID: d8189e0e-6127-4ef2-88cc-534cb2217340
         run: |
           set -euo pipefail
-          test -n "$CLOUDFLARE_API_TOKEN" || { echo "Cloudflare token is not configured"; exit 1; }
-          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "Cloudflare account id is not configured"; exit 1; }
+          test -n "$CLOUDFLARE_API_TOKEN" || exit 1
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || exit 1
           echo "::add-mask::$CLOUDFLARE_API_TOKEN"
           api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$D1_DATABASE_ID/query"
           response_file="$(mktemp)"
           trap 'rm -f "$response_file"' EXIT
           sql=$(cat <<'SQL'
           WITH target AS (
-            SELECT id, game_round_id, source_record_id, export_version, race_count, entry_count
-            FROM reference_round_exports ORDER BY created_at DESC LIMIT 1
-          ), reference_analyses AS (
+            SELECT id,game_round_id,source_record_id,export_version,race_count,entry_count FROM reference_round_exports ORDER BY created_at DESC LIMIT 1
+          ), analyses AS (
             SELECT a.id FROM target t JOIN game_legs gl ON gl.game_round_id=t.game_round_id JOIN ai_race_analyses a ON a.race_id=gl.race_id WHERE a.analysis_origin='reference'
-          ), reference_systems AS (
+          ), systems_for_round AS (
             SELECT s.id,s.spike_count FROM target t JOIN systems s ON s.game_round_id=t.game_round_id
           )
           SELECT
-            (SELECT COUNT(*) FROM target) export_present,
-            (SELECT COUNT(*) FROM target t JOIN source_records sr ON sr.id=t.source_record_id WHERE sr.raw_object_key IS NOT NULL AND sr.content_hash IS NOT NULL) archived_source_present,
-            (SELECT COUNT(*) FROM target t JOIN game_rounds gr ON gr.id=t.game_round_id) round_present,
-            (SELECT COUNT(*) FROM target t JOIN game_legs gl ON gl.game_round_id=t.game_round_id) leg_count,
-            (SELECT race_count FROM target) stored_race_count,
-            (SELECT COUNT(*) FROM target t JOIN game_legs gl ON gl.game_round_id=t.game_round_id JOIN race_entries re ON re.race_id=gl.race_id) computed_entry_count,
-            (SELECT entry_count FROM target) stored_entry_count,
-            (SELECT COUNT(*) FROM reference_analyses) analysis_count,
-            (SELECT COUNT(*) FROM reference_analyses ra JOIN ai_horse_predictions p ON p.ai_race_analysis_id=ra.id) prediction_count,
-            (SELECT COUNT(*) FROM reference_analyses ra WHERE ABS((SELECT COALESCE(SUM(COALESCE(p.win_probability,0)),0) FROM ai_horse_predictions p WHERE p.ai_race_analysis_id=ra.id)-1.0)>0.00001) bad_probability_sums,
-            (SELECT COUNT(*) FROM reference_systems) system_count,
-            (SELECT COUNT(*) FROM reference_systems WHERE spike_count<>3) bad_system_spike_counts,
-            (SELECT COUNT(*) FROM reference_systems rs WHERE (SELECT COUNT(*) FROM system_selections ss WHERE ss.system_id=rs.id AND ss.is_spike=1)<>3) bad_selected_spike_counts,
-            (SELECT COUNT(*) FROM target WHERE export_version='kentaurai-reference-v1') contract_ok;
+            (SELECT COUNT(*) FROM target)=1 export_present,
+            (SELECT COUNT(*) FROM target t JOIN source_records sr ON sr.id=t.source_record_id WHERE sr.raw_object_key IS NOT NULL AND sr.content_hash IS NOT NULL)=1 archive_present,
+            (SELECT COUNT(*) FROM target t JOIN game_rounds gr ON gr.id=t.game_round_id)=1 round_present,
+            ((SELECT COUNT(*) FROM target t JOIN game_legs gl ON gl.game_round_id=t.game_round_id)=8 AND (SELECT race_count FROM target)=8) legs_ok,
+            ((SELECT COUNT(*) FROM target t JOIN game_legs gl ON gl.game_round_id=t.game_round_id JOIN race_entries re ON re.race_id=gl.race_id)=(SELECT entry_count FROM target) AND (SELECT entry_count FROM target)>0) entries_ok,
+            (SELECT COUNT(*) FROM analyses)=8 analyses_ok,
+            (SELECT COUNT(*) FROM analyses a JOIN ai_horse_predictions p ON p.ai_race_analysis_id=a.id)=(SELECT entry_count FROM target) predictions_ok,
+            (SELECT COUNT(*) FROM analyses a WHERE ABS((SELECT COALESCE(SUM(COALESCE(p.win_probability,0)),0) FROM ai_horse_predictions p WHERE p.ai_race_analysis_id=a.id)-1.0)>0.00001)=0 probability_sums_ok,
+            ((SELECT COUNT(*) FROM systems_for_round)>0 AND (SELECT COUNT(*) FROM systems_for_round WHERE spike_count<>3)=0) systems_ok,
+            (SELECT COUNT(*) FROM systems_for_round s WHERE (SELECT COUNT(*) FROM system_selections ss WHERE ss.system_id=s.id AND ss.is_spike=1)<>3)=0 selections_ok,
+            (SELECT COUNT(*) FROM target WHERE export_version='kentaurai-reference-v1')=1 contract_ok;
           SQL
           )
-          code="$(curl --silent --show-error --output "$response_file" --write-out '%{http_code}' --request POST --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" --header 'Content-Type: application/json' --data "$(jq -cn --arg sql "$sql" '{sql:$sql}')" "$api")"
-          [[ "$code" == "200" ]] || { echo "Production verification query failed"; exit 1; }
-          jq -e '.success==true and (.result|length==1) and .result[0].success==true and (.result[0].results|length==1)' "$response_file" >/dev/null || { echo "Production verification query returned an invalid response"; exit 1; }
-          jq -e '.result[0].results[0] as $r | $r.export_present==1 and $r.archived_source_present==1 and $r.round_present==1 and $r.leg_count==8 and $r.stored_race_count==8 and $r.computed_entry_count==$r.stored_entry_count and $r.computed_entry_count>0 and $r.analysis_count==8 and $r.prediction_count==$r.stored_entry_count and $r.bad_probability_sums==0 and $r.system_count>0 and $r.bad_system_spike_counts==0 and $r.bad_selected_spike_counts==0 and $r.contract_ok==1' "$response_file" >/dev/null || { echo "Production reference import verification failed"; exit 1; }
-          echo "Production reference import verification passed."
+          code="$(curl -sS -o "$response_file" -w '%{http_code}' -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' --data "$(jq -cn --arg sql "$sql" '{sql:$sql}')" "$api")"
+          [[ "$code" == 200 ]] || { echo 'verification_query_failed'; exit 1; }
+          jq -e '.success==true and .result[0].success==true and (.result[0].results|length==1)' "$response_file" >/dev/null || { echo 'verification_response_invalid'; exit 1; }
+          failed="$(jq -r '.result[0].results[0] | to_entries[] | select(.value != 1) | .key' "$response_file")"
+          if [[ -n "$failed" ]]; then
+            echo 'Failed invariant names (no private values):'
+            printf '%s\n' "$failed"
+            exit 1
+          fi
+          echo 'Production reference import verification passed.'
