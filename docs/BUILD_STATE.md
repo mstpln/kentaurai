@@ -2,7 +2,7 @@
 
 Version: 0.5.0
 Phase: verified official + X-Labs data foundation with production backfills active
-Status: official live acquisition is deployed and smoke-tested; the official multi-year historical backfill is running; verified X-Labs acquisition/normalization is deployed; the production X-Labs vertical-slice gate passed; the separate multi-year X-Labs backfill for 2023-09-08 through 2026-09-07 is now running under the existing bounded scheduler.
+Status: official live acquisition is deployed and smoke-tested; the official multi-year historical backfill is running; verified X-Labs acquisition/normalization is deployed; the production X-Labs vertical-slice gate passed; the separate multi-year X-Labs backfill for 2023-09-08 through 2026-09-07 is running under the existing bounded scheduler; the private reference-round production import has been completed and independently verified.
 
 ## Current production state
 - Worker: `kentaurai-api`.
@@ -13,12 +13,15 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 - X-Labs historical backfill range: 2023-09-08 through 2026-09-07, newest-first, one X-Labs checkpoint per minute when eligible.
 - The X-Labs historical job does not outrun official history: it waits until the corresponding official date is ready.
 - Daily V85/V86 X-Labs catch-up remains separate and has priority over the long historical X-Labs job.
-- GitHub Actions now contains guarded manual production workflows for D1 migrations and for starting/resuming the fixed historical X-Labs job.
+- The private `kentaurai-reference-v1` round is stored in production with archived source provenance and independently verified structural invariants.
+- GitHub Actions contains guarded manual production workflows for D1 migrations and for starting/resuming the fixed historical X-Labs job.
 
 ## Verified foundation
 - D1 core schema, indexes, reference-round extensions, X-Labs backfill schema and current production migrations are provisioned.
 - R2/raw snapshot handling preserves exact private source payloads with source/import-run provenance.
 - Manual editorial structured import and `kentaurai-reference-v1` import paths are implemented with public/private separation.
+- The private reference-round browser import is deployed without a client-JavaScript dependency; production import and persistence were independently verified without exposing the private payload in GitHub.
+- Reference-round verification confirmed the stored round/legs/entries, reference analyses and predictions, probability-sum invariants, systems and exactly-three-spikes contract.
 - Official-provider calendar/day, game and ordinary-race capture use strict HTTPS/host/redirect/content validation.
 - Conservative official normalization maps only verified field semantics and leaves unknown facts null.
 - Betting, odds and equipment are immutable timestamped snapshots tied to source records.
@@ -64,8 +67,9 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 - The multi-year historical X-Labs job for 2023-09-08 through 2026-09-07 was explicitly authorized and successfully started in production through the guarded GitHub workflow.
 
 ## Private interface
-- `/app` is a private read-only browser interface using `APP_PASSWORD` and a secure HttpOnly session cookie.
-- `/app/api/*` is private session-authenticated read API; `ADMIN_TOKEN` is never exposed to the browser.
+- `/app` is a private browser interface using `APP_PASSWORD` and a secure HttpOnly session cookie.
+- `/app/api/*` is private session-authenticated API; `ADMIN_TOKEN` is never exposed to the browser.
+- `/app/import/reference-round` accepts the private reference export through an authenticated multipart form and sends it directly to the Worker without committing it to GitHub.
 - `/v1/*` remains operational/admin-token protected.
 - Global search covers horses, trainers and drivers.
 - Entity lists are paginated and preserve list position when opening/returning from details.
@@ -106,6 +110,7 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 ## Quality and privacy
 - GitHub contains code/schema/tests/docs/synthetic fixtures only.
 - No real racing payloads, private reference exports, database dumps, secrets or paid/private editorial provider identity/content may be committed.
+- Production reference verification is aggregate/invariant based and must not print private reference values into public Actions logs.
 - X-Labs tests use synthetic HTML/JavaScript only; no real captured X-Labs payload or script is committed.
 - Raw facts, deterministic calculations and AI judgments remain explicitly separated.
 - Historical imports are checkpointed, lease-protected and idempotent.
@@ -114,16 +119,15 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 1. Keep the official and X-Labs multi-year backfills running independently through their persisted checkpoints.
 2. Monitor for repeated technical failures rather than reacting to isolated neutral X-Labs unavailability.
 3. Verify upcoming/current V85/V86 official acquisition and daily X-Labs catch-up remain healthy while the long jobs run.
-4. Check/import the private reference round if it is still absent from production.
+4. Keep the verified private reference round as a fixed reference fixture in private production storage; do not commit its payload to GitHub.
 5. Do not change model weights or begin AI modelling merely because one round or one telemetry sample looks interesting.
 
 ## Next build sequence
 1. Let official + historical X-Labs population continue in the background and monitor operational health.
-2. Verify the private reference-round production state and import it through the existing private path if still absent.
-3. After the active data/backfill phase is sufficiently complete, build the installable PWA package: manifest, install metadata, standalone behavior and dedicated KentaurAI icons.
-4. Build deterministic Trend metrics/leaderboards once enough verified history exists for meaningful minimum-sample rules.
-5. Add automatic post-race review orchestration after the factual/result foundation is stable.
-6. Only then move into the KentaurAI AI analysis runner and system optimizer, keeping raw facts, calculated features and AI judgments separate.
+2. After the active data/backfill phase is sufficiently complete, build the installable PWA package: manifest, install metadata, standalone behavior and dedicated KentaurAI icons.
+3. Build deterministic Trend metrics/leaderboards once enough verified history exists for meaningful minimum-sample rules.
+4. Add automatic post-race review orchestration after the factual/result foundation is stable.
+5. Only then move into the KentaurAI AI analysis runner and system optimizer, keeping raw facts, calculated features and AI judgments separate.
 
 ## Not yet implemented / intentionally deferred
 - verified/persisted shared-person identity across trainer and driver roles
