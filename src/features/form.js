@@ -44,11 +44,11 @@ async function previousStarts(env, target, asOf) {
       AND re.scratched = 0
       AND re.id <> ?
       AND (
-        (r.scheduled_start_at IS NOT NULL AND r.scheduled_start_at < ?)
+        (r.scheduled_start_at IS NOT NULL AND datetime(r.scheduled_start_at) < datetime(?))
         OR (r.scheduled_start_at IS NULL AND r.race_date < ?)
       )
       AND (rr.placing IS NOT NULL OR rr.placing_text IS NOT NULL OR rr.result_status IS NOT NULL)
-    ORDER BY COALESCE(r.scheduled_start_at, r.race_date || 'T23:59:59Z') DESC, r.race_number DESC, re.id ASC
+    ORDER BY COALESCE(datetime(r.scheduled_start_at), datetime(r.race_date || 'T23:59:59Z')) DESC, r.race_number DESC, re.id ASC
     LIMIT ?
   `).bind(target.horse_id, target.id, asOf, dateOnly(asOf), HISTORY_LIMIT).all();
   return results;
@@ -75,8 +75,14 @@ export async function calculateHorseFormFeatures(env, raceEntryId, options = {})
   const target = await targetEntry(env, raceEntryId);
   if (!target) throw new Error('race entry not found');
 
-  const asOf = options.asOf || target.scheduled_start_at || `${target.race_date}T00:00:00Z`;
-  if (!Number.isFinite(Date.parse(asOf))) throw new Error('asOf must be an ISO date/time');
+  const targetAsOf = target.scheduled_start_at || `${target.race_date}T00:00:00Z`;
+  const asOf = options.asOf || targetAsOf;
+  const asOfMs = Date.parse(asOf);
+  const targetMs = Date.parse(targetAsOf);
+  if (!Number.isFinite(asOfMs)) throw new Error('asOf must be an ISO date/time');
+  if (!Number.isFinite(targetMs)) throw new Error('target race start must be a valid ISO date/time');
+  if (asOfMs > targetMs) throw new Error('asOf cannot be after the target race start');
+
   const starts = await previousStarts(env, target, asOf);
   const calculated = buildFeatures(starts, asOf);
 
