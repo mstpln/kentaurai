@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createTestEnv } from './helpers/d1.js';
 import { captureXlabsRaceJson } from '../src/provider/xlabs-race.js';
 
-function seedContext(db, objects) {
+function seedContext(db, objects, overrides = {}) {
   const parentKey = 'raw/xlabs/parent-fast.html';
   objects.set(parentKey, { body: '<html></html>', options: {} });
   db.prepare(`INSERT INTO source_records
@@ -13,7 +13,7 @@ function seedContext(db, objects) {
 
   const calcKey = 'raw/xlabs_script/calculate-fast.js';
   objects.set(calcKey, {
-    body: `function parseData(path) { const fileName = '1' + monthString + dayString + trackNumber + raceNumberString + '.json'; $.getJSON(path + fileName); }`,
+    body: overrides.calculateText || `function parseData(path) { const fileName = '1' + monthString + dayString + trackNumber + raceNumberString + '.json'; $.getJSON(path + fileName); }`,
     options: {}
   });
   db.prepare(`INSERT INTO source_records
@@ -22,7 +22,7 @@ function seedContext(db, objects) {
     .run(calcKey, JSON.stringify({ parentSourceRecordId: 'src_fast_parent', scriptName: 'calculate.js' }));
 
   const mainKey = 'raw/xlabs_script/main-fast.js';
-  objects.set(mainKey, { body: `parseData('json/');`, options: {} });
+  objects.set(mainKey, { body: overrides.mainText || `parseData('json/');`, options: {} });
   db.prepare(`INSERT INTO source_records
     (id, source_type, external_id, source_url, fetched_at, raw_object_key, content_hash, quality_status, rights_status, metadata_json)
     VALUES ('src_fast_main','xlabs_script','src_fast_parent:main.js','https://kmtid.atgx.se/260906/js/main.js','2099-01-01T00:00:01Z',?,'hash_fast_main','captured_unmapped','unknown',?)`)
@@ -59,4 +59,42 @@ test('uses the bounded verified calculate/main context before the full script re
   assert.deepEqual(seen, ['https://kmtid.atgx.se/260906/json/109060705.json']);
   const source = db.prepare(`SELECT metadata_json FROM source_records WHERE source_type = 'xlabs_race_json'`).get();
   assert.equal(JSON.parse(source.metadata_json).pathResolution, 'verified_captured_context');
+});
+
+test('does not use fast context when the same function is also called with a dynamic path', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedContext(db, objects, {
+    mainText: `parseData('json/'); parseData(runtimePath);`
+  });
+  let fetchCalled = false;
+
+  await assert.rejects(
+    captureXlabsRaceJson(env, 'src_fast_calc', 7, 5, {
+      fetchImpl: async () => {
+        fetchCalled = true;
+        return new Response(telemetryPayload(), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+    }),
+    /X-Labs race-data path is not uniquely resolved/
+  );
+  assert.equal(fetchCalled, false);
+});
+
+test('does not attribute a later getJSON call to an earlier function body', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedContext(db, objects, {
+    calculateText: `function parseData(path) { return path; } function other(path) { $.getJSON(path + 'race.json'); }`
+  });
+  let fetchCalled = false;
+
+  await assert.rejects(
+    captureXlabsRaceJson(env, 'src_fast_calc', 7, 5, {
+      fetchImpl: async () => {
+        fetchCalled = true;
+        return new Response(telemetryPayload(), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+    }),
+    /X-Labs race-data path is not uniquely resolved/
+  );
+  assert.equal(fetchCalled, false);
 });
