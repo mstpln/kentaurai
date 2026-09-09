@@ -34,6 +34,8 @@ test('post-race runner writes one deterministic review per settled leg', async (
   assert.equal(rows.filter((row) => row.error_type === 'coverage_miss').length, 1);
   assert.equal(rows.filter((row) => row.selected_in_system === 1).length, 6);
   assert.ok(rows.every((row) => JSON.parse(row.review_json).reviewVersion === 'deterministic-v1'));
+  assert.ok(rows.every((row) => ['candidate_learning', 'no_change'].includes(JSON.parse(row.review_json).classification)));
+  assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM model_change_log`).get().count, 0);
 });
 
 test('post-race runner is idempotent after a system is reviewed', async () => {
@@ -43,6 +45,18 @@ test('post-race runner is idempotent after a system is reviewed', async () => {
   const second = await runNextPostRaceReview(env);
   assert.equal(second.status, 'idle');
   assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM post_race_reviews`).get().count, 8);
+});
+
+test('post-race runner resumes a partial deterministic review without duplicates', async () => {
+  const { env, db } = createTestEnv();
+  seedSettledRound(db);
+  await runNextPostRaceReview(env);
+  db.prepare(`DELETE FROM post_race_reviews WHERE race_id='review_race_8'`).run();
+  const resumed = await runNextPostRaceReview(env);
+  assert.equal(resumed.status, 'completed');
+  assert.equal(resumed.reviews, 1);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM post_race_reviews`).get().count, 8);
+  assert.equal(new Set(db.prepare(`SELECT id FROM post_race_reviews`).all().map((row) => row.id)).size, 8);
 });
 
 test('post-race runner waits until all eight legs have factual winners', async () => {
