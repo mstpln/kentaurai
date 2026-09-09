@@ -59,6 +59,17 @@ test('post-race runner resumes a partial deterministic review without duplicates
   assert.equal(new Set(db.prepare(`SELECT id FROM post_race_reviews`).all().map((row) => row.id)).size, 8);
 });
 
+test('post-race runner respects an existing review for the same system and race regardless of review id', async () => {
+  const { env, db } = createTestEnv();
+  seedSettledRound(db);
+  db.prepare(`INSERT INTO post_race_reviews (id, game_round_id, race_id, race_entry_id, system_id, selected_in_system, review_json) VALUES ('legacy_review','round_review','review_race_1','review_win_1','system_review',1,'{}')`).run();
+  const result = await runNextPostRaceReview(env);
+  assert.equal(result.status, 'completed');
+  assert.equal(result.reviews, 7);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM post_race_reviews WHERE system_id='system_review'`).get().count, 8);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM post_race_reviews WHERE system_id='system_review' AND race_id='review_race_1'`).get().count, 1);
+});
+
 test('post-race runner waits until all eight legs have factual winners', async () => {
   const { env, db } = createTestEnv();
   seedSettledRound(db);
