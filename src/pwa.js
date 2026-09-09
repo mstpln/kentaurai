@@ -38,7 +38,7 @@ self.addEventListener('fetch',event=>{const url=new URL(event.request.url);if(ev
 }
 
 export function pwaHeadMarkup() {
-  return `<link rel="manifest" href="/app/manifest.webmanifest"><link rel="icon" href="/app/icon.svg" type="image/svg+xml"><link rel="apple-touch-icon" href="/app/icon.svg"><meta name="application-name" content="KentaurAI"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="KentaurAI">`;
+  return `<link rel="manifest" href="/app/manifest.webmanifest"><link rel="icon" href="/app/icon.svg" type="image/svg+xml"><meta name="application-name" content="KentaurAI"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="apple-mobile-web-app-title" content="KentaurAI">`;
 }
 
 export function pwaRegistrationScript() {
