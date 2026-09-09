@@ -14,6 +14,15 @@ WITH prize_observations AS (
   JOIN source_records s ON s.id = o.source_record_id
   WHERE o.entity_type = 'race'
     AND s.source_type = 'official_provider'
+    AND (
+      s.external_id = 'race:' || o.entity_id
+      OR EXISTS (
+        SELECT 1
+        FROM game_legs gl
+        WHERE gl.race_id = o.entity_id
+          AND s.external_id = 'game:' || gl.game_round_id
+      )
+    )
     AND json_valid(o.fields_json)
     AND json_type(o.fields_json, '$.prizeText') = 'text'
 ),
