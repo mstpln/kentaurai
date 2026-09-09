@@ -1,12 +1,13 @@
 import {
   renderAppPage as renderReleaseAppPage,
-  renderLoginPage,
+  renderLoginPage as renderReleaseLoginPage,
   htmlResponse,
   redirectResponse,
   safeReturnPath
 } from './app-page-release.js';
+import { pwaHeadMarkup, pwaRegistrationScript } from './pwa.js';
 
-export { renderLoginPage, htmlResponse, redirectResponse, safeReturnPath };
+export { htmlResponse, redirectResponse, safeReturnPath };
 
 const releaseBootstrap = `<script id="kentaurai-release-bootstrap">
 renderStart().catch(err=>{app.innerHTML='<div class="notice">Kunde inte läsa data: '+esc(err.message)+'</div>'});
@@ -49,14 +50,18 @@ renderDetail=async function(){await previousHistoryRenderDetail();if(!state.deta
    document.querySelectorAll('[data-history-horse]').forEach(x=>x.onclick=()=>openDetail('horses',x.dataset.historyHorse));
    const prev=document.getElementById('linkedHorseprevPage');const next=document.getElementById('linkedHorsenextPage');
    if(prev)prev.onclick=()=>{state.linkedHorseOffsets[key]=Math.max(0,data.offset-data.limit);renderDetail()};
-   if(next)next.onclick=()=>{state.linkedHorseOffsets[key]=data.offset+data.limit;renderDetail()};
+   if(next)next.onclick=()=>{state.linkedHorseOffsets[key]=history.offset+history.limit;renderDetail()};
  }
 };
 </script>`;
 
+export function renderLoginPage(options = {}) {
+  return renderReleaseLoginPage(options).replace('</head>', `${pwaHeadMarkup()}</head>`);
+}
+
 export function renderAppPage() {
   return renderReleaseAppPage()
     .replace(releaseBootstrap, '')
-    .replace('</head>', `${historyCss}</head>`)
-    .replace('</body>', `${historyScript}${releaseBootstrap}</body>`);
+    .replace('</head>', `${historyCss}${pwaHeadMarkup()}</head>`)
+    .replace('</body>', `${historyScript}${releaseBootstrap}${pwaRegistrationScript()}</body>`);
 }
