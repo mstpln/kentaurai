@@ -9,6 +9,7 @@ import {
 } from '../src/import/xlabs-backfill.js';
 
 const DATE = '2099-01-02';
+const GAME_ID = 'V86_2099-01-02_7_1';
 
 function seedOfficialRace(db, date = DATE) {
   db.prepare(`INSERT INTO tracks (id, canonical_name, country_code) VALUES ('track_7','Synthetic Track','SE')`).run();
@@ -20,9 +21,49 @@ function seedOfficialRace(db, date = DATE) {
     VALUES ('entry_1','race_5','horse_1',1,1000),('entry_2','race_5','horse_2',2,1000)`).run();
 }
 
-function seedV86Round(db) {
-  db.prepare(`INSERT INTO game_rounds (id, game_type, round_date) VALUES ('V86_2099-01-02_7_1','V86',?)`).run(DATE);
-  db.prepare(`INSERT INTO game_legs (game_round_id,leg_number,race_id) VALUES ('V86_2099-01-02_7_1',1,'race_5')`).run();
+function seedDailyV86OfficialState(db, objects, { gameQuality = 'normalized_verified_subset', includeGame = true } = {}) {
+  seedOfficialRace(db);
+  for (let raceNumber = 6; raceNumber <= 12; raceNumber += 1) {
+    const raceId = `race_${raceNumber}`;
+    const horseId = `horse_${raceNumber}`;
+    const entryId = `entry_${raceNumber}`;
+    db.prepare(`INSERT INTO races (id, track_id, race_date, race_number, distance_m, start_method)
+      VALUES (?,'track_7',?,?,1000,'auto')`).run(raceId, DATE, raceNumber);
+    db.prepare(`INSERT INTO horses (id, canonical_name) VALUES (?,?)`).run(horseId, `Synthetic ${raceNumber}`);
+    db.prepare(`INSERT INTO race_entries (id, race_id, horse_id, start_number, actual_start_distance_m)
+      VALUES (?,?,?,1,1000)`).run(entryId, raceId, horseId);
+  }
+
+  db.prepare(`INSERT INTO game_rounds (id, game_type, round_date) VALUES (?,'V86',?)`).run(GAME_ID, DATE);
+  for (let leg = 1; leg <= 8; leg += 1) {
+    db.prepare(`INSERT INTO game_legs (game_round_id,leg_number,race_id) VALUES (?,?,?)`)
+      .run(GAME_ID, leg, `race_${leg + 4}`);
+  }
+
+  const calendarKey = 'raw/official_provider/calendar.json';
+  const calendarPayload = {
+    date: DATE,
+    games: {
+      V86: [{
+        id: GAME_ID,
+        races: Array.from({ length: 8 }, (_, index) => `${DATE}_7_${index + 5}`)
+      }]
+    }
+  };
+  objects.set(calendarKey, { body: JSON.stringify(calendarPayload), options: {} });
+  db.prepare(`INSERT INTO source_records
+    (id, source_type, external_id, source_url, fetched_at, raw_object_key, content_hash, quality_status)
+    VALUES ('src_calendar','official_provider',?,?,'2099-01-03T04:00:00Z',?,'hash_calendar','captured_unmapped')`)
+    .run(`calendar:${DATE}`, `https://example.test/calendar/${DATE}`, calendarKey);
+
+  if (includeGame) {
+    const gameKey = 'raw/official_provider/game.json';
+    objects.set(gameKey, { body: '{}', options: {} });
+    db.prepare(`INSERT INTO source_records
+      (id, source_type, external_id, source_url, fetched_at, raw_object_key, content_hash, quality_status)
+      VALUES ('src_game','official_provider',?,?,'2099-01-03T04:01:00Z',?,'hash_game',?)`)
+      .run(`game:${GAME_ID}`, `https://example.test/games/${GAME_ID}`, gameKey, gameQuality);
+  }
 }
 
 function seedOfficialCoverage(db, { start = DATE, end = DATE, next = '2099-01-01', status = 'running' } = {}) {
@@ -78,10 +119,9 @@ test('daily X-Labs scheduling creates a stable V85/V86-only job for yesterday', 
   assert.equal(first.status, 'running');
 });
 
-test('daily X-Labs job processes a normalized V86 leg without waiting for full official history', async () => {
+test('daily X-Labs job processes a fully normalized V86 round without waiting for full ordinary-race history', async () => {
   const { env, db, objects } = createTestEnv();
-  seedOfficialRace(db);
-  seedV86Round(db);
+  seedDailyV86OfficialState(db, objects);
   seedXlabsContext(db, objects);
   await ensureDailyXlabsJob(env, '2099-01-03T04:30:00.000Z');
 
@@ -96,6 +136,37 @@ test('daily X-Labs job processes a normalized V86 leg without waiting for full o
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM xlabs_data`).get().n, 2);
 });
 
+test('daily X-Labs waits for the official V86 game normalization instead of completing a partial day', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedDailyV86OfficialState(db, objects, { gameQuality: 'captured_unmapped' });
+  await ensureDailyXlabsJob(env, '2099-01-03T04:30:00.000Z');
+
+  const result = await runXlabsBackfillStep(env);
+  assert.equal(result.scope, 'daily_v85_v86');
+  assert.equal(result.status, 'waiting_for_official_live');
+  assert.equal(result.reason, 'game_normalization_pending');
+  assert.equal(result.pendingGameCount, 1);
+  assert.ok(result.retryAfter);
+  const job = db.prepare(`SELECT next_date,next_race_index,processed_races,retry_after,lease_token FROM xlabs_backfill_jobs`).get();
+  assert.equal(job.next_date, DATE);
+  assert.equal(job.next_race_index, 0);
+  assert.equal(job.processed_races, 0);
+  assert.ok(job.retry_after);
+  assert.equal(job.lease_token, null);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM xlabs_data`).get().n, 0);
+});
+
+test('daily X-Labs waits when the official calendar exists but the game capture is missing', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedDailyV86OfficialState(db, objects, { includeGame: false });
+  await ensureDailyXlabsJob(env, '2099-01-03T04:30:00.000Z');
+
+  const result = await runXlabsBackfillStep(env);
+  assert.equal(result.status, 'waiting_for_official_live');
+  assert.equal(result.pendingGameCount, 1);
+  assert.equal(db.prepare(`SELECT processed_races FROM xlabs_backfill_jobs`).get().processed_races, 0);
+});
+
 test('multi-day X-Labs history waits until official backfill has completed the checkpoint date', async () => {
   const { env, db } = createTestEnv();
   await startXlabsBackfill(env, '2099-01-01', DATE);
@@ -105,12 +176,13 @@ test('multi-day X-Labs history waits until official backfill has completed the c
   const result = await runXlabsBackfillStep(env);
   assert.equal(result.scope, 'historical_all');
   assert.equal(result.status, 'waiting_for_official');
-  const job = db.prepare(`SELECT next_date,next_race_index,processed_races,consecutive_errors,lease_token FROM xlabs_backfill_jobs`).get();
+  const job = db.prepare(`SELECT next_date,next_race_index,processed_races,consecutive_errors,lease_token,retry_after FROM xlabs_backfill_jobs`).get();
   assert.equal(job.next_date, DATE);
   assert.equal(job.next_race_index, 0);
   assert.equal(job.processed_races, 0);
   assert.equal(job.consecutive_errors, 0);
   assert.equal(job.lease_token, null);
+  assert.ok(job.retry_after);
 });
 
 test('captures and normalizes one available X-Labs race from a verified official checkpoint', async () => {
