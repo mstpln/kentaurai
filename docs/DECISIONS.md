@@ -30,7 +30,7 @@
 17. The approved Sagittarius KentaurAI brand stays separate from entity navigation symbolism.
 18. Bottom-navigation symbols are Trend = approved chart-line, Tränare = clipboard/pen, Hästar = horse, Kuskar = lightbulb, Spel = ticket. Entity profile tiles use initials rather than category symbols.
 19. Trend uses the approved chart-line symbol and the singular label `Trend` in both navigation and page heading.
-20. Installable PWA packaging is a deferred interface build after the current data/backfill work. The known gap is that mobile currently behaves as a browser/home-screen shortcut rather than a standalone installed app; the follow-up build must add a web manifest, install metadata, standalone launch behavior and dedicated KentaurAI app icons.
+20. KentaurAI is packaged as an installable PWA scoped to `/app/` with standalone launch and dedicated Sagittarius icons. Its service worker may cache public PWA metadata/icon assets only; authenticated app HTML and API data remain outside the offline cache.
 
 ## Historical data and X-Labs
 1. Historical starter/result data is imported once, stored permanently and updated incrementally. The planned backfill remains approximately 2-3 years of Swedish racing, with older starts fetched selectively when useful for active horse profiles.
@@ -56,6 +56,8 @@
 4. Saved main/alternative systems are preserved. Overview/list metrics use a deterministic primary system while round detail can inspect all saved proposals.
 5. Post-race detail may show winner trip classifications only when stored positional evidence supports them. Unsupported trip labels remain unknown.
 6. Round learnings are classified No change / Candidate / Confirmed. A single race or round does not directly change model weights.
+7. Automatic deterministic post-race review runs only for saved V85/V86 rounds where all eight legs have exactly one factual winner. Ambiguous/dead-heat legs fail closed until dedicated verified semantics exist.
+8. Post-race review is idempotent and resumable per system/race. Covered winners are recorded as No change; missed winners are Candidate learning, with spike misses distinguished from ordinary coverage misses. Review generation never writes model changes automatically.
 
 ## Official live normalization
 1. Raw official responses are archived before normalization and remain the factual source of truth.
