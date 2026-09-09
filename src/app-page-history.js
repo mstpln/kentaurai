@@ -50,7 +50,7 @@ renderDetail=async function(){await previousHistoryRenderDetail();if(!state.deta
    document.querySelectorAll('[data-history-horse]').forEach(x=>x.onclick=()=>openDetail('horses',x.dataset.historyHorse));
    const prev=document.getElementById('linkedHorseprevPage');const next=document.getElementById('linkedHorsenextPage');
    if(prev)prev.onclick=()=>{state.linkedHorseOffsets[key]=Math.max(0,data.offset-data.limit);renderDetail()};
-   if(next)next.onclick=()=>{state.linkedHorseOffsets[key]=history.offset+history.limit;renderDetail()};
+   if(next)next.onclick=()=>{state.linkedHorseOffsets[key]=data.offset+data.limit;renderDetail()};
  }
 };
 </script>`;
