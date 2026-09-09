@@ -135,6 +135,12 @@ function validateRedirectUrl(currentUrl, location, expectedPathname) {
   return target.toString();
 }
 
+function raceHttpError(status) {
+  const error = new Error(`X-Labs race data returned HTTP ${status}`);
+  if (status === 404) error.code = 'XLABS_NOT_FOUND';
+  return error;
+}
+
 async function readBoundedText(response) {
   if (!response.body?.getReader) {
     const text = await response.text();
@@ -179,7 +185,7 @@ async function fetchJsonText(url, fetchImpl, timeoutMs = XLABS_FETCH_TIMEOUT_MS)
         redirects += 1;
         continue;
       }
-      if (!response.ok) throw new Error(`X-Labs race data returned HTTP ${response.status}`);
+      if (!response.ok) throw raceHttpError(response.status);
       const type = (response.headers.get('content-type') || '').toLowerCase();
       if (type && !type.includes('json') && !type.includes('text/plain')) throw new Error('X-Labs race-data response had an unexpected content type');
       const declared = Number(response.headers.get('content-length'));

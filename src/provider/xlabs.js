@@ -30,6 +30,12 @@ function validateRedirectUrl(currentUrl, location) {
   return target.toString();
 }
 
+function providerHttpError(status) {
+  const error = new Error(`X-Labs returned HTTP ${status}`);
+  if (status === 404) error.code = 'XLABS_NOT_FOUND';
+  return error;
+}
+
 export function validateXlabsDate(value) {
   const text = String(value || '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) throw new Error('date must use YYYY-MM-DD');
@@ -66,7 +72,7 @@ async function fetchText(url, fetchImpl) {
         continue;
       }
 
-      if (!response.ok) throw new Error(`X-Labs returned HTTP ${response.status}`);
+      if (!response.ok) throw providerHttpError(response.status);
       const type = (response.headers.get('content-type') || '').toLowerCase();
       if (type && !type.includes('text/html') && !type.includes('application/xhtml+xml')) {
         throw new Error('X-Labs did not return HTML');

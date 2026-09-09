@@ -30,6 +30,7 @@
 17. The approved Sagittarius KentaurAI brand stays separate from entity navigation symbolism.
 18. Bottom-navigation symbols are Trend = approved chart-line, Tränare = clipboard/pen, Hästar = horse, Kuskar = lightbulb, Spel = ticket. Entity profile tiles use initials rather than category symbols.
 19. Trend uses the approved chart-line symbol and the singular label `Trend` in both navigation and page heading.
+20. Installable PWA packaging is a deferred interface build after the current data/backfill work. The known gap is that mobile currently behaves as a browser/home-screen shortcut rather than a standalone installed app; the follow-up build must add a web manifest, install metadata, standalone launch behavior and dedicated KentaurAI app icons.
 
 ## Historical data and X-Labs
 1. Historical starter/result data is imported once, stored permanently and updated incrementally. The planned backfill remains approximately 2-3 years of Swedish racing, with older starts fetched selectively when useful for active horse profiles.
@@ -43,6 +44,10 @@
 9. The verified X-Labs subset consists of reproducible section pace, travelled/extra distance and converted kilometre time. Slipstream remains null because the observed telemetry has no lane field.
 10. The mandatory V1 multi-year foundation is the official Swedish-trotting starter/result history. Historical X-Labs acquisition is a separate optional layer: it is not implied by completion of the official backfill and must not delay or invalidate official facts when unavailable.
 11. The official historical job is date/race checkpointed, idempotent and lease-protected. It processes one ordinary race per scheduled step and stops at the same checkpoint after three consecutive failures so an explicit resume cannot skip facts.
+12. X-Labs historical acquisition uses a separate date/race checkpointed and lease-protected job table. It processes at most one race object per minute and keeps 404/unavailable X-Labs coverage neutral instead of treating missing telemetry as a model/data error.
+13. Multi-day X-Labs backfill is not allowed to outrun official history. A historical X-Labs checkpoint waits until the corresponding official backfill date is complete, so a temporarily empty official date cannot be mistaken for permanent missing X-Labs coverage.
+14. A daily X-Labs catch-up job is created at `04:30 UTC` for the previous UTC date. Single-day jobs have priority over the long historical X-Labs job so recent measurements are not blocked by multi-year catch-up.
+15. X-Labs date pages and the verified application-script context remain archived for provenance before race-object capture; raw race telemetry is archived before normalization, and only the verified telemetry subset is written to D1.
 
 ## Spel and post-race analysis
 1. Every V85/V86 system has exactly three spikar in three different legs, with one selected horse in each spike leg.

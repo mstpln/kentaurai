@@ -3,7 +3,7 @@
 Private V85/V86 data, analysis backend and read-only intelligence interface with a public codebase.
 
 ## Current build
-Version 0.5.0 contains the verified official/X-Labs data foundation, resumable ordinary-race history pipeline and automatic official V85/V86 pre-race acquisition. Real provider payloads and private reference/editorial data remain outside the public repository; GitHub contains code, migrations, tests, documentation and synthetic fixtures only.
+Version 0.5.0 contains the verified official/X-Labs data foundation, resumable ordinary-race history pipeline, automatic official V85/V86 pre-race acquisition and a separately checkpointed X-Labs acquisition path. Real provider payloads and private reference/editorial data remain outside the public repository; GitHub contains code, migrations, tests, documentation and synthetic fixtures only.
 
 The current build contains:
 - D1 normalized relational schema and provenance model
@@ -24,7 +24,9 @@ The current build contains:
 - Spel area with Översikt / V85 / V86 plus saved-round post-race detail
 - complete presentation of currently stored measurement families on entity/start detail, while internal provenance remains backend-only
 - verified X-Labs race-telemetry capture, normalization and raw-vs-normalized checks; exact payloads remain private
-- persistent three-year-capable historical backfill jobs with idempotent source reuse, checkpoints, bounded retries and scheduled continuation
+- scheduled previous-day X-Labs catch-up for stored V85/V86 game legs
+- a separate three-year-capable historical X-Labs job that follows verified official-history readiness rather than outrunning it
+- persistent official and X-Labs backfill jobs with idempotent source reuse, checkpoints, leases and bounded retries
 - private sanitized X-Labs script inspection for request mechanisms and endpoint clues without returning raw script bodies
 - secure app login with a separate `APP_PASSWORD` and HttpOnly session cookie
 - strict validation, idempotency and SQLite-backed integration QA
@@ -44,6 +46,8 @@ Entity detail views group profile/activity data and measured start history inste
 Spel is separate from entity browsing. Översikt shows compact performance statistics, V85/V86 tabs list saved rounds, and each round has a dedicated post-race detail view. Saved systems preserve the exactly-three-spikes system rule.
 
 The visual system is minimal, dark and structured. The approved Sagittarius mark is used for the KentaurAI brand. Bottom navigation uses the approved chart icon for Trend, clipboard/pen for Tränare, horse for Hästar, lightbulb for Kuskar and ticket for Spel. Entity profile tiles use initials rather than category icons.
+
+The current browser interface is not yet packaged as an installable PWA. Manifest/install metadata, standalone launch behavior and dedicated app icons are intentionally deferred until the active data/backfill work is complete.
 
 ## Public-code / private-data boundary
 This repository contains code, migrations, tests, documentation and synthetic fixtures only.
@@ -79,20 +83,23 @@ Real source data belongs only in the private Cloudflare D1/R2 deployment or is s
 - `POST /v1/xlabs/capture-race-json` - Bearer ADMIN_TOKEN; captures one browser-verified telemetry object
 - `POST /v1/xlabs/normalize` - Bearer ADMIN_TOKEN; maps the verified telemetry subset
 - `POST /v1/xlabs/verify-normalization` - Bearer ADMIN_TOKEN; compares private raw telemetry with normalized rows
+- `POST /v1/xlabs/backfill/start` - Bearer ADMIN_TOKEN; creates/resumes a historical X-Labs date-range job
+- `POST /v1/xlabs/backfill/step` - Bearer ADMIN_TOKEN; advances one X-Labs checkpoint
+- `GET /v1/xlabs/backfill/status?job_id=...` - Bearer ADMIN_TOKEN
 - `POST /v1/xlabs/inspect` - Bearer ADMIN_TOKEN; sanitized structural inspection of a captured X-Labs date page
 - `POST /v1/xlabs/inspect-script` - Bearer ADMIN_TOKEN; sanitized read-only inspection of a captured X-Labs script for request mechanisms and endpoint candidates
 - `POST /v1/import/editorial` - Bearer ADMIN_TOKEN
 - `POST /v1/import/reference-round` - Bearer ADMIN_TOKEN
 - `POST /v1/import/raw` - Bearer ADMIN_TOKEN
 - `POST /v1/learning/hypotheses` - Bearer ADMIN_TOKEN
-- `POST /v1/historical/backfill/start` - Bearer ADMIN_TOKEN; creates or resumes a date-range job
-- `POST /v1/historical/backfill/step` - Bearer ADMIN_TOKEN; processes one checkpointed race
+- `POST /v1/historical/backfill/start` - Bearer ADMIN_TOKEN; creates or resumes an official date-range job
+- `POST /v1/historical/backfill/step` - Bearer ADMIN_TOKEN; processes one official checkpointed race
 - `GET /v1/historical/backfill/status?job_id=...` - Bearer ADMIN_TOKEN
 
 All `/v1/*` routes fail closed unless `ADMIN_TOKEN` is configured and supplied.
 
 ### Automatic V85/V86 acquisition
-The configured schedules are `15 5 * * *` and `15 17 * * *` in UTC. The morning run captures the current date plus the next seven dates. The evening run starts from the next date and therefore never changes the current race-day snapshot automatically after the morning refresh. Late changes can still be handled through the admin-only manual refresh path.
+The configured official schedules are `15 5 * * *` and `15 17 * * *` in UTC. The morning run captures the current date plus the next seven dates. The evening run starts from the next date and therefore never changes the current race-day snapshot automatically after the morning refresh. Late changes can still be handled through the admin-only manual refresh path.
 
 Each calendar snapshot is archived privately before game discovery. Discovery accepts only V85/V86 identities for the requested date with exactly eight same-date race ids. Each discovered game is then captured through the same verified official provider path and archived before normalization. A partial date/game capture failure marks the scheduled operation as failed rather than silently reporting success.
 
@@ -120,16 +127,18 @@ Verified mapping rules include:
 
 Ordinary historical race payloads expose an explicit boolean `scratched`; that field is mapped as verified. The V85/V86 live-game mapper remains conservative where its own captured payload does not establish scratch semantics.
 
-Historical acquisition filters calendar data to Swedish trotting tracks, deduplicates race identifiers and processes one race per checkpoint. Jobs persist their date/race cursor in D1, retry the same checkpoint up to three consecutive failures, reuse already captured or normalized sources, and continue from the minute schedule. A job range is capped at 1,096 days.
+Historical official acquisition filters calendar data to Swedish trotting tracks, deduplicates race identifiers and processes one race per checkpoint. Jobs persist their date/race cursor in D1, retry the same checkpoint up to three consecutive failures, reuse already captured or normalized sources, and continue from the minute schedule. A job range is capped at 1,096 days.
 
-This 0.5.0 historical job covers official starter/result history only. It does not claim historical X-Labs coverage: X-Labs remains an optional measurement layer, and a separately resumable historical acquisition path must be verified before it can be enabled.
-
-### X-Labs telemetry
+### X-Labs telemetry and scheduling
 Browser network inspection established the actual race-object recipe as `1MMDDTTRR.json`, where `TT` is the zero-padded official track id and `RR` is the zero-padded race number. The payload is a time-ordered array of telemetry frames with `trackId`, `raceNumber`, `timestamp` and target positions. Capture validates every frame against the requested race before archiving it privately.
 
-The script-inspection endpoint is read-only. It reports bounded counts of common browser request mechanisms, sanitized literal request URLs, sanitized candidate endpoint strings and coarse keyword counts. It does not return the raw script body, query strings, credentials or arbitrary nearby source snippets.
-
 The mapper reproduces the observed closest-frame pace calculations for first/last sections, travelled distance, extra distance and converted kilometre time. At least 99% target-frame coverage is required per starter. Raw telemetry does not contain a lane field, so source slipstream is deliberately stored as null rather than inferred. The verification route re-derives every accepted field from the private raw snapshot and requires at least ten representative field comparisons. Missing X-Labs remains neutral and never breaks the official-data pipeline.
+
+X-Labs acquisition has two deliberately separate scopes. `daily_v85_v86` is created at `04:30 UTC` for the previous UTC date and processes only already-normalized V85/V86 game legs, so current round measurements are not blocked by the long ordinary-race history import. `historical_all` is the explicit multi-year job and considers all normalized Swedish races; it waits until the official historical backfill has completed the corresponding date before advancing, preventing temporary missing official data from being misclassified as permanent missing X-Labs.
+
+The minute scheduler advances at most one X-Labs race checkpoint per invocation, with recent daily V85/V86 jobs prioritized over the long historical job. X-Labs date/race 404 responses are recorded as neutral unavailable coverage and advance the checkpoint. Technical/structural/provenance failures stay on the same checkpoint and stop the job after three consecutive failures until explicitly resumed.
+
+The script-inspection endpoint is read-only. It reports bounded counts of common browser request mechanisms, sanitized literal request URLs, sanitized candidate endpoint strings and coarse keyword counts. It does not return the raw script body, query strings, credentials or arbitrary nearby source snippets.
 
 ## Reference-round import
 `kentaurai-reference-v1` is the pre-race reference contract. The validator requires exactly eight V85/V86 legs, complete analysis coverage, probabilities summing to 100% per leg, exactly three spikar in three different legs, one selected horse in every spike leg, and system row count equal to the product of selections.
