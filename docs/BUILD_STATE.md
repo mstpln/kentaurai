@@ -2,7 +2,7 @@
 
 Version: 0.5.0
 Phase: verified official + X-Labs data foundation with production backfills active
-Status: official live acquisition is deployed and smoke-tested; the official multi-year historical backfill is running; verified X-Labs acquisition/normalization is deployed; the production X-Labs vertical-slice gate passed; the separate multi-year X-Labs backfill for 2023-09-08 through 2026-09-07 is running under the existing bounded scheduler; the private reference-round production import has been completed and independently verified.
+Status: official live acquisition is deployed and smoke-tested; the official multi-year historical backfill is running; verified X-Labs acquisition/normalization is deployed; the production X-Labs vertical-slice gate passed; the separate multi-year X-Labs backfill for 2023-09-08 through 2026-09-07 is running under the existing bounded scheduler; the private reference-round production import has been completed and independently verified; installable KentaurAI PWA packaging is merged to `main`.
 
 ## Current production state
 - Worker: `kentaurai-api`.
@@ -15,6 +15,7 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 - Daily V85/V86 X-Labs catch-up remains separate and has priority over the long historical X-Labs job.
 - The private `kentaurai-reference-v1` round is stored in production with archived source provenance and independently verified structural invariants.
 - GitHub Actions contains guarded manual production workflows for D1 migrations and for starting/resuming the fixed historical X-Labs job.
+- The Worker entrypoint includes the scoped PWA wrapper; public PWA metadata/assets are separate from authenticated app/API responses.
 
 ## Verified foundation
 - D1 core schema, indexes, reference-round extensions, X-Labs backfill schema and current production migrations are provisioned.
@@ -71,6 +72,8 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 - `/app/api/*` is private session-authenticated API; `ADMIN_TOKEN` is never exposed to the browser.
 - `/app/import/reference-round` accepts the private reference export through an authenticated multipart form and sends it directly to the Worker without committing it to GitHub.
 - `/v1/*` remains operational/admin-token protected.
+- KentaurAI is packaged as an installable PWA with a scoped `/app/` manifest, standalone launch behavior and dedicated Sagittarius app/maskable icons.
+- The service worker caches only public PWA metadata/icon assets; authenticated app HTML and `/app/api/*` responses are not cached.
 - Global search covers horses, trainers and drivers.
 - Entity lists are paginated and preserve list position when opening/returning from details.
 - Entity **Starter** tabs read paginated historical pages rather than relying on a fixed latest-N detail payload.
@@ -85,9 +88,8 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 - Tränare uses clipboard/pen, Hästar uses the horse symbol and Kuskar uses the lightbulb symbol.
 - Entity detail tiles display entity initials rather than category icons.
 - Trend category controls remain Tränare / Hästar / Kuskar with 2 veckor / 4 veckor / 3 mån / 6 mån / 1 år.
-- Approved Sagittarius KentaurAI branding remains unchanged.
+- Approved Sagittarius KentaurAI branding remains unchanged and is also used for the installable PWA icons.
 - General UI remains minimal/dark with black, grey, brown and beige plus restrained warm accent color.
-- Installable PWA packaging remains deferred until the active data/backfill phase is complete.
 
 ## Entity/data coverage
 - Horse, trainer and driver remain separate analytical entities.
@@ -114,6 +116,7 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 - X-Labs tests use synthetic HTML/JavaScript only; no real captured X-Labs payload or script is committed.
 - Raw facts, deterministic calculations and AI judgments remain explicitly separated.
 - Historical imports are checkpointed, lease-protected and idempotent.
+- PWA caching is restricted to public static metadata/assets and does not create an offline cache of private KentaurAI data.
 
 ## Current verification/operations gate
 1. Keep the official and X-Labs multi-year backfills running independently through their persisted checkpoints.
@@ -124,8 +127,8 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 
 ## Next build sequence
 1. Let official + historical X-Labs population continue in the background and monitor operational health.
-2. After the active data/backfill phase is sufficiently complete, build the installable PWA package: manifest, install metadata, standalone behavior and dedicated KentaurAI icons.
-3. Build deterministic Trend metrics/leaderboards once enough verified history exists for meaningful minimum-sample rules.
+2. Assess accumulated verified history against explicit minimum-sample requirements for deterministic Trend metrics/leaderboards.
+3. Build deterministic Trend metrics/leaderboards once the production history is sufficient.
 4. Add automatic post-race review orchestration after the factual/result foundation is stable.
 5. Only then move into the KentaurAI AI analysis runner and system optimizer, keeping raw facts, calculated features and AI judgments separate.
 
@@ -135,7 +138,6 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 - additional official-provider endpoint patterns not yet observed
 - historical trainer/driver/horse Trend leaderboards with production minimum-sample rules
 - automatic post-race review orchestration
-- installable PWA packaging
 - additional winner-trip categories requiring facts not currently represented in the schema
 - dead-heat-specific presentation pending a verified source example
 - future feature-engine expansion
