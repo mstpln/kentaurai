@@ -3,7 +3,7 @@
 Private V85/V86 data, analysis backend and read-only intelligence interface with a public codebase.
 
 ## Current build
-Version 0.5.0 contains the verified official/X-Labs data foundation, resumable ordinary-race history pipeline, automatic official V85/V86 pre-race acquisition and a separately checkpointed X-Labs acquisition path. Real provider payloads and private reference/editorial data remain outside the public repository; GitHub contains code, migrations, tests, documentation and synthetic fixtures only.
+Version 0.5.0 contains the verified official/X-Labs data foundation, resumable ordinary-race history pipeline, automatic official V85/V86 pre-race acquisition, separately checkpointed X-Labs acquisition, installable PWA packaging and deterministic automatic post-race review. Real provider payloads and private reference/editorial data remain outside the public repository; GitHub contains code, migrations, tests, documentation and synthetic fixtures only.
 
 The current build contains:
 - D1 normalized relational schema and provenance model
@@ -16,12 +16,14 @@ The current build contains:
 - immutable normalized observations plus timestamped betting/odds/equipment snapshots
 - private raw-vs-normalized verification endpoint
 - private read-only KentaurAI interface at `/app`
+- installable scoped PWA packaging with KentaurAI Sagittarius icons and no caching of authenticated app/API data
 - global horse/trainer/driver search
 - paginated entity lists and grouped detail pages for horses, trainers and drivers
 - paginated full start-history reads per horse/trainer/driver, with all stored measurement families enriched only for the current page
 - paginated linked-horse history for trainer/driver profiles
 - Trend workspace with category/time-period controls
 - Spel area with Översikt / V85 / V86 plus saved-round post-race detail
+- deterministic automatic post-race review for fully settled saved V85/V86 systems, with misses recorded as candidate learning only and no automatic model changes
 - complete presentation of currently stored measurement families on entity/start detail, while internal provenance remains backend-only
 - verified X-Labs race-telemetry capture, normalization and raw-vs-normalized checks; exact payloads remain private
 - scheduled previous-day X-Labs catch-up for stored V85/V86 game legs
@@ -43,11 +45,11 @@ Trend is the start workspace. It switches between Tränare / Hästar / Kuskar an
 
 Entity detail views group profile/activity data and measured start history instead of flattening every field into one page. Stored race/start/result facts, market/odds histories, equipment, X-Labs, positions, conditions, calculated features, AI analyses and structured editorial signals are separated into natural sections. Unknown facts remain null/unknown. Start history is paginated rather than capped to a fixed latest-100 window, so the same interface can support the planned multi-year backfill.
 
-Spel is separate from entity browsing. Översikt shows compact performance statistics, V85/V86 tabs list saved rounds, and each round has a dedicated post-race detail view. Saved systems preserve the exactly-three-spikes system rule.
+Spel is separate from entity browsing. Översikt shows compact performance statistics, V85/V86 tabs list saved rounds, and each round has a dedicated post-race detail view. Saved systems preserve the exactly-three-spikes system rule. Once all eight legs have one unambiguous factual winner, KentaurAI can automatically write deterministic per-leg post-race reviews. Covered winners are recorded as no change; misses are candidate learning only. Dead heats remain unreviewed automatically until dedicated verified semantics exist.
 
 The visual system is minimal, dark and structured. The approved Sagittarius mark is used for the KentaurAI brand. Bottom navigation uses the approved chart icon for Trend, clipboard/pen for Tränare, horse for Hästar, lightbulb for Kuskar and ticket for Spel. Entity profile tiles use initials rather than category icons.
 
-The current browser interface is not yet packaged as an installable PWA. Manifest/install metadata, standalone launch behavior and dedicated app icons are intentionally deferred until the active data/backfill work is complete.
+KentaurAI is packaged as an installable PWA. Its manifest is scoped to `/app/`, launches standalone and uses dedicated normal/maskable Sagittarius icons. The service worker caches only public PWA metadata/icon assets; authenticated app HTML and `/app/api/*` responses are never placed in its offline cache.
 
 ## Public-code / private-data boundary
 This repository contains code, migrations, tests, documentation and synthetic fixtures only.
@@ -92,6 +94,7 @@ Real source data belongs only in the private Cloudflare D1/R2 deployment or is s
 - `POST /v1/import/reference-round` - Bearer ADMIN_TOKEN
 - `POST /v1/import/raw` - Bearer ADMIN_TOKEN
 - `POST /v1/learning/hypotheses` - Bearer ADMIN_TOKEN
+- `POST /v1/post-race/review-next` - Bearer ADMIN_TOKEN; manually advances one eligible deterministic post-race review
 - `POST /v1/historical/backfill/start` - Bearer ADMIN_TOKEN; creates or resumes an official date-range job
 - `POST /v1/historical/backfill/step` - Bearer ADMIN_TOKEN; processes one official checkpointed race
 - `GET /v1/historical/backfill/status?job_id=...` - Bearer ADMIN_TOKEN

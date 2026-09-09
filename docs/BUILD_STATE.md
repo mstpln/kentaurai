@@ -2,7 +2,7 @@
 
 Version: 0.5.0
 Phase: verified official + X-Labs data foundation with production backfills active
-Status: official live acquisition is deployed and smoke-tested; the official multi-year historical backfill is running; verified X-Labs acquisition/normalization is deployed; the production X-Labs vertical-slice gate passed; the separate multi-year X-Labs backfill for 2023-09-08 through 2026-09-07 is running under the existing bounded scheduler; the private reference-round production import has been completed and independently verified; installable KentaurAI PWA packaging is merged to `main`.
+Status: official live acquisition is deployed and smoke-tested; the official multi-year historical backfill is running; verified X-Labs acquisition/normalization is deployed; the production X-Labs vertical-slice gate passed; the separate multi-year X-Labs backfill for 2023-09-08 through 2026-09-07 is running under the existing bounded scheduler; the private reference-round production import has been completed and independently verified; installable KentaurAI PWA packaging and automatic deterministic post-race review are merged to `main`.
 
 ## Current production state
 - Worker: `kentaurai-api`.
@@ -16,6 +16,7 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 - The private `kentaurai-reference-v1` round is stored in production with archived source provenance and independently verified structural invariants.
 - GitHub Actions contains guarded manual production workflows for D1 migrations and for starting/resuming the fixed historical X-Labs job.
 - The Worker entrypoint includes the scoped PWA wrapper; public PWA metadata/assets are separate from authenticated app/API responses.
+- The minute Worker schedule also attempts at most one eligible deterministic post-race review pass; rounds without eight unambiguous factual winners remain untouched.
 
 ## Verified foundation
 - D1 core schema, indexes, reference-round extensions, X-Labs backfill schema and current production migrations are provisioned.
@@ -39,7 +40,7 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 ## Automatic official live acquisition
 - `15 5 * * *` captures the current UTC date plus the next seven dates and discovers only verified V85/V86 eight-leg games.
 - `15 17 * * *` captures upcoming dates but excludes the current date, preserving race-day morning as the final automatic same-day pre-race refresh.
-- `* * * * *` continues one official historical backfill checkpoint, one pending live-normalization checkpoint and at most one eligible X-Labs checkpoint per invocation.
+- `* * * * *` continues one official historical backfill checkpoint, one pending live-normalization checkpoint, at most one eligible X-Labs checkpoint and one bounded post-race review attempt per invocation.
 - Calendar discovery requires a matching date, V85/V86 game identity, exactly eight race ids and same-date race identities before a game is fetched.
 - Raw calendar and game snapshots are archived before normalization.
 - Partial capture failures are surfaced as failed import/orchestrator runs rather than silently reported as success.
@@ -107,6 +108,9 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 - Overview/list views use a deterministic primary system while round detail can inspect preserved alternatives.
 - Round detail separates pre-race assessment, result facts and post-race learning.
 - Winner-trip classification is shown only when stored evidence supports it.
+- Automatic deterministic review requires eight legs with exactly one factual winner each; ambiguous/dead-heat rounds fail closed.
+- Review writes are deterministic, resumable and idempotent per system/race, including protection against duplicate legacy review rows.
+- Covered winners are No change; missed winners are Candidate learning, with spike misses distinguished from ordinary coverage misses.
 - Learning remains No change / Candidate / Confirmed; one race or round never changes model weights directly.
 
 ## Quality and privacy
@@ -116,6 +120,7 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 - X-Labs tests use synthetic HTML/JavaScript only; no real captured X-Labs payload or script is committed.
 - Raw facts, deterministic calculations and AI judgments remain explicitly separated.
 - Historical imports are checkpointed, lease-protected and idempotent.
+- Post-race review does not create model changes and does not infer unsupported scenario explanations.
 - PWA caching is restricted to public static metadata/assets and does not create an offline cache of private KentaurAI data.
 
 ## Current verification/operations gate
@@ -129,17 +134,17 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 1. Let official + historical X-Labs population continue in the background and monitor operational health.
 2. Assess accumulated verified history against explicit minimum-sample requirements for deterministic Trend metrics/leaderboards.
 3. Build deterministic Trend metrics/leaderboards once the production history is sufficient.
-4. Add automatic post-race review orchestration after the factual/result foundation is stable.
-5. Only then move into the KentaurAI AI analysis runner and system optimizer, keeping raw facts, calculated features and AI judgments separate.
+4. Expand the deterministic feature engine only with calculations supported by stored factual inputs.
+5. Only then move into the KentaurAI AI analysis runner, value assessment and system optimizer, keeping raw facts, calculated features and AI judgments separate.
 
 ## Not yet implemented / intentionally deferred
 - verified/persisted shared-person identity across trainer and driver roles
 - verified live scratch/withdrawal mapping
 - additional official-provider endpoint patterns not yet observed
 - historical trainer/driver/horse Trend leaderboards with production minimum-sample rules
-- automatic post-race review orchestration
 - additional winner-trip categories requiring facts not currently represented in the schema
-- dead-heat-specific presentation pending a verified source example
+- dead-heat-specific post-race semantics/presentation pending a verified source example
 - future feature-engine expansion
 - KentaurAI AI analysis runner
+- deterministic value assessment against market percentage
 - system optimizer
