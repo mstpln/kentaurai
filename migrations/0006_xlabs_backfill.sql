@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS xlabs_backfill_jobs (
   consecutive_errors INTEGER NOT NULL DEFAULT 0,
   last_error TEXT,
   last_run_at TEXT,
+  retry_after TEXT,
   lease_token TEXT,
   lease_until TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -21,4 +22,4 @@ CREATE TABLE IF NOT EXISTS xlabs_backfill_jobs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_xlabs_backfill_status
-  ON xlabs_backfill_jobs(status, scope, created_at);
+  ON xlabs_backfill_jobs(status, scope, retry_after, created_at);
