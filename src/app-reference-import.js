@@ -56,7 +56,10 @@ importButton.addEventListener('click',async()=>{
     if(!response.ok)throw new Error(data.message||data.error||('HTTP '+response.status));
     const summary=data.summary||{};
     const counts=data.counts||{};
-    show('Import klar.\n'+(summary.game_type||summary.gameType||'Referensomgång')+' · '+(summary.date||'')+'\n'+(summary.races!=null?summary.races+' lopp · ':'')+(summary.entries!=null?summary.entries+' starter\n':'')+'Sparad: '+(data.reused?'redan importerad tidigare':'ny import')+(counts.errors?' · fel: '+counts.errors:''),'ok');
+    const details=[];
+    if(summary.raceCount!=null)details.push(summary.raceCount+' lopp');
+    if(summary.entryCount!=null)details.push(summary.entryCount+' starter');
+    show('Import klar.\n'+(summary.gameType||'Referensomgång')+(details.length?' · '+details.join(' · '):'')+'\nSparad: '+(data.reused?'redan importerad tidigare':'ny import')+(counts.errors?' · fel: '+counts.errors:''),'ok');
   }catch(error){
     show('Importen misslyckades: '+error.message,'error');
     importButton.disabled=false;
