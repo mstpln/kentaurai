@@ -15,7 +15,6 @@ export function pwaManifest() {
     display_override: ['standalone', 'minimal-ui'],
     background_color: THEME,
     theme_color: THEME,
-    orientation: 'portrait-primary',
     icons: [
       { src: '/app/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
       { src: '/app/icon-maskable.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'maskable' }
