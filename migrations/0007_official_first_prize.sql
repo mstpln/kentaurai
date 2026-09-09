@@ -24,7 +24,7 @@ amounts AS (
     observed_at,
     TRIM(SUBSTR(prize_text, 7, INSTR(SUBSTR(prize_text, 7), '-') - 1)) AS amount_text
   FROM prize_observations
-  WHERE prize_text LIKE 'Pris: %-%'
+  WHERE prize_text GLOB 'Pris: *-*'
     AND INSTR(SUBSTR(prize_text, 7), '-') > 1
 ),
 validated AS (
@@ -63,6 +63,8 @@ WHERE CAST(digits AS INTEGER) BETWEEN 1 AND 999999999
   );
 
 -- Repair already-normalized historical/live races without refetching private raw data.
+-- Existing non-null facts are deliberately preserved; conflicting source observations
+-- remain available in normalized_observations instead of silently replacing them.
 UPDATE races
 SET first_prize_sek = (
       SELECT c.first_prize_sek
@@ -79,8 +81,8 @@ WHERE first_prize_sek IS NULL
     WHERE c.race_id = races.id
   );
 
--- Future official race observations populate/update the canonical race fact while
--- every source snapshot remains preserved in normalized_observations.
+-- Future official race observations fill a missing canonical race fact. A later
+-- conflicting observation never overwrites an already stored first-prize fact.
 CREATE TRIGGER IF NOT EXISTS trg_official_race_first_prize
 AFTER INSERT ON normalized_observations
 WHEN NEW.entity_type = 'race'
@@ -94,6 +96,7 @@ BEGIN
       ),
       updated_at = CURRENT_TIMESTAMP
   WHERE id = NEW.entity_id
+    AND first_prize_sek IS NULL
     AND EXISTS (
       SELECT 1
       FROM official_race_first_prize_candidates c
