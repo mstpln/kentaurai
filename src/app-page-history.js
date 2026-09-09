@@ -1,12 +1,13 @@
 import {
   renderAppPage as renderReleaseAppPage,
-  renderLoginPage,
+  renderLoginPage as renderReleaseLoginPage,
   htmlResponse,
   redirectResponse,
   safeReturnPath
 } from './app-page-release.js';
+import { pwaHeadMarkup, pwaRegistrationScript } from './pwa.js';
 
-export { renderLoginPage, htmlResponse, redirectResponse, safeReturnPath };
+export { htmlResponse, redirectResponse, safeReturnPath };
 
 const releaseBootstrap = `<script id="kentaurai-release-bootstrap">
 renderStart().catch(err=>{app.innerHTML='<div class="notice">Kunde inte läsa data: '+esc(err.message)+'</div>'});
@@ -54,9 +55,13 @@ renderDetail=async function(){await previousHistoryRenderDetail();if(!state.deta
 };
 </script>`;
 
+export function renderLoginPage(options = {}) {
+  return renderReleaseLoginPage(options).replace('</head>', `${pwaHeadMarkup()}</head>`);
+}
+
 export function renderAppPage() {
   return renderReleaseAppPage()
     .replace(releaseBootstrap, '')
-    .replace('</head>', `${historyCss}</head>`)
-    .replace('</body>', `${historyScript}${releaseBootstrap}</body>`);
+    .replace('</head>', `${historyCss}${pwaHeadMarkup()}</head>`)
+    .replace('</body>', `${historyScript}${releaseBootstrap}${pwaRegistrationScript()}</body>`);
 }
