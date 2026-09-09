@@ -50,6 +50,15 @@ test('future results cannot leak into an earlier as-of calculation', async () =>
   assert.equal(result.features.form_days_since_last_start, 7);
 });
 
+test('form calculation rejects an as-of time after the target race start', async () => {
+  const { env, db } = createTestEnv();
+  seed(db);
+  await assert.rejects(
+    calculateHorseFormFeatures(env, 'form_target', { asOf: '2099-02-01T19:00:00Z' }),
+    /cannot be after the target race start/
+  );
+});
+
 test('persisted form features are immutable and idempotent for the same snapshot', async () => {
   const { env, db } = createTestEnv();
   seed(db);
