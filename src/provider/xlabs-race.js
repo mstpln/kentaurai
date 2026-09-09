@@ -9,6 +9,7 @@ const MAX_REDIRECTS = 2;
 const MAX_SAMPLE_FIELDS = 20;
 const MAX_SAMPLE_DEPTH = 3;
 const XLABS_FETCH_TIMEOUT_MS = 30_000;
+const MAX_FAST_CONTEXT_BYTES = 512 * 1024;
 
 function positiveInteger(value, name, max) {
   const text = typeof value === 'number'
@@ -40,7 +41,8 @@ function validateResolvedBaseUrl(value, date) {
 }
 
 function validateCapturedDatePageUrl(value, date) {
-  const url = new URL(value);
+  let url;
+  try { url = new URL(value); } catch { return null; }
   if (url.protocol !== 'https:') return null;
   if (url.username || url.password) return null;
   if (url.hostname.toLowerCase() !== XLABS_HOST) return null;
@@ -62,7 +64,7 @@ function parseMetadata(value) {
 
 async function loadCaptureContext(env, calculateSourceRecordId) {
   const source = await env.DB.prepare(`
-    SELECT id, metadata_json
+    SELECT id, raw_object_key, metadata_json
     FROM source_records
     WHERE id = ? AND source_type = 'xlabs_script'
     LIMIT 1
@@ -83,26 +85,71 @@ async function loadCaptureContext(env, calculateSourceRecordId) {
   const parentMetadata = parseMetadata(parent.metadata_json);
   const date = typeof parentMetadata.date === 'string' ? parentMetadata.date : null;
   try { validateXlabsDate(date); } catch { throw new Error('captured X-Labs parent source is missing a valid date'); }
-  return { parentId, parentSourceUrl: parent.source_url, date };
+  return {
+    parentId,
+    parentSourceUrl: parent.source_url,
+    calculateRawObjectKey: source.raw_object_key,
+    date
+  };
 }
 
-async function verifiedCapturedContextBaseUrl(env, parentId, parentSourceUrl, date) {
-  if (!validateCapturedDatePageUrl(parentSourceUrl, date)) return null;
+async function readFastContextText(env, key) {
+  if (!key) return null;
+  const object = await env.RAW_BUCKET.get(key);
+  if (!object) return null;
+  const text = await object.text();
+  if (new TextEncoder().encode(text).byteLength > MAX_FAST_CONTEXT_BYTES) return null;
+  return text;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function uniqueJsonPathCallName(mainText) {
+  const names = [];
+  const pattern = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(\s*(['"])json\/\2\s*\)/g;
+  for (const match of String(mainText || '').matchAll(pattern)) {
+    if (!names.includes(match[1])) names.push(match[1]);
+    if (names.length > 1) return null;
+  }
+  return names.length === 1 ? names[0] : null;
+}
+
+function calculateScriptSupportsPathCall(calculateText, functionName) {
+  if (!calculateText || !functionName) return false;
+  const name = escapeRegExp(functionName);
+  const declaration = new RegExp(`\\bfunction\\s+${name}\\s*\\(([^)]*)\\)\\s*\\{([\\s\\S]{0,6000})`, 'm').exec(calculateText);
+  if (!declaration) return false;
+  const params = declaration[1].split(',').map((part) => part.trim()).filter(Boolean);
+  if (!params.includes('path')) return false;
+  return /\$\.getJSON\s*\(\s*path\s*\+/.test(declaration[2]);
+}
+
+async function verifiedCapturedContextBaseUrl(env, context) {
+  if (!validateCapturedDatePageUrl(context.parentSourceUrl, context.date)) return null;
   const sibling = await env.DB.prepare(`
-    SELECT id
+    SELECT raw_object_key
     FROM source_records
     WHERE source_type = 'xlabs_script'
       AND external_id = ?
       AND raw_object_key IS NOT NULL
     ORDER BY fetched_at DESC, id DESC
     LIMIT 1
-  `).bind(`${parentId}:main.js`).first();
-  if (!sibling?.id) return null;
-  return validateResolvedBaseUrl(`https://${XLABS_HOST}/${compactDate(date)}/json/`, date);
+  `).bind(`${context.parentId}:main.js`).first();
+  if (!sibling?.raw_object_key) return null;
+
+  const [calculateText, mainText] = await Promise.all([
+    readFastContextText(env, context.calculateRawObjectKey),
+    readFastContextText(env, sibling.raw_object_key)
+  ]);
+  const functionName = uniqueJsonPathCallName(mainText);
+  if (!functionName || !calculateScriptSupportsPathCall(calculateText, functionName)) return null;
+  return validateResolvedBaseUrl(`https://${XLABS_HOST}/${compactDate(context.date)}/json/`, context.date);
 }
 
 async function resolveRaceBaseUrl(env, sourceId, context) {
-  const verified = await verifiedCapturedContextBaseUrl(env, context.parentId, context.parentSourceUrl, context.date);
+  const verified = await verifiedCapturedContextBaseUrl(env, context);
   if (verified) return { baseUrl: verified, resolution: 'verified_captured_context' };
 
   const pathResolution = await resolveCapturedXlabsRequestPath(env, sourceId);
