@@ -39,6 +39,18 @@ function validateResolvedBaseUrl(value, date) {
   return url;
 }
 
+function validateCapturedDatePageUrl(value, date) {
+  const url = new URL(value);
+  if (url.protocol !== 'https:') return null;
+  if (url.username || url.password) return null;
+  if (url.hostname.toLowerCase() !== XLABS_HOST) return null;
+  if (url.port && url.port !== '443') return null;
+  const expected = `/${compactDate(date)}`;
+  if (url.pathname !== expected && url.pathname !== `${expected}/`) return null;
+  if (url.search || url.hash) return null;
+  return url;
+}
+
 function parseMetadata(value) {
   try {
     const parsed = value ? JSON.parse(value) : null;
@@ -62,7 +74,7 @@ async function loadCaptureContext(env, calculateSourceRecordId) {
   if (!parentId) throw new Error('captured X-Labs calculate script is missing parent provenance');
 
   const parent = await env.DB.prepare(`
-    SELECT id, metadata_json
+    SELECT id, source_url, metadata_json
     FROM source_records
     WHERE id = ? AND source_type = 'xlabs'
     LIMIT 1
@@ -71,7 +83,36 @@ async function loadCaptureContext(env, calculateSourceRecordId) {
   const parentMetadata = parseMetadata(parent.metadata_json);
   const date = typeof parentMetadata.date === 'string' ? parentMetadata.date : null;
   try { validateXlabsDate(date); } catch { throw new Error('captured X-Labs parent source is missing a valid date'); }
-  return { parentId, date };
+  return { parentId, parentSourceUrl: parent.source_url, date };
+}
+
+async function verifiedCapturedContextBaseUrl(env, parentId, parentSourceUrl, date) {
+  if (!validateCapturedDatePageUrl(parentSourceUrl, date)) return null;
+  const sibling = await env.DB.prepare(`
+    SELECT id
+    FROM source_records
+    WHERE source_type = 'xlabs_script'
+      AND external_id = ?
+      AND raw_object_key IS NOT NULL
+    ORDER BY fetched_at DESC, id DESC
+    LIMIT 1
+  `).bind(`${parentId}:main.js`).first();
+  if (!sibling?.id) return null;
+  return validateResolvedBaseUrl(`https://${XLABS_HOST}/${compactDate(date)}/json/`, date);
+}
+
+async function resolveRaceBaseUrl(env, sourceId, context) {
+  const verified = await verifiedCapturedContextBaseUrl(env, context.parentId, context.parentSourceUrl, context.date);
+  if (verified) return { baseUrl: verified, resolution: 'verified_captured_context' };
+
+  const pathResolution = await resolveCapturedXlabsRequestPath(env, sourceId);
+  if (pathResolution.status !== 'resolved_static' || !pathResolution.resolvedBaseUrl) {
+    throw new Error(`X-Labs race-data path is not uniquely resolved (${pathResolution.status})`);
+  }
+  return {
+    baseUrl: validateResolvedBaseUrl(pathResolution.resolvedBaseUrl, context.date),
+    resolution: 'script_path_resolution'
+  };
 }
 
 async function lookupCanonicalTrackName(env, externalTrackId) {
@@ -235,12 +276,9 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
   const sourceId = String(calculateSourceRecordId || '').trim();
   if (!sourceId) throw new Error('source_record_id is required');
 
-  const { parentId, date } = await loadCaptureContext(env, sourceId);
-  const pathResolution = await resolveCapturedXlabsRequestPath(env, sourceId);
-  if (pathResolution.status !== 'resolved_static' || !pathResolution.resolvedBaseUrl) {
-    throw new Error(`X-Labs race-data path is not uniquely resolved (${pathResolution.status})`);
-  }
-  const baseUrl = validateResolvedBaseUrl(pathResolution.resolvedBaseUrl, date);
+  const context = await loadCaptureContext(env, sourceId);
+  const { parentId, date } = context;
+  const { baseUrl, resolution } = await resolveRaceBaseUrl(env, sourceId, context);
   const requestedTrackId = positiveInteger(trackId, 'track_id', 99);
   const race = positiveInteger(raceNumber, 'race_number', 99);
   const trackMapping = await resolveXlabsTrackId(env, requestedTrackId);
@@ -249,7 +287,8 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
   const requestedUrl = new URL(fileName, baseUrl).toString();
   const run = await startImportRun(env, 'xlabs_race_capture', {
     kind: 'race_json', parentSourceRecordId: parentId, calculateSourceRecordId: sourceId, date,
-    requestedTrackId, xlabsTrackId, raceNumber: race, trackMappingStatus: trackMapping.mappingStatus
+    requestedTrackId, xlabsTrackId, raceNumber: race, trackMappingStatus: trackMapping.mappingStatus,
+    pathResolution: resolution
   });
   const counts = { inserted: 0, updated: 0, skipped: 0, errors: 0 };
 
@@ -280,6 +319,7 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
         calculateSourceRecordId: sourceId,
         requestedUrl,
         redirectCount: fetched.redirectCount,
+        pathResolution: resolution,
         acquisitionRecipe: '1MMDDTTRR.json',
         normalizationStatus: 'available_verified_subset'
       }
@@ -295,6 +335,7 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
       requestedTrackId,
       xlabsTrackId,
       trackMappingStatus: trackMapping.mappingStatus,
+      pathResolution: resolution,
       raceNumber: race,
       fileName,
       requestedUrl,
