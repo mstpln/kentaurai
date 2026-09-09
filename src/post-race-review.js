@@ -136,12 +136,17 @@ async function reviewSystem(env, round, system) {
         (id, game_round_id, race_id, race_entry_id, system_id, model_version_id,
          winner_rank, winner_probability, winner_market_percent, selected_in_system,
          error_type, scenario_match, review_json, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM post_race_reviews existing
+        WHERE existing.system_id = ? AND existing.race_id = ?
+      )
     `).bind(
       id, round.id, leg.raceId, leg.winnerEntryId, system.id,
       system.model_version_id || null, leg.winnerRank, leg.winnerProbability,
       leg.selections.find((selection) => selection.raceEntryId === leg.winnerEntryId)?.marketPercent ?? null,
-      result.selectedWinner ? 1 : 0, result.errorType, JSON.stringify(result.review), now
+      result.selectedWinner ? 1 : 0, result.errorType, JSON.stringify(result.review), now,
+      system.id, leg.raceId
     ).run();
     inserted += Number(write.meta?.changes ?? 0);
   }
