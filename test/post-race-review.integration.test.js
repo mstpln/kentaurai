@@ -67,3 +67,12 @@ test('post-race runner waits until all eight legs have factual winners', async (
   assert.equal(result.status, 'idle');
   assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM post_race_reviews`).get().count, 0);
 });
+
+test('post-race runner does not guess a winner when a leg has multiple first-place results', async () => {
+  const { env, db } = createTestEnv();
+  seedSettledRound(db);
+  db.prepare(`INSERT INTO race_results (race_entry_id, placing, placing_text) VALUES ('review_other_8',1,'1')`).run();
+  const result = await runNextPostRaceReview(env);
+  assert.equal(result.status, 'idle');
+  assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM post_race_reviews`).get().count, 0);
+});
