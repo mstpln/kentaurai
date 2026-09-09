@@ -34,6 +34,7 @@ const LIVE_MORNING_CRON = '15 5 * * *';
 const LIVE_EVENING_CRON = '15 17 * * *';
 const XLABS_DAILY_CRON = '30 4 * * *';
 const MAX_REFERENCE_IMPORT_BYTES = 1024 * 1024;
+const MAX_REFERENCE_MULTIPART_BYTES = MAX_REFERENCE_IMPORT_BYTES + 64 * 1024;
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -56,6 +57,26 @@ async function readJsonLimited(request, maxBytes) {
   const text = await request.text();
   if (new TextEncoder().encode(text).byteLength > maxBytes) throw new Error('reference round payload exceeds 1 MB limit');
   return JSON.parse(text);
+}
+
+async function readReferenceRoundUpload(request) {
+  const type = request.headers.get('content-type') || '';
+  if (!type.includes('multipart/form-data')) throw new Error('reference round upload must use multipart/form-data');
+  const declaredLength = Number(request.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_REFERENCE_MULTIPART_BYTES) throw new Error('reference round payload exceeds 1 MB limit');
+
+  const form = await request.formData();
+  const files = form.getAll('reference_round');
+  if (files.length !== 1 || typeof files[0]?.text !== 'function') throw new Error('select exactly one reference round JSON file');
+  const file = files[0];
+  if (file.size > MAX_REFERENCE_IMPORT_BYTES) throw new Error('reference round payload exceeds 1 MB limit');
+  const text = await file.text();
+  if (new TextEncoder().encode(text).byteLength > MAX_REFERENCE_IMPORT_BYTES) throw new Error('reference round payload exceeds 1 MB limit');
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error('reference round file must contain valid JSON');
+  }
 }
 
 async function handleProviderCapture(env, body) {
@@ -144,9 +165,18 @@ async function handleApp(request, env, url) {
     if (!appPasswordMatches(env, form.get('password'))) return redirectResponse('/app/login?error=1');
     return redirectResponse('/app', { 'set-cookie': await createAppSessionCookie(env) });
   }
-  if (request.method === 'GET' && path === '/app/import/reference-round') {
+  if (path === '/app/import/reference-round') {
     if (!(await hasValidAppSession(request, env))) return redirectResponse('/app/login');
-    return htmlResponse(renderReferenceImportPage());
+    if (request.method === 'GET') return htmlResponse(renderReferenceImportPage());
+    if (request.method === 'POST') {
+      try {
+        const payload = await readReferenceRoundUpload(request);
+        const result = await importReferenceRound(env, payload);
+        return htmlResponse(renderReferenceImportPage({ result }));
+      } catch (error) {
+        return htmlResponse(renderReferenceImportPage({ error: error.message }), 400);
+      }
+    }
   }
   if (request.method === 'GET' && (path === '/app' || path === '/app/')) {
     if (!(await hasValidAppSession(request, env))) return redirectResponse('/app/login');
