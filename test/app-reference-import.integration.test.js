@@ -13,7 +13,7 @@ test('reference-round import page is private', async () => {
   env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
 
   let response = await worker.fetch(new Request('https://example.test/app/import/reference-round'), env);
-  assert.equal(response.status, 302);
+  assert.equal(response.status, 303);
   assert.equal(response.headers.get('location'), '/app/login');
 
   const cookie = await cookieFor(env);
