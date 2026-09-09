@@ -1,6 +1,7 @@
 import { stableId } from '../ids.js';
 import { finishImportRun, startImportRun } from './common.js';
 import { normalizeCapturedXlabsRace } from './xlabs-telemetry.js';
+import { v85V86GameIdsFromCalendar } from './official-live-scheduled.js';
 import { captureXlabsDate, validateXlabsDate } from '../provider/xlabs.js';
 import { captureReferencedXlabsScript } from '../provider/xlabs-script.js';
 import { captureXlabsRaceJson } from '../provider/xlabs-race.js';
@@ -10,6 +11,8 @@ const MAX_RANGE_DAYS = 1096;
 const NORMALIZED_QUALITY = 'normalized_verified_subset';
 const HISTORICAL_SCOPE = 'historical_all';
 const DAILY_SCOPE = 'daily_v85_v86';
+const HISTORICAL_RETRY_DELAY_MS = 60_000;
+const DAILY_RETRY_DELAY_MS = 15 * 60_000;
 
 function addDays(date, days) {
   const value = new Date(`${validateXlabsDate(date)}T00:00:00Z`);
@@ -54,7 +57,8 @@ async function startScopedXlabsBackfill(env, scope, startDate, endDate, { resume
     await env.DB.prepare(`
       UPDATE xlabs_backfill_jobs
       SET status = CASE WHEN next_date >= start_date THEN 'running' ELSE status END,
-          consecutive_errors = 0, last_error = NULL, updated_at = CURRENT_TIMESTAMP
+          consecutive_errors = 0, last_error = NULL, retry_after = NULL,
+          updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND status = 'failed'
     `).bind(id).run();
   }
@@ -84,13 +88,16 @@ async function acquireLease(env, job) {
   return Number(result.meta?.changes ?? 0) === 1 ? token : null;
 }
 
-async function releaseLease(env, job, leaseToken) {
+async function deferJob(env, job, leaseToken, delayMs) {
+  const retryAfter = new Date(Date.now() + delayMs).toISOString();
   const result = await env.DB.prepare(`
     UPDATE xlabs_backfill_jobs
-    SET lease_token = NULL, lease_until = NULL, last_run_at = ?, updated_at = CURRENT_TIMESTAMP
+    SET lease_token = NULL, lease_until = NULL, retry_after = ?, last_run_at = ?,
+        updated_at = CURRENT_TIMESTAMP
     WHERE id = ? AND lease_token = ?
-  `).bind(new Date().toISOString(), job.id, leaseToken).run();
-  if (Number(result.meta?.changes ?? 0) !== 1) throw new Error('X-Labs backfill lease was lost while releasing checkpoint');
+  `).bind(retryAfter, new Date().toISOString(), job.id, leaseToken).run();
+  if (Number(result.meta?.changes ?? 0) !== 1) throw new Error('X-Labs backfill lease was lost while deferring checkpoint');
+  return retryAfter;
 }
 
 async function officialDateReady(env, date) {
@@ -112,7 +119,7 @@ async function advanceDate(env, job, leaseToken, { unavailableDate = false } = {
     UPDATE xlabs_backfill_jobs
     SET next_date = ?, next_race_index = 0, processed_dates = processed_dates + 1,
         unavailable_dates = unavailable_dates + ?, status = ?, consecutive_errors = 0,
-        last_error = NULL, last_run_at = ?, lease_token = NULL, lease_until = NULL,
+        last_error = NULL, retry_after = NULL, last_run_at = ?, lease_token = NULL, lease_until = NULL,
         updated_at = CURRENT_TIMESTAMP
     WHERE id = ? AND lease_token = ?
   `).bind(next, Number(unavailableDate), completed ? 'completed' : 'running', new Date().toISOString(), job.id, leaseToken).run();
@@ -153,12 +160,20 @@ async function dailyGameRacesForDate(env, date) {
     JOIN races r ON r.id = gl.race_id
     JOIN track_external_ids tx ON tx.track_id = r.track_id
     WHERE gr.round_date = ?
+      AND r.race_date = ?
       AND gr.game_type IN ('V85', 'V86')
       AND tx.source_type = 'official'
       AND r.race_number IS NOT NULL
       AND EXISTS (SELECT 1 FROM race_entries re WHERE re.race_id = r.id)
+      AND EXISTS (
+        SELECT 1 FROM source_records sr
+        WHERE sr.source_type = 'official_provider'
+          AND sr.external_id = 'game:' || gr.id
+          AND sr.quality_status = 'normalized_verified_subset'
+          AND sr.raw_object_key IS NOT NULL
+      )
     ORDER BY CAST(tx.external_id AS INTEGER), r.race_number, r.id
-  `).bind(date).all();
+  `).bind(date, date).all();
   return validRaceRows(results);
 }
 
@@ -176,6 +191,59 @@ async function latestSource(env, sourceType, externalId) {
     ORDER BY CASE quality_status WHEN 'normalized_verified_subset' THEN 0 ELSE 1 END, fetched_at DESC, id DESC
     LIMIT 1
   `).bind(sourceType, externalId).first();
+}
+
+async function latestSourceByTime(env, sourceType, externalId) {
+  return env.DB.prepare(`
+    SELECT id, quality_status, raw_object_key, metadata_json, fetched_at
+    FROM source_records
+    WHERE source_type = ? AND external_id = ? AND raw_object_key IS NOT NULL
+    ORDER BY fetched_at DESC, id DESC
+    LIMIT 1
+  `).bind(sourceType, externalId).first();
+}
+
+async function readJsonSource(env, source, label) {
+  if (!source?.raw_object_key) throw new Error(`${label} source record was not found`);
+  const object = await env.RAW_BUCKET.get(source.raw_object_key);
+  if (!object) throw new Error(`${label} raw object was not found`);
+  let payload;
+  try { payload = JSON.parse(await object.text()); } catch { throw new Error(`${label} raw object was not valid JSON`); }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error(`${label} payload must be an object`);
+  return payload;
+}
+
+async function dailyOfficialReadiness(env, date) {
+  const calendar = await latestSourceByTime(env, 'official_provider', `calendar:${date}`);
+  if (!calendar) return { ready: false, reason: 'calendar_missing', gameCount: null, pendingGameCount: null };
+  const payload = await readJsonSource(env, calendar, 'official calendar');
+  const gameIds = v85V86GameIdsFromCalendar(payload, date);
+  if (gameIds.length === 0) return { ready: true, gameCount: 0, pendingGameCount: 0 };
+
+  let pendingGameCount = 0;
+  for (const gameId of gameIds) {
+    const source = await latestSourceByTime(env, 'official_provider', `game:${gameId}`);
+    if (!source || source.quality_status !== NORMALIZED_QUALITY) {
+      pendingGameCount += 1;
+      continue;
+    }
+    const round = await env.DB.prepare(`
+      SELECT game_type, round_date,
+        (SELECT COUNT(*) FROM game_legs gl WHERE gl.game_round_id = gr.id) AS leg_count
+      FROM game_rounds gr
+      WHERE gr.id = ?
+      LIMIT 1
+    `).bind(gameId).first();
+    if (!round || !['V85', 'V86'].includes(round.game_type) || round.round_date !== date || Number(round.leg_count) !== 8) {
+      throw new Error('normalized official V85/V86 round is missing its verified eight-leg structure');
+    }
+  }
+  return {
+    ready: pendingGameCount === 0,
+    reason: pendingGameCount ? 'game_normalization_pending' : null,
+    gameCount: gameIds.length,
+    pendingGameCount
+  };
 }
 
 async function ensureDateContext(env, date, options, counts) {
@@ -218,7 +286,7 @@ async function recordUnavailableRace(env, job, leaseToken) {
     UPDATE xlabs_backfill_jobs
     SET next_race_index = ?, processed_races = processed_races + 1,
         unavailable_races = unavailable_races + 1, consecutive_errors = 0,
-        last_error = NULL, last_run_at = ?, lease_token = NULL, lease_until = NULL,
+        last_error = NULL, retry_after = NULL, last_run_at = ?, lease_token = NULL, lease_until = NULL,
         updated_at = CURRENT_TIMESTAMP
     WHERE id = ? AND lease_token = ?
   `).bind(nextIndex, new Date().toISOString(), job.id, leaseToken).run();
@@ -232,7 +300,7 @@ async function recordCompletedRace(env, job, leaseToken, reused) {
     UPDATE xlabs_backfill_jobs
     SET next_race_index = ?, processed_races = processed_races + 1,
         reused_races = reused_races + ?, consecutive_errors = 0,
-        last_error = NULL, last_run_at = ?, lease_token = NULL, lease_until = NULL,
+        last_error = NULL, retry_after = NULL, last_run_at = ?, lease_token = NULL, lease_until = NULL,
         updated_at = CURRENT_TIMESTAMP
     WHERE id = ? AND lease_token = ?
   `).bind(nextIndex, Number(reused), new Date().toISOString(), job.id, leaseToken).run();
@@ -240,17 +308,21 @@ async function recordCompletedRace(env, job, leaseToken, reused) {
   return nextIndex;
 }
 
+async function selectAutomaticJob(env) {
+  return env.DB.prepare(`
+    SELECT * FROM xlabs_backfill_jobs
+    WHERE status = 'running' AND (retry_after IS NULL OR retry_after <= ?)
+    ORDER BY CASE scope WHEN 'daily_v85_v86' THEN 0 ELSE 1 END,
+             CASE scope WHEN 'daily_v85_v86' THEN next_date ELSE NULL END DESC,
+             created_at
+    LIMIT 1
+  `).bind(new Date().toISOString()).first();
+}
+
 export async function runXlabsBackfillStep(env, jobId = null, options = {}) {
   if (!env.DB) throw new Error('DB is not configured');
   if (!env.RAW_BUCKET?.get || !env.RAW_BUCKET?.put) throw new Error('RAW_BUCKET read/write access is not configured');
-  const job = jobId
-    ? await loadJob(env, jobId)
-    : await env.DB.prepare(`
-        SELECT * FROM xlabs_backfill_jobs
-        WHERE status = 'running'
-        ORDER BY CASE scope WHEN 'daily_v85_v86' THEN 0 ELSE 1 END, created_at
-        LIMIT 1
-      `).first();
+  const job = jobId ? await loadJob(env, jobId) : await selectAutomaticJob(env);
   if (!job) return { status: 'idle', done: true };
   if (job.status !== 'running') return { jobId: job.id, status: job.status, done: job.status === 'completed', reused: true };
   const leaseToken = await acquireLease(env, job);
@@ -267,19 +339,57 @@ export async function runXlabsBackfillStep(env, jobId = null, options = {}) {
   const counts = { inserted: 0, updated: 0, skipped: 0, errors: 0 };
   try {
     if (job.scope === HISTORICAL_SCOPE && !(await officialDateReady(env, job.next_date))) {
-      await releaseLease(env, job, leaseToken);
+      const retryAfter = await deferJob(env, job, leaseToken, HISTORICAL_RETRY_DELAY_MS);
       await finishImportRun(env, run.id, counts);
       return {
         importRunId: run.id,
         jobId: job.id,
         scope: job.scope,
         status: 'waiting_for_official',
+        retryAfter,
         checkpoint: { date: job.next_date, nextRaceIndex: job.next_race_index },
         done: false
       };
     }
 
+    let dailyReadiness = null;
+    if (job.scope === DAILY_SCOPE) {
+      dailyReadiness = await dailyOfficialReadiness(env, job.next_date);
+      if (!dailyReadiness.ready) {
+        const retryAfter = await deferJob(env, job, leaseToken, DAILY_RETRY_DELAY_MS);
+        await finishImportRun(env, run.id, counts);
+        return {
+          importRunId: run.id,
+          jobId: job.id,
+          scope: job.scope,
+          status: 'waiting_for_official_live',
+          reason: dailyReadiness.reason,
+          gameCount: dailyReadiness.gameCount,
+          pendingGameCount: dailyReadiness.pendingGameCount,
+          retryAfter,
+          checkpoint: { date: job.next_date, nextRaceIndex: job.next_race_index },
+          done: false
+        };
+      }
+      if (dailyReadiness.gameCount === 0) {
+        const completed = await advanceDate(env, job, leaseToken);
+        await finishImportRun(env, run.id, counts);
+        return {
+          importRunId: run.id,
+          jobId: job.id,
+          scope: job.scope,
+          status: completed ? 'completed' : 'running',
+          advancedDate: job.next_date,
+          noScheduledGame: true,
+          done: completed
+        };
+      }
+    }
+
     const races = await racesForJobDate(env, job);
+    if (job.scope === DAILY_SCOPE && dailyReadiness?.gameCount > 0 && races.length === 0) {
+      throw new Error('normalized official V85/V86 rounds have no eligible linked race entries');
+    }
     if (races.length === 0 || job.next_race_index >= races.length) {
       const completed = await advanceDate(env, job, leaseToken);
       await finishImportRun(env, run.id, counts);
@@ -366,7 +476,7 @@ export async function runXlabsBackfillStep(env, jobId = null, options = {}) {
       UPDATE xlabs_backfill_jobs
       SET consecutive_errors = consecutive_errors + 1,
           status = CASE WHEN consecutive_errors + 1 >= 3 THEN 'failed' ELSE 'running' END,
-          last_error = ?, last_run_at = ?, lease_token = NULL, lease_until = NULL,
+          last_error = ?, retry_after = NULL, last_run_at = ?, lease_token = NULL, lease_until = NULL,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND lease_token = ?
     `).bind(String(error.message).slice(0, 1000), new Date().toISOString(), job.id, leaseToken).run();
