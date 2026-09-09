@@ -1,0 +1,93 @@
+name: Smoke production X-Labs for 2026-09-06
+run-name: Smoke production X-Labs for 2026-09-06 — @${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type RUN XLABS SMOKE 2026-09-06 to authorize the single-day production smoke
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kentaurai-production-xlabs-smoke-2026-09-06
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    if: ${{ inputs.confirmation == 'RUN XLABS SMOKE 2026-09-06' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+
+      - name: Run QA before production smoke
+        run: npm run qa
+
+      - name: Run one bounded production X-Labs checkpoint
+        shell: bash
+        env:
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          API_BASE_URL: https://kentaurai-api.mattias-bjerstedt-36a.workers.dev
+          JOB_ID: xlabsbackfill_xlabs-race-v1__historical-all__2026-09-06__2026-09-06
+        run: |
+          set -euo pipefail
+          test -n "$ADMIN_TOKEN" || { echo "ADMIN_TOKEN is not configured"; exit 1; }
+          echo "::add-mask::$ADMIN_TOKEN"
+
+          request() {
+            local method="$1"
+            local path="$2"
+            local body="${3:-}"
+            local output="$4"
+            local args=(--silent --show-error --max-time 180 --output "$output" --write-out '%{http_code}'
+              --request "$method" --header "authorization: Bearer $ADMIN_TOKEN")
+            if [[ -n "$body" ]]; then
+              args+=(--header 'content-type: application/json' --data "$body")
+            fi
+            curl "${args[@]}" "$API_BASE_URL$path"
+          }
+
+          initial_file="$(mktemp)"
+          start_file="$(mktemp)"
+          step_file="$(mktemp)"
+          final_file="$(mktemp)"
+          trap 'rm -f "$initial_file" "$start_file" "$step_file" "$final_file"' EXIT
+
+          initial_code="$(request GET "/v1/xlabs/backfill/status?job_id=$JOB_ID" '' "$initial_file")"
+          if [[ "$initial_code" == "200" ]]; then
+            echo "Initial job state: status=$(jq -r '.status' "$initial_file") checkpoint=$(jq -r '.next_date + ":" + (.next_race_index|tostring)' "$initial_file") processed_races=$(jq -r '.processed_races' "$initial_file") unavailable_races=$(jq -r '.unavailable_races' "$initial_file") errors=$(jq -r '.consecutive_errors' "$initial_file")"
+          else
+            echo "Initial job state: absent or unavailable (HTTP $initial_code)"
+          fi
+
+          start_code="$(request POST '/v1/xlabs/backfill/start' '{"start_date":"2026-09-06","end_date":"2026-09-06","resume":true}' "$start_file")"
+          [[ "$start_code" == "201" ]] || { echo "Single-day job create/resume failed (HTTP $start_code)"; exit 1; }
+          jq -e --arg id "$JOB_ID" '.id == $id and .start_date == "2026-09-06" and .end_date == "2026-09-06" and .scope == "historical_all"' "$start_file" > /dev/null
+
+          if jq -e '(.processed_races >= 1) or (.unavailable_dates >= 1)' "$start_file" > /dev/null; then
+            echo "Smoke evidence already sufficient; no checkpoint advanced."
+          else
+            step_code="$(request POST '/v1/xlabs/backfill/step' "{\"job_id\":\"$JOB_ID\"}" "$step_file")"
+            [[ "$step_code" == "200" ]] || { echo "Bounded checkpoint failed (HTTP $step_code)"; exit 1; }
+            jq -e --arg id "$JOB_ID" '.jobId == $id' "$step_file" > /dev/null
+            echo "Checkpoint result: status=$(jq -r '.status' "$step_file") race_recorded=$(jq -r 'has("raceId")' "$step_file") neutral_unavailable=$(jq -r '(.unavailableRace == true) or has("unavailableDate")' "$step_file") import_run_recorded=$(jq -r 'has("importRunId")' "$step_file")"
+          fi
+
+          final_code="$(request GET "/v1/xlabs/backfill/status?job_id=$JOB_ID" '' "$final_file")"
+          [[ "$final_code" == "200" ]] || { echo "Final job status failed (HTTP $final_code)"; exit 1; }
+          jq -e --arg id "$JOB_ID" '.id == $id and .start_date == "2026-09-06" and .end_date == "2026-09-06"' "$final_file" > /dev/null
+          jq -e '(.processed_races >= 1) or (.unavailable_dates >= 1)' "$final_file" > /dev/null || {
+            echo "Smoke evidence was not sufficient after the single allowed checkpoint";
+            exit 1;
+          }
+          echo "Final job state: status=$(jq -r '.status' "$final_file") checkpoint=$(jq -r '.next_date + ":" + (.next_race_index|tostring)' "$final_file") processed_races=$(jq -r '.processed_races' "$final_file") unavailable_races=$(jq -r '.unavailable_races' "$final_file") unavailable_dates=$(jq -r '.unavailable_dates' "$final_file") errors=$(jq -r '.consecutive_errors' "$final_file")"
