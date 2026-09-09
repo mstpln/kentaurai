@@ -27,11 +27,13 @@ import { getGameHistoryDetail, listGameHistory } from './routes/games.js';
 import { getGameHistorySummary } from './routes/game-summary.js';
 import { appAuthConfigured, appPasswordMatches, createAppSessionCookie, hasValidAppSession } from './app-auth.js';
 import { htmlResponse, redirectResponse, renderAppPage, renderLoginPage } from './app-page-history.js';
+import { renderReferenceImportPage } from './app-reference-import.js';
 
 const BACKFILL_CRON = '* * * * *';
 const LIVE_MORNING_CRON = '15 5 * * *';
 const LIVE_EVENING_CRON = '15 17 * * *';
 const XLABS_DAILY_CRON = '30 4 * * *';
+const MAX_REFERENCE_IMPORT_BYTES = 1024 * 1024;
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -46,6 +48,16 @@ async function readJson(request) {
   return request.json();
 }
 
+async function readJsonLimited(request, maxBytes) {
+  const type = request.headers.get('content-type') || '';
+  if (!type.includes('application/json')) throw new Error('content-type must be application/json');
+  const declaredLength = Number(request.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) throw new Error('reference round payload exceeds 1 MB limit');
+  const text = await request.text();
+  if (new TextEncoder().encode(text).byteLength > maxBytes) throw new Error('reference round payload exceeds 1 MB limit');
+  return JSON.parse(text);
+}
+
 async function handleProviderCapture(env, body) {
   const kind = String(body.kind || '').toLowerCase();
   if (kind === 'calendar') return captureCalendar(env, body.date);
@@ -58,6 +70,10 @@ async function handleAppApi(request, env, url) {
   if (!(await hasValidAppSession(request, env))) return json({ error: 'unauthorized' }, 401);
   const path = url.pathname;
 
+  if (request.method === 'POST' && path === '/app/api/import/reference-round') {
+    const payload = await readJsonLimited(request, MAX_REFERENCE_IMPORT_BYTES);
+    return json(await importReferenceRound(env, payload), 201);
+  }
   if (request.method === 'GET' && path === '/app/api/summary') return json(await getEntitySummary(env));
   if (request.method === 'GET' && path === '/app/api/search') return json(await searchEntities(env, url.searchParams.get('q'), url.searchParams.get('limit')));
   if (request.method === 'GET' && path === '/app/api/games/summary') return json(await getGameHistorySummary(env));
@@ -127,6 +143,10 @@ async function handleApp(request, env, url) {
     const form = await request.formData();
     if (!appPasswordMatches(env, form.get('password'))) return redirectResponse('/app/login?error=1');
     return redirectResponse('/app', { 'set-cookie': await createAppSessionCookie(env) });
+  }
+  if (request.method === 'GET' && path === '/app/import/reference-round') {
+    if (!(await hasValidAppSession(request, env))) return redirectResponse('/app/login');
+    return htmlResponse(renderReferenceImportPage());
   }
   if (request.method === 'GET' && (path === '/app' || path === '/app/')) {
     if (!(await hasValidAppSession(request, env))) return redirectResponse('/app/login');
