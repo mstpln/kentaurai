@@ -1,6 +1,7 @@
 import { stableId } from '../ids.js';
 import { finishImportRun, startImportRun } from './common.js';
 import { normalizeCapturedOfficialRace, officialRaceHasFinalResults } from './official-historical-race.js';
+import { markOfficialRaceSourceGap, officialRaceSourceGap } from './official-source-gap.js';
 import { captureCalendar, captureRace, validateIsoDate } from '../provider/official.js';
 import { sourceFailureRetryDelayMs } from '../provider/source-error.js';
 
@@ -132,13 +133,30 @@ async function advanceDate(env, job, leaseToken) {
   return completed;
 }
 
+async function checkpointRace(env, job, leaseToken, { reused = false } = {}) {
+  const nextIndex = job.next_race_index + 1;
+  const checkpoint = await env.DB.prepare(`
+    UPDATE historical_backfill_jobs
+    SET next_race_index = ?, processed_races = processed_races + 1,
+        reused_races = reused_races + ?, consecutive_errors = 0, last_error = NULL,
+        last_run_at = ?, lease_token = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND lease_token = ?
+  `).bind(nextIndex, Number(reused), new Date().toISOString(), job.id, leaseToken).run();
+  if (Number(checkpoint.meta?.changes ?? 0) !== 1) throw new Error('historical backfill lease was lost before checkpoint update');
+  return nextIndex;
+}
+
 async function chooseRaceSource(env, raceId, options, counts) {
   const source = await sourceForIdentity(env, `race:${raceId}`);
   if (source?.quality_status === NORMALIZED_QUALITY) return source;
 
   if (source) {
     const cachedPayload = await loadJsonObject(env, source, 'official race');
-    if (officialRaceHasFinalResults(cachedPayload)) return source;
+    try {
+      if (officialRaceHasFinalResults(cachedPayload)) return source;
+    } catch (error) {
+      if (!officialRaceSourceGap(error)) throw error;
+    }
   }
 
   const captured = await captureRace(env, raceId, { fetchImpl: options.fetchImpl });
@@ -190,29 +208,42 @@ export async function runHistoricalBackfillStep(env, jobId = null, options = {})
       }
 
       const raceId = raceIds[job.next_race_index];
-      const raceSource = await chooseRaceSource(env, raceId, options, counts);
-      const normalized = await normalizeCapturedOfficialRace(env, raceSource.id);
-      if (normalized.reused) counts.skipped += 1;
-      else counts.updated += 1;
-      const nextIndex = job.next_race_index + 1;
-      const checkpoint = await env.DB.prepare(`
-        UPDATE historical_backfill_jobs
-        SET next_race_index = ?, processed_races = processed_races + 1,
-            reused_races = reused_races + ?, consecutive_errors = 0, last_error = NULL,
-            last_run_at = ?, lease_token = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND lease_token = ?
-      `).bind(nextIndex, Number(normalized.reused), new Date().toISOString(), job.id, leaseToken).run();
-      if (Number(checkpoint.meta?.changes ?? 0) !== 1) throw new Error('historical backfill lease was lost before checkpoint update');
-      await finishImportRun(env, run.id, counts);
-      return {
-        importRunId: run.id,
-        jobId: job.id,
-        status: 'running',
-        checkpoint: { date: job.next_date, nextRaceIndex: nextIndex },
-        raceId,
-        normalized,
-        done: false
-      };
+      let raceSource = null;
+      try {
+        raceSource = await chooseRaceSource(env, raceId, options, counts);
+        const normalized = await normalizeCapturedOfficialRace(env, raceSource.id);
+        if (normalized.reused) counts.skipped += 1;
+        else counts.updated += 1;
+        const nextIndex = await checkpointRace(env, job, leaseToken, { reused: normalized.reused });
+        await finishImportRun(env, run.id, counts);
+        return {
+          importRunId: run.id,
+          jobId: job.id,
+          status: 'running',
+          checkpoint: { date: job.next_date, nextRaceIndex: nextIndex },
+          raceId,
+          normalized,
+          done: false
+        };
+      } catch (error) {
+        const gap = officialRaceSourceGap(error);
+        if (!gap || !raceSource?.id) throw error;
+        const sourceGap = await markOfficialRaceSourceGap(env, raceSource.id, gap);
+        counts.skipped += 1;
+        const nextIndex = await checkpointRace(env, job, leaseToken);
+        await finishImportRun(env, run.id, counts);
+        return {
+          importRunId: run.id,
+          jobId: job.id,
+          status: 'running',
+          checkpoint: { date: job.next_date, nextRaceIndex: nextIndex },
+          raceId,
+          sourceRecordId: raceSource.id,
+          sourceGap,
+          normalized: null,
+          done: false
+        };
+      }
     }
     throw new Error(`no Swedish trotting races found within ${MAX_EMPTY_DATES_PER_STEP} checkpoint dates`);
   } catch (error) {
