@@ -28,7 +28,7 @@ Rekommenderat exportfilnamn skapas automatiskt:
 ## Data
 
 ### Datamängd
-Visar antal lagrade tränare, hästar, kuskar och spelomgångar med sparade system.
+Visar antal lagrade tränare, hästar, kuskar och V85/V86-spelomgångar.
 
 ### Senaste körningar
 Visar de senaste registrerade import-/arbetsflödeskörningarna med antal nya, uppdaterade, överhoppade och fel samt tydlig status.
