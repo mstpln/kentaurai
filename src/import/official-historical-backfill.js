@@ -10,6 +10,7 @@ const NORMALIZED_QUALITY = 'normalized_verified_subset';
 const BACKFILL_VERSION = 'official-se-trot-v2';
 const MAX_RANGE_DAYS = 1096;
 const MAX_EMPTY_DATES_PER_STEP = 14;
+export const DAILY_OFFICIAL_LOOKBACK_DAYS = 3;
 export const MAX_HISTORICAL_CHECKPOINTS_PER_BATCH = 3;
 
 function addDays(date, days) {
@@ -91,6 +92,18 @@ export async function startHistoricalBackfill(env, startDate, endDate, { resume 
   return getHistoricalBackfill(env, id);
 }
 
+export async function ensureDailyOfficialHistoryJobs(env, scheduledTime = Date.now()) {
+  const instant = new Date(scheduledTime);
+  if (Number.isNaN(instant.getTime())) throw new Error('scheduled time is invalid');
+  const scheduledDate = instant.toISOString().slice(0, 10);
+  const jobs = [];
+  for (let offset = 1; offset <= DAILY_OFFICIAL_LOOKBACK_DAYS; offset += 1) {
+    const date = addDays(scheduledDate, -offset);
+    jobs.push(await startHistoricalBackfill(env, date, date));
+  }
+  return { lookbackDays: DAILY_OFFICIAL_LOOKBACK_DAYS, jobs };
+}
+
 async function loadHistoricalBackfill(env, jobId) {
   const id = String(jobId || '').trim();
   if (!id) throw new Error('job_id is required');
@@ -102,6 +115,18 @@ export async function getHistoricalBackfill(env, jobId) {
   if (!row) throw new Error('historical backfill job was not found');
   const { lease_token: _leaseToken, ...visible } = row;
   return visible;
+}
+
+async function selectAutomaticHistoricalJob(env) {
+  return env.DB.prepare(`
+    SELECT *
+    FROM historical_backfill_jobs
+    WHERE status = 'running'
+    ORDER BY CASE WHEN start_date = end_date THEN 0 ELSE 1 END,
+             CASE WHEN start_date = end_date THEN end_date ELSE NULL END DESC,
+             created_at
+    LIMIT 1
+  `).first();
 }
 
 async function acquireLease(env, job) {
@@ -172,9 +197,7 @@ async function chooseRaceSource(env, raceId, options, counts) {
 export async function runHistoricalBackfillStep(env, jobId = null, options = {}) {
   if (!env.DB) throw new Error('DB is not configured');
   if (!env.RAW_BUCKET?.get || !env.RAW_BUCKET?.put) throw new Error('RAW_BUCKET read/write access is not configured');
-  let job = jobId
-    ? await loadHistoricalBackfill(env, jobId)
-    : await env.DB.prepare(`SELECT * FROM historical_backfill_jobs WHERE status = 'running' ORDER BY created_at LIMIT 1`).first();
+  let job = jobId ? await loadHistoricalBackfill(env, jobId) : await selectAutomaticHistoricalJob(env);
   if (!job) return { status: 'idle', done: true };
   if (job.status !== 'running') return { jobId: job.id, status: job.status, done: job.status === 'completed', reused: true };
   const leaseToken = await acquireLease(env, job);
