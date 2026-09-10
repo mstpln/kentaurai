@@ -8,6 +8,7 @@ import {
 } from './analysis-exchange.js';
 
 const MAX_SUBMISSION_BYTES = 1024 * 1024;
+const MARKET_BLIND_FEATURE_VERSIONS = new Set(['form-v2', 'class-exposure-v2', 'development-v2']);
 
 function requiredText(value, field, max = 200) {
   const text = String(value ?? '').trim();
@@ -95,9 +96,26 @@ function parentLegsForFinal(parent) {
   }));
 }
 
+function isolateMarketBlindContext(context) {
+  const round = context.round ? { ...context.round } : null;
+  if (round) {
+    delete round.jackpotSek;
+    delete round.turnoverSek;
+  }
+  const legs = (context.legs || []).map((leg) => ({
+    ...leg,
+    entries: (leg.entries || []).map((entry) => ({
+      ...entry,
+      features: (entry.features || []).filter((feature) => MARKET_BLIND_FEATURE_VERSIONS.has(feature.version))
+    }))
+  }));
+  return { ...context, round, legs };
+}
+
 export async function prepareAnalysisContext(env, roundId, stage = 'pre_market', options = {}) {
   const normalizedStage = String(stage || 'pre_market').toLowerCase();
-  const context = await getAnalysisContext(env, roundId, normalizedStage, options);
+  const rawContext = await getAnalysisContext(env, roundId, normalizedStage, options);
+  const context = normalizedStage === 'pre_market' ? isolateMarketBlindContext(rawContext) : rawContext;
   const contextFingerprint = await stableContextFingerprint(context);
   const common = {
     ...context,
@@ -112,7 +130,8 @@ export async function prepareAnalysisContext(env, roundId, stage = 'pre_market',
         systemsAllowed: false,
         probabilitiesPerLegMustSumTo: 1,
         rankingsMustCoverAllActiveEntries: true,
-        abcdMeaning: 'relative winning strength, not value'
+        abcdMeaning: 'relative winning strength, not value',
+        acceptedFeatureVersions: [...MARKET_BLIND_FEATURE_VERSIONS]
       }
     };
   }
