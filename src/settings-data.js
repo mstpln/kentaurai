@@ -8,7 +8,7 @@ import {
   submitAnalysis
 } from './analysis-api.js';
 
-export const KENTAURAI_APP_VERSION = '0.6.0';
+export const KENTAURAI_APP_VERSION = '0.6.1';
 export const FULL_EXPORT_VERSION = 'kentaurai-full-export-v1';
 const EXPORT_BATCH_SIZE = 500;
 const MAX_ANALYSIS_UPLOAD_BYTES = 1024 * 1024;
@@ -333,62 +333,41 @@ export async function createFullDataExportResponse(env, providerValue) {
       workflow: [
         'Use analysis_contexts[].preMarket for the current round before using market information.',
         'Return one pre_market JSON file using the template below and import it into KentaurAI.',
-        'Export all data again for the same provider. The file will then include the market context for that stored parent.',
-        'Return one final JSON file with value/recommendations/systems. Do not include legs in a final submission; KentaurAI preserves the stored market-blind strength assessment.',
-        'Every V85/V86 system must cover all eight legs and contain exactly three one-horse spike legs.'
-      ],
-      output_contract: ANALYSIS_SUBMISSION_VERSION,
-      recommended_output_filename: analysisFileName(provider, exportedAt),
-      templates
+        'Export all data again after the pre_market analysis has been imported.',
+        'Use the matching market context and return one final JSON file.'
+      ]
     },
+    submission_templates: templates,
     analysis_contexts: analysisContexts
   };
 
-  const encoder = new TextEncoder();
-  const stream = new ReadableStream({
-    async start(controller) {
-      const write = (value) => controller.enqueue(encoder.encode(value));
-      try {
-        const { analysis_contexts: _contexts, ...metadataWithoutContexts } = metadata;
-        write('{"metadata":');
-        write(JSON.stringify(metadataWithoutContexts));
-        write(',"analysis_contexts":');
-        write(JSON.stringify(analysisContexts));
-        write(',"tables":{');
-        let firstTable = true;
-        for (const table of tableNames) {
-          if (!firstTable) write(',');
-          firstTable = false;
-          write(`${JSON.stringify(table)}:[`);
-          let firstRow = true;
-          let lastRowId = 0;
-          for (;;) {
-            const query = `SELECT rowid AS __kentaurai_export_rowid, * FROM ${quoteIdentifier(table)} WHERE rowid > ? ORDER BY rowid ASC LIMIT ?`;
-            const { results } = await env.DB.prepare(query).bind(lastRowId, EXPORT_BATCH_SIZE).all();
-            if (!results.length) break;
-            for (const sourceRow of results) {
-              lastRowId = Number(sourceRow.__kentaurai_export_rowid);
-              const row = { ...sourceRow };
-              delete row.__kentaurai_export_rowid;
-              const safeRow = sanitizeExportRow(table, row, policy);
-              if (!safeRow) continue;
-              if (!firstRow) write(',');
-              firstRow = false;
-              write(JSON.stringify(safeRow));
-            }
-            if (results.length < EXPORT_BATCH_SIZE) break;
-          }
-          write(']');
-        }
-        write('}}');
-        controller.close();
-      } catch (error) {
-        controller.error(error);
+  const chunks = ['{\n  "metadata":', JSON.stringify(metadata, null, 2), ',\n  "tables":{'];
+  let firstTable = true;
+  for (const table of tableNames) {
+    if (!firstTable) chunks.push(',');
+    firstTable = false;
+    chunks.push(`\n    ${JSON.stringify(table)}:[`);
+    let firstRow = true;
+    let offset = 0;
+    while (true) {
+      const { results } = await env.DB.prepare(`SELECT * FROM ${quoteIdentifier(table)} ORDER BY rowid ASC LIMIT ? OFFSET ?`).bind(EXPORT_BATCH_SIZE, offset).all();
+      if (!results.length) break;
+      for (const row of results) {
+        const sanitized = sanitizeExportRow(table, row, policy);
+        if (!sanitized) continue;
+        if (!firstRow) chunks.push(',');
+        firstRow = false;
+        chunks.push('\n      ', JSON.stringify(sanitized));
       }
+      if (results.length < EXPORT_BATCH_SIZE) break;
+      offset += results.length;
     }
-  });
+    if (!firstRow) chunks.push('\n    ');
+    chunks.push(']');
+  }
+  chunks.push('\n  }\n}');
 
-  return new Response(stream, {
+  return new Response(chunks.join(''), {
     headers: {
       'content-type': 'application/json; charset=utf-8',
       'content-disposition': `attachment; filename="${exportFileName(provider, exportedAt)}"`,
@@ -398,38 +377,24 @@ export async function createFullDataExportResponse(env, providerValue) {
   });
 }
 
-export async function readAnalysisUpload(request) {
-  const type = request.headers.get('content-type') || '';
-  if (!type.includes('multipart/form-data')) throw new Error('analysfilen måste laddas upp som multipart/form-data');
-  const declaredLength = Number(request.headers.get('content-length'));
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_ANALYSIS_UPLOAD_BYTES + 64 * 1024) throw new Error('analysfilen är större än 1 MB');
+async function readUpload(request) {
+  const contentLength = Number(request.headers.get('content-length') || 0);
+  if (contentLength && contentLength > MAX_ANALYSIS_UPLOAD_BYTES + 128 * 1024) throw new Error('analysis upload is too large');
   const form = await request.formData();
-  const files = form.getAll('analysis_file');
-  if (files.length !== 1 || typeof files[0]?.text !== 'function') throw new Error('välj exakt en JSON-fil med AI-analysen');
-  const file = files[0];
-  if (file.size > MAX_ANALYSIS_UPLOAD_BYTES) throw new Error('analysfilen är större än 1 MB');
-  if (file.name && !file.name.toLowerCase().endsWith('.json')) throw new Error('analysfilen måste vara en .json-fil');
+  const file = form.get('analysis_file');
+  if (!file || typeof file.text !== 'function') throw new Error('analysis_file is required');
+  if (file.size > MAX_ANALYSIS_UPLOAD_BYTES) throw new Error('analysis upload is too large');
   const text = await file.text();
-  if (new TextEncoder().encode(text).byteLength > MAX_ANALYSIS_UPLOAD_BYTES) throw new Error('analysfilen är större än 1 MB');
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error('analysfilen innehåller inte giltig JSON');
-  }
+  let payload;
+  try { payload = JSON.parse(text); } catch { throw new Error('analysis_file must contain valid JSON'); }
+  return payload;
 }
 
 export async function importAnalysisUpload(env, request) {
-  const payload = await readAnalysisUpload(request);
+  const payload = await readUpload(request);
   const result = await submitAnalysis(env, payload);
   return {
-    ok: true,
-    contractVersion: ANALYSIS_SUBMISSION_VERSION,
-    submissionId: result.submissionId,
-    roundId: result.roundId,
-    stage: result.stage,
-    provider: result.provider,
-    model: result.model,
-    reused: result.reused,
-    writes: result.writes
+    ...result,
+    recommendedFileName: analysisFileName(result.provider, new Date().toISOString())
   };
 }
