@@ -61,4 +61,12 @@ jobs:
           echo "Recent orchestrators:"
           jq -c '.result[0].results' "$response_file"
 
-# status probe 2026-09-10b
+          query "SELECT external_id,quality_status,fetched_at,raw_object_key FROM source_records WHERE source_type='official_provider' AND external_id LIKE 'race:2026-08-15_%' ORDER BY external_id,fetched_at DESC;"
+          echo "Official race sources for 2026-08-15:"
+          jq -c '.result[0].results' "$response_file"
+
+          query "SELECT id,race_number,track_id,source_quality FROM races WHERE race_date='2026-08-15' ORDER BY id;"
+          echo "Normalized races for 2026-08-15:"
+          jq -c '.result[0].results' "$response_file"
+
+# investigate failing official historical checkpoint 2026-09-10
