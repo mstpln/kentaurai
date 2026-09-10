@@ -1,8 +1,9 @@
 import worker from './worker-pwa.js';
 import { appAuthConfigured, clearAppSessionCookie, hasValidAppSession } from './app-auth.js';
-import { htmlResponse, redirectResponse, renderAppPage } from './app-page-navigation.js';
+import { htmlResponse, redirectResponse, renderAppPage } from './app-page-feedback.js';
 import { XLABS_SCRIPT_SELECTOR_VERSION } from './provider/xlabs-script.js';
-import { KENTAURAI_APP_VERSION, createFullDataExportResponse, getSettingsStatus, importAnalysisUpload } from './settings-data.js';
+import { KENTAURAI_APP_VERSION, createFullDataExportResponse, getSettingsStatus, importAnalysisUpload } from './settings-data-display.js';
+import { getEnhancedGameHistoryDetail } from './routes/game-detail-display.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -30,7 +31,11 @@ export default {
       return json({ ok: true, service: 'kentaurai-api', version: KENTAURAI_APP_VERSION, xlabsScriptSelector: XLABS_SCRIPT_SELECTOR_VERSION });
     }
 
-    if (request.method === 'GET' && (path === '/app' || path === '/app/')) {
+    if (request.method === 'GET' && path === '/app') {
+      return redirectResponse('/app/');
+    }
+
+    if (request.method === 'GET' && path === '/app/') {
       if (appAuthConfigured(env) && await hasValidAppSession(request, env)) return htmlResponse(renderAppPage());
       return worker.fetch(request, env);
     }
@@ -66,6 +71,19 @@ export default {
       if (denied) return denied;
       try {
         return json(await importAnalysisUpload(env, request), 201);
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    const gameDetailMatch = path.match(/^\/app\/api\/games\/([^/]+)$/);
+    if (request.method === 'GET' && gameDetailMatch) {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        const data = await getEnhancedGameHistoryDetail(env, decodeURIComponent(gameDetailMatch[1]));
+        return data ? json(data) : json({ error: 'not_found' }, 404);
       } catch (error) {
         console.error(error);
         return json({ error: 'request_failed', message: error.message }, 400);
