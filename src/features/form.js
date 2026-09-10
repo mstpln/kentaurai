@@ -1,12 +1,18 @@
 import { stableId } from '../ids.js';
 
-export const FORM_FEATURE_VERSION = 'form-v1';
+export const FORM_FEATURE_VERSION = 'form-v2';
 const HISTORY_LIMIT = 5;
 
 function finiteOrNull(value) {
   if (value == null) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function boolean01OrNull(value) {
+  if (value == null) return null;
+  const number = Number(value);
+  return number === 0 || number === 1 ? number : null;
 }
 
 function dateOnly(value) {
@@ -55,20 +61,37 @@ async function previousStarts(env, target, asOf) {
 }
 
 function buildFeatures(starts, asOf) {
-  const placings = starts.map((start) => finiteOrNull(start.placing)).filter((value) => value != null && value > 0);
   const startsCount = starts.length;
-  const quality = startsCount >= 3 ? 'sufficient' : startsCount > 0 ? 'limited' : 'unavailable';
+  const hasSample = startsCount > 0;
+  const placingValues = starts.map((start) => finiteOrNull(start.placing));
+  const gallopValues = starts.map((start) => boolean01OrNull(start.gallop));
+  const disqualificationValues = starts.map((start) => boolean01OrNull(start.disqualified));
+  const allPlacingsKnown = hasSample && placingValues.every((value) => value != null && value > 0);
+  const allGallopsKnown = hasSample && gallopValues.every((value) => value != null);
+  const allDisqualificationsKnown = hasSample && disqualificationValues.every((value) => value != null);
+  const quality = startsCount >= 3 && allPlacingsKnown && allGallopsKnown && allDisqualificationsKnown
+    ? 'sufficient'
+    : hasSample ? 'limited' : 'unavailable';
   const latestDate = starts[0]?.race_date ?? null;
   const values = {
     form_starts_5: startsCount,
-    form_wins_5: placings.filter((placing) => placing === 1).length,
-    form_top3_5: placings.filter((placing) => placing <= 3).length,
-    form_avg_placing_5: placings.length ? placings.reduce((sum, placing) => sum + placing, 0) / placings.length : null,
-    form_gallops_5: starts.filter((start) => Number(start.gallop) === 1).length,
-    form_disqualifications_5: starts.filter((start) => Number(start.disqualified) === 1).length,
+    form_wins_5: allPlacingsKnown ? placingValues.filter((placing) => placing === 1).length : null,
+    form_top3_5: allPlacingsKnown ? placingValues.filter((placing) => placing <= 3).length : null,
+    form_avg_placing_5: allPlacingsKnown ? placingValues.reduce((sum, placing) => sum + placing, 0) / placingValues.length : null,
+    form_gallops_5: allGallopsKnown ? gallopValues.reduce((sum, value) => sum + value, 0) : null,
+    form_disqualifications_5: allDisqualificationsKnown ? disqualificationValues.reduce((sum, value) => sum + value, 0) : null,
     form_days_since_last_start: latestDate ? daysBetween(asOf, latestDate) : null
   };
-  return { values, quality, sampleSize: startsCount };
+  return {
+    values,
+    quality,
+    sampleSize: startsCount,
+    fieldCoverage: {
+      placing: placingValues.filter((value) => value != null && value > 0).length,
+      gallop: gallopValues.filter((value) => value != null).length,
+      disqualified: disqualificationValues.filter((value) => value != null).length
+    }
+  };
 }
 
 export async function calculateHorseFormFeatures(env, raceEntryId, options = {}) {
@@ -91,6 +114,7 @@ export async function calculateHorseFormFeatures(env, raceEntryId, options = {})
     featureVersion: FORM_FEATURE_VERSION,
     asOf,
     sampleSize: calculated.sampleSize,
+    fieldCoverage: calculated.fieldCoverage,
     dataQuality: calculated.quality,
     features: calculated.values
   };
@@ -102,6 +126,7 @@ export async function persistHorseFormFeatures(env, raceEntryId, options = {}) {
     calculation: FORM_FEATURE_VERSION,
     historyLimit: HISTORY_LIMIT,
     sampleSize: result.sampleSize,
+    fieldCoverage: result.fieldCoverage,
     inputs: ['races', 'race_entries', 'race_results']
   });
 
