@@ -6,12 +6,15 @@ import { ANALYSIS_SUBMISSION_VERSION } from '../src/analysis-exchange.js';
 
 function seedRound(db) {
   db.prepare(`INSERT INTO tracks (id, canonical_name, country_code) VALUES ('idem_track','Idempotent Park','SE')`).run();
-  db.prepare(`INSERT INTO game_rounds (id, game_type, round_date, status) VALUES ('idem_round','V86','2020-07-01','upcoming')`).run();
+  db.prepare(`
+    INSERT INTO game_rounds (id, game_type, round_date, scheduled_start_at, bet_stop_at, status)
+    VALUES ('idem_round','V86','2099-07-01','2099-07-01T14:00:00Z','2099-07-01T13:55:00Z','upcoming')
+  `).run();
   for (let leg = 1; leg <= 8; leg += 1) {
     const raceId = `idem_race_${leg}`;
     const horseId = `idem_horse_${leg}`;
     const entryId = `idem_entry_${leg}`;
-    db.prepare(`INSERT INTO races (id, track_id, race_date, race_number) VALUES (?, 'idem_track', '2020-07-01', ?)`).run(raceId, leg);
+    db.prepare(`INSERT INTO races (id, track_id, race_date, race_number) VALUES (?, 'idem_track', '2099-07-01', ?)`).run(raceId, leg);
     db.prepare(`INSERT INTO game_legs (game_round_id, leg_number, race_id) VALUES ('idem_round', ?, ?)`).run(leg, raceId);
     db.prepare(`INSERT INTO horses (id, canonical_name) VALUES (?, ?)`).run(horseId, `Idempotent Horse ${leg}`);
     db.prepare(`INSERT INTO race_entries (id, race_id, horse_id, start_number) VALUES (?, ?, ?, 1)`).run(entryId, raceId, horseId);
