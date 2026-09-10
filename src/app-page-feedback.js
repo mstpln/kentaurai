@@ -32,13 +32,21 @@ function actualRaceShapeText(leg){
   if(leg?.winner?.trip?.label)return leg.winner.trip.label;
   return leg?.winner?'Saknar verifierat positionsunderlag':'Resultat saknas';
 }
+function scenarioMatchText(value){
+  if(value===null||value===undefined||value==='')return null;
+  const normalized=String(value).toLowerCase();
+  if(['match','true','yes'].includes(normalized))return 'stämde';
+  if(['mismatch','false','no'].includes(normalized))return 'stämde inte';
+  return String(value);
+}
 function expectedVsActualText(leg,systemResult){
   const expected=systemResult?.expectedRaceShape;
-  const actual=leg?.winner?.trip?.label;
-  if(expected&&actual)return 'Förväntat: '+expected+' · Faktiskt: '+actual;
-  if(expected)return 'Förväntat: '+expected+' · Faktiskt: saknar verifierat positionsunderlag';
-  if(actual)return 'Förväntat: saknas · Faktiskt: '+actual;
-  return 'Underlag saknas';
+  const assessed=scenarioMatchText(systemResult?.review?.scenarioMatch);
+  const winnerTrip=leg?.winner?.trip?.label;
+  const expectedText=expected?'Förväntat: '+expected:'Förväntat: saknas';
+  if(assessed)return expectedText+' · Faktisk helhetsbedömning: '+assessed;
+  const actualText='Faktisk loppbild: saknar verifierad helhetsbedömning';
+  return expectedText+' · '+actualText+(winnerTrip?' · Vinnaren: '+winnerTrip:'');
 }
 const previousRoundLegBlock=roundLegBlock;
 roundLegBlock=function(leg,selectedSystem){
@@ -54,7 +62,6 @@ roundLegBlock=function(leg,selectedSystem){
 const previousRenderGameDetailView=renderGameDetailView;
 renderGameDetailView=function(detail){
   previousRenderGameDetailView(detail);
-  const selectedSystem=detail.systems.find(system=>system.id===state.gameSystemId)||detail.systems[0]||null;
   document.querySelectorAll('.game-table tbody tr').forEach((row,index)=>{
     const leg=detail.legs[index];
     const cell=row.children[2];
