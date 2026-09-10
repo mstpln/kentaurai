@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import vm from 'node:vm';
 
 import worker from '../src/worker-settings.js';
 import { createAppSessionCookie } from '../src/app-auth.js';
@@ -40,6 +41,16 @@ test('year filter applies across start method, distance and track tables', async
   assert.equal(data.distances.reduce((sum, row) => sum + row.starts, 0), 3);
   assert.equal(data.tracks.reduce((sum, row) => sum + row.starts, 0), 3);
   assert.deepEqual(data.startMethods.map((row) => row.label).sort(), ['auto', 'volt']);
+
+  const auto = data.startMethods.find((row) => row.label === 'auto');
+  assert.equal(auto.starts, 1);
+  assert.equal(auto.gallops, 0);
+  assert.equal(auto.gallopRate, 0);
+
+  const volt = data.startMethods.find((row) => row.label === 'volt');
+  assert.equal(volt.starts, 2);
+  assert.equal(volt.gallops, 2);
+  assert.equal(volt.gallopRate, 1);
 });
 
 test('distance start-method filter keeps method-specific gallop rates', async () => {
@@ -91,7 +102,7 @@ test('filtered statistics route is private and returns requested filters', async
   assert.equal(data.tracks.reduce((sum, row) => sum + row.starts, 0), 1);
 });
 
-test('statistics UI uses dynamic current/previous year and correct Voltstart wording', () => {
+test('statistics UI uses dynamic years, correct Voltstart wording and responsive table scrolling', () => {
   const html = renderAppPage();
   assert.match(html, /new Date\(\)\.getFullYear\(\)/);
   assert.match(html, /\(i år\)/);
@@ -100,4 +111,13 @@ test('statistics UI uses dynamic current/previous year and correct Voltstart wor
   assert.match(html, /Galopp %/);
   assert.match(html, /data-distance-method/);
   assert.match(html, /data-track-method/);
+  assert.match(html, /stat-table-scroll/);
+  assert.match(html, /@media\(max-width:1200px\)/);
+});
+
+test('all embedded scripts in the final statistics-filter app are valid JavaScript', () => {
+  const html = renderAppPage();
+  const scripts = [...html.matchAll(/<script(?: [^>]*)?>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
+  assert.ok(scripts.some((script) => script.includes('kentaurai') || script.includes('entityStatState')));
+  for (const script of scripts) assert.doesNotThrow(() => new vm.Script(script));
 });
