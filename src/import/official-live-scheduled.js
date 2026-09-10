@@ -1,5 +1,6 @@
 import { captureCalendar, captureGame, validateIsoDate } from '../provider/official.js';
 import { normalizeCapturedOfficialGameSequential } from './official-live-sequential.js';
+import { markOfficialRaceSourceGap, officialGameSourceGap } from './official-source-gap.js';
 import { finishImportRun, startImportRun } from './common.js';
 
 const GAME_TYPES = ['V85', 'V86'];
@@ -189,6 +190,21 @@ export async function normalizeNextPendingOfficialGame(env) {
       normalized
     };
   } catch (error) {
+    const gap = officialGameSourceGap(error);
+    if (gap && cursor === 0) {
+      const sourceGap = await markOfficialRaceSourceGap(env, source.id, gap);
+      counts.skipped = 1;
+      await finishImportRun(env, run.id, counts);
+      return {
+        status: 'source_gap',
+        done: true,
+        sourceRecordId: source.id,
+        externalId: source.external_id,
+        fetchedAt: source.fetched_at,
+        cursor,
+        sourceGap
+      };
+    }
     counts.errors = 1;
     await finishImportRun(env, run.id, counts, error);
     throw error;
