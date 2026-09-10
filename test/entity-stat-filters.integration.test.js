@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+import worker from '../src/worker-settings.js';
+import { createAppSessionCookie } from '../src/app-auth.js';
 import { getFilteredEntityStatBreakdowns } from '../src/routes/entity-stat-breakdowns.js';
 import { renderAppPage } from '../src/app-page-stat-filters.js';
 import { createTestEnv } from './helpers/d1.js';
@@ -69,6 +71,24 @@ test('track start-method filter is independent from distance filter', async () =
   assert.equal(data.tracks.reduce((sum, row) => sum + row.starts, 0), 1);
   assert.equal(data.tracks[0].label, 'Track A');
   assert.equal(data.tracks[0].gallopRate, 0);
+});
+
+test('filtered statistics route is private and returns requested filters', async () => {
+  const { env, db } = createTestEnv();
+  seed(db);
+  env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
+  const url = 'https://example.test/app/api/entities/trainers/trainer-filter/stat-breakdowns?year=2026&distance_start_method=volt&track_start_method=auto';
+
+  let response = await worker.fetch(new Request(url), env);
+  assert.equal(response.status, 401);
+
+  const cookie = (await createAppSessionCookie(env)).split(';')[0];
+  response = await worker.fetch(new Request(url, { headers: { cookie } }), env);
+  assert.equal(response.status, 200);
+  const data = await response.json();
+  assert.deepEqual(data.filters, { year: 2026, distanceStartMethod: 'volt', trackStartMethod: 'auto' });
+  assert.equal(data.distances.reduce((sum, row) => sum + row.starts, 0), 2);
+  assert.equal(data.tracks.reduce((sum, row) => sum + row.starts, 0), 1);
 });
 
 test('statistics UI uses dynamic current/previous year and correct Voltstart wording', () => {
