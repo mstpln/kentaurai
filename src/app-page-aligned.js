@@ -1,0 +1,251 @@
+import {
+  renderAppPage as renderLocalizedAppPage,
+  renderLoginPage,
+  htmlResponse,
+  redirectResponse,
+  safeReturnPath
+} from './app-page-localization.js';
+
+export { renderLoginPage, htmlResponse, redirectResponse, safeReturnPath };
+
+const trackIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s6-5.2 6-11a6 6 0 1 0-12 0c0 5.8 6 11 6 11z"/><ellipse cx="12" cy="10" rx="3.2" ry="1.8"/></svg>`;
+
+const alignedCss = `
+<style id="kentaurai-aligned-ui-v063">
+/* Six-item bottom navigation: slightly taller for comfortable spacing and touch targets. */
+.shell{padding-bottom:104px!important}
+.bottom-nav{padding-top:10px!important;padding-bottom:calc(10px + env(safe-area-inset-bottom))!important}
+.bottom-inner{max-width:820px!important;grid-template-columns:repeat(6,minmax(0,1fr))!important;gap:3px!important}
+.nav-item{min-width:0!important;padding:9px 3px 8px!important}
+.nav-item[data-page="tracks"] .nav-icon{fill:none!important;stroke:currentColor!important;stroke-width:2!important;stroke-linecap:round!important;stroke-linejoin:round!important}
+
+/* Settings gear: optically the same scale as the circular brand mark and centered on the brand row. */
+.settings-button{width:32px!important;height:32px!important;padding:5px!important;align-self:center!important}
+.settings-button svg{width:21px!important;height:21px!important}
+@media(max-width:760px){
+  .shell{padding-bottom:104px!important}
+  .top-inner{position:relative!important}
+  .settings-button{right:12px!important;top:10px!important;width:32px!important;height:32px!important;padding:5px!important}
+  .settings-button svg{width:21px!important;height:21px!important}
+  .brand{padding-right:42px!important}
+}
+
+/* Dense statistics must fit the mobile card without horizontal scrolling or wrapping. */
+@media(max-width:620px){
+  .stat-table-scroll{overflow-x:visible!important}
+  .stat-filter-table{width:100%!important;table-layout:fixed!important}
+  .stat-filter-table th,.stat-filter-table td{padding:9px 3px!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:clip!important}
+  .stat-filter-table th{font-size:6.8px!important;letter-spacing:.025em!important}
+  .stat-filter-table td{font-size:9px!important;font-variant-numeric:tabular-nums!important}
+  .stat-filter-table th:first-child,.stat-filter-table td:first-child{width:27%!important;padding-left:7px!important}
+  .stat-filter-table th:not(:first-child),.stat-filter-table td:not(:first-child){width:14.6%!important;text-align:right!important}
+  .stat-filter-table th:last-child,.stat-filter-table td:last-child{padding-right:7px!important}
+}
+
+/* Settings Variant 3: content first, one explicit status row last. */
+.settings-row{grid-template-columns:1fr!important;gap:7px!important;align-items:stretch!important;padding:14px 0!important}
+.settings-row-output{grid-column:auto!important;color:#aaa39a!important}
+.settings-row-status{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:3px;padding-top:9px;border-top:1px solid var(--line-soft);font-size:11px}
+.settings-row-status-label{color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.08em;font-weight:650}
+.status-pill{border:0!important;border-radius:0!important;background:transparent!important;padding:0!important;min-width:0!important;text-align:right!important;font-size:11px!important;font-weight:650!important;line-height:1.2!important;text-transform:none!important;letter-spacing:0!important}
+.status-pill.working,.status-pill.success{color:#a8bda4!important}
+.status-pill.warning,.status-pill.running,.status-pill.unknown{color:#d0b178!important}
+.status-pill.error{color:#d4a49a!important}
+
+/* Horse start history: compact overview rows with the existing complete start detail below. */
+.horse-start-section+.horse-start-section{margin-top:20px}
+.horse-start-group-title{font-size:10px;text-transform:uppercase;letter-spacing:.11em;color:var(--muted);font-weight:650;margin:0 0 9px 2px}
+.horse-start-group-title.upcoming{color:var(--accent-soft)}
+.horse-start-table{overflow:hidden}
+.horse-start-head,.horse-start-summary{display:grid;grid-template-columns:95px minmax(150px,1.65fr) 90px 120px 105px 22px;gap:10px;align-items:center}
+.horse-start-head{padding:10px 14px;border-bottom:1px solid var(--line);background:#10100f;color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.06em;font-weight:650}
+.horse-start-entry{border-bottom:1px solid var(--line-soft)}
+.horse-start-entry:last-child{border-bottom:0}
+.horse-start-entry>summary{list-style:none;cursor:pointer;padding:14px;background:transparent}
+.horse-start-entry>summary::-webkit-details-marker{display:none}
+.horse-start-entry.upcoming>summary{background:#15130f}
+.horse-start-date,.horse-start-result,.horse-start-equipment{white-space:nowrap}
+.horse-start-date{font-size:12px;font-weight:550}
+.horse-start-race{font-size:13px;font-weight:600;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.horse-start-race small{display:block;margin-top:2px;color:var(--muted);font-size:10px;font-weight:450;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.horse-start-result{font-size:12px;font-weight:600}
+.horse-start-result.upcoming{color:var(--accent-soft)}
+.horse-start-equipment{font-size:11px;overflow:hidden;text-overflow:ellipsis}
+.horse-start-chevron{color:var(--muted);font-size:17px;line-height:1;text-align:right;transition:transform .15s ease}
+.horse-start-entry[open] .horse-start-chevron{transform:rotate(180deg)}
+.horse-start-entry .start-details{border-top:1px solid var(--line-soft);padding:13px;background:#11110f}
+.horse-start-short-date{display:none}
+@media(max-width:620px){
+  .horse-start-head,.horse-start-summary{grid-template-columns:48px minmax(60px,1fr) 42px 50px 46px 14px;gap:3px}
+  .horse-start-head{padding:8px 6px;font-size:6.6px;letter-spacing:.02em}
+  .horse-start-entry>summary{padding:11px 6px}
+  .horse-start-date,.horse-start-result{font-size:8.4px}
+  .horse-start-race{font-size:8.8px}
+  .horse-start-race small{font-size:7.2px}
+  .horse-start-equipment{font-size:7.8px}
+  .horse-start-chevron{font-size:13px}
+  .horse-start-wide-date{display:none}.horse-start-short-date{display:inline}
+}
+
+/* Track browsing/detail. */
+.track-list-meta{display:flex;gap:10px;align-items:center;color:var(--muted);font-size:11px;margin-top:3px;flex-wrap:wrap}
+.track-list-meta span+span:before{content:'·';margin-right:10px;color:#5f5a53}
+.track-detail-icon{width:68px;height:68px;border-radius:16px;border:1px solid var(--line);background:linear-gradient(135deg,#24221e,#121210);display:grid;place-items:center;color:var(--accent-soft)}
+.track-detail-icon svg{width:31px;height:31px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.track-description{font-size:13px;line-height:1.58;color:#c3bbb0}
+.track-filter-stack{display:grid;gap:13px;margin-bottom:15px}
+.track-filter-line{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap}
+.track-filter-line .filter-block{flex:0 1 auto}
+.track-lane-table{width:100%;border-collapse:collapse;table-layout:fixed}
+.track-lane-table th,.track-lane-table td{padding:10px 10px;border-bottom:1px solid var(--line-soft);white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums}
+.track-lane-table th:first-child,.track-lane-table td:first-child{text-align:left}
+.track-lane-table th{font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:650;background:#10100f}
+.track-lane-table td{font-size:12px}.track-lane-table tr:last-child td{border-bottom:0}
+.track-data-note{font-size:11px;color:var(--muted);margin-top:10px;line-height:1.5}
+.track-home-row{width:100%;border:0;border-bottom:1px solid var(--line-soft);background:transparent;color:var(--text);display:flex;align-items:center;justify-content:space-between;gap:14px;padding:13px 15px;text-align:left;cursor:pointer}
+.track-home-row:last-child{border-bottom:0}.track-home-row:hover .track-home-name{color:var(--accent-soft)}
+.track-home-name{font-weight:550}.track-home-meta{font-size:11px;color:var(--muted);margin-top:2px}.track-home-open{font-size:12px;color:var(--muted)}
+@media(max-width:620px){
+  .track-detail-icon{width:58px;height:58px}.track-detail-icon svg{width:27px;height:27px}
+  .track-lane-table th,.track-lane-table td{padding:9px 3px;white-space:nowrap}
+  .track-lane-table th{font-size:7px;letter-spacing:.02em}.track-lane-table td{font-size:9px}
+  .track-lane-table th:first-child,.track-lane-table td:first-child{padding-left:7px}.track-lane-table th:last-child,.track-lane-table td:last-child{padding-right:7px}
+}
+</style>`;
+
+const alignedScript = `
+<script id="kentaurai-aligned-ui-script-v063">
+(function(){
+const TRACK_ICON=${JSON.stringify(trackIcon)};
+state.trackOffsets=state.trackOffsets||0;
+state.trackDetail=state.trackDetail||null;
+state.trackTab=state.trackTab||'overview';
+state.trackFilters=state.trackFilters||{};
+state.trackTrainerOffsets=state.trackTrainerOffsets||{};
+
+function addTrackNavigation(){
+  const inner=document.querySelector('.bottom-inner');
+  if(!inner||inner.querySelector('[data-page="tracks"]'))return;
+  const games=inner.querySelector('[data-page="games"]');
+  const button=document.createElement('button');
+  button.className='nav-item';button.dataset.page='tracks';button.innerHTML=TRACK_ICON+'Bana';
+  button.querySelector('svg')?.classList.add('nav-icon');
+  button.onclick=()=>renderTracks();
+  inner.insertBefore(button,games||null);
+}
+addTrackNavigation();
+
+function statusWords(status){return ({working:'Fungerar',success:'Klar',warning:'Varning',error:'Fel',running:'Pågår',unknown:'Okänd'})[status]||status}
+statusText=statusWords;
+function alignSettingsStatuses(){
+  document.querySelectorAll('.settings-row').forEach(row=>{
+    const pill=row.querySelector(':scope > .status-pill');
+    if(!pill||row.querySelector(':scope > .settings-row-status'))return;
+    const status=pill.className.split(/\\s+/).find(x=>['working','success','warning','error','running','unknown'].includes(x));
+    if(status)pill.textContent=statusWords(status);
+    const bottom=document.createElement('div');bottom.className='settings-row-status';
+    const label=document.createElement('span');label.className='settings-row-status-label';label.textContent='Status';
+    bottom.append(label,pill);row.append(bottom);
+  });
+}
+const priorAlignedRenderData=renderData;
+renderData=async function(){await priorAlignedRenderData();if(state.settingsOpen&&state.settingsTab==='data')alignSettingsStatuses()};
+
+const priorAlignedDetailTabs=detailTabs;
+detailTabs=function(type){if(type==='horse')return [['stats','Statistik'],['starts','Starter'],['data','Data']];return priorAlignedDetailTabs(type)};
+
+const priorAlignedStartCards=startCards;
+function alignedShoe(value,barefoot){
+  const text=String(value??'').trim().toLowerCase();
+  if(['barefoot','barfota'].includes(text)||barefoot===true||barefoot===1)return 'Barfota';
+  if(['shod','shoes','shoe','skor','with_shoes'].includes(text)||barefoot===false||barefoot===0)return 'Med skor';
+  return value||null;
+}
+function alignedShoes(eq){
+  if(!eq)return '—';const front=alignedShoe(eq.shoesFront,eq.barefootFront),rear=alignedShoe(eq.shoesRear,eq.barefootRear);
+  if(front==='Barfota'&&rear==='Barfota')return 'Barfota';
+  if(front==='Med skor'&&rear==='Med skor')return 'Med skor';
+  if(front==='Barfota'&&rear==='Med skor')return 'Barfota fram';
+  if(front==='Med skor'&&rear==='Barfota')return 'Barfota bak';
+  return [front,rear].filter(Boolean).join(' / ')||'—';
+}
+function alignedSulky(value){const v=String(value||'').toLowerCase();if(['regular','normal','standard'].includes(v))return 'Vanlig';if(['american','american bike','bike'].includes(v))return 'Amerikansk';return value||'—'}
+function alignedUpcoming(r){
+  const status=String(r.race_status||'').toLowerCase();if(['upcoming','running','live'].includes(status))return true;
+  if(r.placing!=null||r.placing_text||r.result_status)return false;
+  if(r.race_date){const today=new Date();const key=today.getFullYear()+'-'+String(today.getMonth()+1).padStart(2,'0')+'-'+String(today.getDate()).padStart(2,'0');if(r.race_date>key)return true}
+  return false;
+}
+function alignedResult(r,upcoming){if(upcoming)return 'Kommande';if(r.scratched)return 'Struken';if(r.disqualified)return 'Diskad';return r.placing_text||r.placing||'—'}
+function shortStartDate(value){if(!value)return '—';const d=new Date(value+'T12:00:00Z');if(Number.isNaN(d.getTime()))return value;return new Intl.DateTimeFormat('sv-SE',{day:'numeric',month:'short'}).format(d)}
+function startMeta(r){return [(r.game_type?(r.game_type+(r.leg_number?'-'+r.leg_number:'')):null),r.distance_m?num(r.distance_m)+' m':null,localStartMethod(r.start_method)].filter(Boolean).join(' · ')}
+function horseStartTableGroup(label,rows,details,upcoming){
+  if(!rows.length)return '';
+  return '<section class="horse-start-section"><div class="horse-start-group-title '+(upcoming?'upcoming':'')+'">'+label+'</div><div class="card horse-start-table"><div class="horse-start-head"><div>Datum</div><div>Lopp</div><div>Resultat</div><div>Skor</div><div>Vagn</div><div></div></div>'+rows.map(({r,index})=>'<details class="horse-start-entry '+(upcoming?'upcoming':'')+'"><summary class="horse-start-summary"><div class="horse-start-date"><span class="horse-start-wide-date">'+esc(dateSv(r.race_date))+'</span><span class="horse-start-short-date">'+esc(shortStartDate(r.race_date))+'</span></div><div class="horse-start-race">'+esc(r.track_name||'Okänd bana')+'<small>'+esc(startMeta(r))+'</small></div><div class="horse-start-result '+(upcoming?'upcoming':'')+'">'+esc(alignedResult(r,upcoming))+'</div><div class="horse-start-equipment">'+esc(alignedShoes(r.equipment))+'</div><div class="horse-start-equipment">'+esc(alignedSulky(r.equipment?.sulkyType))+'</div><div class="horse-start-chevron">⌄</div></summary>'+details[index]+'</details>').join('')+'</div></section>';
+}
+function horseStartTable(detail){
+  const rows=detail.starts||[];if(!rows.length)return empty('Inga starter att visa','Databasen har ännu inga starter kopplade till denna profil.');
+  const template=document.createElement('template');template.innerHTML=priorAlignedStartCards(detail);
+  const details=[...template.content.querySelectorAll('.start-card')].map(card=>card.querySelector('.start-details')?.outerHTML||'<div class="start-details"></div>');
+  const indexed=rows.map((r,index)=>({r,index}));const upcoming=indexed.filter(x=>alignedUpcoming(x.r));const previous=indexed.filter(x=>!alignedUpcoming(x.r));
+  return '<div class="horse-start-history">'+horseStartTableGroup('Kommande lopp',upcoming,details,true)+horseStartTableGroup('Tidigare starter',previous,details,false)+'</div>';
+}
+startCards=function(detail){if(state.detail?.page==='horses'&&state.tab==='starts')return horseStartTable(detail);return priorAlignedStartCards(detail)};
+
+function trackPager(data,prefix){return pager({...data,items:data.items||[]},prefix)}
+async function renderTracks(){
+  state.detail=null;state.gameDetail=null;state.gameSystemId=null;state.trackDetail=null;state.page='tracks';state.trackTab='overview';setNav('tracks');
+  const offset=Number(state.trackOffsets||0);const data=await api('/tracks?limit=20&offset='+offset);
+  if(data.total>0&&!data.items.length&&offset>0){state.trackOffsets=Math.max(0,Math.floor((data.total-1)/data.limit)*data.limit);return renderTracks()}
+  const rows=data.items.length?'<div class="card entity-list">'+data.items.map(item=>'<button class="entity-row" data-track-id="'+esc(item.id)+'"><span><span class="entity-name">'+esc(item.name)+'</span><span class="track-list-meta">'+(item.city?'<span>'+esc(item.city)+'</span>':'')+'<span>'+num(item.races)+' lopp i databasen</span></span></span><span class="chevron">›</span></button>').join('')+'</div>':empty('Inga banor att visa','Databasen har ännu inga banor.');
+  app.innerHTML=heading('Banor','Banprofil, spårstatistik och hemmatränare')+rows+trackPager(data,'track');
+  document.querySelectorAll('[data-track-id]').forEach(x=>x.onclick=()=>openTrackDetail(x.dataset.trackId));
+  const prev=document.getElementById('trackprevPage'),next=document.getElementById('tracknextPage');if(prev)prev.onclick=()=>{state.trackOffsets=Math.max(0,data.offset-data.limit);renderTracks()};if(next)next.onclick=()=>{state.trackOffsets=data.offset+data.limit;renderTracks()};
+  patchTrackHistory(null,'overview');
+}
+function trackFacts(detail){const p=detail.profile||{},c=detail.coverage||{};return dataSection('Banprofil',[["Ort",detail.city],["Land",detail.countryCode],["Banlängd",p.lapLengthM==null?null:num(p.lapLengthM)+' m'],["Upplopp",p.homeStretchM==null?null:num(p.homeStretchM)+' m'],["Banbredd",p.widthM==null?null:dec(p.widthM,1)+' m'],["Kurvradie",p.curveRadiusM==null?null:dec(p.curveRadiusM,1)+' m'],["Dosering",p.bankingDegrees==null?null:dec(p.bankingDegrees,1)+'°'],["Underlag",p.surface],["Open stretch",p.openStretchLanes==null?null:p.openStretchLanes+' spår'],["Vinklad startbilsvinge",p.angledMobileWing==null?null:(p.angledMobileWing?'Ja':'Nej')]])+dataSection('Datatäckning',[["Lopp",c.races],["Lopp med resultat",c.racesWithResults],["Starter",c.starts],["Starter med resultat",c.resultStarts],["Första lopp",c.firstRaceDate?dateSv(c.firstRaceDate):null],["Senaste lopp",c.lastRaceDate?dateSv(c.lastRaceDate):null],["Hemmatränare",c.homeTrainers]])}
+function trackOverview(detail){const p=detail.profile||{};return '<div class="data-groups"><section class="data-section"><div class="data-section-head"><h2>Banan i korthet</h2></div><div class="card-pad track-description">'+esc(detail.description)+'</div></section>'+trackFacts(detail)+(p.startNotes?'<section class="data-section"><div class="data-section-head"><h2>Startnoteringar</h2></div><div class="card-pad track-description">'+esc(p.startNotes)+'</div></section>':'')+'</div>'}
+function trackFilterKey(id){return String(id)}
+function filtersForTrack(detail){const key=trackFilterKey(detail.id);if(!state.trackFilters[key]){const groups=detail.distanceGroups||[];state.trackFilters[key]={year:'all',startMethod:'auto',distanceGroup:(groups.find(x=>x.key==='2140')||groups[0]||{key:'2140'}).key}}return state.trackFilters[key]}
+function trackPeriodOptions(){const y=new Date().getFullYear();return [['all','All data'],[String(y),String(y)],[String(y-1),String(y-1)]]}
+function trackFilterButtons(options,active,attr){return '<div class="stat-pills">'+options.map(([value,label])=>'<button type="button" class="stat-pill '+(String(value)===String(active)?'active':'')+'" '+attr+'="'+esc(value)+'">'+esc(label)+'</button>').join('')+'</div>'}
+async function trackLaneView(detail){
+  const f=filtersForTrack(detail),groups=(detail.distanceGroups||[]).map(x=>[x.key,x.label.replace(' m','')]);
+  const controls='<div class="track-filter-stack"><div class="track-filter-line"><div class="filter-block"><div class="filter-label">Period</div>'+trackFilterButtons(trackPeriodOptions(),f.year,'data-track-year')+'</div><div class="filter-block"><div class="filter-label">Startmetod</div>'+trackFilterButtons([['auto','Autostart'],['volt','Voltstart']],f.startMethod,'data-track-method')+'</div></div><div class="filter-block"><div class="filter-label">Distans</div>'+trackFilterButtons(groups.length?groups:[[f.distanceGroup,f.distanceGroup]],f.distanceGroup,'data-track-distance')+'</div></div>';
+  replaceTrackTabBody(controls+'<div id="trackLaneStats"><div class="card stat-filter-loading">Läser spårstatistik…</div></div>');bindTrackFilterButtons(detail);
+  const q=new URLSearchParams({year:f.year,start_method:f.startMethod,distance_group:f.distanceGroup});const data=await api('/tracks/'+encodeURIComponent(detail.id)+'/lane-stats?'+q.toString());if(state.trackDetail!==detail.id||state.trackTab!=='lanes')return;
+  const body=data.rows.length?'<div class="card"><table class="track-lane-table"><thead><tr><th>Spår</th><th>Starter</th><th>Vinst %</th><th>Topp 3 %</th><th>Galopp %</th></tr></thead><tbody>'+data.rows.map(r=>'<tr><td>'+num(r.lane)+'</td><td>'+num(r.starts)+'</td><td>'+pct(r.winRate)+'</td><td>'+pct(r.top3Rate)+'</td><td>'+pct(r.gallopRate)+'</td></tr>').join('')+'</tbody></table></div><div class="track-data-note">'+num(data.totals.resultStarts)+' resultatsatta starter ligger bakom procentsatserna för den valda kombinationen.</div>':empty('Ingen statistik för valt filter','Det finns ännu inga lagrade starter för denna kombination av bana, distans och startmetod.');
+  const target=document.getElementById('trackLaneStats');if(target)target.innerHTML=body;bindTrackFilterButtons(detail);
+}
+function bindTrackFilterButtons(detail){const f=filtersForTrack(detail);document.querySelectorAll('[data-track-year]').forEach(b=>b.onclick=()=>{f.year=b.dataset.trackYear;trackLaneView(detail)});document.querySelectorAll('[data-track-method]').forEach(b=>b.onclick=()=>{f.startMethod=b.dataset.trackMethod;trackLaneView(detail)});document.querySelectorAll('[data-track-distance]').forEach(b=>b.onclick=()=>{f.distanceGroup=b.dataset.trackDistance;trackLaneView(detail)})}
+async function trackHomeView(detail){
+  const key=trackFilterKey(detail.id),offset=Number(state.trackTrainerOffsets[key]||0);replaceTrackTabBody('<div class="skeleton"></div>');const data=await api('/tracks/'+encodeURIComponent(detail.id)+'/home-trainers?limit=20&offset='+offset);if(state.trackDetail!==detail.id||state.trackTab!=='home')return;
+  if(data.total>0&&!data.items.length&&offset>0){state.trackTrainerOffsets[key]=Math.max(0,Math.floor((data.total-1)/data.limit)*data.limit);return trackHomeView(detail)}
+  const rows=data.items.length?'<div class="card">'+data.items.map(x=>'<button class="track-home-row" data-home-trainer="'+esc(x.id)+'"><span><span class="track-home-name">'+esc(x.name)+'</span>'+(x.location?'<span class="track-home-meta">'+esc(x.location)+'</span>':'')+'</span><span class="track-home-open">Öppna ›</span></button>').join('')+'</div>'+trackPager(data,'homeTrainer'):empty('Inga hemmatränare hittades','Ingen verifierad aktuell hemmabanekoppling till denna bana finns ännu i den lagrade tränardatan.');replaceTrackTabBody(rows+'<div class="track-data-note">Hemmatränare baseras på den senaste verifierade officiella tränarobservationen. Saknad uppgift lämnas okänd.</div>');
+  document.querySelectorAll('[data-home-trainer]').forEach(x=>x.onclick=()=>openDetail('trainers',x.dataset.homeTrainer));const prev=document.getElementById('homeTrainerprevPage'),next=document.getElementById('homeTrainernextPage');if(prev)prev.onclick=()=>{state.trackTrainerOffsets[key]=Math.max(0,data.offset-data.limit);trackHomeView(detail)};if(next)next.onclick=()=>{state.trackTrainerOffsets[key]=data.offset+data.limit;trackHomeView(detail)};
+}
+function replaceTrackTabBody(html){const host=document.getElementById('trackTabBody');if(host)host.innerHTML=html}
+function bindTrackTabs(detail){document.querySelectorAll('[data-track-tab]').forEach(b=>b.onclick=()=>{state.trackTab=b.dataset.trackTab;renderTrackDetail(detail.id,detail)})}
+function patchTrackHistory(id,tab){const current=history.state;if(!current||current.marker!=='kentaurai-nav-v1'||!current.view)return;history.replaceState({...current,view:{...current.view,page:'tracks',trackDetail:id||null,trackTab:tab||'overview'},signature:JSON.stringify({...current.view,page:'tracks',trackDetail:id||null,trackTab:tab||'overview'})},'')}
+async function openTrackDetail(id){state.trackDetail=id;state.trackTab='overview';state.trackTrainerOffsets[trackFilterKey(id)]=0;return renderTrackDetail(id)}
+async function renderTrackDetail(id,cached=null){
+  state.detail=null;state.gameDetail=null;state.gameSystemId=null;state.trackDetail=id;state.page='tracks';setNav('tracks');const detail=cached||await api('/tracks/'+encodeURIComponent(id));if(state.trackDetail!==id)return;
+  const meta=[detail.city,detail.countryCode].filter(Boolean).join(' · ');app.innerHTML='<button class="back" id="backTracks">↩ <span>Banor</span></button><div class="detail-head"><div class="track-detail-icon">'+TRACK_ICON+'</div><div><div class="eyebrow">Bana</div><div class="detail-name">'+esc(detail.name)+'</div><div class="detail-meta">'+esc(meta)+'</div></div></div><div class="tabs">'+[['overview','Översikt'],['lanes','Spårstatistik'],['home','Hemmatränare']].map(([key,label])=>'<button class="tab '+(state.trackTab===key?'active':'')+'" data-track-tab="'+key+'">'+label+'</button>').join('')+'</div><div id="trackTabBody"></div>';
+  document.getElementById('backTracks').onclick=()=>{state.trackDetail=null;renderTracks()};bindTrackTabs(detail);patchTrackHistory(id,state.trackTab);
+  if(state.trackTab==='overview')replaceTrackTabBody(trackOverview(detail));else if(state.trackTab==='lanes')await trackLaneView(detail);else await trackHomeView(detail);
+}
+
+/* Let the existing browser-history restorer understand the new page without rewriting its private closure. */
+const priorAlignedRenderStart=renderStart;
+renderStart=async function(){const view=history.state?.view;if(view?.page==='tracks'){state.trackTab=view.trackTab||'overview';if(view.trackDetail)return renderTrackDetail(view.trackDetail);return renderTracks()}return priorAlignedRenderStart()};
+
+/* Existing in-app navigation remains authoritative for the original five areas. */
+document.querySelectorAll('.nav-item:not([data-page="tracks"])').forEach(button=>{const original=button.onclick;button.addEventListener('click',()=>{state.trackDetail=null})});
+})();
+</script>`;
+
+export function renderAppPage() {
+  return renderLocalizedAppPage()
+    .replace('</head>', `${alignedCss}</head>`)
+    .replace('</body>', `${alignedScript}</body>`);
+}
