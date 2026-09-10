@@ -19,6 +19,7 @@ test('settings uses understandable source labels and compact status symbols', ()
   assert.match(html, /hasDisplayValue/);
   assert.match(html, /Saknar verifierat positionsunderlag/);
   assert.match(html, /Förväntat:/);
+  assert.match(html, /Faktisk loppbild: saknar verifierad helhetsbedömning/);
 });
 
 test('login and root redirects stay inside the installed PWA scope', async () => {
