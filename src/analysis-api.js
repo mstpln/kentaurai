@@ -1,3 +1,4 @@
+import { stableId } from './ids.js';
 import {
   ANALYSIS_CONTEXT_VERSION,
   ANALYSIS_SUBMISSION_VERSION,
@@ -158,6 +159,21 @@ async function verifyContext(env, roundId, stage, fingerprint, parentSubmissionI
   return context;
 }
 
+function reusedSubmission(existing) {
+  return {
+    contractVersion: ANALYSIS_SUBMISSION_VERSION,
+    submissionId: existing.submissionId,
+    roundId: existing.roundId,
+    stage: existing.stage,
+    provider: existing.producer.provider,
+    model: existing.producer.model,
+    modelVersionId: stableId('analysis', existing.roundId, existing.submissionId),
+    parentSubmissionId: existing.parentSubmissionId || null,
+    reused: true,
+    writes: { analyses: 0, predictions: 0, systems: 0, selections: 0 }
+  };
+}
+
 export async function submitAnalysis(env, payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('analysis submission must be an object');
   const roundId = requiredText(payload.round_id ?? payload.roundId, 'round_id', 200);
@@ -166,6 +182,14 @@ export async function submitAnalysis(env, payload) {
   const provider = requiredText(payload.producer?.provider, 'producer.provider', 100);
   const model = requiredText(payload.producer?.model, 'producer.model', 200);
   const contextFingerprint = payload.context_fingerprint ?? payload.contextFingerprint;
+  const existing = await getAnalysisSubmission(env, roundId, id);
+  if (existing) {
+    const requestedParent = payload.parent_submission_id ?? payload.parentSubmissionId ?? null;
+    if (existing.stage !== stage || existing.producer.provider !== provider || existing.producer.model !== model || (existing.parentSubmissionId || null) !== requestedParent) {
+      throw new Error('submission_id already exists for this round with different immutable identity metadata; use a new submission_id');
+    }
+    return reusedSubmission(existing);
+  }
 
   if (stage === 'pre_market') {
     if (payload.parent_submission_id ?? payload.parentSubmissionId) throw new Error('pre-market submission cannot have a parent submission');
