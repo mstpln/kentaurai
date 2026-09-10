@@ -43,13 +43,7 @@ jobs:
           query "SELECT status,next_date,next_race_index,processed_dates,processed_races,reused_races,unavailable_dates,unavailable_races,consecutive_errors,last_error,retry_after,last_run_at,updated_at FROM xlabs_backfill_jobs WHERE id='xlabsbackfill_xlabs-race-v1__historical-all__2023-09-08__2026-09-07' LIMIT 1;"
           echo "X-Labs history:"; jq -c '.result[0].results[0] // {}' "$response_file"
 
-          query "SELECT external_id,quality_status,metadata_json,fetched_at FROM source_records WHERE id='src_4bf4ac1f-8a64-4232-85e6-f76061b6519d' LIMIT 1;"
-          echo "Recovered X-Labs source:"; jq -c '.result[0].results[0] // {}' "$response_file"
-
-          query "SELECT external_id,quality_status,metadata_json,fetched_at FROM source_records WHERE source_type='official_provider' AND external_id='game:V85_2026-09-13_78_5' ORDER BY fetched_at DESC LIMIT 4;"
-          echo "Upcoming V85 sources:"; jq -c '.result[0].results' "$response_file"
-
-          query "SELECT status,started_at,finished_at,error_count,error_json,metadata_json FROM import_runs WHERE source_type='scheduled_orchestrator' ORDER BY started_at DESC LIMIT 8;"
+          query "SELECT status,started_at,finished_at,error_count,error_json,metadata_json FROM import_runs WHERE source_type='scheduled_orchestrator' ORDER BY started_at DESC LIMIT 12;"
           echo "Recent orchestrators:"; jq -c '.result[0].results' "$response_file"
 
-# post-v078 verification 2
+# comprehensive live 3x verification 2026-09-10
