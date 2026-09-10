@@ -37,13 +37,16 @@ jobs:
             jq -e '.success == true and (.result | all(.success == true))' "$response_file" >/dev/null
           }
 
-          query "SELECT status,next_date,next_race_index,processed_dates,processed_races,reused_races,consecutive_errors,last_error,last_run_at,updated_at FROM historical_backfill_jobs WHERE id='backfill_official-se-trot-v2__2023-09-08__2026-09-07' LIMIT 1;"
-          echo "Official history:"; jq -c '.result[0].results[0] // {}' "$response_file"
+          query "SELECT id,scope,start_date,end_date,next_date,next_race_index,status,processed_dates,processed_races,unavailable_dates,unavailable_races,consecutive_errors,last_error,retry_after,last_run_at,created_at,updated_at FROM xlabs_backfill_jobs WHERE scope='daily_v85_v86' ORDER BY start_date DESC LIMIT 20;"
+          echo "Daily X-Labs jobs:"; jq -c '.result[0].results' "$response_file"
 
-          query "SELECT status,next_date,next_race_index,processed_dates,processed_races,reused_races,unavailable_dates,unavailable_races,consecutive_errors,last_error,retry_after,last_run_at,updated_at FROM xlabs_backfill_jobs WHERE id='xlabsbackfill_xlabs-race-v1__historical-all__2023-09-08__2026-09-07' LIMIT 1;"
-          echo "X-Labs history:"; jq -c '.result[0].results[0] // {}' "$response_file"
+          query "SELECT external_id,quality_status,fetched_at FROM source_records WHERE source_type='official_provider' AND external_id LIKE 'calendar:2026-09-%' ORDER BY fetched_at DESC LIMIT 40;"
+          echo "Recent official calendars:"; jq -c '.result[0].results' "$response_file"
+
+          query "SELECT id,game_type,round_date FROM game_rounds WHERE round_date >= '2026-09-07' ORDER BY round_date DESC,id;"
+          echo "Recent normalized rounds:"; jq -c '.result[0].results' "$response_file"
 
           query "SELECT status,started_at,finished_at,error_count,error_json,metadata_json FROM import_runs WHERE source_type='scheduled_orchestrator' ORDER BY started_at DESC LIMIT 12;"
           echo "Recent orchestrators:"; jq -c '.result[0].results' "$response_file"
 
-# fresh ETA checkpoint 2026-09-10 10:13 CEST
+# daily X-Labs prerequisite investigation 2026-09-10
