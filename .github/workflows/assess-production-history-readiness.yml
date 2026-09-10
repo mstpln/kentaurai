@@ -51,3 +51,5 @@ jobs:
 
           query "SELECT status,started_at,finished_at,error_count,error_json,metadata_json FROM import_runs WHERE source_type='scheduled_orchestrator' ORDER BY started_at DESC LIMIT 8;"
           echo "Recent orchestrators:"; jq -c '.result[0].results' "$response_file"
+
+# post-v078 verification
