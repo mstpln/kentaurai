@@ -1,6 +1,7 @@
 import { stableId } from '../ids.js';
 import { finishImportRun, startImportRun } from './common.js';
 import { normalizeCapturedXlabsRace } from './xlabs-telemetry.js';
+import { XLABS_SOURCE_GAP_QUALITY, markXlabsSourceGap, xlabsTelemetrySourceGap } from './xlabs-source-gap.js';
 import { v85V86GameIdsFromCalendar } from './official-live-scheduled.js';
 import { captureXlabsDate, validateXlabsDate } from '../provider/xlabs.js';
 import { captureReferencedXlabsScript } from '../provider/xlabs-script.js';
@@ -321,6 +322,21 @@ async function selectAutomaticJob(env) {
   `).bind(new Date().toISOString()).first();
 }
 
+function sourceGapResult(run, job, race, source, nextIndex, sourceGap) {
+  return {
+    importRunId: run.id,
+    jobId: job.id,
+    scope: job.scope,
+    status: 'running',
+    checkpoint: { date: job.next_date, nextRaceIndex: nextIndex },
+    raceId: race.race_id,
+    sourceRecordId: source.id,
+    sourceGap,
+    unavailableRace: true,
+    done: false
+  };
+}
+
 export async function runXlabsBackfillStep(env, jobId = null, options = {}) {
   if (!env.DB) throw new Error('DB is not configured');
   if (!env.RAW_BUCKET?.get || !env.RAW_BUCKET?.put) throw new Error('RAW_BUCKET read/write access is not configured');
@@ -425,6 +441,13 @@ export async function runXlabsBackfillStep(env, jobId = null, options = {}) {
     let source = await sourceForRace(env, job.next_date, trackId, raceNumber);
     let reused = Boolean(source?.quality_status === NORMALIZED_QUALITY);
 
+    if (source?.quality_status === XLABS_SOURCE_GAP_QUALITY) {
+      counts.skipped += 1;
+      const nextIndex = await recordUnavailableRace(env, job, leaseToken);
+      await finishImportRun(env, run.id, counts);
+      return sourceGapResult(run, job, race, source, nextIndex, { qualityStatus: XLABS_SOURCE_GAP_QUALITY, gap: null, reused: true });
+    }
+
     if (!source) {
       try {
         const captured = await captureXlabsRaceJson(env, context.calculateSourceRecordId, trackId, raceNumber, {
@@ -454,9 +477,19 @@ export async function runXlabsBackfillStep(env, jobId = null, options = {}) {
     }
 
     if (source.quality_status !== NORMALIZED_QUALITY) {
-      const normalized = await normalizeCapturedXlabsRace(env, source.id);
-      counts.updated += 1;
-      reused = normalized.counts.inserted === 0;
+      try {
+        const normalized = await normalizeCapturedXlabsRace(env, source.id);
+        counts.updated += 1;
+        reused = normalized.counts.inserted === 0;
+      } catch (error) {
+        const gap = xlabsTelemetrySourceGap(error);
+        if (!gap) throw error;
+        const sourceGap = await markXlabsSourceGap(env, source.id, gap);
+        counts.skipped += 1;
+        const nextIndex = await recordUnavailableRace(env, job, leaseToken);
+        await finishImportRun(env, run.id, counts);
+        return sourceGapResult(run, job, race, source, nextIndex, sourceGap);
+      }
     } else counts.skipped += 1;
 
     const nextIndex = await recordCompletedRace(env, job, leaseToken, reused);
