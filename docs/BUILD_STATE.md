@@ -2,7 +2,7 @@
 
 Version: 0.5.0
 Phase: verified official + X-Labs data foundation with production backfills active
-Status: official live acquisition is deployed and smoke-tested; the official multi-year historical backfill is running; verified X-Labs acquisition/normalization is deployed; the production X-Labs vertical-slice gate passed; the separate multi-year X-Labs backfill for 2023-09-08 through 2026-09-07 is running under the existing bounded scheduler; the private reference-round production import has been completed and independently verified; installable KentaurAI PWA packaging and automatic deterministic post-race review are merged to `main`.
+Status: official live acquisition is deployed and smoke-tested; the official multi-year historical backfill is running; verified X-Labs acquisition/normalization is deployed; the production X-Labs vertical-slice gate passed; the separate multi-year X-Labs backfill for 2023-09-08 through 2026-09-07 is running under the existing bounded scheduler; the private reference-round production import has been completed and independently verified; installable KentaurAI PWA packaging and automatic deterministic post-race review are merged to `main`; a provider-neutral pre-race analysis exchange is implemented for external AI clients such as ChatGPT or Claude.
 
 ## Current production state
 - Worker: `kentaurai-api`.
@@ -13,6 +13,7 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 - X-Labs historical backfill range: 2023-09-08 through 2026-09-07, newest-first, up to three sequential X-Labs checkpoints per minute when eligible.
 - The X-Labs historical job does not outrun official history: it waits until the corresponding official date is ready.
 - Daily V85/V86 X-Labs catch-up remains separate and has priority over the long historical X-Labs job.
+- A rolling three-day official ordinary-race catch-up is created at the existing 04:30 UTC scheduling point so recent historical coverage remains current and short scheduler gaps can self-heal.
 - The private `kentaurai-reference-v1` round is stored in production with archived source provenance and independently verified structural invariants.
 - GitHub Actions contains guarded manual production workflows for D1 migrations and for starting/resuming the fixed historical X-Labs job.
 - The Worker entrypoint includes the scoped PWA wrapper; public PWA metadata/assets are separate from authenticated app/API responses.
@@ -36,6 +37,8 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 - The production official backfill for 2023-09-08 through 2026-09-07 has been observed advancing from its persisted checkpoint.
 - Official race first-prize mapping is implemented deterministically from verified prize text; malformed/unknown prize text stays null and existing source-backed facts are not overwritten by conflicting later observations.
 - Existing already-normalized official race observations can be repaired from archived source-backed data without refetching.
+- Form, class-exposure and development deterministic features use strict-null semantics so missing factual inputs do not silently become zero or partial certainty.
+- Trend readiness has an explicit fail-closed minimum-sample/date-coverage contract; actual leaderboards remain deferred until production history is sufficient.
 
 ## Automatic official live acquisition
 - `15 5 * * *` captures the current UTC date plus the next seven dates and discovers only verified V85/V86 eight-leg games.
@@ -61,6 +64,7 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 ## X-Labs scheduling and historical acquisition
 - `30 4 * * *` creates/reuses the previous-day V85/V86 X-Labs catch-up job.
 - Daily jobs use scope `daily_v85_v86` and target only stored normalized V85/V86 game legs.
+- Stale daily jobs whose required official live prerequisite never existed are closed safely once their target is older than yesterday; this does not falsely mark X-Labs telemetry unavailable.
 - The long historical job uses scope `historical_all` and covers all eligible normalized Swedish races.
 - Historical X-Labs waits for matching official-history readiness before attempting a date.
 - Date page plus verified script context are archived/reused before new race-object acquisition; raw race telemetry is archived before normalization.
@@ -69,6 +73,20 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 - The multi-year historical X-Labs job for 2023-09-08 through 2026-09-07 was explicitly authorized and successfully started in production through the guarded GitHub workflow.
 - Historical batches never parallelize source requests. Each successful race is durably checkpointed before the next begins; completion, busy/idle state, dependency waits or a technical failure stop the remaining source batch. Rate limits, access pushback, temporary upstream failures and timeouts apply bounded persistent cooldowns without advancing the failed checkpoint.
 - Existing official and X-Labs jobs continue from their stored cursors after deployment; this batching change does not recreate, restart or reinitialize them.
+
+## Provider-neutral analysis exchange
+- KentaurAI is the factual database, deterministic calculation and persistence layer; it does not run a separate autonomous AI model inside the Worker.
+- ChatGPT, Claude or another authorized external AI client can use the same private structured exchange and store independent analyses for the same round without overwriting each other.
+- The exchange is pre-race only and requires a verified future betting/start deadline so post-race facts cannot leak into a new pre-race analysis.
+- `pre_market` context exposes official facts, verified historical starts/X-Labs, approved market-blind deterministic feature versions and structured editorial signals while excluding current betting percentages, odds, turnover and jackpot.
+- A stored `pre_market` submission records scenarios, ranking, ABCD, win probabilities, uncertainty and reasoning for every active entry.
+- `market` context is available only after a stored pre-market parent. A final submission may add recommendations and systems but cannot rewrite the parent market-blind probabilities/ranks/ABCD assessment.
+- KentaurAI derives value ratio from stored probability versus stored market percentage; AI clients do not supply value or market percentage as factual inputs.
+- Every analysis context has a stable SHA-256 fingerprint. Changed current context requires a fresh submission.
+- Submission IDs are immutable idempotency keys: an exact retry is a no-op, while changed content under the same ID is rejected.
+- Every stored V85/V86 system must cover all eight legs and contain exactly three actual one-horse spike legs. KentaurAI derives row count and spike count rather than trusting client totals.
+- Analysis exchange routes live under `/v1/analysis/*` and use existing `ADMIN_TOKEN` authentication; real submissions remain private in D1.
+- The detailed contract is documented in `docs/ANALYSIS_EXCHANGE.md`.
 
 ## Private interface
 - `/app` is a private browser interface using `APP_PASSWORD` and a secure HttpOnly session cookie.
@@ -104,7 +122,7 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 - Scratched declarations are excluded from performance and coverage denominators.
 - Missing values stay unknown rather than being inferred for presentation.
 
-## Spel
+## Spel and post-race review
 - Spel has exactly three tabs: Översikt, V85 and V86.
 - Every saved V85/V86 system obeys the exactly-three-spikes rule.
 - Overview/list views use a deterministic primary system while round detail can inspect preserved alternatives.
@@ -113,7 +131,7 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 - Automatic deterministic review requires eight legs with exactly one factual winner each; ambiguous/dead-heat rounds fail closed.
 - Review writes are deterministic, resumable and idempotent per system/race, including protection against duplicate legacy review rows.
 - Covered winners are No change; missed winners are Candidate learning, with spike misses distinguished from ordinary coverage misses.
-- Learning remains No change / Candidate / Confirmed; one race or round never changes model weights directly.
+- Learning remains No change / Candidate / Confirmed; one race or round never changes analysis rules or model weights directly.
 
 ## Quality and privacy
 - GitHub contains code/schema/tests/docs/synthetic fixtures only.
@@ -128,25 +146,24 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 ## Current verification/operations gate
 1. Keep the official and X-Labs multi-year backfills running independently through their persisted checkpoints.
 2. Monitor for repeated technical failures rather than reacting to isolated neutral X-Labs unavailability.
-3. Verify upcoming/current V85/V86 official acquisition and daily X-Labs catch-up remain healthy while the long jobs run.
+3. Verify upcoming/current V85/V86 official acquisition, rolling official ordinary-race history and daily X-Labs catch-up remain healthy while the long jobs run.
 4. Keep the verified private reference round as a fixed reference fixture in private production storage; do not commit its payload to GitHub.
-5. Do not change model weights or begin AI modelling merely because one round or one telemetry sample looks interesting.
+5. Keep post-race learning conservative: one wrong ranking, spike or round is evidence to review, not a reason to change logic automatically.
 
 ## Next build sequence
-1. Let official + historical X-Labs population continue in the background and monitor operational health.
-2. Assess accumulated verified history against explicit minimum-sample requirements for deterministic Trend metrics/leaderboards.
-3. Build deterministic Trend metrics/leaderboards once the production history is sufficient.
-4. Expand the deterministic feature engine only with calculations supported by stored factual inputs.
-5. Only then move into the KentaurAI AI analysis runner, value assessment and system optimizer, keeping raw facts, calculated features and AI judgments separate.
+1. Let official + historical X-Labs population continue in the background and verify the first natural rolling-history execution.
+2. Use the provider-neutral analysis exchange on an upcoming live V85/V86 round and verify the first private read -> external AI analysis -> stored submission round trip.
+3. Assess accumulated verified history against the Trend readiness contract and build deterministic Trend metrics/leaderboards once production history is sufficient.
+4. Expand deterministic factual features and objective post-race scoring/calibration only where stored source data supports the calculation.
+5. Keep interpretation, rankings, probabilities, value judgment and betting suggestions in the replaceable external AI analysis layer; do not add an autonomous Worker AI runner unless the product direction is explicitly changed later.
 
 ## Not yet implemented / intentionally deferred
 - verified/persisted shared-person identity across trainer and driver roles
 - verified live scratch/withdrawal mapping
 - additional official-provider endpoint patterns not yet observed
-- historical trainer/driver/horse Trend leaderboards with production minimum-sample rules
+- historical trainer/driver/horse Trend leaderboards once production minimum-sample rules pass
 - additional winner-trip categories requiring facts not currently represented in the schema
 - dead-heat-specific post-race semantics/presentation pending a verified source example
-- future feature-engine expansion
-- KentaurAI AI analysis runner
-- deterministic value assessment against market percentage
-- system optimizer
+- future deterministic feature-engine expansion
+- expanded objective probability/ranking/system calibration reports across accumulated rounds
+- any autonomous in-Worker AI analysis runner (not currently planned)
