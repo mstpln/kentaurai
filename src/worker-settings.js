@@ -40,9 +40,8 @@ export default {
     }
 
     if (request.method === 'GET' && path === '/') return redirectResponse('/app/');
-    if (request.method === 'GET' && path === '/app') return redirectResponse('/app/');
 
-    if (request.method === 'GET' && path === '/app/') {
+    if (request.method === 'GET' && (path === '/app' || path === '/app/')) {
       if (appAuthConfigured(env) && await hasValidAppSession(request, env)) return htmlResponse(renderAppPage());
       return canonicalizeAppRedirect(await worker.fetch(request, env));
     }
