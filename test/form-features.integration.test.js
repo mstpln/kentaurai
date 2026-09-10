@@ -28,7 +28,9 @@ test('horse form uses only the five latest factual prior starts', async () => {
   const { env, db } = createTestEnv();
   seed(db);
   const result = await calculateHorseFormFeatures(env, 'form_target');
+  assert.equal(result.featureVersion, 'form-v2');
   assert.equal(result.sampleSize, 5);
+  assert.deepEqual(result.fieldCoverage, { placing: 5, gallop: 5, disqualified: 5 });
   assert.equal(result.dataQuality, 'sufficient');
   assert.equal(result.features.form_starts_5, 5);
   assert.equal(result.features.form_wins_5, 1);
@@ -36,6 +38,24 @@ test('horse form uses only the five latest factual prior starts', async () => {
   assert.equal(result.features.form_avg_placing_5, 3.4);
   assert.equal(result.features.form_gallops_5, 1);
   assert.equal(result.features.form_disqualifications_5, 1);
+  assert.equal(result.features.form_days_since_last_start, 7);
+});
+
+test('unknown form inputs remain null instead of becoming zero or partial aggregates', async () => {
+  const { env, db } = createTestEnv();
+  seed(db);
+  db.prepare(`UPDATE race_results SET placing = NULL, gallop = NULL WHERE race_entry_id='form_entry_6'`).run();
+  db.prepare(`UPDATE race_results SET disqualified = NULL WHERE race_entry_id='form_entry_5'`).run();
+  const result = await calculateHorseFormFeatures(env, 'form_target');
+  assert.equal(result.sampleSize, 5);
+  assert.deepEqual(result.fieldCoverage, { placing: 4, gallop: 4, disqualified: 4 });
+  assert.equal(result.dataQuality, 'limited');
+  assert.equal(result.features.form_starts_5, 5);
+  assert.equal(result.features.form_wins_5, null);
+  assert.equal(result.features.form_top3_5, null);
+  assert.equal(result.features.form_avg_placing_5, null);
+  assert.equal(result.features.form_gallops_5, null);
+  assert.equal(result.features.form_disqualifications_5, null);
   assert.equal(result.features.form_days_since_last_start, 7);
 });
 
@@ -70,6 +90,7 @@ test('persisted form features are immutable and idempotent for the same snapshot
   assert.equal(rows.length, 7);
   assert.ok(rows.every((row) => row.data_quality === 'sufficient'));
   assert.ok(rows.every((row) => JSON.parse(row.provenance_json).sampleSize === 5));
+  assert.ok(rows.every((row) => JSON.parse(row.provenance_json).fieldCoverage.placing === 5));
 });
 
 test('missing history stays factual and unavailable instead of being invented', async () => {
@@ -80,8 +101,11 @@ test('missing history stays factual and unavailable instead of being invented', 
   db.prepare(`INSERT INTO race_entries (id, race_id, horse_id, start_number) VALUES ('empty_entry','empty_race','empty_horse',1)`).run();
   const result = await calculateHorseFormFeatures(env, 'empty_entry');
   assert.equal(result.sampleSize, 0);
+  assert.deepEqual(result.fieldCoverage, { placing: 0, gallop: 0, disqualified: 0 });
   assert.equal(result.dataQuality, 'unavailable');
   assert.equal(result.features.form_starts_5, 0);
+  assert.equal(result.features.form_wins_5, null);
+  assert.equal(result.features.form_gallops_5, null);
   assert.equal(result.features.form_avg_placing_5, null);
   assert.equal(result.features.form_days_since_last_start, null);
 });
