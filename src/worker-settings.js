@@ -1,6 +1,6 @@
 import worker from './worker-pwa.js';
 import { appAuthConfigured, clearAppSessionCookie, hasValidAppSession } from './app-auth.js';
-import { htmlResponse, redirectResponse, renderAppPage } from './app-page-stat-filters.js';
+import { htmlResponse, redirectResponse, renderAppPage } from './app-page-localization.js';
 import { XLABS_SCRIPT_SELECTOR_VERSION } from './provider/xlabs-script.js';
 import { KENTAURAI_APP_VERSION, createFullDataExportResponse, getSettingsStatus, importAnalysisUpload } from './settings-data-display.js';
 import { getEnhancedGameHistoryDetail } from './routes/game-detail-display.js';
@@ -103,7 +103,7 @@ export default {
     }
 
     const gameDetailMatch = path.match(/^\/app\/api\/games\/([^/]+)$/);
-    if (request.method === 'GET' && gameDetailMatch) {
+    if (request.method === 'GET' && gameDetailMatch && gameDetailMatch[1] !== 'summary') {
       const denied = await requireSession(request, env);
       if (denied) return denied;
       try {
