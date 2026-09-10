@@ -1,7 +1,8 @@
 import worker from './worker-pwa.js';
 import { appAuthConfigured, clearAppSessionCookie, hasValidAppSession } from './app-auth.js';
 import { htmlResponse, redirectResponse, renderAppPage } from './app-page-settings.js';
-import { createFullDataExportResponse, getSettingsStatus, importAnalysisUpload } from './settings-data.js';
+import { XLABS_SCRIPT_SELECTOR_VERSION } from './provider/xlabs-script.js';
+import { KENTAURAI_APP_VERSION, createFullDataExportResponse, getSettingsStatus, importAnalysisUpload } from './settings-data.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -24,6 +25,10 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
+
+    if (request.method === 'GET' && path === '/health') {
+      return json({ ok: true, service: 'kentaurai-api', version: KENTAURAI_APP_VERSION, xlabsScriptSelector: XLABS_SCRIPT_SELECTOR_VERSION });
+    }
 
     if (request.method === 'GET' && (path === '/app' || path === '/app/')) {
       if (appAuthConfigured(env) && await hasValidAppSession(request, env)) return htmlResponse(renderAppPage());
