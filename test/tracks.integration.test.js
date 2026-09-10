@@ -127,8 +127,8 @@ test('track app routes require a private app session and return track data when 
   seedTrackData(db);
   env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
 
-  let response = await worker.fetch(new Request('https://example.test/app/api/tracks/track-a'));
-  assert.equal(response.status, 503);
+  let response = await worker.fetch(new Request('https://example.test/app/api/tracks/track-a'), env);
+  assert.equal(response.status, 401);
 
   const cookie = (await createAppSessionCookie(env)).split(';')[0];
   response = await worker.fetch(new Request('https://example.test/app/api/tracks/track-a', { headers: { cookie } }), env);
