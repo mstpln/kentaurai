@@ -1,6 +1,6 @@
 import { stableId } from '../ids.js';
 
-export const CLASS_FEATURE_VERSION = 'class-exposure-v1';
+export const CLASS_FEATURE_VERSION = 'class-exposure-v2';
 const HISTORY_LIMIT = 10;
 
 function dateOnly(value) {
@@ -43,25 +43,35 @@ async function history(env, target, asOf) {
 }
 
 function calculate(rows, targetFirstPrize) {
-  const advertised = rows.map((row) => numeric(row.first_prize_sek)).filter((value) => value != null && value >= 0);
-  const earnings = rows.map((row) => numeric(row.prize_sek)).filter((value) => value != null && value >= 0);
-  const placings = rows.map((row) => numeric(row.placing)).filter((value) => value != null && value > 0);
-  const maxPrize = advertised.length ? Math.max(...advertised) : null;
-  const avgPrize = advertised.length ? advertised.reduce((sum, value) => sum + value, 0) / advertised.length : null;
+  const advertisedValues = rows.map((row) => numeric(row.first_prize_sek));
+  const earningsValues = rows.map((row) => numeric(row.prize_sek));
+  const placingValues = rows.map((row) => numeric(row.placing));
+  const hasSample = rows.length > 0;
+  const allAdvertisedKnown = hasSample && advertisedValues.every((value) => value != null && value >= 0);
+  const allEarningsKnown = hasSample && earningsValues.every((value) => value != null && value >= 0);
+  const allPlacingsKnown = hasSample && placingValues.every((value) => value != null && value > 0);
+  const maxPrize = allAdvertisedKnown ? Math.max(...advertisedValues) : null;
+  const avgPrize = allAdvertisedKnown ? advertisedValues.reduce((sum, value) => sum + value, 0) / advertisedValues.length : null;
   const targetPrize = numeric(targetFirstPrize);
   const ratio = targetPrize != null && maxPrize != null && maxPrize > 0 ? targetPrize / maxPrize : null;
-  const quality = rows.length === 0 ? 'unavailable' : advertised.length >= 5 ? 'sufficient' : 'limited';
+  const quality = rows.length === 0
+    ? 'unavailable'
+    : rows.length >= 5 && allAdvertisedKnown && allEarningsKnown && allPlacingsKnown ? 'sufficient' : 'limited';
 
   return {
     dataQuality: quality,
     sampleSize: rows.length,
-    knownClassPrizeCount: advertised.length,
+    fieldCoverage: {
+      firstPrize: advertisedValues.filter((value) => value != null && value >= 0).length,
+      earnings: earningsValues.filter((value) => value != null && value >= 0).length,
+      placing: placingValues.filter((value) => value != null && value > 0).length
+    },
     features: {
       class_starts_10: rows.length,
-      class_wins_10: placings.filter((placing) => placing === 1).length,
+      class_wins_10: allPlacingsKnown ? placingValues.filter((placing) => placing === 1).length : null,
       class_max_first_prize_10: maxPrize,
       class_avg_first_prize_10: avgPrize,
-      class_prize_earnings_10: earnings.length ? earnings.reduce((sum, value) => sum + value, 0) : null,
+      class_prize_earnings_10: allEarningsKnown ? earningsValues.reduce((sum, value) => sum + value, 0) : null,
       class_target_first_prize: targetPrize,
       class_target_vs_max_prize_ratio: ratio
     }
@@ -90,7 +100,7 @@ export async function persistClassExposureFeatures(env, raceEntryId, options = {
     calculation: CLASS_FEATURE_VERSION,
     historyLimit: HISTORY_LIMIT,
     sampleSize: result.sampleSize,
-    knownClassPrizeCount: result.knownClassPrizeCount,
+    fieldCoverage: result.fieldCoverage,
     inputs: ['races.first_prize_sek', 'race_entries', 'race_results.prize_sek', 'race_results.placing']
   });
   let writes = 0;
