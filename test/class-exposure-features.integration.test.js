@@ -28,8 +28,9 @@ test('class exposure uses factual advertised first prizes and actual prior earni
   const { env, db } = createTestEnv();
   seed(db);
   const result = await calculateClassExposureFeatures(env, 'class_target');
+  assert.equal(result.featureVersion, 'class-exposure-v2');
   assert.equal(result.sampleSize, 6);
-  assert.equal(result.knownClassPrizeCount, 6);
+  assert.deepEqual(result.fieldCoverage, { firstPrize: 6, earnings: 6, placing: 6 });
   assert.equal(result.dataQuality, 'sufficient');
   assert.equal(result.features.class_starts_10, 6);
   assert.equal(result.features.class_wins_10, 2);
@@ -45,11 +46,29 @@ test('unknown first-prize facts remain null rather than being inferred', async (
   seed(db);
   db.prepare(`UPDATE races SET first_prize_sek = NULL WHERE id LIKE 'class_race_%' OR id='class_target_race'`).run();
   const result = await calculateClassExposureFeatures(env, 'class_target');
-  assert.equal(result.knownClassPrizeCount, 0);
+  assert.deepEqual(result.fieldCoverage, { firstPrize: 0, earnings: 6, placing: 6 });
   assert.equal(result.dataQuality, 'limited');
   assert.equal(result.features.class_max_first_prize_10, null);
   assert.equal(result.features.class_avg_first_prize_10, null);
   assert.equal(result.features.class_target_first_prize, null);
+  assert.equal(result.features.class_target_vs_max_prize_ratio, null);
+});
+
+test('partial class inputs never produce partial aggregates disguised as complete facts', async () => {
+  const { env, db } = createTestEnv();
+  seed(db);
+  db.prepare(`UPDATE races SET first_prize_sek = NULL WHERE id='class_race_6'`).run();
+  db.prepare(`UPDATE race_results SET prize_sek = NULL WHERE race_entry_id='class_entry_5'`).run();
+  db.prepare(`UPDATE race_results SET placing = NULL WHERE race_entry_id='class_entry_4'`).run();
+  const result = await calculateClassExposureFeatures(env, 'class_target');
+  assert.deepEqual(result.fieldCoverage, { firstPrize: 5, earnings: 5, placing: 5 });
+  assert.equal(result.dataQuality, 'limited');
+  assert.equal(result.features.class_starts_10, 6);
+  assert.equal(result.features.class_wins_10, null);
+  assert.equal(result.features.class_max_first_prize_10, null);
+  assert.equal(result.features.class_avg_first_prize_10, null);
+  assert.equal(result.features.class_prize_earnings_10, null);
+  assert.equal(result.features.class_target_first_prize, 100000);
   assert.equal(result.features.class_target_vs_max_prize_ratio, null);
 });
 
@@ -61,7 +80,7 @@ test('class snapshots are pre-race, immutable and idempotent', async () => {
   const second = await persistClassExposureFeatures(env, 'class_target');
   assert.equal(first.writes, 7);
   assert.equal(second.writes, 0);
-  const rows = db.prepare(`SELECT * FROM analysis_features WHERE race_entry_id='class_target' AND feature_version='class-exposure-v1'`).all();
+  const rows = db.prepare(`SELECT * FROM analysis_features WHERE race_entry_id='class_target' AND feature_version='class-exposure-v2'`).all();
   assert.equal(rows.length, 7);
-  assert.ok(rows.every((row) => JSON.parse(row.provenance_json).knownClassPrizeCount === 6));
+  assert.ok(rows.every((row) => JSON.parse(row.provenance_json).fieldCoverage.firstPrize === 6));
 });
