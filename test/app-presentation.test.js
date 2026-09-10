@@ -74,9 +74,11 @@ test('settings wrapper does not swallow the reserved game summary route', async 
   const { env, db } = createTestEnv();
   env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
   db.prepare(`INSERT INTO game_rounds (id, game_type, round_date, status) VALUES ('round_summary','V85','2099-01-03','upcoming')`).run();
+  db.prepare(`INSERT INTO systems (id, game_round_id, system_type, budget_sek, row_count, spike_count, created_at) VALUES ('system_summary','round_summary','main',200,120,3,'2099-01-03T10:00:00Z')`).run();
   const cookie = (await createAppSessionCookie(env)).split(';')[0];
   const response = await worker.fetch(new Request('https://example.test/app/api/games/summary', { headers: { cookie } }), env);
   assert.equal(response.status, 200);
   const data = await response.json();
   assert.equal(data.all.rounds, 1);
+  assert.equal(data.savedSystems, 1);
 });
