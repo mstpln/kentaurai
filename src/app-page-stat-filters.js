@@ -21,6 +21,7 @@ const statsFilterCss = `
 .stat-filter-card-head{min-height:62px;padding:14px 16px;border-bottom:1px solid var(--line-soft);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .stat-filter-card-head h2{font-size:16px;font-weight:650;margin:0}
 .stat-filter-card-head .stat-pills{justify-content:flex-end}
+.stat-table-scroll{overflow-x:auto}
 .stat-filter-table{width:100%;border-collapse:collapse}
 .stat-filter-table th,.stat-filter-table td{padding:11px 13px;text-align:left;border-bottom:1px solid var(--line-soft);white-space:nowrap}
 .stat-filter-table tr:last-child td{border-bottom:0}
@@ -29,8 +30,8 @@ const statsFilterCss = `
 .stat-filter-table td:first-child{font-weight:550;color:var(--text)}
 .stat-table-empty{padding:18px 16px;color:var(--muted);font-size:12px}
 .stat-filter-loading{padding:18px;color:var(--muted);font-size:12px}
-@media(max-width:900px){.breakdown-grid.entity-filter-grid{grid-template-columns:1fr}.stat-filter-card-head{min-height:auto}}
-@media(max-width:620px){.stat-period-bar{display:block}.stat-filter-label{display:block;margin:0 0 8px}.stat-pills{flex-wrap:nowrap;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}.stat-pills::-webkit-scrollbar{display:none}.stat-filter-card-head{display:block}.stat-filter-card-head .stat-pills{margin-top:10px;justify-content:flex-start}.stat-filter-table th,.stat-filter-table td{padding:10px 9px}.stat-filter-table th{font-size:8px}.stat-filter-table td{font-size:11px}.stat-filter-card{overflow-x:auto}}
+@media(max-width:1200px){.breakdown-grid.entity-filter-grid{grid-template-columns:1fr}.stat-filter-card-head{min-height:auto}}
+@media(max-width:620px){.stat-period-bar{display:block}.stat-filter-label{display:block;margin:0 0 8px}.stat-pills{flex-wrap:nowrap;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}.stat-pills::-webkit-scrollbar{display:none}.stat-filter-card-head{display:block}.stat-filter-card-head .stat-pills{margin-top:10px;justify-content:flex-start}.stat-filter-table th,.stat-filter-table td{padding:10px 9px}.stat-filter-table th{font-size:8px}.stat-filter-table td{font-size:11px}}
 </style>`;
 
 const statsFilterScript = `
@@ -75,7 +76,7 @@ function formatLabel(kind,label){
 function statTable(title,kind,rows,methodValue){
   const toggles=(kind==='distance'||kind==='track')?pills(methodOptions(),methodValue,kind==='distance'?'data-distance-method':'data-track-method'):'';
   const body=(rows||[]).length?(rows||[]).map(row=>'<tr><td>'+esc(formatLabel(kind,row.label))+'</td><td>'+num(row.starts)+'</td><td>'+num(row.wins)+'</td><td>'+esc(formatRate(row.winRate))+'</td><td>'+esc(formatRate(row.top3Rate))+'</td><td>'+esc(formatRate(row.gallopRate))+'</td></tr>').join(''):'';
-  return '<div class="card stat-filter-card"><div class="stat-filter-card-head"><h2>'+esc(title)+'</h2>'+toggles+'</div>'+(body?'<table class="stat-filter-table"><thead><tr><th>Grupp</th><th>Starter</th><th>Vinster</th><th>Vinst %</th><th>Topp 3 %</th><th>Galopp %</th></tr></thead><tbody>'+body+'</tbody></table>':'<div class="stat-table-empty">Ingen statistik för valt filter.</div>')+'</div>';
+  return '<div class="card stat-filter-card"><div class="stat-filter-card-head"><h2>'+esc(title)+'</h2>'+toggles+'</div>'+(body?'<div class="stat-table-scroll"><table class="stat-filter-table"><thead><tr><th>Grupp</th><th>Starter</th><th>Vinster</th><th>Vinst %</th><th>Topp 3 %</th><th>Galopp %</th></tr></thead><tbody>'+body+'</tbody></table></div>':'<div class="stat-table-empty">Ingen statistik för valt filter.</div>')+'</div>';
 }
 function bindFilterButtons(){
   const filters=filtersForCurrentEntity();
