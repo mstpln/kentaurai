@@ -28,45 +28,21 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "Cloudflare token is not configured"; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "Cloudflare account id is not configured"; exit 1; }
           echo "::add-mask::$CLOUDFLARE_API_TOKEN"
-
           api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$D1_DATABASE_ID/query"
           response_file="$(mktemp)"
           trap 'rm -f "$response_file"' EXIT
-
           query() {
             local sql="$1"
             local code
-            code="$(curl --silent --show-error --output "$response_file" --write-out '%{http_code}' \
-              --request POST \
-              --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-              --header 'Content-Type: application/json' \
-              --data "$(jq -cn --arg sql "$sql" '{sql:$sql}')" \
-              "$api")"
+            code="$(curl --silent --show-error --output "$response_file" --write-out '%{http_code}' --request POST --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" --header 'Content-Type: application/json' --data "$(jq -cn --arg sql "$sql" '{sql:$sql}')" "$api")"
             [[ "$code" == "200" ]] || { echo "D1 query failed (HTTP $code)"; exit 1; }
-            jq -e '.success == true and (.result | length >= 1) and (.result | all(.success == true))' "$response_file" > /dev/null || {
-              echo "D1 query returned an unsuccessful result";
-              exit 1;
-            }
+            jq -e '.success == true and (.result | length >= 1) and (.result | all(.success == true))' "$response_file" > /dev/null || { echo "D1 query returned an unsuccessful result"; exit 1; }
           }
-
-          query "SELECT status,start_date,end_date,next_date,next_race_index,processed_dates,processed_races,reused_races,consecutive_errors,last_error,last_run_at,updated_at FROM historical_backfill_jobs WHERE start_date='2023-09-08' AND end_date='2026-09-07' ORDER BY created_at DESC LIMIT 1;"
-          echo "Official backfill:"
-          jq -c '.result[0].results[0] // {}' "$response_file"
-
-          query "SELECT status,start_date,end_date,next_date,next_race_index,processed_dates,processed_races,reused_races,unavailable_dates,unavailable_races,consecutive_errors,last_error,retry_after,last_run_at,updated_at FROM xlabs_backfill_jobs WHERE scope='historical_all' AND start_date='2023-09-08' AND end_date='2026-09-07' ORDER BY created_at DESC LIMIT 1;"
-          echo "X-Labs backfill:"
-          jq -c '.result[0].results[0] // {}' "$response_file"
-
-          query "SELECT source_type,status,started_at,finished_at,error_count,error_json,metadata_json FROM import_runs WHERE source_type='scheduled_orchestrator' ORDER BY started_at DESC LIMIT 5;"
-          echo "Recent orchestrators:"
-          jq -c '.result[0].results' "$response_file"
-
-          query "SELECT external_id,quality_status,fetched_at,raw_object_key FROM source_records WHERE source_type='official_provider' AND external_id LIKE 'race:2026-08-15_%' ORDER BY external_id,fetched_at DESC;"
-          echo "Official race sources for 2026-08-15:"
-          jq -c '.result[0].results' "$response_file"
-
-          query "SELECT id,race_number,track_id,source_quality FROM races WHERE race_date='2026-08-15' ORDER BY id;"
-          echo "Normalized races for 2026-08-15:"
-          jq -c '.result[0].results' "$response_file"
-
-# investigate failing official historical checkpoint 2026-09-10
+          query "SELECT status,next_date,next_race_index,processed_dates,processed_races,consecutive_errors,last_error,last_run_at FROM historical_backfill_jobs WHERE start_date='2023-09-08' AND end_date='2026-09-07' ORDER BY created_at DESC LIMIT 1;"
+          echo "Official backfill:"; jq -c '.result[0].results[0] // {}' "$response_file"
+          query "SELECT t.id,t.canonical_name,x.external_id FROM track_external_ids x JOIN tracks t ON t.id=x.track_id WHERE x.source_type='official' AND x.external_id='47' LIMIT 5;"
+          echo "Track 47:"; jq -c '.result[0].results' "$response_file"
+          query "SELECT id,source_type,status,started_at,finished_at,error_count,error_json,metadata_json FROM import_runs WHERE source_type IN ('official_historical_backfill_step','official_historical_race_normalize') AND (error_json LIKE '%missing horse identity%' OR metadata_json LIKE '%2026-08-15_47_1%') ORDER BY started_at DESC LIMIT 10;"
+          echo "Relevant failures:"; jq -c '.result[0].results' "$response_file"
+          query "SELECT id,external_id,source_url,fetched_at,quality_status,metadata_json FROM source_records WHERE source_type='official_provider' AND external_id='race:2026-08-15_47_1' ORDER BY fetched_at DESC LIMIT 5;"
+          echo "Problem source:"; jq -c '.result[0].results' "$response_file"
