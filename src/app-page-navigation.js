@@ -25,18 +25,20 @@ export function groupDistanceRows(rows = []) {
   const grouped = new Map();
   for (const row of rows || []) {
     const label = standardDistanceGroup(row?.label);
-    const current = grouped.get(label) || { label, starts: 0, resultStarts: 0, wins: 0, top3: 0 };
+    const current = grouped.get(label) || { label, starts: 0, resultStarts: 0, wins: 0, top3: 0, gallops: 0 };
     current.starts += Number(row?.starts || 0);
     current.resultStarts += Number(row?.resultStarts || 0);
     current.wins += Number(row?.wins || 0);
     current.top3 += Number(row?.top3 || 0);
+    current.gallops += Number(row?.gallops || 0);
     grouped.set(label, current);
   }
   return Array.from(grouped.values())
     .map((row) => ({
       ...row,
       winRate: row.resultStarts ? row.wins / row.resultStarts : null,
-      top3Rate: row.resultStarts ? row.top3 / row.resultStarts : null
+      top3Rate: row.resultStarts ? row.top3 / row.resultStarts : null,
+      gallopRate: row.resultStarts ? row.gallops / row.resultStarts : null
     }))
     .sort((a, b) => {
       if (b.starts !== a.starts) return b.starts - a.starts;
