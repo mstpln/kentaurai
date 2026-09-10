@@ -4,7 +4,7 @@ KentaurAI is the factual database, deterministic calculation and persistence lay
 
 ## Contract
 
-The exchange has two explicit stages.
+The exchange is deliberately pre-race only and has two explicit stages. A round must have a verified future betting/start deadline; new contexts/submissions fail closed after that deadline so post-race facts cannot leak into a pre-race analysis.
 
 1. `pre_market`: KentaurAI returns current factual race/entry context, verified historical starts and X-Labs measurements, approved deterministic market-blind features, and structured editorial signals. Current betting percentages, odds, turnover and jackpot are excluded. The AI returns its market-blind race assessment: scenarios, ranking, ABCD group, win probability, uncertainty and reasoning for every active entry.
 2. `market`: available only after a `pre_market` submission has been stored. KentaurAI returns the current market snapshot linked to that parent. The AI may then return value/system recommendations and one or more systems. The final submission cannot rewrite the stored market-blind probabilities/ranks/ABCD assessment; KentaurAI copies those values from the parent and calculates value ratios from stored market percentages.
@@ -14,6 +14,8 @@ Every context carries a SHA-256 fingerprint. A submission is rejected if the rel
 ## Provider neutrality and identity
 
 Each submission records its producer provider/model and its own stable `submission_id`. Different providers can store analyses for the same round without overwriting each other. A final submission references exactly one stored pre-market parent from the same provider.
+
+A `submission_id` is also an idempotency key. Retrying the exact same client payload is a no-op that returns the existing submission; changed content under the same ID is rejected and must use a new ID.
 
 The exchange does not call an AI model from the Worker and does not require a specific vendor API. The authorized AI client reads/writes through the private API.
 
