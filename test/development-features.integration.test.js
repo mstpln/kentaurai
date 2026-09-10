@@ -28,6 +28,7 @@ test('development compares the latest three factual starts with the preceding th
   const { env, db } = createTestEnv();
   seed(db);
   const result = await calculateDevelopmentFeatures(env, 'dev_target');
+  assert.equal(result.featureVersion, 'development-v2');
   assert.equal(result.sampleSize, 6);
   assert.equal(result.dataQuality, 'sufficient');
   assert.equal(result.features.development_recent_avg_placing_3, 2);
@@ -49,7 +50,7 @@ test('development refuses post-race as-of snapshots and future results do not le
   seed(db);
   db.prepare(`INSERT INTO races (id, track_id, race_date, race_number, scheduled_start_at, first_prize_sek) VALUES ('dev_future_race','dev_track','2099-02-02',2,'2099-02-02T12:00:00Z',500000)`).run();
   db.prepare(`INSERT INTO race_entries (id, race_id, horse_id, start_number) VALUES ('dev_future_entry','dev_future_race','dev_horse',2)`).run();
-  db.prepare(`INSERT INTO race_results (race_entry_id, placing, placing_text, prize_sek, result_status) VALUES ('dev_future_entry',1,'1',500000,'finished')`).run();
+  db.prepare(`INSERT INTO race_results (race_entry_id, placing, placing_text, prize_sek, gallop, disqualified, result_status) VALUES ('dev_future_entry',1,'1',500000,0,0,'finished')`).run();
   const result = await calculateDevelopmentFeatures(env, 'dev_target');
   assert.equal(result.sampleSize, 6);
   assert.equal(result.features.development_recent_earnings_3, 120000);
@@ -63,11 +64,26 @@ test('unknown class facts stay null and partial samples are marked limited', asy
   const result = await calculateDevelopmentFeatures(env, 'dev_target', { asOf: '2099-01-18T00:00:00Z' });
   assert.equal(result.dataQuality, 'limited');
   assert.equal(result.sampleSize, 4);
-  assert.equal(result.features.development_recent_avg_first_prize_3, 35000);
+  assert.equal(result.features.development_recent_avg_first_prize_3, null);
   assert.equal(result.features.development_previous_avg_first_prize_3, 20000);
   const full = await calculateDevelopmentFeatures(env, 'dev_target');
   assert.equal(full.features.development_recent_avg_first_prize_3, null);
   assert.equal(full.features.development_class_exposure_ratio, null);
+});
+
+test('unknown result fields do not become false zeroes or partial aggregates', async () => {
+  const { env, db } = createTestEnv();
+  seed(db);
+  db.prepare(`UPDATE race_results SET placing = NULL, placing_text = 'unknown', prize_sek = NULL, gallop = NULL, disqualified = NULL WHERE race_entry_id = 'dev_entry_6'`).run();
+  const result = await calculateDevelopmentFeatures(env, 'dev_target');
+  assert.equal(result.features.development_recent_avg_placing_3, null);
+  assert.equal(result.features.development_recent_top3_rate_3, null);
+  assert.equal(result.features.development_top3_rate_delta, null);
+  assert.equal(result.features.development_recent_earnings_3, null);
+  assert.equal(result.features.development_earnings_ratio, null);
+  assert.equal(result.features.development_recent_gallops_3, null);
+  assert.equal(result.features.development_recent_disqualifications_3, null);
+  assert.deepEqual(result.coverage.recent, { placings: 2, firstPrizes: 3, earnings: 2, gallops: 2, disqualifications: 2 });
 });
 
 test('development snapshots persist immutably and idempotently', async () => {
@@ -77,7 +93,8 @@ test('development snapshots persist immutably and idempotently', async () => {
   const second = await persistDevelopmentFeatures(env, 'dev_target');
   assert.equal(first.writes, 16);
   assert.equal(second.writes, 0);
-  const rows = db.prepare(`SELECT * FROM analysis_features WHERE race_entry_id='dev_target' AND feature_version='development-v1'`).all();
+  const rows = db.prepare(`SELECT * FROM analysis_features WHERE race_entry_id='dev_target' AND feature_version='development-v2'`).all();
   assert.equal(rows.length, 16);
   assert.ok(rows.every((row) => JSON.parse(row.provenance_json).sampleSize === 6));
+  assert.ok(rows.every((row) => JSON.parse(row.provenance_json).coverage.recent.placings === 3));
 });
