@@ -10,6 +10,17 @@ export function officialRaceSourceGap(error) {
   };
 }
 
+export function officialGameSourceGap(error) {
+  const message = String(error?.message || '');
+  const match = /^races\[(\d+)\]\.starts\[(\d+)\]\.horse\.id is required$/.exec(message);
+  if (!match) return null;
+  return {
+    code: 'missing_horse_identity',
+    raceIndex: Number(match[1]),
+    startIndex: Number(match[2])
+  };
+}
+
 export async function markOfficialRaceSourceGap(env, sourceRecordId, gap) {
   if (!env.DB) throw new Error('DB is not configured');
   const id = String(sourceRecordId || '').trim();
@@ -32,10 +43,10 @@ export async function markOfficialRaceSourceGap(env, sourceRecordId, gap) {
     metadata = {};
   }
   metadata.normalizationStatus = 'source_gap';
-  metadata.sourceGap = {
-    code: gap.code,
-    startNumber: Number.isInteger(gap.startNumber) ? gap.startNumber : null
-  };
+  metadata.sourceGap = { code: gap.code };
+  for (const field of ['startNumber', 'raceIndex', 'startIndex']) {
+    if (Number.isInteger(gap[field])) metadata.sourceGap[field] = gap[field];
+  }
 
   const result = await env.DB.prepare(`
     UPDATE source_records
