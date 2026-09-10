@@ -1,4 +1,4 @@
-name: Resume and verify official historical backfill
+name: Verify resumed production history
 
 on:
   push:
@@ -12,11 +12,11 @@ permissions:
   contents: read
 
 jobs:
-  resume:
+  verify:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Resume exact failed production job and verify state
+      - name: Read production backfill state
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -24,8 +24,8 @@ jobs:
           D1_DATABASE_ID: d8189e0e-6127-4ef2-88cc-534cb2217340
         run: |
           set -euo pipefail
-          test -n "$CLOUDFLARE_API_TOKEN" || { echo "Cloudflare token is not configured"; exit 1; }
-          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "Cloudflare account id is not configured"; exit 1; }
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
           echo "::add-mask::$CLOUDFLARE_API_TOKEN"
           api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$D1_DATABASE_ID/query"
           response_file="$(mktemp)"
@@ -34,20 +34,14 @@ jobs:
             local sql="$1"
             local code
             code="$(curl --silent --show-error --output "$response_file" --write-out '%{http_code}' --request POST --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" --header 'Content-Type: application/json' --data "$(jq -cn --arg sql "$sql" '{sql:$sql}')" "$api")"
-            [[ "$code" == "200" ]] || { echo "D1 query failed (HTTP $code)"; exit 1; }
-            jq -e '.success == true and (.result | length >= 1) and (.result | all(.success == true))' "$response_file" > /dev/null || { echo "D1 query returned an unsuccessful result"; exit 1; }
+            [[ "$code" == "200" ]]
+            jq -e '.success == true and (.result | all(.success == true))' "$response_file" >/dev/null
           }
-
-          job_id='backfill_official-se-trot-v2__2023-09-08__2026-09-07'
-          query "SELECT status,next_date,next_race_index,processed_races,consecutive_errors,last_error FROM historical_backfill_jobs WHERE id='$job_id' LIMIT 1;"
-          echo "Before resume:"; jq -c '.result[0].results[0] // {}' "$response_file"
-          jq -e '.result[0].results[0] | .status == "failed" and .next_date == "2026-08-15" and .next_race_index == 22 and .processed_races == 576 and .consecutive_errors == 3 and .last_error == "official race start 1 is missing horse identity"' "$response_file" > /dev/null || { echo "Guard failed: production job state changed; refusing mutation"; exit 1; }
-
-          query "UPDATE historical_backfill_jobs SET status='running', consecutive_errors=0, last_error=NULL, lease_token=NULL, lease_until=NULL, updated_at=CURRENT_TIMESTAMP WHERE id='$job_id' AND status='failed' AND next_date='2026-08-15' AND next_race_index=22 AND processed_races=576 AND consecutive_errors=3 AND last_error='official race start 1 is missing horse identity';"
-          changes="$(jq -r '.result[0].meta.changes // 0' "$response_file")"
-          [[ "$changes" == "1" ]] || { echo "Resume update did not change exactly one row"; exit 1; }
-          echo "Resume mutation applied to exactly one guarded job row."
-
-          query "SELECT status,next_date,next_race_index,processed_races,consecutive_errors,last_error,lease_token,lease_until FROM historical_backfill_jobs WHERE id='$job_id' LIMIT 1;"
-          echo "After resume:"; jq -c '.result[0].results[0] // {}' "$response_file"
-          jq -e '.result[0].results[0] | .status == "running" and .next_date == "2026-08-15" and .next_race_index == 22 and .processed_races == 576 and .consecutive_errors == 0 and .last_error == null and .lease_token == null and .lease_until == null' "$response_file" > /dev/null || { echo "Post-resume verification failed"; exit 1; }
+          query "SELECT status,next_date,next_race_index,processed_dates,processed_races,reused_races,consecutive_errors,last_error,last_run_at,updated_at FROM historical_backfill_jobs WHERE id='backfill_official-se-trot-v2__2023-09-08__2026-09-07' LIMIT 1;"
+          echo "Official backfill:"; jq -c '.result[0].results[0] // {}' "$response_file"
+          query "SELECT status,next_date,next_race_index,processed_dates,processed_races,reused_races,unavailable_dates,unavailable_races,consecutive_errors,last_error,retry_after,last_run_at,updated_at FROM xlabs_backfill_jobs WHERE scope='historical_all' AND start_date='2023-09-08' AND end_date='2026-09-07' ORDER BY created_at DESC LIMIT 1;"
+          echo "X-Labs backfill:"; jq -c '.result[0].results[0] // {}' "$response_file"
+          query "SELECT external_id,quality_status,metadata_json,fetched_at FROM source_records WHERE source_type='official_provider' AND external_id='race:2026-08-15_47_1' ORDER BY fetched_at DESC LIMIT 3;"
+          echo "Problem race source status:"; jq -c '.result[0].results' "$response_file"
+          query "SELECT status,started_at,finished_at,error_count,error_json,metadata_json FROM import_runs WHERE source_type='scheduled_orchestrator' ORDER BY started_at DESC LIMIT 4;"
+          echo "Recent orchestrators:"; jq -c '.result[0].results' "$response_file"
