@@ -1,5 +1,13 @@
 import worker from './index.js';
 import { requireAdmin } from './auth.js';
+import {
+  getRoundAnalysisSubmission,
+  listAnalyzableRounds,
+  listRoundAnalysisSubmissions,
+  prepareAnalysisContext,
+  readAnalysisSubmissionJson,
+  submitAnalysis
+} from './analysis-api.js';
 import { runNextPostRaceReview } from './post-race-review.js';
 import { pwaIcon, pwaManifest, pwaServiceWorker } from './pwa.js';
 
@@ -22,6 +30,46 @@ function json(data, status = 200) {
   });
 }
 
+async function handleAnalysisApi(request, env, url) {
+  const denied = requireAdmin(request, env);
+  if (denied) return denied;
+  try {
+    const path = url.pathname;
+    if (request.method === 'GET' && path === '/v1/analysis/rounds') {
+      return json(await listAnalyzableRounds(env, { limit: url.searchParams.get('limit') }));
+    }
+
+    const contextMatch = path.match(/^\/v1\/analysis\/rounds\/([^/]+)\/context$/);
+    if (request.method === 'GET' && contextMatch) {
+      const roundId = decodeURIComponent(contextMatch[1]);
+      return json(await prepareAnalysisContext(env, roundId, url.searchParams.get('stage') || 'pre_market', {
+        preMarketSubmissionId: url.searchParams.get('pre_market_submission_id')
+      }));
+    }
+
+    const submissionsMatch = path.match(/^\/v1\/analysis\/rounds\/([^/]+)\/submissions$/);
+    if (submissionsMatch && request.method === 'GET') {
+      return json(await listRoundAnalysisSubmissions(env, decodeURIComponent(submissionsMatch[1])));
+    }
+    if (submissionsMatch && request.method === 'POST') {
+      const payload = await readAnalysisSubmissionJson(request);
+      const roundId = decodeURIComponent(submissionsMatch[1]);
+      if (String(payload?.round_id ?? payload?.roundId ?? '') !== roundId) throw new Error('round_id must match the round in the request path');
+      return json(await submitAnalysis(env, payload), 201);
+    }
+
+    const submissionMatch = path.match(/^\/v1\/analysis\/rounds\/([^/]+)\/submissions\/([^/]+)$/);
+    if (request.method === 'GET' && submissionMatch) {
+      const result = await getRoundAnalysisSubmission(env, decodeURIComponent(submissionMatch[1]), decodeURIComponent(submissionMatch[2]));
+      return result ? json(result) : json({ error: 'not_found' }, 404);
+    }
+    return json({ error: 'not_found' }, 404);
+  } catch (error) {
+    console.error(error);
+    return json({ error: 'request_failed', message: error.message }, 400);
+  }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -39,6 +87,8 @@ export default {
         }
       });
     }
+
+    if (url.pathname.startsWith('/v1/analysis/')) return handleAnalysisApi(request, env, url);
 
     if (request.method === 'POST' && url.pathname === '/v1/post-race/review-next') {
       const denied = requireAdmin(request, env);

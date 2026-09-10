@@ -10,6 +10,17 @@
 - Raw verified facts, deterministic calculated features and AI judgments remain separate layers.
 - Unknown factual data is null/unknown; it is never invented for presentation convenience.
 
+## External AI analysis exchange
+1. KentaurAI is the factual database, deterministic calculation and persistence layer. The normal product does not run a separate autonomous AI model inside the Worker.
+2. ChatGPT, Claude or another authorized AI client may read the same private structured round context and store independent analyses without overwriting another provider/model submission.
+3. New analysis is pre-race only. A verified future betting/start deadline is required; post-deadline attempts fail closed so later facts cannot contaminate a pre-race judgment.
+4. Analysis is split into two stages. `pre_market` contains official facts, X-Labs, approved deterministic market-blind features and structured editorial signals, but excludes current betting percentages, odds, turnover and jackpot. `market` is available only after a pre-market parent has been stored.
+5. The market-aware final pass may add value/system recommendations but cannot rewrite the stored parent win probabilities, raw ranking or ABCD strength groups. ABCD remains strength, not value.
+6. KentaurAI derives value ratios and system factual fields from stored inputs rather than trusting AI-supplied market facts or totals. Every saved V85/V86 system still has exactly three actual one-horse spike legs and row count is derived from the eight-leg selection product.
+7. Every context has a stable SHA-256 fingerprint. Stale context submissions are rejected. Submission IDs are immutable idempotency keys: exact retries are no-ops; revised content requires a new ID.
+8. Analysis exchange routes remain private under existing `ADMIN_TOKEN` authentication. Real analyses live in private D1 and are not committed to GitHub.
+9. Stored analyses/systems feed deterministic post-race scoring. A wrong outcome is evidence to review, not an automatic logic/model change; learning remains No change / Candidate / Confirmed.
+
 ## Interface direction
 1. Horse, trainer and driver remain primary detail entities, with V85/V86 system/performance history available in a dedicated Spel area.
 2. Bottom navigation is fixed as **Trend -> Tränare -> Hästar -> Kuskar -> Spel**.
@@ -49,6 +60,8 @@
 14. A daily X-Labs catch-up job is created at `04:30 UTC` for the previous UTC date. Single-day jobs have priority over the long historical X-Labs job so recent measurements are not blocked by multi-year catch-up.
 15. X-Labs date pages and the verified application-script context remain archived for provenance before race-object capture; raw race telemetry is archived before normalization, and only the verified telemetry subset is written to D1.
 16. Pending current/live official normalization is attempted before the larger historical batches, and eligible daily V85/V86 X-Labs work continues to outrank `historical_all`. Existing backfill jobs retain their stored cursors and continue in place when batching code is deployed.
+17. Recent ordinary-race official history is maintained by stable rolling one-day jobs for the previous three settled UTC dates. They reuse the same raw capture, final-result validation, checkpoint/source-gap rules and get priority over the long historical official job before control returns to the persisted long-history cursor.
+18. A daily X-Labs job whose official live prerequisite never existed may close cleanly once its target date becomes older than yesterday. This closes stale orchestration work only; it does not claim that X-Labs telemetry was checked or unavailable.
 
 ## Spel and post-race analysis
 1. Every V85/V86 system has exactly three spikar in three different legs, with one selected horse in each spike leg.
