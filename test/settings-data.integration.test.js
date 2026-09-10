@@ -80,6 +80,10 @@ test('settings routes are private and settings UI includes the shared gear and S
 
   const cookie = await sessionCookie(env);
   response = await worker.fetch(new Request('https://example.test/app', { headers: { cookie } }), env);
+  assert.equal(response.status, 303);
+  assert.equal(response.headers.get('location'), '/app/');
+
+  response = await worker.fetch(new Request('https://example.test/app/', { headers: { cookie } }), env);
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /id="settingsButton"/);
