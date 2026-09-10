@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createTestEnv } from './helpers/d1.js';
 import worker from '../src/index.js';
 import { normalizeCapturedOfficialRace, officialRaceHasFinalResults, validateOfficialRacePayload } from '../src/import/official-historical-race.js';
-import { runHistoricalBackfillBatch, runHistoricalBackfillStep, startHistoricalBackfill, swedishTrottingRaceIds } from '../src/import/official-historical-backfill.js';
+import { runHistoricalBackfillStep, startHistoricalBackfill, swedishTrottingRaceIds } from '../src/import/official-historical-backfill.js';
 
 const DATE = '2099-04-10';
 const RACE_ID = `${DATE}_7_5`;
@@ -12,13 +12,13 @@ function person(id, firstName, lastName) {
   return { id, firstName, lastName, homeTrack: { id: 7, name: 'Synthetic Park' } };
 }
 
-function racePayload(date = DATE, raceNumber = 5) {
-  const raceId = `${date}_7_${raceNumber}`;
+function racePayload(date = DATE) {
+  const raceId = `${date}_7_5`;
   return {
     id: raceId,
     name: 'Synthetic ordinary race',
     date,
-    number: raceNumber,
+    number: 5,
     distance: 2140,
     startMethod: 'auto',
     startTime: `${date}T15:00:20`,
@@ -66,17 +66,12 @@ function racePayload(date = DATE, raceNumber = 5) {
   };
 }
 
-function calendarPayload(date = DATE, raceNumbers = [5]) {
+function calendarPayload(date = DATE) {
+  const raceId = `${date}_7_5`;
   return {
     date,
     tracks: [
-      {
-        id: 7,
-        name: 'Synthetic Park',
-        countryCode: 'SE',
-        sport: 'trot',
-        races: raceNumbers.map((raceNumber) => ({ id: `${date}_7_${raceNumber}`, number: raceNumber }))
-      },
+      { id: 7, name: 'Synthetic Park', countryCode: 'SE', sport: 'trot', races: [{ id: raceId, number: 5 }] },
       { id: 45, name: 'Synthetic Gallop', countryCode: 'SE', sport: 'gallop', races: [{ id: `${date}_45_1` }] },
       { id: 96, name: 'Synthetic Foreign', countryCode: 'NO', sport: 'trot', races: [{ id: `${date}_96_1` }] }
     ],
@@ -247,13 +242,11 @@ test('three failures stop at the same checkpoint and explicit resume continues i
   const failingFetch = async () => new Response('temporarily unavailable', { status: 503 });
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     await assert.rejects(() => runHistoricalBackfillStep(env, job.id, { fetchImpl: failingFetch }), /HTTP 503/);
-    const state = db.prepare('SELECT status, next_date, next_race_index, consecutive_errors, lease_until FROM historical_backfill_jobs WHERE id = ?').get(job.id);
+    const state = db.prepare('SELECT status, next_date, next_race_index, consecutive_errors FROM historical_backfill_jobs WHERE id = ?').get(job.id);
     assert.equal(state.next_date, DATE);
     assert.equal(state.next_race_index, 0);
     assert.equal(state.consecutive_errors, attempt);
     assert.equal(state.status, attempt === 3 ? 'failed' : 'running');
-    assert.ok(state.lease_until);
-    if (attempt < 3) db.prepare(`UPDATE historical_backfill_jobs SET lease_until = '2000-01-01T00:00:00Z' WHERE id = ?`).run(job.id);
   }
 
   const resumed = await startHistoricalBackfill(env, DATE, DATE, { resume: true });
@@ -266,62 +259,4 @@ test('three failures stop at the same checkpoint and explicit resume continues i
   const result = await runHistoricalBackfillStep(env, job.id, { fetchImpl: successfulFetch });
   assert.equal(result.raceId, RACE_ID);
   assert.equal(result.checkpoint.nextRaceIndex, 1);
-});
-
-test('official batch commits the first checkpoint and stops when the second source request fails', async () => {
-  const { env, db } = createTestEnv();
-  const requestedRaces = [];
-  const fetchImpl = async (url) => {
-    if (url.includes('/calendar/day/')) return jsonResponse(calendarPayload(DATE, [5, 6, 7]));
-    const raceId = url.split('/').pop();
-    requestedRaces.push(raceId);
-    if (raceId.endsWith('_6')) return new Response('pushback', { status: 429, headers: { 'retry-after': '180' } });
-    return jsonResponse(racePayload(DATE, Number(raceId.split('_').pop())));
-  };
-  const job = await startHistoricalBackfill(env, DATE, DATE);
-
-  await assert.rejects(
-    () => runHistoricalBackfillBatch(env, job.id, { fetchImpl }),
-    (error) => error.code === 'SOURCE_RATE_LIMITED' && error.httpStatus === 429
-  );
-
-  assert.deepEqual(requestedRaces, [`${DATE}_7_5`, `${DATE}_7_6`]);
-  const state = db.prepare(`
-    SELECT next_race_index, processed_races, consecutive_errors, lease_token, lease_until
-    FROM historical_backfill_jobs WHERE id = ?
-  `).get(job.id);
-  assert.equal(state.next_race_index, 1);
-  assert.equal(state.processed_races, 1);
-  assert.equal(state.consecutive_errors, 1);
-  assert.equal(state.lease_token, null);
-  assert.ok(Date.parse(state.lease_until) > Date.now());
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM races').get().n, 1);
-});
-
-test('official batch advances exactly three of four eligible races and reuses the calendar capture', async () => {
-  const { env, db } = createTestEnv();
-  const requested = [];
-  let calendarFetches = 0;
-  const fetchImpl = async (url) => {
-    if (url.includes('/calendar/day/')) {
-      calendarFetches += 1;
-      return jsonResponse(calendarPayload(DATE, [5, 6, 7, 8]));
-    }
-    const raceId = url.split('/').pop();
-    requested.push(raceId);
-    return jsonResponse(racePayload(DATE, Number(raceId.split('_').pop())));
-  };
-  const job = await startHistoricalBackfill(env, DATE, DATE);
-
-  const result = await runHistoricalBackfillBatch(env, job.id, { fetchImpl });
-
-  assert.equal(result.stepCount, 3);
-  assert.deepEqual(requested, [`${DATE}_7_5`, `${DATE}_7_6`, `${DATE}_7_7`]);
-  assert.equal(calendarFetches, 1);
-  const state = db.prepare(`
-    SELECT next_race_index, processed_races, consecutive_errors
-    FROM historical_backfill_jobs WHERE id = ?
-  `).get(job.id);
-  assert.deepEqual({ ...state }, { next_race_index: 3, processed_races: 3, consecutive_errors: 0 });
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM races').get().n, 3);
 });

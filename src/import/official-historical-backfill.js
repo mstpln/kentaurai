@@ -2,14 +2,12 @@ import { stableId } from '../ids.js';
 import { finishImportRun, startImportRun } from './common.js';
 import { normalizeCapturedOfficialRace, officialRaceHasFinalResults } from './official-historical-race.js';
 import { captureCalendar, captureRace, validateIsoDate } from '../provider/official.js';
-import { sourceFailureRetryDelayMs } from '../provider/source-error.js';
 
 const SOURCE_TYPE = 'official_provider';
 const NORMALIZED_QUALITY = 'normalized_verified_subset';
 const BACKFILL_VERSION = 'official-se-trot-v2';
 const MAX_RANGE_DAYS = 1096;
 const MAX_EMPTY_DATES_PER_STEP = 14;
-export const MAX_HISTORICAL_CHECKPOINTS_PER_BATCH = 3;
 
 function addDays(date, days) {
   const value = new Date(`${validateIsoDate(date)}T00:00:00Z`);
@@ -82,8 +80,7 @@ export async function startHistoricalBackfill(env, startDate, endDate, { resume 
     await env.DB.prepare(`
       UPDATE historical_backfill_jobs
       SET status = CASE WHEN next_date >= start_date THEN 'running' ELSE status END,
-          consecutive_errors = 0, last_error = NULL, lease_token = NULL, lease_until = NULL,
-          updated_at = CURRENT_TIMESTAMP
+          consecutive_errors = 0, last_error = NULL, updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND status = 'failed'
     `).bind(id).run();
   }
@@ -217,35 +214,14 @@ export async function runHistoricalBackfillStep(env, jobId = null, options = {})
     throw new Error(`no Swedish trotting races found within ${MAX_EMPTY_DATES_PER_STEP} checkpoint dates`);
   } catch (error) {
     counts.errors = 1;
-    const retryDelayMs = sourceFailureRetryDelayMs(error);
-    const retryAt = retryDelayMs == null ? null : new Date(Date.now() + retryDelayMs).toISOString();
     await env.DB.prepare(`
       UPDATE historical_backfill_jobs
       SET consecutive_errors = consecutive_errors + 1,
           status = CASE WHEN consecutive_errors + 1 >= 3 THEN 'failed' ELSE 'running' END,
-          last_error = ?, last_run_at = ?, lease_token = NULL, lease_until = ?, updated_at = CURRENT_TIMESTAMP
+          last_error = ?, last_run_at = ?, lease_token = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND lease_token = ?
-    `).bind(String(error.message).slice(0, 1000), new Date().toISOString(), retryAt, job.id, leaseToken).run();
+    `).bind(String(error.message).slice(0, 1000), new Date().toISOString(), job.id, leaseToken).run();
     await finishImportRun(env, run.id, counts, error);
     throw error;
   }
-}
-
-export async function runHistoricalBackfillBatch(env, jobId = null, options = {}) {
-  const step = options.stepImpl || runHistoricalBackfillStep;
-  const results = [];
-  for (let index = 0; index < MAX_HISTORICAL_CHECKPOINTS_PER_BATCH; index += 1) {
-    const result = await step(env, jobId, options);
-    results.push(result);
-    if (!result || result.done || result.status !== 'running') break;
-  }
-  const last = results.at(-1) || { status: 'idle', done: true };
-  return {
-    jobId: last.jobId || jobId || null,
-    status: last.status,
-    done: Boolean(last.done),
-    stepCount: results.length,
-    maxCheckpoints: MAX_HISTORICAL_CHECKPOINTS_PER_BATCH,
-    results
-  };
 }

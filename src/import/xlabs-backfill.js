@@ -5,7 +5,6 @@ import { v85V86GameIdsFromCalendar } from './official-live-scheduled.js';
 import { captureXlabsDate, validateXlabsDate } from '../provider/xlabs.js';
 import { captureReferencedXlabsScript } from '../provider/xlabs-script.js';
 import { captureXlabsRaceJson } from '../provider/xlabs-race.js';
-import { sourceFailureRetryDelayMs } from '../provider/source-error.js';
 
 const BACKFILL_VERSION = 'xlabs-race-v1';
 const MAX_RANGE_DAYS = 1096;
@@ -14,7 +13,6 @@ const HISTORICAL_SCOPE = 'historical_all';
 const DAILY_SCOPE = 'daily_v85_v86';
 const HISTORICAL_RETRY_DELAY_MS = 60_000;
 const DAILY_RETRY_DELAY_MS = 15 * 60_000;
-export const MAX_XLABS_CHECKPOINTS_PER_BATCH = 3;
 
 function addDays(date, days) {
   const value = new Date(`${validateXlabsDate(date)}T00:00:00Z`);
@@ -474,37 +472,15 @@ export async function runXlabsBackfillStep(env, jobId = null, options = {}) {
     };
   } catch (error) {
     counts.errors = 1;
-    const retryDelayMs = sourceFailureRetryDelayMs(error);
-    const retryAfter = retryDelayMs == null ? null : new Date(Date.now() + retryDelayMs).toISOString();
     await env.DB.prepare(`
       UPDATE xlabs_backfill_jobs
       SET consecutive_errors = consecutive_errors + 1,
           status = CASE WHEN consecutive_errors + 1 >= 3 THEN 'failed' ELSE 'running' END,
-          last_error = ?, retry_after = ?, last_run_at = ?, lease_token = NULL, lease_until = NULL,
+          last_error = ?, retry_after = NULL, last_run_at = ?, lease_token = NULL, lease_until = NULL,
           updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND lease_token = ?
-    `).bind(String(error.message).slice(0, 1000), retryAfter, new Date().toISOString(), job.id, leaseToken).run();
+    `).bind(String(error.message).slice(0, 1000), new Date().toISOString(), job.id, leaseToken).run();
     await finishImportRun(env, run.id, counts, error);
     throw error;
   }
-}
-
-export async function runXlabsBackfillBatch(env, jobId = null, options = {}) {
-  const step = options.stepImpl || runXlabsBackfillStep;
-  const results = [];
-  for (let index = 0; index < MAX_XLABS_CHECKPOINTS_PER_BATCH; index += 1) {
-    const result = await step(env, jobId, options);
-    results.push(result);
-    if (!result || result.done || result.status !== 'running') break;
-  }
-  const last = results.at(-1) || { status: 'idle', done: true };
-  return {
-    jobId: last.jobId || jobId || null,
-    scope: last.scope || null,
-    status: last.status,
-    done: Boolean(last.done),
-    stepCount: results.length,
-    maxCheckpoints: MAX_XLABS_CHECKPOINTS_PER_BATCH,
-    results
-  };
 }

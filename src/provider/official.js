@@ -1,7 +1,6 @@
 import { archiveRawPayload } from '../raw.js';
 import { discoverProviderShape } from '../import/atg.js';
 import { finishImportRun, startImportRun } from '../import/common.js';
-import { sourceFetchError, sourceHttpError, sourceInvalidResponseError } from './source-error.js';
 
 const DEFAULT_BASE_URL = 'https://www.atg.se/services/racinginfo/v1/api';
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
@@ -77,7 +76,7 @@ export function buildRaceUrl(env, raceId) {
 async function readBoundedText(response) {
   if (!response.body?.getReader) {
     const text = await response.text();
-    if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) throw sourceInvalidResponseError('official provider response exceeded size limit');
+    if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) throw new Error('official provider response exceeded size limit');
     return text;
   }
   const reader = response.body.getReader();
@@ -90,7 +89,7 @@ async function readBoundedText(response) {
     bytes += value.byteLength;
     if (bytes > MAX_RESPONSE_BYTES) {
       await reader.cancel();
-      throw sourceInvalidResponseError('official provider response exceeded size limit');
+      throw new Error('official provider response exceeded size limit');
     }
     parts.push(decoder.decode(value, { stream: true }));
   }
@@ -103,29 +102,25 @@ async function fetchJson(url, fetchImpl) {
   const timeout = setTimeout(() => controller.abort(), 12_000);
   let response;
   try {
-    try {
-      response = await fetchImpl(url, {
-        method: 'GET',
-        headers: { accept: 'application/json' },
-        redirect: 'manual',
-        signal: controller.signal
-      });
-    } catch (error) {
-      throw sourceFetchError(error, 'official provider request', { timeoutMs: 12_000 });
-    }
+    response = await fetchImpl(url, {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+      redirect: 'manual',
+      signal: controller.signal
+    });
   } finally {
     clearTimeout(timeout);
   }
 
-  if (!response.ok) throw sourceHttpError('official provider', response);
+  if (!response.ok) throw new Error(`official provider returned HTTP ${response.status}`);
   const type = response.headers.get('content-type') || '';
-  if (!type.toLowerCase().includes('json')) throw sourceInvalidResponseError('official provider did not return JSON');
+  if (!type.toLowerCase().includes('json')) throw new Error('official provider did not return JSON');
 
   const contentLength = response.headers.get('content-length');
   if (contentLength != null) {
     const declaredLength = Number(contentLength);
     if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
-      throw sourceInvalidResponseError('official provider response exceeded size limit');
+      throw new Error('official provider response exceeded size limit');
     }
   }
 
@@ -134,12 +129,11 @@ async function fetchJson(url, fetchImpl) {
   try {
     const payload = JSON.parse(rawText);
     if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-      throw sourceInvalidResponseError('official provider payload must be an object');
+      throw new Error('payload must be an object');
     }
     return { payload, rawText };
   } catch (error) {
-    if (error?.code === 'SOURCE_INVALID_RESPONSE') throw error;
-    throw sourceInvalidResponseError(`official provider returned invalid JSON: ${error.message}`);
+    throw new Error(`official provider returned invalid JSON: ${error.message}`);
   }
 }
 
@@ -158,9 +152,7 @@ async function capture(env, { kind, identity, url, fetchImpl = fetch, validatePa
 
     const fetchedAt = new Date().toISOString();
     const { payload, rawText } = await fetchJson(url, fetchImpl);
-    if (validatePayload) {
-      try { validatePayload(payload); } catch (error) { throw sourceInvalidResponseError(error.message); }
-    }
+    if (validatePayload) validatePayload(payload);
     const archived = await archiveRawPayload(env, {
       sourceType: 'official_provider',
       externalId: `${kind}:${identity}`,

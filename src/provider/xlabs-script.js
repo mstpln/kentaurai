@@ -1,7 +1,6 @@
 import { archiveRawSnapshot } from '../raw.js';
 import { finishImportRun, startImportRun } from '../import/common.js';
 import { inspectXlabsHtml } from '../routes/xlabs-inspection.js';
-import { sourceFetchError, sourceHttpError, sourceInvalidResponseError } from './source-error.js';
 
 const XLABS_HOST = 'kmtid.atgx.se';
 const MAX_SCRIPT_BYTES = 2 * 1024 * 1024;
@@ -89,19 +88,17 @@ async function fetchScript(url, fetchImpl) {
         redirects += 1;
         continue;
       }
-      if (!response.ok) throw sourceHttpError('X-Labs script', response);
+      if (!response.ok) throw new Error(`X-Labs script returned HTTP ${response.status}`);
       const type = (response.headers.get('content-type') || '').toLowerCase();
       if (type && !type.includes('javascript') && !type.includes('text/plain') && !type.includes('application/octet-stream')) {
-        throw sourceInvalidResponseError('X-Labs script did not return JavaScript');
+        throw new Error('X-Labs script did not return JavaScript');
       }
       const declared = Number(response.headers.get('content-length'));
-      if (Number.isFinite(declared) && declared > MAX_SCRIPT_BYTES) throw sourceInvalidResponseError('X-Labs script exceeded size limit');
+      if (Number.isFinite(declared) && declared > MAX_SCRIPT_BYTES) throw new Error('X-Labs script exceeded size limit');
       const body = await response.text();
-      if (new TextEncoder().encode(body).byteLength > MAX_SCRIPT_BYTES) throw sourceInvalidResponseError('X-Labs script exceeded size limit');
+      if (new TextEncoder().encode(body).byteLength > MAX_SCRIPT_BYTES) throw new Error('X-Labs script exceeded size limit');
       return { body, finalUrl: currentUrl, redirectCount: redirects };
     }
-  } catch (error) {
-    throw sourceFetchError(error, 'X-Labs script capture', { timeoutMs: 12_000 });
   } finally {
     clearTimeout(timeout);
   }

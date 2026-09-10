@@ -2,7 +2,6 @@ import { archiveRawSnapshot } from '../raw.js';
 import { finishImportRun, startImportRun } from '../import/common.js';
 import { validateXlabsDate } from './xlabs.js';
 import { resolveCapturedXlabsRequestPath } from '../routes/xlabs-path-resolution.js';
-import { sourceFetchError, sourceHttpError, sourceInvalidResponseError } from './source-error.js';
 
 const XLABS_HOST = 'kmtid.atgx.se';
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
@@ -364,10 +363,16 @@ function validateRedirectUrl(currentUrl, location, expectedPathname) {
   return target.toString();
 }
 
+function raceHttpError(status) {
+  const error = new Error(`X-Labs race data returned HTTP ${status}`);
+  if (status === 404) error.code = 'XLABS_NOT_FOUND';
+  return error;
+}
+
 async function readBoundedText(response) {
   if (!response.body?.getReader) {
     const text = await response.text();
-    if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) throw sourceInvalidResponseError('X-Labs race-data response exceeded size limit');
+    if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) throw new Error('X-Labs race-data response exceeded size limit');
     return text;
   }
   const reader = response.body.getReader();
@@ -380,7 +385,7 @@ async function readBoundedText(response) {
     bytes += value.byteLength;
     if (bytes > MAX_RESPONSE_BYTES) {
       await reader.cancel();
-      throw sourceInvalidResponseError('X-Labs race-data response exceeded size limit');
+      throw new Error('X-Labs race-data response exceeded size limit');
     }
     parts.push(decoder.decode(value, { stream: true }));
   }
@@ -408,18 +413,19 @@ async function fetchJsonText(url, fetchImpl, timeoutMs = XLABS_FETCH_TIMEOUT_MS)
         redirects += 1;
         continue;
       }
-      if (!response.ok) throw sourceHttpError('X-Labs race data', response, { notFoundCode: 'XLABS_NOT_FOUND' });
+      if (!response.ok) throw raceHttpError(response.status);
       const type = (response.headers.get('content-type') || '').toLowerCase();
-      if (type && !type.includes('json') && !type.includes('text/plain')) throw sourceInvalidResponseError('X-Labs race-data response had an unexpected content type');
+      if (type && !type.includes('json') && !type.includes('text/plain')) throw new Error('X-Labs race-data response had an unexpected content type');
       const declared = Number(response.headers.get('content-length'));
-      if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) throw sourceInvalidResponseError('X-Labs race-data response exceeded size limit');
+      if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) throw new Error('X-Labs race-data response exceeded size limit');
       const body = await readBoundedText(response);
       let parsed;
-      try { parsed = JSON.parse(body); } catch { throw sourceInvalidResponseError('X-Labs race-data response was not valid JSON'); }
+      try { parsed = JSON.parse(body); } catch { throw new Error('X-Labs race-data response was not valid JSON'); }
       return { body, parsed, finalUrl: currentUrl, redirectCount: redirects };
     }
   } catch (error) {
-    throw sourceFetchError(error, 'X-Labs race-data capture', { timeoutMs });
+    if (error?.name === 'AbortError') throw new Error(`X-Labs race-data capture timed out after ${timeoutMs}ms`);
+    throw error;
   } finally {
     clearTimeout(timeout);
   }
@@ -476,11 +482,7 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
   try {
     const fetchedAt = new Date().toISOString();
     const fetched = await fetchJsonText(requestedUrl, options.fetchImpl || fetch, options.timeoutMs ?? XLABS_FETCH_TIMEOUT_MS);
-    try {
-      validateXlabsRacePayload(fetched.parsed, xlabsTrackId, race);
-    } catch (error) {
-      throw sourceInvalidResponseError(error.message);
-    }
+    validateXlabsRacePayload(fetched.parsed, xlabsTrackId, race);
     const archived = await archiveRawSnapshot(env, {
       sourceType: 'xlabs_race_json',
       externalId: `${date}:${xlabsTrackId}:${race}`,

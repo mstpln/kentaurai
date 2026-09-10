@@ -4,7 +4,6 @@ import worker from '../src/index.js';
 import { createTestEnv } from './helpers/d1.js';
 import {
   ensureDailyXlabsJob,
-  runXlabsBackfillBatch,
   runXlabsBackfillStep,
   startXlabsBackfill
 } from '../src/import/xlabs-backfill.js';
@@ -20,16 +19,6 @@ function seedOfficialRace(db, date = DATE) {
   db.prepare(`INSERT INTO horses (id, canonical_name) VALUES ('horse_1','Synthetic One'),('horse_2','Synthetic Two')`).run();
   db.prepare(`INSERT INTO race_entries (id, race_id, horse_id, start_number, actual_start_distance_m)
     VALUES ('entry_1','race_5','horse_1',1,1000),('entry_2','race_5','horse_2',2,1000)`).run();
-}
-
-function seedAdditionalOfficialRaces(db, raceNumbers, date = DATE) {
-  for (const raceNumber of raceNumbers) {
-    db.prepare(`INSERT INTO races (id, track_id, race_date, race_number, distance_m, start_method)
-      VALUES (?,'track_7',?,?,1000,'auto')`).run(`race_${raceNumber}`, date, raceNumber);
-    db.prepare(`INSERT INTO horses (id, canonical_name) VALUES (?,?)`).run(`horse_${raceNumber}`, `Synthetic ${raceNumber}`);
-    db.prepare(`INSERT INTO race_entries (id, race_id, horse_id, start_number, actual_start_distance_m)
-      VALUES (?,?,?,?,1000)`).run(`entry_${raceNumber}`, `race_${raceNumber}`, `horse_${raceNumber}`, raceNumber);
-  }
 }
 
 function seedDailyV86OfficialState(db, objects, { gameQuality = 'normalized_verified_subset', includeGame = true } = {}) {
@@ -107,10 +96,10 @@ function seedXlabsContext(db, objects, date = DATE) {
     .run(`https://kmtid.atgx.se/${compact}/js/main.js`, mainKey, JSON.stringify({ parentSourceRecordId: 'src_parent', scriptName: 'main.js' }));
 }
 
-function telemetryPayload(raceNumber = 5) {
+function telemetryPayload() {
   return Array.from({ length: 12 }, (_, index) => ({
     trackId: 7,
-    raceNumber,
+    raceNumber: 5,
     timestamp: new Date(Date.UTC(2099, 0, 2, 12, 0, index * 10)).toISOString(),
     targets: [
       { number: 1, posX: index * 100, posY: 0, distanceToFinish: Math.max(0, 1100 - index * 100) },
@@ -288,73 +277,4 @@ test('X-Labs backfill admin routes require ADMIN_TOKEN and expose stable status'
   const status = await response.json();
   assert.equal(status.id, created.id);
   assert.equal(status.status, 'running');
-});
-
-test('X-Labs batch advances only three neutral 404 race checkpoints and reuses date context', async () => {
-  const { env, db, objects } = createTestEnv();
-  seedOfficialRace(db);
-  seedAdditionalOfficialRaces(db, [6, 7, 8]);
-  seedOfficialCoverage(db);
-  seedXlabsContext(db, objects);
-  await startXlabsBackfill(env, DATE, DATE);
-  const requested = [];
-
-  const result = await runXlabsBackfillBatch(env, null, {
-    raceFetchImpl: async (url) => {
-      requested.push(url.split('/').pop());
-      return new Response('missing', { status: 404 });
-    }
-  });
-
-  assert.equal(result.stepCount, 3);
-  assert.deepEqual(requested, ['101020705.json', '101020706.json', '101020707.json']);
-  const state = db.prepare(`
-    SELECT next_race_index, processed_races, unavailable_races, consecutive_errors
-    FROM xlabs_backfill_jobs
-  `).get();
-  assert.deepEqual({ ...state }, {
-    next_race_index: 3,
-    processed_races: 3,
-    unavailable_races: 3,
-    consecutive_errors: 0
-  });
-  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM source_records WHERE source_type='xlabs'`).get().n, 1);
-  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM source_records WHERE source_type='xlabs_script'`).get().n, 2);
-});
-
-test('X-Labs batch preserves the first checkpoint and stops on a second-race upstream failure', async () => {
-  const { env, db, objects } = createTestEnv();
-  seedOfficialRace(db);
-  seedAdditionalOfficialRaces(db, [6, 7]);
-  seedOfficialCoverage(db);
-  seedXlabsContext(db, objects);
-  await startXlabsBackfill(env, DATE, DATE);
-  const requested = [];
-
-  await assert.rejects(
-    () => runXlabsBackfillBatch(env, null, {
-      raceFetchImpl: async (url) => {
-        const raceNumber = Number(url.slice(-7, -5));
-        requested.push(raceNumber);
-        if (raceNumber === 6) return new Response('temporary failure', { status: 503 });
-        return new Response(JSON.stringify(telemetryPayload(raceNumber)), {
-          status: 200,
-          headers: { 'content-type': 'application/json' }
-        });
-      }
-    }),
-    (error) => error.code === 'SOURCE_UPSTREAM_ERROR' && error.httpStatus === 503
-  );
-
-  assert.deepEqual(requested, [5, 6]);
-  const state = db.prepare(`
-    SELECT next_race_index, processed_races, consecutive_errors, retry_after, lease_token
-    FROM xlabs_backfill_jobs
-  `).get();
-  assert.equal(state.next_race_index, 1);
-  assert.equal(state.processed_races, 1);
-  assert.equal(state.consecutive_errors, 1);
-  assert.ok(Date.parse(state.retry_after) > Date.now());
-  assert.equal(state.lease_token, null);
-  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM xlabs_data`).get().n, 2);
 });

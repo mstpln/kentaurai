@@ -1,6 +1,5 @@
 import { archiveRawSnapshot } from '../raw.js';
 import { finishImportRun, startImportRun } from '../import/common.js';
-import { sourceFetchError, sourceHttpError, sourceInvalidResponseError } from './source-error.js';
 
 const DEFAULT_BASE_URL = 'https://kmtid.atgx.se';
 const XLABS_HOST = 'kmtid.atgx.se';
@@ -29,6 +28,12 @@ function validateRedirectUrl(currentUrl, location) {
   if (target.port && target.port !== '443') throw new Error('X-Labs redirect must use the standard https port');
   target.hash = '';
   return target.toString();
+}
+
+function providerHttpError(status) {
+  const error = new Error(`X-Labs returned HTTP ${status}`);
+  if (status === 404) error.code = 'XLABS_NOT_FOUND';
+  return error;
 }
 
 export function validateXlabsDate(value) {
@@ -67,19 +72,17 @@ async function fetchText(url, fetchImpl) {
         continue;
       }
 
-      if (!response.ok) throw sourceHttpError('X-Labs', response, { notFoundCode: 'XLABS_NOT_FOUND' });
+      if (!response.ok) throw providerHttpError(response.status);
       const type = (response.headers.get('content-type') || '').toLowerCase();
       if (type && !type.includes('text/html') && !type.includes('application/xhtml+xml')) {
-        throw sourceInvalidResponseError('X-Labs did not return HTML');
+        throw new Error('X-Labs did not return HTML');
       }
       const declared = Number(response.headers.get('content-length'));
-      if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) throw sourceInvalidResponseError('X-Labs response exceeded size limit');
+      if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) throw new Error('X-Labs response exceeded size limit');
       const body = await response.text();
-      if (new TextEncoder().encode(body).byteLength > MAX_RESPONSE_BYTES) throw sourceInvalidResponseError('X-Labs response exceeded size limit');
+      if (new TextEncoder().encode(body).byteLength > MAX_RESPONSE_BYTES) throw new Error('X-Labs response exceeded size limit');
       return { body, finalUrl: currentUrl, redirectCount: redirects };
     }
-  } catch (error) {
-    throw sourceFetchError(error, 'X-Labs date-page capture', { timeoutMs: 12_000 });
   } finally {
     clearTimeout(timeout);
   }

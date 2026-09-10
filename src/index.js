@@ -6,8 +6,8 @@ import { normalizeCapturedOfficialGameSequential } from './import/official-live-
 import { captureUpcomingOfficialGames, normalizeNextPendingOfficialGame } from './import/official-live-scheduled.js';
 import { normalizeCapturedXlabsRace } from './import/xlabs-telemetry.js';
 import { normalizeCapturedOfficialRace } from './import/official-historical-race.js';
-import { getHistoricalBackfill, runHistoricalBackfillBatch, runHistoricalBackfillStep, startHistoricalBackfill } from './import/official-historical-backfill.js';
-import { ensureDailyXlabsJob, getXlabsBackfill, runXlabsBackfillBatch, runXlabsBackfillStep, startXlabsBackfill } from './import/xlabs-backfill.js';
+import { getHistoricalBackfill, runHistoricalBackfillStep, startHistoricalBackfill } from './import/official-historical-backfill.js';
+import { ensureDailyXlabsJob, getXlabsBackfill, runXlabsBackfillStep, startXlabsBackfill } from './import/xlabs-backfill.js';
 import { captureCalendar, captureGame, captureRace } from './provider/official.js';
 import { captureXlabsDate } from './provider/xlabs.js';
 import { captureXlabsRaceJson } from './provider/xlabs-race.js';
@@ -318,9 +318,9 @@ async function handleScheduled(controller, env) {
   const parts = [];
 
   if (controller.cron === BACKFILL_CRON) {
+    parts.push(await runScheduledPart('historical_backfill', () => runHistoricalBackfillStep(env)));
+    parts.push(await runScheduledPart('xlabs_backfill', () => runXlabsBackfillStep(env)));
     parts.push(await runScheduledPart('live_normalize', () => normalizeNextPendingOfficialGame(env)));
-    parts.push(await runScheduledPart('historical_backfill', () => runHistoricalBackfillBatch(env)));
-    parts.push(await runScheduledPart('xlabs_backfill', () => runXlabsBackfillBatch(env)));
   } else if (controller.cron === LIVE_MORNING_CRON) {
     parts.push(await runScheduledPart('live_capture_morning', () => captureUpcomingOfficialGames(env, controller.scheduledTime, { includeToday: true })));
   } else if (controller.cron === LIVE_EVENING_CRON) {

@@ -9,8 +9,8 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 - D1: `kentaurai`.
 - R2: `kentaurai-raw`.
 - Production migrations are applied through migration 0007; the manual GitHub migration workflow reported no pending migrations at the latest production check.
-- Official historical backfill range: 2023-09-08 through 2026-09-07, newest-first, up to three sequential race checkpoints per minute when eligible.
-- X-Labs historical backfill range: 2023-09-08 through 2026-09-07, newest-first, up to three sequential X-Labs checkpoints per minute when eligible.
+- Official historical backfill range: 2023-09-08 through 2026-09-07, newest-first, one race checkpoint per scheduled step.
+- X-Labs historical backfill range: 2023-09-08 through 2026-09-07, newest-first, one X-Labs checkpoint per minute when eligible.
 - The X-Labs historical job does not outrun official history: it waits until the corresponding official date is ready.
 - Daily V85/V86 X-Labs catch-up remains separate and has priority over the long historical X-Labs job.
 - The private `kentaurai-reference-v1` round is stored in production with archived source provenance and independently verified structural invariants.
@@ -40,7 +40,7 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 ## Automatic official live acquisition
 - `15 5 * * *` captures the current UTC date plus the next seven dates and discovers only verified V85/V86 eight-leg games.
 - `15 17 * * *` captures upcoming dates but excludes the current date, preserving race-day morning as the final automatic same-day pre-race refresh.
-- `* * * * *` attempts pending live normalization first, then continues up to three sequential official historical checkpoints and up to three sequential eligible X-Labs checkpoints, plus one bounded post-race review attempt per invocation.
+- `* * * * *` continues one official historical backfill checkpoint, one pending live-normalization checkpoint, at most one eligible X-Labs checkpoint and one bounded post-race review attempt per invocation.
 - Calendar discovery requires a matching date, V85/V86 game identity, exactly eight race ids and same-date race identities before a game is fetched.
 - Raw calendar and game snapshots are archived before normalization.
 - Partial capture failures are surfaced as failed import/orchestrator runs rather than silently reported as success.
@@ -67,8 +67,6 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 - Race/date HTTP 404 is neutral unavailable X-Labs coverage and advances the checkpoint without contaminating official facts or model state.
 - Structural, provenance, host/path, payload-identity, timeout and normalization failures stay on the same checkpoint and stop the job after three consecutive technical errors until explicitly resumed.
 - The multi-year historical X-Labs job for 2023-09-08 through 2026-09-07 was explicitly authorized and successfully started in production through the guarded GitHub workflow.
-- Historical batches never parallelize source requests. Each successful race is durably checkpointed before the next begins; completion, busy/idle state, dependency waits or a technical failure stop the remaining source batch. Rate limits, access pushback, temporary upstream failures and timeouts apply bounded persistent cooldowns without advancing the failed checkpoint.
-- Existing official and X-Labs jobs continue from their stored cursors after deployment; this batching change does not recreate, restart or reinitialize them.
 
 ## Private interface
 - `/app` is a private browser interface using `APP_PASSWORD` and a secure HttpOnly session cookie.
