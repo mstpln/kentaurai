@@ -44,6 +44,30 @@ function submissionId(value) {
   return text;
 }
 
+async function assertRoundOpenForAnalysis(env, roundId) {
+  const row = await env.DB.prepare(`
+    SELECT COALESCE(
+      gr.bet_stop_at,
+      gr.scheduled_start_at,
+      (SELECT MIN(r.scheduled_start_at)
+       FROM game_legs gl
+       JOIN races r ON r.id = gl.race_id
+       WHERE gl.game_round_id = gr.id)
+    ) AS analysis_deadline
+    FROM game_rounds gr
+    WHERE gr.id = ? AND gr.game_type IN ('V85','V86')
+    LIMIT 1
+  `).bind(roundId).first();
+  if (!row) throw new Error('V85/V86 round was not found');
+  if (!row.analysis_deadline || !Number.isFinite(Date.parse(row.analysis_deadline))) {
+    throw new Error('round has no verified pre-race analysis deadline');
+  }
+  if (Date.parse(row.analysis_deadline) <= Date.now()) {
+    throw new Error('analysis exchange is pre-race only; this round has already reached its analysis deadline');
+  }
+  return row.analysis_deadline;
+}
+
 function systemSelections(system, index) {
   const selections = system?.selections;
   if (!Array.isArray(selections)) throw new Error(`systems[${index}].selections must be an array`);
@@ -114,8 +138,10 @@ function isolateMarketBlindContext(context) {
 }
 
 export async function prepareAnalysisContext(env, roundId, stage = 'pre_market', options = {}) {
+  const normalizedRoundId = requiredText(roundId, 'round_id', 200);
+  await assertRoundOpenForAnalysis(env, normalizedRoundId);
   const normalizedStage = String(stage || 'pre_market').toLowerCase();
-  const rawContext = await getAnalysisContext(env, roundId, normalizedStage, options);
+  const rawContext = await getAnalysisContext(env, normalizedRoundId, normalizedStage, options);
   const context = normalizedStage === 'pre_market' ? isolateMarketBlindContext(rawContext) : rawContext;
   const contextFingerprint = await stableContextFingerprint(context);
   const common = {
@@ -270,9 +296,17 @@ export async function listAnalyzableRounds(env, options = {}) {
     FROM game_rounds gr
     LEFT JOIN game_legs gl ON gl.game_round_id = gr.id
     WHERE gr.game_type IN ('V85','V86')
+      AND datetime(COALESCE(
+        gr.bet_stop_at,
+        gr.scheduled_start_at,
+        (SELECT MIN(r2.scheduled_start_at)
+         FROM game_legs gl2
+         JOIN races r2 ON r2.id = gl2.race_id
+         WHERE gl2.game_round_id = gr.id)
+      )) > CURRENT_TIMESTAMP
     GROUP BY gr.id
     HAVING COUNT(gl.leg_number) = 8
-    ORDER BY gr.round_date DESC, gr.scheduled_start_at DESC, gr.id ASC
+    ORDER BY gr.round_date ASC, gr.scheduled_start_at ASC, gr.id ASC
     LIMIT ?
   `).bind(limit).all();
   return {
