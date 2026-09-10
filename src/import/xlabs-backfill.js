@@ -103,6 +103,26 @@ async function deferJob(env, job, leaseToken, delayMs) {
   return retryAfter;
 }
 
+function dailyPrerequisiteExpired(job, now = Date.now()) {
+  if (job.scope !== DAILY_SCOPE) return false;
+  const instant = new Date(now);
+  if (Number.isNaN(instant.getTime())) throw new Error('current time is invalid');
+  const yesterday = addDays(instant.toISOString().slice(0, 10), -1);
+  return job.next_date < yesterday;
+}
+
+async function completeExpiredDailyPrerequisite(env, job, leaseToken) {
+  const next = addDays(job.next_date, -1);
+  const result = await env.DB.prepare(`
+    UPDATE xlabs_backfill_jobs
+    SET next_date = ?, next_race_index = 0, status = 'completed',
+        consecutive_errors = 0, last_error = NULL, retry_after = NULL, last_run_at = ?,
+        lease_token = NULL, lease_until = NULL, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND lease_token = ? AND scope = ?
+  `).bind(next, new Date().toISOString(), job.id, leaseToken, DAILY_SCOPE).run();
+  if (Number(result.meta?.changes ?? 0) !== 1) throw new Error('X-Labs daily prerequisite lease was lost while completing stale job');
+}
+
 async function officialDateReady(env, date) {
   const row = await env.DB.prepare(`
     SELECT id
@@ -374,6 +394,20 @@ export async function runXlabsBackfillStep(env, jobId = null, options = {}) {
     if (job.scope === DAILY_SCOPE) {
       dailyReadiness = await dailyOfficialReadiness(env, job.next_date);
       if (!dailyReadiness.ready) {
+        if (dailyPrerequisiteExpired(job, options.now ?? Date.now())) {
+          await completeExpiredDailyPrerequisite(env, job, leaseToken);
+          await finishImportRun(env, run.id, counts);
+          return {
+            importRunId: run.id,
+            jobId: job.id,
+            scope: job.scope,
+            status: 'completed',
+            reason: dailyReadiness.reason,
+            prerequisiteExpired: true,
+            checkpoint: { date: addDays(job.next_date, -1), nextRaceIndex: 0 },
+            done: true
+          };
+        }
         const retryAfter = await deferJob(env, job, leaseToken, DAILY_RETRY_DELAY_MS);
         await finishImportRun(env, run.id, counts);
         return {
