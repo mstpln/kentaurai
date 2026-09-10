@@ -1,9 +1,10 @@
 import worker from './worker-pwa.js';
 import { appAuthConfigured, clearAppSessionCookie, hasValidAppSession } from './app-auth.js';
-import { htmlResponse, redirectResponse, renderAppPage } from './app-page-feedback.js';
+import { htmlResponse, redirectResponse, renderAppPage } from './app-page-stat-filters.js';
 import { XLABS_SCRIPT_SELECTOR_VERSION } from './provider/xlabs-script.js';
 import { KENTAURAI_APP_VERSION, createFullDataExportResponse, getSettingsStatus, importAnalysisUpload } from './settings-data-display.js';
 import { getEnhancedGameHistoryDetail } from './routes/game-detail-display.js';
+import { getFilteredEntityStatBreakdowns } from './routes/entity-stat-breakdowns.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -78,6 +79,23 @@ export default {
       if (denied) return denied;
       try {
         return json(await importAnalysisUpload(env, request), 201);
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    const statBreakdownMatch = path.match(/^\/app\/api\/entities\/(horses|trainers|drivers)\/([^/]+)\/stat-breakdowns$/);
+    if (request.method === 'GET' && statBreakdownMatch) {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        const data = await getFilteredEntityStatBreakdowns(env, statBreakdownMatch[1], decodeURIComponent(statBreakdownMatch[2]), {
+          year: url.searchParams.get('year'),
+          distanceStartMethod: url.searchParams.get('distance_start_method'),
+          trackStartMethod: url.searchParams.get('track_start_method')
+        });
+        return data ? json(data) : json({ error: 'not_found' }, 404);
       } catch (error) {
         console.error(error);
         return json({ error: 'request_failed', message: error.message }, 400);

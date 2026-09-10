@@ -20,11 +20,11 @@ test('standard distance grouping folds nearby variants into canonical race dista
 
 test('distance rows aggregate counts before recalculating rates', () => {
   const grouped = groupDistanceRows([
-    { label: '2140', starts: 54, resultStarts: 54, wins: 9, top3: 12 },
-    { label: '2148', starts: 4, resultStarts: 4, wins: 0, top3: 1 },
-    { label: '2120', starts: 1, resultStarts: 1, wins: 0, top3: 1 },
-    { label: '1640', starts: 20, resultStarts: 20, wins: 1, top3: 5 },
-    { label: '1609', starts: 4, resultStarts: 4, wins: 0, top3: 0 }
+    { label: '2140', starts: 54, resultStarts: 54, wins: 9, top3: 12, gallops: 6 },
+    { label: '2148', starts: 4, resultStarts: 4, wins: 0, top3: 1, gallops: 1 },
+    { label: '2120', starts: 1, resultStarts: 1, wins: 0, top3: 1, gallops: 0 },
+    { label: '1640', starts: 20, resultStarts: 20, wins: 1, top3: 5, gallops: 2 },
+    { label: '1609', starts: 4, resultStarts: 4, wins: 0, top3: 0, gallops: 1 }
   ]);
 
   const middle = grouped.find((row) => row.label === '2140');
@@ -34,14 +34,18 @@ test('distance rows aggregate counts before recalculating rates', () => {
     resultStarts: 59,
     wins: 9,
     top3: 14,
+    gallops: 7,
     winRate: 9 / 59,
-    top3Rate: 14 / 59
+    top3Rate: 14 / 59,
+    gallopRate: 7 / 59
   });
 
   const short = grouped.find((row) => row.label === '1640');
   assert.equal(short.starts, 24);
   assert.equal(short.wins, 1);
   assert.equal(short.top3, 5);
+  assert.equal(short.gallops, 3);
+  assert.equal(short.gallopRate, 3 / 24);
 });
 
 test('rendered app shell has a borderless settings gear and in-app history support', () => {
