@@ -1,4 +1,4 @@
-name: Assess production history readiness
+name: Resume and verify official historical backfill
 
 on:
   push:
@@ -6,18 +6,17 @@ on:
       - ops/backfill-coverage-assessment-v067
     paths:
       - .github/workflows/assess-production-history-readiness.yml
-      - src/routes/production-readiness.js
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  assess:
+  resume:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Query aggregate production readiness
+      - name: Resume exact failed production job and verify state
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -38,11 +37,17 @@ jobs:
             [[ "$code" == "200" ]] || { echo "D1 query failed (HTTP $code)"; exit 1; }
             jq -e '.success == true and (.result | length >= 1) and (.result | all(.success == true))' "$response_file" > /dev/null || { echo "D1 query returned an unsuccessful result"; exit 1; }
           }
-          query "SELECT status,next_date,next_race_index,processed_dates,processed_races,consecutive_errors,last_error,last_run_at FROM historical_backfill_jobs WHERE start_date='2023-09-08' AND end_date='2026-09-07' ORDER BY created_at DESC LIMIT 1;"
-          echo "Official backfill:"; jq -c '.result[0].results[0] // {}' "$response_file"
-          query "SELECT t.id,t.canonical_name,x.external_id FROM track_external_ids x JOIN tracks t ON t.id=x.track_id WHERE x.source_type='official' AND x.external_id='47' LIMIT 5;"
-          echo "Track 47:"; jq -c '.result[0].results' "$response_file"
-          query "SELECT id,source_type,status,started_at,finished_at,error_count,error_json,metadata_json FROM import_runs WHERE source_type IN ('official_historical_backfill_step','official_historical_race_normalize') AND (error_json LIKE '%missing horse identity%' OR metadata_json LIKE '%2026-08-15_47_1%') ORDER BY started_at DESC LIMIT 10;"
-          echo "Relevant failures:"; jq -c '.result[0].results' "$response_file"
-          query "SELECT id,external_id,source_url,fetched_at,quality_status,metadata_json FROM source_records WHERE source_type='official_provider' AND external_id='race:2026-08-15_47_1' ORDER BY fetched_at DESC LIMIT 5;"
-          echo "Problem source:"; jq -c '.result[0].results' "$response_file"
+
+          job_id='backfill_official-se-trot-v2__2023-09-08__2026-09-07'
+          query "SELECT status,next_date,next_race_index,processed_races,consecutive_errors,last_error FROM historical_backfill_jobs WHERE id='$job_id' LIMIT 1;"
+          echo "Before resume:"; jq -c '.result[0].results[0] // {}' "$response_file"
+          jq -e '.result[0].results[0] | .status == "failed" and .next_date == "2026-08-15" and .next_race_index == 22 and .processed_races == 576 and .consecutive_errors == 3 and .last_error == "official race start 1 is missing horse identity"' "$response_file" > /dev/null || { echo "Guard failed: production job state changed; refusing mutation"; exit 1; }
+
+          query "UPDATE historical_backfill_jobs SET status='running', consecutive_errors=0, last_error=NULL, lease_token=NULL, lease_until=NULL, updated_at=CURRENT_TIMESTAMP WHERE id='$job_id' AND status='failed' AND next_date='2026-08-15' AND next_race_index=22 AND processed_races=576 AND consecutive_errors=3 AND last_error='official race start 1 is missing horse identity';"
+          changes="$(jq -r '.result[0].meta.changes // 0' "$response_file")"
+          [[ "$changes" == "1" ]] || { echo "Resume update did not change exactly one row"; exit 1; }
+          echo "Resume mutation applied to exactly one guarded job row."
+
+          query "SELECT status,next_date,next_race_index,processed_races,consecutive_errors,last_error,lease_token,lease_until FROM historical_backfill_jobs WHERE id='$job_id' LIMIT 1;"
+          echo "After resume:"; jq -c '.result[0].results[0] // {}' "$response_file"
+          jq -e '.result[0].results[0] | .status == "running" and .next_date == "2026-08-15" and .next_race_index == 22 and .processed_races == 576 and .consecutive_errors == 0 and .last_error == null and .lease_token == null and .lease_until == null' "$response_file" > /dev/null || { echo "Post-resume verification failed"; exit 1; }
