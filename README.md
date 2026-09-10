@@ -130,7 +130,7 @@ Verified mapping rules include:
 
 Ordinary historical race payloads expose an explicit boolean `scratched`; that field is mapped as verified. The V85/V86 live-game mapper remains conservative where its own captured payload does not establish scratch semantics.
 
-Historical official acquisition filters calendar data to Swedish trotting tracks, deduplicates race identifiers and processes one race per checkpoint. Jobs persist their date/race cursor in D1, retry the same checkpoint up to three consecutive failures, reuse already captured or normalized sources, and continue from the minute schedule. A job range is capped at 1,096 days.
+Historical official acquisition filters calendar data to Swedish trotting tracks, deduplicates race identifiers and processes one race per durable checkpoint. The minute schedule may process up to three checkpoints sequentially, with no parallel source requests. Jobs persist their date/race cursor in D1, retry the same checkpoint up to three consecutive failures, reuse already captured or normalized sources, and continue in place after deployment. A job range is capped at 1,096 days.
 
 ### X-Labs telemetry and scheduling
 Browser network inspection established the actual race-object recipe as `1MMDDTTRR.json`, where `TT` is the zero-padded official track id and `RR` is the zero-padded race number. The payload is a time-ordered array of telemetry frames with `trackId`, `raceNumber`, `timestamp` and target positions. Capture validates every frame against the requested race before archiving it privately.
@@ -139,7 +139,7 @@ The mapper reproduces the observed closest-frame pace calculations for first/las
 
 X-Labs acquisition has two deliberately separate scopes. `daily_v85_v86` is created at `04:30 UTC` for the previous UTC date and processes only already-normalized V85/V86 game legs, so current round measurements are not blocked by the long ordinary-race history import. `historical_all` is the explicit multi-year job and considers all normalized Swedish races; it waits until the official historical backfill has completed the corresponding date before advancing, preventing temporary missing official data from being misclassified as permanent missing X-Labs.
 
-The minute scheduler advances at most one X-Labs race checkpoint per invocation, with recent daily V85/V86 jobs prioritized over the long historical job. X-Labs date/race 404 responses are recorded as neutral unavailable coverage and advance the checkpoint. Technical/structural/provenance failures stay on the same checkpoint and stop the job after three consecutive failures until explicitly resumed.
+The minute scheduler advances at most three sequential X-Labs checkpoints per invocation, with recent daily V85/V86 jobs prioritized over the long historical job and no parallel source requests. X-Labs date/race 404 responses are recorded as neutral unavailable coverage and advance the checkpoint. Technical source pushback stops the remaining batch and applies bounded retry cooldown; technical/structural/provenance failures stay on the same checkpoint and stop the job after three consecutive failures until explicitly resumed.
 
 The script-inspection endpoint is read-only. It reports bounded counts of common browser request mechanisms, sanitized literal request URLs, sanitized candidate endpoint strings and coarse keyword counts. It does not return the raw script body, query strings, credentials or arbitrary nearby source snippets.
 

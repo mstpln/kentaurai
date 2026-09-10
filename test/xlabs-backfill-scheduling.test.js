@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createTestEnv } from './helpers/d1.js';
 import {
   ensureDailyXlabsJob,
+  runXlabsBackfillBatch,
   runXlabsBackfillStep,
   startXlabsBackfill
 } from '../src/import/xlabs-backfill.js';
@@ -17,7 +18,9 @@ test('a deferred daily X-Labs job does not starve a ready historical job', async
     (id,start_date,end_date,next_date,status)
     VALUES ('official_gate',?,?,?,'running')`).run(DATE, DATE, '2099-01-01');
 
-  const first = await runXlabsBackfillStep(env);
+  const batch = await runXlabsBackfillBatch(env);
+  assert.equal(batch.stepCount, 1);
+  const first = batch.results[0];
   assert.equal(first.jobId, daily.id);
   assert.equal(first.status, 'waiting_for_official_live');
   assert.equal(first.reason, 'calendar_missing');
