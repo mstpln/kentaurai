@@ -1,6 +1,6 @@
 import worker from './worker-pwa.js';
 import { appAuthConfigured, clearAppSessionCookie, hasValidAppSession } from './app-auth.js';
-import { htmlResponse, redirectResponse, renderAppPage } from './app-page-presentation-v2.js';
+import { htmlResponse, redirectResponse, renderAppPage } from './app-page-localization.js';
 import { XLABS_SCRIPT_SELECTOR_VERSION } from './provider/xlabs-script.js';
 import { KENTAURAI_APP_VERSION, createFullDataExportResponse, getSettingsStatus, importAnalysisUpload } from './settings-data-display.js';
 import { getEnhancedGameHistoryDetail } from './routes/game-detail-display.js';
