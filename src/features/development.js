@@ -1,6 +1,6 @@
 import { stableId } from '../ids.js';
 
-export const DEVELOPMENT_FEATURE_VERSION = 'development-v1';
+export const DEVELOPMENT_FEATURE_VERSION = 'development-v2';
 const HISTORY_LIMIT = 6;
 const SPLIT = 3;
 
@@ -47,19 +47,43 @@ function average(values) {
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 }
 
+function completeAverage(rows, field, predicate = (value) => value >= 0) {
+  if (!rows.length) return null;
+  const values = rows.map((row) => numeric(row[field]));
+  if (values.some((value) => value == null || !predicate(value))) return null;
+  return average(values);
+}
+
+function completeSum(rows, field) {
+  if (!rows.length) return null;
+  const values = rows.map((row) => numeric(row[field]));
+  if (values.some((value) => value == null || value < 0)) return null;
+  return values.reduce((sum, value) => sum + value, 0);
+}
+
+function completeBooleanCount(rows, field) {
+  if (!rows.length) return null;
+  const values = rows.map((row) => row[field]);
+  if (values.some((value) => value == null)) return null;
+  return values.filter((value) => Number(value) === 1).length;
+}
+
 function summarize(rows) {
-  const placings = rows.map((row) => numeric(row.placing)).filter((value) => value != null && value > 0);
-  const classPrizes = rows.map((row) => numeric(row.first_prize_sek)).filter((value) => value != null && value >= 0);
-  const earnings = rows.map((row) => numeric(row.prize_sek)).filter((value) => value != null && value >= 0);
+  const placings = rows.map((row) => numeric(row.placing));
+  const completePlacings = rows.length > 0 && placings.every((value) => value != null && value > 0);
   return {
     starts: rows.length,
-    avgPlacing: average(placings),
-    wins: placings.filter((value) => value === 1).length,
-    top3: placings.filter((value) => value <= 3).length,
-    avgFirstPrize: average(classPrizes),
-    earnings: earnings.length ? earnings.reduce((sum, value) => sum + value, 0) : null,
-    gallops: rows.filter((row) => Number(row.gallop) === 1).length,
-    disqualifications: rows.filter((row) => Number(row.disqualified) === 1).length
+    knownPlacings: placings.filter((value) => value != null && value > 0).length,
+    knownFirstPrizes: rows.filter((row) => numeric(row.first_prize_sek) != null && numeric(row.first_prize_sek) >= 0).length,
+    knownEarnings: rows.filter((row) => numeric(row.prize_sek) != null && numeric(row.prize_sek) >= 0).length,
+    knownGallops: rows.filter((row) => row.gallop != null).length,
+    knownDisqualifications: rows.filter((row) => row.disqualified != null).length,
+    avgPlacing: completePlacings ? average(placings) : null,
+    top3Rate: completePlacings ? placings.filter((value) => value <= 3).length / rows.length : null,
+    avgFirstPrize: completeAverage(rows, 'first_prize_sek'),
+    earnings: completeSum(rows, 'prize_sek'),
+    gallops: completeBooleanCount(rows, 'gallop'),
+    disqualifications: completeBooleanCount(rows, 'disqualified')
   };
 }
 
@@ -85,13 +109,29 @@ function calculate(rows) {
     sampleSize: rows.length,
     recentSampleSize: recentRows.length,
     previousSampleSize: previousRows.length,
+    coverage: {
+      recent: {
+        placings: recent.knownPlacings,
+        firstPrizes: recent.knownFirstPrizes,
+        earnings: recent.knownEarnings,
+        gallops: recent.knownGallops,
+        disqualifications: recent.knownDisqualifications
+      },
+      previous: {
+        placings: previous.knownPlacings,
+        firstPrizes: previous.knownFirstPrizes,
+        earnings: previous.knownEarnings,
+        gallops: previous.knownGallops,
+        disqualifications: previous.knownDisqualifications
+      }
+    },
     features: {
       development_recent_avg_placing_3: recent.avgPlacing,
       development_previous_avg_placing_3: previous.avgPlacing,
       development_avg_placing_delta: delta(recent.avgPlacing, previous.avgPlacing),
-      development_recent_top3_rate_3: recent.starts ? recent.top3 / recent.starts : null,
-      development_previous_top3_rate_3: previous.starts ? previous.top3 / previous.starts : null,
-      development_top3_rate_delta: recent.starts && previous.starts ? (recent.top3 / recent.starts) - (previous.top3 / previous.starts) : null,
+      development_recent_top3_rate_3: recent.top3Rate,
+      development_previous_top3_rate_3: previous.top3Rate,
+      development_top3_rate_delta: delta(recent.top3Rate, previous.top3Rate),
       development_recent_avg_first_prize_3: recent.avgFirstPrize,
       development_previous_avg_first_prize_3: previous.avgFirstPrize,
       development_class_exposure_ratio: ratio(recent.avgFirstPrize, previous.avgFirstPrize),
@@ -131,6 +171,7 @@ export async function persistDevelopmentFeatures(env, raceEntryId, options = {})
     sampleSize: result.sampleSize,
     recentSampleSize: result.recentSampleSize,
     previousSampleSize: result.previousSampleSize,
+    coverage: result.coverage,
     inputs: ['races.first_prize_sek', 'race_entries', 'race_results']
   });
 
