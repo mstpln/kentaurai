@@ -135,19 +135,13 @@ export async function getSettingsStatus(env) {
 }
 
 async function providerPreMarketRounds(env, provider) {
-  const { results } = await env.DB.prepare(`
-    SELECT config_json, ai_provider
-    FROM model_versions
-    WHERE feature_version = 'analysis-exchange-v1'
-      AND ai_provider = ?
-    ORDER BY datetime(created_at) DESC
-  `).bind(provider).all();
+  const analyzable = await listAnalyzableRounds(env, { limit: 100 });
   const rounds = new Set();
-  for (const row of results) {
-    try {
-      const meta = JSON.parse(row.config_json || '{}')?.analysisExchange;
-      if (meta?.stage === 'pre_market' && meta?.roundId) rounds.add(meta.roundId);
-    } catch {}
+  for (const round of analyzable.rounds) {
+    const submissions = await listRoundAnalysisSubmissions(env, round.id);
+    if (submissions.submissions.some((item) => item.stage === 'pre_market' && item.provider === provider)) {
+      rounds.add(round.id);
+    }
   }
   return rounds;
 }
