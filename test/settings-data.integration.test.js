@@ -28,7 +28,7 @@ function seedFutureRound(db) {
     `).run(entryId, raceId, horseId);
     db.prepare(`
       INSERT INTO betting_snapshots (id, game_round_id, leg_number, race_entry_id, captured_at, bet_percent, market_rank)
-      VALUES (?, ?, ?, ?, '2099-05-31T12:00:00Z', 50, 1)
+      VALUES (?, ?, ?, ?, '2026-09-01T12:00:00Z', 50, 1)
     `).run(`settings_bet_${leg}`, ROUND_ID, leg, entryId);
   }
 }
