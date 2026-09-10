@@ -2,7 +2,6 @@ import {
   ANALYSIS_SUBMISSION_VERSION
 } from './analysis-exchange.js';
 import {
-  getRoundAnalysisSubmission,
   listAnalyzableRounds,
   listRoundAnalysisSubmissions,
   prepareAnalysisContext,
@@ -95,7 +94,7 @@ export async function getSettingsStatus(env) {
     env.DB.prepare('SELECT COUNT(*) AS n FROM trainers').first(),
     env.DB.prepare('SELECT COUNT(*) AS n FROM horses').first(),
     env.DB.prepare('SELECT COUNT(*) AS n FROM drivers').first(),
-    env.DB.prepare('SELECT COUNT(DISTINCT game_round_id) AS n FROM systems').first(),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM game_rounds WHERE game_type IN ('V85','V86')").first(),
     env.DB.prepare(`
       SELECT id, source_type, started_at, finished_at, status,
              inserted_count, updated_count, skipped_count, error_count, error_json
@@ -135,15 +134,18 @@ export async function getSettingsStatus(env) {
 }
 
 async function providerPreMarketRounds(env, provider) {
-  const analyzable = await listAnalyzableRounds(env, { limit: 100 });
-  const rounds = new Set();
-  for (const round of analyzable.rounds) {
-    const submissions = await listRoundAnalysisSubmissions(env, round.id);
-    if (submissions.submissions.some((item) => item.stage === 'pre_market' && item.provider === provider)) {
-      rounds.add(round.id);
-    }
-  }
-  return rounds;
+  const { results } = await env.DB.prepare(`
+    SELECT gl.game_round_id
+    FROM model_versions mv
+    JOIN ai_race_analyses ara ON ara.model_version_id = mv.id
+    JOIN game_legs gl ON gl.race_id = ara.race_id
+    WHERE mv.feature_version = 'analysis-exchange-v1'
+      AND mv.ai_provider = ?
+      AND ara.market_blind = 1
+    GROUP BY mv.id, gl.game_round_id
+    HAVING COUNT(DISTINCT ara.race_id) = 8
+  `).bind(provider).all();
+  return new Set(results.map((row) => row.game_round_id));
 }
 
 async function buildExportPolicy(env, provider, exportedAt) {
