@@ -13,13 +13,13 @@ import {
 } from '../src/analysis-api.js';
 
 const ROUND_ID = 'round_analysis_exchange';
-const ROUND_DATE = '2020-05-01';
+const ROUND_DATE = '2099-05-01';
 
 function seedRound(db) {
   db.prepare(`INSERT INTO tracks (id, canonical_name, country_code) VALUES ('track_analysis','Synthetic Park','SE')`).run();
   db.prepare(`
     INSERT INTO game_rounds (id, game_type, round_date, scheduled_start_at, bet_stop_at, status)
-    VALUES (?, 'V85', ?, '2020-05-01T14:00:00Z', '2020-05-01T13:55:00Z', 'upcoming')
+    VALUES (?, 'V85', ?, '2099-05-01T14:00:00Z', '2099-05-01T13:55:00Z', 'upcoming')
   `).run(ROUND_ID, ROUND_DATE);
 
   for (let leg = 1; leg <= 8; leg += 1) {
@@ -27,7 +27,7 @@ function seedRound(db) {
     db.prepare(`
       INSERT INTO races (id, track_id, race_date, race_number, scheduled_start_at, distance_m, start_method, first_prize_sek, status)
       VALUES (?, 'track_analysis', ?, ?, ?, 2140, 'auto', 100000, 'upcoming')
-    `).run(raceId, ROUND_DATE, leg, `2020-05-01T${String(13 + leg).padStart(2, '0')}:00:00Z`);
+    `).run(raceId, ROUND_DATE, leg, `2099-05-01T${String(13 + leg).padStart(2, '0')}:00:00Z`);
     db.prepare(`INSERT INTO game_legs (game_round_id, leg_number, race_id) VALUES (?, ?, ?)`).run(ROUND_ID, leg, raceId);
 
     for (let start = 1; start <= 2; start += 1) {
