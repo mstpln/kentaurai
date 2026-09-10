@@ -1,4 +1,4 @@
-name: Verify resumed production history
+name: Inspect current live normalization gap
 
 on:
   push:
@@ -12,11 +12,11 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  inspect:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Read production backfill state
+      - name: Read production live-normalization state
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -37,11 +37,13 @@ jobs:
             [[ "$code" == "200" ]]
             jq -e '.success == true and (.result | all(.success == true))' "$response_file" >/dev/null
           }
-          query "SELECT status,next_date,next_race_index,processed_dates,processed_races,reused_races,consecutive_errors,last_error,last_run_at,updated_at FROM historical_backfill_jobs WHERE id='backfill_official-se-trot-v2__2023-09-08__2026-09-07' LIMIT 1;"
-          echo "Official backfill:"; jq -c '.result[0].results[0] // {}' "$response_file"
-          query "SELECT status,next_date,next_race_index,processed_dates,processed_races,reused_races,unavailable_dates,unavailable_races,consecutive_errors,last_error,retry_after,last_run_at,updated_at FROM xlabs_backfill_jobs WHERE scope='historical_all' AND start_date='2023-09-08' AND end_date='2026-09-07' ORDER BY created_at DESC LIMIT 1;"
-          echo "X-Labs backfill:"; jq -c '.result[0].results[0] // {}' "$response_file"
-          query "SELECT external_id,quality_status,metadata_json,fetched_at FROM source_records WHERE source_type='official_provider' AND external_id='race:2026-08-15_47_1' ORDER BY fetched_at DESC LIMIT 3;"
-          echo "Problem race source status:"; jq -c '.result[0].results' "$response_file"
-          query "SELECT status,started_at,finished_at,error_count,error_json,metadata_json FROM import_runs WHERE source_type='scheduled_orchestrator' ORDER BY started_at DESC LIMIT 4;"
-          echo "Recent orchestrators:"; jq -c '.result[0].results' "$response_file"
+          query "SELECT id,status,started_at,finished_at,error_json,metadata_json FROM import_runs WHERE source_type='official_live_normalize_auto' AND status='failed' ORDER BY started_at DESC LIMIT 10;"
+          echo "Recent live auto failures:"; jq -c '.result[0].results' "$response_file"
+          query "SELECT id,external_id,fetched_at,quality_status,metadata_json FROM source_records WHERE source_type='official_provider' AND (external_id LIKE 'game:V85_%' OR external_id LIKE 'game:V86_%') ORDER BY fetched_at DESC LIMIT 20;"
+          echo "Recent game sources:"; jq -c '.result[0].results' "$response_file"
+          query "SELECT json_extract(metadata_json,'$.sourceRecordId') source_record_id, COUNT(*) successful_entry_checkpoints, MAX(CAST(json_extract(metadata_json,'$.cursor') AS INTEGER)) max_cursor FROM import_runs WHERE source_type='official_provider_normalize' AND status='success' AND json_extract(metadata_json,'$.stage')='entry' GROUP BY json_extract(metadata_json,'$.sourceRecordId') ORDER BY MAX(started_at) DESC LIMIT 10;"
+          echo "Recent successful live cursors:"; jq -c '.result[0].results' "$response_file"
+          query "SELECT status,next_date,next_race_index,processed_races,consecutive_errors,last_error,last_run_at FROM historical_backfill_jobs WHERE id='backfill_official-se-trot-v2__2023-09-08__2026-09-07' LIMIT 1;"
+          echo "Official history now:"; jq -c '.result[0].results[0] // {}' "$response_file"
+          query "SELECT status,next_date,next_race_index,processed_races,consecutive_errors,last_error,last_run_at FROM xlabs_backfill_jobs WHERE scope='historical_all' ORDER BY created_at DESC LIMIT 1;"
+          echo "X-Labs history now:"; jq -c '.result[0].results[0] // {}' "$response_file"
