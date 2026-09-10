@@ -174,28 +174,56 @@ function reusedSubmission(existing) {
   };
 }
 
+async function storedClientPayloadDigest(env, modelVersionId) {
+  const row = await env.DB.prepare('SELECT notes FROM model_versions WHERE id = ? LIMIT 1').bind(modelVersionId).first();
+  if (!row?.notes) return null;
+  try {
+    const parsed = JSON.parse(row.notes);
+    return parsed?.analysisExchangeClientPayloadDigest || null;
+  } catch {
+    return null;
+  }
+}
+
+async function persistClientPayloadDigest(env, modelVersionId, digest) {
+  const result = await env.DB.prepare(`
+    UPDATE model_versions
+    SET notes = ?
+    WHERE id = ?
+  `).bind(JSON.stringify({ analysisExchangeClientPayloadDigest: digest }), modelVersionId).run();
+  if (Number(result.meta?.changes ?? 0) !== 1) throw new Error('analysis submission metadata could not be finalized');
+}
+
 export async function submitAnalysis(env, payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('analysis submission must be an object');
+  if ('data_snapshot_at' in payload || 'dataSnapshotAt' in payload) throw new Error('data_snapshot_at is assigned by KentaurAI and must not be supplied by the client');
   const roundId = requiredText(payload.round_id ?? payload.roundId, 'round_id', 200);
   const stage = requiredText(payload.stage, 'stage', 20).toLowerCase();
   const id = submissionId(payload.submission_id ?? payload.submissionId);
   const provider = requiredText(payload.producer?.provider, 'producer.provider', 100);
   const model = requiredText(payload.producer?.model, 'producer.model', 200);
   const contextFingerprint = payload.context_fingerprint ?? payload.contextFingerprint;
+  const clientPayloadDigest = await sha256(payload);
+  const modelVersionId = stableId('analysis', roundId, id);
   const existing = await getAnalysisSubmission(env, roundId, id);
   if (existing) {
     const requestedParent = payload.parent_submission_id ?? payload.parentSubmissionId ?? null;
     if (existing.stage !== stage || existing.producer.provider !== provider || existing.producer.model !== model || (existing.parentSubmissionId || null) !== requestedParent) {
       throw new Error('submission_id already exists for this round with different immutable identity metadata; use a new submission_id');
     }
+    const storedDigest = await storedClientPayloadDigest(env, modelVersionId);
+    if (!storedDigest || storedDigest !== clientPayloadDigest) {
+      throw new Error('submission_id already exists with different content; use a new submission_id for a revised analysis');
+    }
     return reusedSubmission(existing);
   }
 
+  let result;
   if (stage === 'pre_market') {
     if (payload.parent_submission_id ?? payload.parentSubmissionId) throw new Error('pre-market submission cannot have a parent submission');
     if (Array.isArray(payload.systems) && payload.systems.length) throw new Error('pre-market submission cannot contain systems');
     await verifyContext(env, roundId, 'pre_market', contextFingerprint);
-    return importAnalysisSubmission(env, {
+    result = await importAnalysisSubmission(env, {
       ...payload,
       contract_version: ANALYSIS_SUBMISSION_VERSION,
       submission_id: id,
@@ -205,30 +233,32 @@ export async function submitAnalysis(env, payload) {
       data_snapshot_at: new Date().toISOString(),
       systems: []
     });
+  } else {
+    if (stage !== 'final') throw new Error('stage must be pre_market or final');
+    const parentSubmissionId = submissionId(payload.parent_submission_id ?? payload.parentSubmissionId);
+    if ('legs' in payload) throw new Error('final submission must not resend race rankings/strength analysis; KentaurAI copies the stored pre-market parent');
+    const parent = await getAnalysisSubmission(env, roundId, parentSubmissionId);
+    if (!parent || parent.stage !== 'pre_market') throw new Error('parent_submission_id must identify a stored pre-market submission for this round');
+    if (parent.producer.provider !== provider) throw new Error('final submission producer.provider must match its pre-market parent');
+    await verifyContext(env, roundId, 'market', contextFingerprint, parentSubmissionId);
+    const systems = payload.systems ?? [];
+    validateExactThreeSpikes(systems);
+    result = await importAnalysisSubmission(env, {
+      ...payload,
+      contract_version: ANALYSIS_SUBMISSION_VERSION,
+      submission_id: id,
+      round_id: roundId,
+      stage: 'final',
+      parent_submission_id: parentSubmissionId,
+      producer: { provider, model },
+      data_snapshot_at: new Date().toISOString(),
+      legs: parentLegsForFinal(parent),
+      systems
+    });
   }
 
-  if (stage !== 'final') throw new Error('stage must be pre_market or final');
-  const parentSubmissionId = submissionId(payload.parent_submission_id ?? payload.parentSubmissionId);
-  if ('legs' in payload) throw new Error('final submission must not resend race rankings/strength analysis; KentaurAI copies the stored pre-market parent');
-  const parent = await getAnalysisSubmission(env, roundId, parentSubmissionId);
-  if (!parent || parent.stage !== 'pre_market') throw new Error('parent_submission_id must identify a stored pre-market submission for this round');
-  if (parent.producer.provider !== provider) throw new Error('final submission producer.provider must match its pre-market parent');
-  await verifyContext(env, roundId, 'market', contextFingerprint, parentSubmissionId);
-  const systems = payload.systems ?? [];
-  validateExactThreeSpikes(systems);
-
-  return importAnalysisSubmission(env, {
-    ...payload,
-    contract_version: ANALYSIS_SUBMISSION_VERSION,
-    submission_id: id,
-    round_id: roundId,
-    stage: 'final',
-    parent_submission_id: parentSubmissionId,
-    producer: { provider, model },
-    data_snapshot_at: new Date().toISOString(),
-    legs: parentLegsForFinal(parent),
-    systems
-  });
+  await persistClientPayloadDigest(env, result.modelVersionId, clientPayloadDigest);
+  return result;
 }
 
 export async function listAnalyzableRounds(env, options = {}) {
