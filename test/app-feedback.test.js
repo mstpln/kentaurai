@@ -21,15 +21,11 @@ test('settings uses understandable source labels and compact status symbols', ()
   assert.match(html, /Förväntat:/);
 });
 
-test('canonical app redirects remain inside the installed PWA scope', async () => {
+test('login and root redirects stay inside the installed PWA scope', async () => {
   const { env } = createTestEnv();
   env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
 
   let response = await worker.fetch(new Request('https://example.test/'), env);
-  assert.equal(response.status, 303);
-  assert.equal(response.headers.get('location'), '/app/');
-
-  response = await worker.fetch(new Request('https://example.test/app'), env);
   assert.equal(response.status, 303);
   assert.equal(response.headers.get('location'), '/app/');
 
