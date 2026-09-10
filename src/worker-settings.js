@@ -22,6 +22,14 @@ async function requireSession(request, env) {
   return null;
 }
 
+function canonicalizeAppRedirect(response) {
+  if (!response || response.status < 300 || response.status >= 400) return response;
+  if (response.headers.get('location') !== '/app') return response;
+  const headers = new Headers(response.headers);
+  headers.set('location', '/app/');
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -31,13 +39,12 @@ export default {
       return json({ ok: true, service: 'kentaurai-api', version: KENTAURAI_APP_VERSION, xlabsScriptSelector: XLABS_SCRIPT_SELECTOR_VERSION });
     }
 
-    if (request.method === 'GET' && path === '/app') {
-      return redirectResponse('/app/');
-    }
+    if (request.method === 'GET' && path === '/') return redirectResponse('/app/');
+    if (request.method === 'GET' && path === '/app') return redirectResponse('/app/');
 
     if (request.method === 'GET' && path === '/app/') {
       if (appAuthConfigured(env) && await hasValidAppSession(request, env)) return htmlResponse(renderAppPage());
-      return worker.fetch(request, env);
+      return canonicalizeAppRedirect(await worker.fetch(request, env));
     }
 
     if (request.method === 'POST' && path === '/app/logout') {
@@ -90,7 +97,7 @@ export default {
       }
     }
 
-    return worker.fetch(request, env);
+    return canonicalizeAppRedirect(await worker.fetch(request, env));
   },
   async scheduled(controller, env, ctx) {
     return worker.scheduled(controller, env, ctx);
