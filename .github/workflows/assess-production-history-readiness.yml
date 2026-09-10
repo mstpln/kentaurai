@@ -49,28 +49,16 @@ jobs:
             }
           }
 
-          query "SELECT status,start_date,end_date,next_date,next_race_index,processed_dates,processed_races,reused_races,consecutive_errors,last_run_at,updated_at FROM historical_backfill_jobs WHERE start_date='2023-09-08' AND end_date='2026-09-07' ORDER BY created_at DESC LIMIT 1;"
+          query "SELECT status,start_date,end_date,next_date,next_race_index,processed_dates,processed_races,reused_races,consecutive_errors,last_error,last_run_at,updated_at FROM historical_backfill_jobs WHERE start_date='2023-09-08' AND end_date='2026-09-07' ORDER BY created_at DESC LIMIT 1;"
           echo "Official backfill:"
           jq -c '.result[0].results[0] // {}' "$response_file"
 
-          query "SELECT status,start_date,end_date,next_date,next_race_index,processed_dates,processed_races,reused_races,unavailable_dates,unavailable_races,consecutive_errors,retry_after,last_run_at,updated_at FROM xlabs_backfill_jobs WHERE scope='historical_all' AND start_date='2023-09-08' AND end_date='2026-09-07' ORDER BY created_at DESC LIMIT 1;"
+          query "SELECT status,start_date,end_date,next_date,next_race_index,processed_dates,processed_races,reused_races,unavailable_dates,unavailable_races,consecutive_errors,last_error,retry_after,last_run_at,updated_at FROM xlabs_backfill_jobs WHERE scope='historical_all' AND start_date='2023-09-08' AND end_date='2026-09-07' ORDER BY created_at DESC LIMIT 1;"
           echo "X-Labs backfill:"
           jq -c '.result[0].results[0] // {}' "$response_file"
 
-          query "SELECT (SELECT COUNT(*) FROM races) AS race_count,(SELECT COUNT(DISTINCT re.race_id) FROM race_entries re JOIN race_results rr ON rr.race_entry_id=re.id) AS races_with_results,(SELECT COUNT(*) FROM race_entries re JOIN race_results rr ON rr.race_entry_id=re.id WHERE re.scratched=0 AND rr.result_status IS NOT NULL) AS completed_entry_count,(SELECT MIN(r.race_date) FROM race_entries re JOIN races r ON r.id=re.race_id JOIN race_results rr ON rr.race_entry_id=re.id WHERE re.scratched=0 AND rr.result_status IS NOT NULL) AS earliest_completed_date,(SELECT MAX(r.race_date) FROM race_entries re JOIN races r ON r.id=re.race_id JOIN race_results rr ON rr.race_entry_id=re.id WHERE re.scratched=0 AND rr.result_status IS NOT NULL) AS latest_completed_date,(SELECT COUNT(DISTINCT race_entry_id) FROM xlabs_data WHERE quality_status='normalized_verified_subset') AS xlabs_entry_count;"
-          echo "History totals:"
-          jq -c '.result[0].results[0]' "$response_file"
+          query "SELECT source_type,status,started_at,finished_at,error_count,error_json,metadata_json FROM import_runs WHERE source_type='scheduled_orchestrator' ORDER BY started_at DESC LIMIT 5;"
+          echo "Recent orchestrators:"
+          jq -c '.result[0].results' "$response_file"
 
-          for entity in horse driver trainer; do
-            case "$entity" in
-              horse) expr='re.horse_id'; where='re.horse_id IS NOT NULL' ;;
-              driver) expr='re.driver_id'; where='re.driver_id IS NOT NULL' ;;
-              trainer) expr='re.trainer_id'; where='re.trainer_id IS NOT NULL' ;;
-            esac
-            sql="WITH completed AS (SELECT $expr AS entity_id,r.race_date FROM race_entries re JOIN races r ON r.id=re.race_id JOIN race_results rr ON rr.race_entry_id=re.id WHERE re.scratched=0 AND rr.result_status IS NOT NULL AND $where), counts AS (SELECT entity_id,SUM(CASE WHEN race_date>=date('now','-14 day') THEN 1 ELSE 0 END) d14,SUM(CASE WHEN race_date>=date('now','-28 day') THEN 1 ELSE 0 END) d28,SUM(CASE WHEN race_date>=date('now','-90 day') THEN 1 ELSE 0 END) d90,SUM(CASE WHEN race_date>=date('now','-180 day') THEN 1 ELSE 0 END) d180,SUM(CASE WHEN race_date>=date('now','-365 day') THEN 1 ELSE 0 END) d365 FROM completed GROUP BY entity_id) SELECT COUNT(*) entities,SUM(d14>=3) d14_ge3,SUM(d14>=5) d14_ge5,SUM(d28>=3) d28_ge3,SUM(d28>=5) d28_ge5,SUM(d90>=5) d90_ge5,SUM(d90>=10) d90_ge10,SUM(d180>=10) d180_ge10,SUM(d365>=10) d365_ge10 FROM counts;"
-            query "$sql"
-            echo "$entity coverage:"
-            jq -c '.result[0].results[0]' "$response_file"
-          done
-
-# status probe 2026-09-10
+# status probe 2026-09-10b
