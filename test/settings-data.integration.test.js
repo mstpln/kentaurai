@@ -149,12 +149,15 @@ test('full export contains accumulated data but guards current market until that
   assert.equal(imported.ok, true);
   assert.equal(imported.stage, 'pre_market');
   assert.equal(imported.provider, 'openai');
+  assert.equal(imported.writes.analyses, 8);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM ai_race_analyses WHERE market_blind = 1`).get().n, 8);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM model_versions WHERE feature_version = 'analysis-exchange-v1' AND ai_provider = 'openai'`).get().n, 1);
 
   response = await worker.fetch(new Request('https://example.test/app/api/settings/export?provider=openai', { headers: { cookie } }), env);
   assert.equal(response.status, 200);
   exported = await response.json();
-  assert.equal(exported.tables.betting_snapshots.length, 8);
   assert.deepEqual(exported.metadata.market_blind_rule.guarded_open_round_ids, []);
+  assert.equal(exported.tables.betting_snapshots.length, 8);
   assert.equal(exported.analysis_contexts[0].market.length, 1);
   assert.equal(exported.analysis_contexts[0].market[0].parentSubmissionId, 'openai-settings-pre-1');
   assert.equal(exported.analysis_contexts[0].market[0].context.market.betting.length, 8);
