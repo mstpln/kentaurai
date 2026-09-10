@@ -1,4 +1,4 @@
-name: Inspect X-Labs structural source gap
+name: Quarantine X-Labs source gap and resume history
 
 on:
   push:
@@ -6,17 +6,16 @@ on:
       - ops/backfill-coverage-assessment-v067
     paths:
       - .github/workflows/assess-production-history-readiness.yml
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  inspect:
+  recover:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Read production X-Labs failure context
+      - name: Guarded production recovery
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -37,11 +36,22 @@ jobs:
             [[ "$code" == "200" ]]
             jq -e '.success == true and (.result | all(.success == true))' "$response_file" >/dev/null
           }
-          query "SELECT status,next_date,next_race_index,processed_races,unavailable_races,consecutive_errors,last_error,retry_after,last_run_at FROM xlabs_backfill_jobs WHERE scope='historical_all' ORDER BY created_at DESC LIMIT 1;"
-          echo "X-Labs job:"; jq -c '.result[0].results[0] // {}' "$response_file"
-          query "SELECT id,status,started_at,finished_at,error_json,metadata_json FROM import_runs WHERE source_type='xlabs_telemetry_normalize' AND status='failed' AND error_json LIKE '%duplicate target%' ORDER BY started_at DESC LIMIT 10;"
-          echo "Duplicate-target normalization failures:"; jq -c '.result[0].results' "$response_file"
-          query "SELECT sr.id,sr.external_id,sr.fetched_at,sr.quality_status,sr.metadata_json FROM source_records sr WHERE sr.id IN (SELECT DISTINCT json_extract(metadata_json,'$.sourceRecordId') FROM import_runs WHERE source_type='xlabs_telemetry_normalize' AND status='failed' AND error_json LIKE '%duplicate target%') ORDER BY sr.fetched_at DESC LIMIT 10;"
-          echo "Affected X-Labs sources:"; jq -c '.result[0].results' "$response_file"
-          query "SELECT status,next_date,next_race_index,processed_races,consecutive_errors,last_error,last_run_at FROM historical_backfill_jobs WHERE id='backfill_official-se-trot-v2__2023-09-08__2026-09-07' LIMIT 1;"
-          echo "Official history:"; jq -c '.result[0].results[0] // {}' "$response_file"
+
+          job_id='xlabsbackfill_xlabs-race-v1__historical-all__2023-09-08__2026-09-07'
+          source_id='src_4bf4ac1f-8a64-4232-85e6-f76061b6519d'
+          query "SELECT status,next_date,next_race_index,processed_races,unavailable_races,consecutive_errors,last_error FROM xlabs_backfill_jobs WHERE id='$job_id' LIMIT 1;"
+          echo "Before recovery:"; jq -c '.result[0].results[0] // {}' "$response_file"
+          jq -e '.result[0].results[0] | .status == "failed" and .next_date == "2026-08-15" and .next_race_index == 0 and .processed_races == 131 and .unavailable_races == 60 and .consecutive_errors == 3 and .last_error == "X-Labs telemetry frame 0 contains duplicate target 9"' "$response_file" >/dev/null || { echo "Guard failed: X-Labs job state changed; refusing mutation"; exit 1; }
+
+          query "SELECT external_id,quality_status FROM source_records WHERE id='$source_id' AND source_type='xlabs_race_json' LIMIT 1;"
+          jq -e '.result[0].results[0] | .external_id == "2026-08-15:6:1" and .quality_status == "captured_unmapped"' "$response_file" >/dev/null || { echo "Guard failed: source state changed; refusing mutation"; exit 1; }
+
+          query "UPDATE source_records SET quality_status='captured_source_gap', metadata_json=json_set(COALESCE(metadata_json,'{}'),'$.normalizationStatus','source_gap','$.sourceGap.code','duplicate_target','$.sourceGap.frameIndex',0,'$.sourceGap.startNumber',9) WHERE id='$source_id' AND source_type='xlabs_race_json' AND external_id='2026-08-15:6:1' AND quality_status='captured_unmapped';"
+          [[ "$(jq -r '.result[0].meta.changes // 0' "$response_file")" == "1" ]] || { echo "Source quarantine did not change exactly one row"; exit 1; }
+
+          query "UPDATE xlabs_backfill_jobs SET status='running', next_race_index=1, processed_races=processed_races+1, unavailable_races=unavailable_races+1, consecutive_errors=0, last_error=NULL, retry_after=NULL, lease_token=NULL, lease_until=NULL, last_run_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id='$job_id' AND status='failed' AND next_date='2026-08-15' AND next_race_index=0 AND processed_races=131 AND unavailable_races=60 AND consecutive_errors=3 AND last_error='X-Labs telemetry frame 0 contains duplicate target 9';"
+          [[ "$(jq -r '.result[0].meta.changes // 0' "$response_file")" == "1" ]] || { echo "Job recovery did not change exactly one row"; exit 1; }
+
+          query "SELECT status,next_date,next_race_index,processed_races,unavailable_races,consecutive_errors,last_error,retry_after FROM xlabs_backfill_jobs WHERE id='$job_id' LIMIT 1;"
+          echo "After recovery:"; jq -c '.result[0].results[0] // {}' "$response_file"
+          jq -e '.result[0].results[0] | .status == "running" and .next_date == "2026-08-15" and .next_race_index == 1 and .processed_races == 132 and .unavailable_races == 61 and .consecutive_errors == 0 and .last_error == null and .retry_after == null' "$response_file" >/dev/null
