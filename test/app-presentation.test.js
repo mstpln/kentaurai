@@ -7,9 +7,14 @@ import { createAppSessionCookie } from '../src/app-auth.js';
 import {
   PRESENTATION_OTHER_LONG_DISTANCE_GROUP,
   presentationDistanceGroup,
-  presentationGroupDistanceRows,
-  renderAppPage
+  presentationGroupDistanceRows
 } from '../src/app-page-presentation-v2.js';
+import {
+  presentationFeatureLabel,
+  presentationQualityLabel,
+  presentationShoeLabel,
+  renderAppPage
+} from '../src/app-page-localization.js';
 import { createTestEnv } from './helpers/d1.js';
 
 test('long distances use canonical groups and one remaining long-distance bucket', () => {
@@ -44,6 +49,18 @@ test('long-distance grouping recalculates rates after aggregation', () => {
   assert.equal(other.gallopRate, 1 / 5);
 });
 
+test('final localization maps current technical values to natural Swedish', () => {
+  assert.equal(presentationShoeLabel('shod', false), 'Med skor');
+  assert.equal(presentationShoeLabel('barefoot', true), 'Barfota');
+  assert.equal(presentationShoeLabel(null, 0), 'Med skor');
+  assert.equal(presentationShoeLabel(null, 1), 'Barfota');
+  assert.equal(presentationQualityLabel('sufficient'), 'God');
+  assert.equal(presentationQualityLabel('limited'), 'Begränsad');
+  assert.equal(presentationFeatureLabel('form_starts_5'), 'Starter – senaste 5');
+  assert.equal(presentationFeatureLabel('class_target_first_prize'), 'Förstapris i aktuellt lopp');
+  assert.equal(presentationFeatureLabel('development_top3_rate_delta'), 'Förändring i topp 3-andel');
+});
+
 test('rendered app contains the requested natural Swedish presentation', () => {
   const html = renderAppPage();
   assert.doesNotMatch(html, /\(i år\)/);
@@ -61,10 +78,13 @@ test('rendered app contains the requested natural Swedish presentation', () => {
   assert.match(html, /Platsodds/);
   assert.match(html, /Startposition/);
   assert.match(html, /Övrigt >2640/);
+  assert.match(html, /Starter – senaste 5/);
+  assert.match(html, /Marknadsblind/);
+  assert.match(html, /Värdekvot/);
   assert.match(html, /\.settings-button\{top:5px!important/);
 });
 
-test('presentation JavaScript remains syntactically valid', () => {
+test('all JavaScript in the final localized app remains syntactically valid', () => {
   const html = renderAppPage();
   const scripts = [...html.matchAll(/<script(?: [^>]*)?>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
   for (const script of scripts) assert.doesNotThrow(() => new vm.Script(script));
