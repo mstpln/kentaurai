@@ -6,7 +6,7 @@ import { normalizeCapturedOfficialGameSequential } from './import/official-live-
 import { captureUpcomingOfficialGames, normalizeNextPendingOfficialGame } from './import/official-live-scheduled.js';
 import { normalizeCapturedXlabsRace } from './import/xlabs-telemetry.js';
 import { normalizeCapturedOfficialRace } from './import/official-historical-race.js';
-import { getHistoricalBackfill, runHistoricalBackfillBatch, runHistoricalBackfillStep, startHistoricalBackfill } from './import/official-historical-backfill.js';
+import { ensureDailyOfficialHistoryJobs, getHistoricalBackfill, runHistoricalBackfillBatch, runHistoricalBackfillStep, startHistoricalBackfill } from './import/official-historical-backfill.js';
 import { ensureDailyXlabsJob, getXlabsBackfill, runXlabsBackfillBatch, runXlabsBackfillStep, startXlabsBackfill } from './import/xlabs-backfill.js';
 import { captureCalendar, captureGame, captureRace } from './provider/official.js';
 import { captureXlabsDate } from './provider/xlabs.js';
@@ -326,6 +326,7 @@ async function handleScheduled(controller, env) {
   } else if (controller.cron === LIVE_EVENING_CRON) {
     parts.push(await runScheduledPart('live_capture_evening', () => captureUpcomingOfficialGames(env, controller.scheduledTime, { includeToday: false })));
   } else if (controller.cron === XLABS_DAILY_CRON) {
+    parts.push(await runScheduledPart('official_daily_history_jobs', () => ensureDailyOfficialHistoryJobs(env, controller.scheduledTime)));
     parts.push(await runScheduledPart('xlabs_daily_job', () => ensureDailyXlabsJob(env, controller.scheduledTime)));
   } else {
     parts.push({ name: 'unknown_cron', ok: false, error: `unsupported cron ${controller.cron}` });
