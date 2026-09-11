@@ -1,4 +1,5 @@
 import { normalizeRaceScope, raceScopeCondition } from '../race-scope.js';
+import { canonicalStartMethodSql, coreMetricSelectSql, mapCoreMetricRow } from '../statistics/core.js';
 
 const ENTITY_STATS_CONFIG = {
   horses: { table: 'horses', relationColumn: 'horse_id' },
@@ -29,15 +30,6 @@ function normalizeStartMethod(value) {
   throw new Error('start method must be all, auto or volt');
 }
 
-function canonicalStartMethodSql() {
-  return `CASE
-    WHEN LOWER(COALESCE(r.start_method, '')) IN ('auto','autostart') THEN 'auto'
-    WHEN LOWER(COALESCE(r.start_method, '')) IN ('volt','volte','voltstart') THEN 'volt'
-    WHEN r.start_method IS NULL OR TRIM(r.start_method) = '' THEN 'unknown'
-    ELSE LOWER(r.start_method)
-  END`;
-}
-
 function addPeriodFilter(conditions, bindings, year) {
   if (year == null) return;
   conditions.push('r.race_date >= ? AND r.race_date < ?');
@@ -46,7 +38,7 @@ function addPeriodFilter(conditions, bindings, year) {
 
 function addMethodFilter(conditions, method) {
   if (!method) return;
-  conditions.push(`${canonicalStartMethodSql()} = '${method}'`);
+  conditions.push(`${canonicalStartMethodSql('r')} = '${method}'`);
 }
 
 function addRaceScopeFilter(conditions, scope) {
@@ -60,31 +52,7 @@ async function entityExists(env, config, id) {
 }
 
 function mapRows(rows) {
-  return rows.map((row) => {
-    const resultStarts = Number(row.result_starts ?? 0);
-    const wins = Number(row.wins ?? 0);
-    const seconds = Number(row.seconds ?? 0);
-    const thirds = Number(row.thirds ?? 0);
-    const top3 = Number(row.top3 ?? 0);
-    const gallops = Number(row.gallops ?? 0);
-    const disqualifications = Number(row.disqualifications ?? 0);
-    const prizeSek = Number(row.prize_sek ?? 0);
-    return {
-      label: row.label,
-      starts: Number(row.starts ?? 0),
-      resultStarts,
-      wins,
-      seconds,
-      thirds,
-      top3,
-      gallops,
-      disqualifications,
-      prizeSek,
-      winRate: resultStarts ? wins / resultStarts : null,
-      top3Rate: resultStarts ? top3 / resultStarts : null,
-      gallopRate: resultStarts ? gallops / resultStarts : null
-    };
-  });
+  return rows.map((row) => ({ label: row.label, ...mapCoreMetricRow(row) }));
 }
 
 async function groupedRows(env, { relationColumn, id, year, raceScope, method, groupExpression, orderBy, limit = null }) {
@@ -95,19 +63,11 @@ async function groupedRows(env, { relationColumn, id, year, raceScope, method, g
   addMethodFilter(conditions, method);
   const sql = `
     SELECT ${groupExpression} AS label,
-      COUNT(*) AS starts,
-      SUM(CASE WHEN rr.race_entry_id IS NOT NULL THEN 1 ELSE 0 END) AS result_starts,
-      SUM(CASE WHEN rr.placing = 1 THEN 1 ELSE 0 END) AS wins,
-      SUM(CASE WHEN rr.placing = 2 THEN 1 ELSE 0 END) AS seconds,
-      SUM(CASE WHEN rr.placing = 3 THEN 1 ELSE 0 END) AS thirds,
-      SUM(CASE WHEN rr.placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) AS top3,
-      SUM(CASE WHEN rr.gallop = 1 THEN 1 ELSE 0 END) AS gallops,
-      SUM(CASE WHEN rr.disqualified = 1 THEN 1 ELSE 0 END) AS disqualifications,
-      SUM(COALESCE(rr.prize_sek, 0)) AS prize_sek
+      ${coreMetricSelectSql('rr')}
     FROM race_entries re
     JOIN races r ON r.id = re.race_id
     LEFT JOIN tracks t ON t.id = r.track_id
-    LEFT JOIN race_results rr ON rr.race_entry_id = re.id
+    JOIN race_results rr ON rr.race_entry_id = re.id
     WHERE ${conditions.join(' AND ')}
     GROUP BY ${groupExpression}
     ORDER BY ${orderBy}
@@ -122,12 +82,15 @@ function emptySummary() {
     starts: 0,
     resultStarts: 0,
     wins: 0,
+    losses: 0,
     seconds: 0,
     thirds: 0,
     top3: 0,
     gallops: 0,
+    gallopVerifiedStarts: 0,
     disqualifications: 0,
-    prizeSek: 0,
+    prizeVerifiedStarts: 0,
+    prizeSek: null,
     winRate: null,
     top3Rate: null,
     gallopRate: null
@@ -145,7 +108,7 @@ export async function getFilteredEntityStatBreakdowns(env, type, id, options = {
   const raceScope = normalizeRaceScope(options.raceScope);
   const distanceStartMethod = normalizeStartMethod(options.distanceStartMethod);
   const trackStartMethod = normalizeStartMethod(options.trackStartMethod);
-  const canonicalMethod = canonicalStartMethodSql();
+  const canonicalMethod = canonicalStartMethodSql('r');
 
   const [summaryRows, startMethods, distances, tracks] = await Promise.all([
     groupedRows(env, {
