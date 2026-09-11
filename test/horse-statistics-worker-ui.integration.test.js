@@ -44,7 +44,7 @@ test('actual Worker HTML contains horse Build B UI after Trend composition', asy
   assert.match(html,/id="kentaurai-trend-build-a-script"/);assert.match(html,/id="kentaurai-horse-statistics-build-b-script"/);
   assert.ok(html.indexOf('kentaurai-trend-build-a-script')<html.indexOf('kentaurai-horse-statistics-build-b-script'));
   for(const text of ['Högst segerprocent','Högst topp 3-procent','Bäst form – senaste 10','Startsnabbaste','Högst startpoäng','Starkaste avslutare','Första starten efter vila','Andra starten efter vila']) assert.match(html,new RegExp(text));
-  assert.match(html,/@media\(max-width:360px\)/);assert.match(html,/Senast verifierade officiella observation/);
+  assert.match(html,/@media\(max-width:430px\)/);assert.match(html,/@media\(max-width:320px\)/);assert.match(html,/Senast verifierade officiella observation/);
 });
 
 test('horse UI enhancer preserves HTML and injects syntactically valid JavaScript', () => {
