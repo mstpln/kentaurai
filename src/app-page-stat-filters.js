@@ -50,14 +50,16 @@ let statRequestToken=0;
 function entityStatKey(){return state.detail?state.detail.page+':'+state.detail.id:null}
 function filtersForCurrentEntity(){
   const key=entityStatKey();
-  if(!key)return {year:'all',distanceMethod:'all',trackMethod:'all'};
-  if(!entityStatState.has(key))entityStatState.set(key,{year:'all',distanceMethod:'all',trackMethod:'all'});
+  if(!key)return {year:'all',raceScope:'all',distanceMethod:'all',trackMethod:'all'};
+  if(!entityStatState.has(key))entityStatState.set(key,{year:'all',raceScope:'all',distanceMethod:'all',trackMethod:'all'});
   return entityStatState.get(key);
 }
 function currentYears(){const year=new Date().getFullYear();return [year,year-1]}
 function periodOptions(){const [current,previous]=currentYears();return [['all','All data'],[String(current),current+' (i år)'],[String(previous),previous+' (förra året)']]}
+function raceScopeOptions(){return [['all','All data'],['stl','STL-lopp'],['weekday','Vardagstrav']]}
 function methodOptions(){return [['all','All data'],['auto','Auto'],['volt','Voltstart']]}
 function pills(options,active,attribute){return '<div class="stat-pills">'+options.map(([value,label])=>'<button type="button" class="stat-pill '+(String(active)===String(value)?'active':'')+'" '+attribute+'="'+esc(value)+'">'+esc(label)+'</button>').join('')+'</div>'}
+function globalFilters(filters){return '<div data-global-stat-filters="true"><div class="stat-period-bar"><span class="stat-filter-label">Period</span>'+pills(periodOptions(),filters.year,'data-stat-year')+'</div><div class="stat-period-bar"><span class="stat-filter-label">Loppnivå</span>'+pills(raceScopeOptions(),filters.raceScope,'data-race-scope')+'</div></div>'}
 function summaryStats(detail){
   const s=detail.stats||{};
   const gallopRate=s.resultStarts?Number(s.gallops||0)/Number(s.resultStarts):null;
@@ -65,7 +67,7 @@ function summaryStats(detail){
 }
 statsView=function(detail){
   const filters=filtersForCurrentEntity();
-  return '<div class="data-groups">'+summaryStats(detail)+'<div class="entity-stat-filter-shell"><div class="stat-period-bar"><span class="stat-filter-label">Period</span>'+pills(periodOptions(),filters.year,'data-stat-year')+'</div><div id="entityStatTables" class="breakdown-grid entity-filter-grid"><div class="card stat-filter-loading">Läser statistik…</div></div></div></div>';
+  return '<div class="data-groups">'+summaryStats(detail)+'<div class="entity-stat-filter-shell">'+globalFilters(filters)+'<div id="entityStatTables" class="breakdown-grid entity-filter-grid"><div class="card stat-filter-loading">Läser statistik…</div></div></div></div>';
 };
 function formatRate(value){return value==null?'—':pct(value)}
 function formatLabel(kind,label){
@@ -81,6 +83,7 @@ function statTable(title,kind,rows,methodValue){
 function bindFilterButtons(){
   const filters=filtersForCurrentEntity();
   document.querySelectorAll('[data-stat-year]').forEach(button=>button.onclick=()=>{filters.year=button.dataset.statYear;renderStatFilters()});
+  document.querySelectorAll('[data-race-scope]').forEach(button=>button.onclick=()=>{filters.raceScope=button.dataset.raceScope;renderStatFilters()});
   document.querySelectorAll('[data-distance-method]').forEach(button=>button.onclick=()=>{filters.distanceMethod=button.dataset.distanceMethod;renderStatFilters()});
   document.querySelectorAll('[data-track-method]').forEach(button=>button.onclick=()=>{filters.trackMethod=button.dataset.trackMethod;renderStatFilters()});
 }
@@ -88,15 +91,15 @@ async function renderStatFilters(){
   if(state.tab!=='stats'||!state.detail)return;
   const key=entityStatKey();
   const filters=filtersForCurrentEntity();
-  const period=document.querySelector('.stat-period-bar');
-  if(period)period.innerHTML='<span class="stat-filter-label">Period</span>'+pills(periodOptions(),filters.year,'data-stat-year');
+  const global=document.querySelector('[data-global-stat-filters]');
+  if(global)global.innerHTML=globalFilters(filters).replace(/^<div data-global-stat-filters="true">|<\/div>$/g,'');
   const target=document.getElementById('entityStatTables');
   if(!target)return;
   target.innerHTML='<div class="card stat-filter-loading">Läser statistik…</div>';
   bindFilterButtons();
   const token=++statRequestToken;
   try{
-    const query=new URLSearchParams({year:filters.year,distance_start_method:filters.distanceMethod,track_start_method:filters.trackMethod});
+    const query=new URLSearchParams({year:filters.year,race_scope:filters.raceScope,distance_start_method:filters.distanceMethod,track_start_method:filters.trackMethod});
     const data=await api('/entities/'+encodeURIComponent(state.detail.page)+'/'+encodeURIComponent(state.detail.id)+'/stat-breakdowns?'+query.toString());
     if(token!==statRequestToken||key!==entityStatKey()||state.tab!=='stats')return;
     const groupedDistances=groupDistanceRows(data.distances||[]);
