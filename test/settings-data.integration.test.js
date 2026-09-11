@@ -12,6 +12,10 @@ function seedFutureRound(db) {
     INSERT INTO game_rounds (id, game_type, round_date, scheduled_start_at, bet_stop_at, status)
     VALUES (?, 'V85', '2099-06-01', '2099-06-01T14:00:00Z', '2099-06-01T13:55:00Z', 'upcoming')
   `).run(ROUND_ID);
+  db.prepare(`
+    INSERT INTO source_records (id, source_type, fetched_at, quality_status)
+    VALUES ('settings-market-source', 'official_provider', '2026-09-01T12:00:00Z', 'verified')
+  `).run();
   for (let leg = 1; leg <= 8; leg += 1) {
     const raceId = `settings_race_${leg}`;
     const horseId = `settings_horse_${leg}`;
@@ -27,8 +31,8 @@ function seedFutureRound(db) {
       VALUES (?, ?, ?, 1, 0, 'normalized_verified_subset')
     `).run(entryId, raceId, horseId);
     db.prepare(`
-      INSERT INTO betting_snapshots (id, game_round_id, leg_number, race_entry_id, captured_at, bet_percent, market_rank)
-      VALUES (?, ?, ?, ?, '2026-09-01T12:00:00Z', 50, 1)
+      INSERT INTO betting_snapshots (id, game_round_id, leg_number, race_entry_id, captured_at, bet_percent, market_rank, source_record_id)
+      VALUES (?, ?, ?, ?, '2026-09-01T12:00:00Z', 50, 1, 'settings-market-source')
     `).run(`settings_bet_${leg}`, ROUND_ID, leg, entryId);
   }
 }
@@ -165,6 +169,7 @@ test('full export contains accumulated data but guards current market until that
   assert.equal(exported.analysis_contexts[0].market.length, 1);
   assert.equal(exported.analysis_contexts[0].market[0].parentSubmissionId, 'openai-settings-pre-1');
   assert.equal(exported.analysis_contexts[0].market[0].context.market.betting.length, 8);
+  assert.equal(exported.analysis_contexts[0].market[0].context.market.definitionVersion, 'verified-market-at-stop-v1');
 });
 
 test('analysis upload rejects non-JSON files and logout clears the private session', async () => {
