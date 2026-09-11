@@ -77,7 +77,7 @@ test('track migration keeps contact facts separate from calculated race classifi
     ['lane_ladder', 'mares']
   );
 
-  db.prepare("UPDATE races SET race_name='Gulddivisionen' WHERE id='r1'").run();
+  db.prepare("UPDATE races SET race_name='Gulddivisionen', main_class='Gulddivisionen', class_flags_json='[]' WHERE id='r1'").run();
   assert.equal(db.prepare("SELECT stl_class FROM race_stl_classifications WHERE race_id='r1'").get().stl_class, 'gold');
   assert.deepEqual(db.prepare("SELECT race_type FROM race_type_classifications WHERE race_id='r1'").all(), []);
 });
