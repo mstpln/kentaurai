@@ -1,6 +1,7 @@
 import { stableId } from '../ids.js';
 import { finishImportRun, startImportRun } from './common.js';
 import { normalizeCapturedOfficialRace, officialRaceHasFinalResults } from './official-historical-race.js';
+import { recordObservation } from './official-live-chunked.js';
 import { markOfficialRaceSourceGap, officialRaceSourceGap } from './official-source-gap.js';
 import { captureCalendar, captureRace, validateIsoDate } from '../provider/official.js';
 import { sourceFailureRetryDelayMs } from '../provider/source-error.js';
@@ -10,6 +11,7 @@ const NORMALIZED_QUALITY = 'normalized_verified_subset';
 const BACKFILL_VERSION = 'official-se-trot-v2';
 const MAX_RANGE_DAYS = 1096;
 const MAX_EMPTY_DATES_PER_STEP = 14;
+const HIGHER_PRIZE_GAME_TYPES = ['V75', 'V85', 'V86'];
 export const DAILY_OFFICIAL_LOOKBACK_DAYS = 3;
 export const MAX_HISTORICAL_CHECKPOINTS_PER_BATCH = 3;
 
@@ -70,6 +72,32 @@ export function swedishTrottingRaceIds(calendar) {
     }
   }
   return ids;
+}
+
+export function historicalGameTypesForRace(calendar, raceId) {
+  const games = calendar?.games;
+  if (!games || typeof games !== 'object' || Array.isArray(games)) return [];
+  return HIGHER_PRIZE_GAME_TYPES.filter((gameType) => {
+    const rounds = games[gameType];
+    if (!Array.isArray(rounds)) return false;
+    return rounds.some((round) => Array.isArray(round?.races) && round.races.includes(raceId));
+  });
+}
+
+async function recordHistoricalGameMembership(env, calendarSource, calendar, raceId, counts) {
+  const gameTypes = historicalGameTypesForRace(calendar, raceId);
+  if (!gameTypes.length) return gameTypes;
+  await recordObservation(
+    env,
+    counts,
+    'race',
+    raceId,
+    calendarSource.id,
+    calendarSource.fetched_at,
+    { gameTypes },
+    NORMALIZED_QUALITY
+  );
+  return gameTypes;
 }
 
 export async function startHistoricalBackfill(env, startDate, endDate, { resume = false } = {}) {
@@ -212,7 +240,7 @@ export async function runHistoricalBackfillStep(env, jobId = null, options = {})
       let calendarSource = await sourceForIdentity(env, `calendar:${job.next_date}`);
       if (!calendarSource) {
         const captured = await captureCalendar(env, job.next_date, { fetchImpl: options.fetchImpl });
-        calendarSource = { id: captured.sourceRecordId, raw_object_key: captured.rawObjectKey, quality_status: 'captured_unmapped' };
+        calendarSource = { id: captured.sourceRecordId, fetched_at: captured.fetchedAt, raw_object_key: captured.rawObjectKey, quality_status: 'captured_unmapped' };
         counts.inserted += Number(!captured.reused);
         counts.skipped += Number(captured.reused);
       } else {
@@ -235,6 +263,7 @@ export async function runHistoricalBackfillStep(env, jobId = null, options = {})
       try {
         raceSource = await chooseRaceSource(env, raceId, options, counts);
         const normalized = await normalizeCapturedOfficialRace(env, raceSource.id);
+        const gameTypes = await recordHistoricalGameMembership(env, calendarSource, calendar, raceId, counts);
         if (normalized.reused) counts.skipped += 1;
         else counts.updated += 1;
         const nextIndex = await checkpointRace(env, job, leaseToken, { reused: normalized.reused });
@@ -245,6 +274,7 @@ export async function runHistoricalBackfillStep(env, jobId = null, options = {})
           status: 'running',
           checkpoint: { date: job.next_date, nextRaceIndex: nextIndex },
           raceId,
+          gameTypes,
           normalized,
           done: false
         };

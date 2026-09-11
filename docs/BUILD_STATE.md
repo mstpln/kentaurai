@@ -2,14 +2,14 @@
 
 Version: 0.6.0
 Phase: verified official + X-Labs data foundation with production backfills active
-Status: v0.6.0 is deployed in production; migration 0008, Worker health, private login and the analysis-prompt route were verified by the successful production release after PR #77. The official multi-year historical backfill and the separate multi-year X-Labs backfill remain active on their persisted cursors. Six-area private navigation and Bana profiles are deployed. The current completion branch fixes the remaining track presentation/contact work and introduces migration 0009, which is not yet applied in production.
+Status: v0.6.0 is deployed in production; migration 0008, Worker health, private login and the analysis-prompt route were verified by the successful production release after PR #77. PR #78 is merged and added the canonical track filters/contact infrastructure plus repository migration 0009. Migration 0009 has not been production-applied or verified as part of the post-#78 rollout, and real private track-contact enrichment is not complete. PR #79 is the current UI-integrity/completion build and is not production-live. The official multi-year historical backfill and separate multi-year X-Labs backfill remain active on their persisted cursors and were not touched by this build.
 
 ## Current production state
 - Worker: `kentaurai-api`.
 - D1: `kentaurai`.
 - R2: `kentaurai-raw`.
 - Production migrations are applied through migration 0008. The production release verified the 0008 track-contact columns and calculated race-classification tables before deploying the Worker.
-- Repository migration 0009 adds fact-level provenance for researched track contact facts. It is pending review/merge and must not be assumed applied until the authorized completion release succeeds.
+- Repository migration 0009 adds fact-level provenance for researched track contact facts. It is present on main after merged PR #78 but must not be assumed production-applied until an authorized release applies and verifies it.
 - Production `/health` was verified against KentaurAI `0.6.0`; `/app/login` and the private analysis-prompt route were also verified after the release.
 - Official historical backfill range: 2023-09-08 through 2026-09-07, newest-first, up to three sequential race checkpoints per minute when eligible.
 - X-Labs historical backfill range: 2023-09-08 through 2026-09-07, newest-first, up to three sequential X-Labs checkpoints per minute when eligible.
@@ -106,8 +106,8 @@ Status: v0.6.0 is deployed in production; migration 0008, Worker health, private
 - Internal provider/source IDs are not primary user-facing content.
 - Missing facts and unsupported derived values remain null/unknown.
 - Bana has list/detail views with **Översikt -> Spårstatistik -> Hemmatränare**. Stored track profile facts are shown only when verified; address/website fields are nullable and hidden when unavailable.
-- Bana spårstatistik supports period, startmetod and canonical distance together with independent optional **STL-klass** and **Lopptyp** filters. STL/race-type classifications are deterministic calculated data stored separately from raw race facts.
-- The completion build moves STL-klass/Lopptyp into the canonical track renderer/query state rather than depending on MutationObserver injection. `All data` remains literal and `SE` is presented as `Sverige` without altering stored country codes.
+- Bana spårstatistik supports period, startmetod, loppnivå and canonical distance together with independent optional **STL-klass** and **Lopptyp** filters. These filters combine in the backend query. STL/race-type classifications are deterministic calculated data stored separately from raw race facts.
+- PR #79 moves all essential Bana filter state/query wiring and address formatting into the canonical track renderer rather than exact generated-source replacement. It also makes the Settings analysis CTA and V85/V86 round-count label canonical Settings output rather than MutationObserver-created UI. `All data` remains literal and `SE` is presented as `Sverige` without altering stored country codes.
 - The completion build adds an `ADMIN_TOKEN`-protected exact-ID track-contact target/enrichment path. Researched real values stay private; conflicts are recorded and do not overwrite an existing different fact.
 
 ## Navigation and visual direction
@@ -153,12 +153,13 @@ Status: v0.6.0 is deployed in production; migration 0008, Worker health, private
 - PWA caching is restricted to public static metadata/assets and does not create an offline cache of private KentaurAI data.
 
 ## Current verification/operations gate
-1. Keep the official and X-Labs multi-year backfills running independently through their persisted checkpoints.
-2. Review and merge the v0.6.0 completion PR only after explicit user approval.
-3. After merge, apply migration 0009 and deploy the exact reviewed main head using the authorized production path.
-4. Query the private exact track target set, research physical addresses and official HTTPS websites, then write verified facts/provenance to D1 without committing the real dataset.
-5. Verify Bana overview/country/contact presentation and combined Spårstatistik filters in the real production app.
-6. Confirm the official and X-Labs backfill rows/cursors still exist and have not been recreated or reset.
+1. Keep the official and X-Labs multi-year backfills running independently through their persisted checkpoints; do not reset or recreate them.
+2. Review PR #79, require exact-head QA/CI, and merge only after explicit user approval.
+3. After merge authorization, apply pending migration 0009 if still needed and deploy the exact reviewed main head through the authorized production path.
+4. Verify health and private authentication, then verify the actual authenticated application shows the Settings AI CTA, V85/V86 count label, Swedish presentation and combined statistics/Bana filters.
+5. Confirm the existing official and X-Labs backfill state remains intact.
+6. Perform real track-contact research/enrichment separately through the private exact-ID path without committing the dataset.
+7. Confirm the official and X-Labs backfill rows/cursors still exist and have not been recreated or reset.
 
 ## Next build sequence
 1. Complete the track-contact enrichment and production verification gate above.

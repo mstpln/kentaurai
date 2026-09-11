@@ -79,6 +79,7 @@ export default {
       try {
         const data = await getTrackLaneStatsV064(env, decodeURIComponent(trackLaneStatsMatch[1]), {
           year: url.searchParams.get('year'),
+          raceScope: url.searchParams.get('race_scope'),
           startMethod: url.searchParams.get('start_method'),
           distanceGroup: url.searchParams.get('distance_group'),
           stlClass: url.searchParams.get('stl_class'),

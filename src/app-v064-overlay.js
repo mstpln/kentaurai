@@ -1,16 +1,6 @@
 import { RACE_TYPE_OPTIONS } from './race-classification.js';
 
-const css = `
-<style id="kentaurai-v064-overlay">
-.analysis-prompt-guide{margin-top:16px;padding-top:15px;border-top:1px solid var(--line-soft)}
-.analysis-prompt-guide h3{font-size:14px;font-weight:650;margin:0 0 6px}
-.analysis-prompt-guide p{font-size:12px;line-height:1.55;color:var(--muted);margin:0 0 12px}
-.analysis-prompt-copy{width:auto}
-@media(max-width:620px){.analysis-prompt-copy{width:100%}}
-</style>`;
-
 function v064Client(RACE_TYPE_OPTIONS) {
-  const originalFetch = window.fetch.bind(window);
   const exactText = new Map([
     ['spike_miss', 'Missad spik'], ['coverage_miss', 'Vinnaren saknades på systemet'],
     ['Learnings', 'Lärdomar'], ['Omgångens learnings', 'Omgångens lärdomar'],
@@ -91,48 +81,10 @@ function v064Client(RACE_TYPE_OPTIONS) {
       for (const [code, name] of Object.entries(countries)) text = text.replace(new RegExp(' · ' + code + '$'), ' · ' + name);
       element.textContent = text;
     });
-    document.querySelectorAll('.settings-count span').forEach((element) => {
-      if (element.textContent.trim() === 'Spel') element.textContent = 'V85/V86-omgångar';
-    });
     localizeTechnicalAnalysisHeadings();
   }
 
-  function enhanceAnalysisImportGuide() {
-    const head = [...document.querySelectorAll('.settings-card-head h2')].find((element) => element.textContent.trim() === 'Importera AI-analys');
-    if (!head) return;
-    const card = head.closest('.settings-card');
-    const body = card?.querySelector('.settings-card-body');
-    if (!body || body.querySelector('.analysis-prompt-guide')) return;
-    body.querySelector('.settings-help')?.remove();
-    body.querySelector('.settings-code')?.remove();
-    const result = body.querySelector('#analysisImportResult');
-    const guide = document.createElement('div');
-    guide.className = 'analysis-prompt-guide';
-    guide.innerHTML = '<h3>Skapa V85/V86-systemanalysfil för import</h3><p>Kopiera instruktionerna och klistra in dem i samma ChatGPT- eller Claude-konversation där analysen och systemet skapades. AI:n skapar då en JSON-fil som är färdig att importera i KentaurAI.</p><button type="button" class="settings-secondary analysis-prompt-copy">Kopiera instruktioner till AI</button>';
-    body.insertBefore(guide, result || null);
-    const button = guide.querySelector('button');
-    button.onclick = async () => {
-      const old = button.textContent;
-      button.disabled = true;
-      try {
-        const provider = document.getElementById('exportProvider')?.value || 'ai';
-        const response = await originalFetch('/app/api/settings/analysis-prompt?provider=' + encodeURIComponent(provider), { headers: { accept: 'application/json' } });
-        const data = await response.json();
-        if (!response.ok || !data.prompt) throw new Error(data.message || 'Kunde inte läsa instruktionerna');
-        if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(data.prompt);
-        else {
-          const area = document.createElement('textarea');
-          area.value = data.prompt;
-          area.style.position = 'fixed'; area.style.opacity = '0'; document.body.appendChild(area); area.select(); document.execCommand('copy'); area.remove();
-        }
-        button.textContent = '✓ Kopierat'; setTimeout(() => { button.textContent = old; }, 1800);
-      } catch {
-        button.textContent = 'Kunde inte kopiera'; setTimeout(() => { button.textContent = old; }, 1800);
-      } finally { button.disabled = false; }
-    };
-  }
-
-  function enhance() { localizeVisible(); enhanceAnalysisImportGuide(); }
+  function enhance() { localizeVisible(); }
   const observer = new MutationObserver(enhance);
   observer.observe(document.getElementById('app') || document.body, { childList: true, subtree: true });
   enhance();
@@ -144,6 +96,5 @@ function browserScript() {
 
 export function enhanceAppHtmlV064(html) {
   return String(html)
-    .replace('</head>', () => `${css}</head>`)
     .replace('</body>', () => `${browserScript()}</body>`);
 }

@@ -138,17 +138,42 @@ test('track contact enrichment rejects unsafe URLs and identity mismatches', asy
   }] }), /HTTPS/);
 });
 
-test('v064 overlay keeps All data untouched and localizes Miss to Fel', () => {
+test('v064 overlay keeps optional localization behavior without creating canonical settings UI', () => {
   const html = enhanceAppHtmlV064('<html><head></head><body><div id="app"></div></body></html>');
   assert.match(html, /\['Miss', 'Fel'\]/);
   assert.doesNotMatch(html, /Alla år/);
   assert.doesNotMatch(html, /Alla startmetoder/);
   assert.doesNotMatch(html, /localizeFilterAllLabels/);
-  assert.match(html, /Skapa V85\/V86-systemanalysfil för import/);
-  assert.match(html, /V85\/V86-omgångar/);
+  assert.doesNotMatch(html, /enhanceAnalysisImportGuide/);
+  assert.doesNotMatch(html, /Skapa V85\/V86-systemanalysfil för import/);
   assert.match(html, /Loppkategorier/);
   const scripts = [...html.matchAll(/<script(?: [^>]*)?>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
   scripts.forEach((script, index) => assert.doesNotThrow(() => new vm.Script(script, { filename: `v064-embedded-${index}.js` })));
+});
+
+test('actual Wrangler worker serves the canonical completion UI after browser login', async () => {
+  const { env } = createTestEnv();
+  env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
+  const login = await worker.fetch(new Request('https://example.test/app/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ password: env.APP_PASSWORD })
+  }), env);
+  assert.equal(login.status, 303);
+  const cookie = login.headers.get('set-cookie').split(';')[0];
+  const response = await worker.fetch(new Request('https://example.test/app/', { headers: { cookie } }), env);
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  for (const label of ['Trend', 'Tränare', 'Hästar', 'Kuskar', 'Bana', 'Spel', 'AI', 'Data',
+    'Skapa V85/V86-systemanalysfil för import', 'Kopiera instruktioner till AI', 'V85/V86-omgångar',
+    'All data', 'Loppnivå', 'Högre prissumma', 'Vardagstrav', 'Översikt', 'Spårstatistik', 'Hemmatränare',
+    'Startmetod', 'STL-klass', 'Lopptyp', 'Sverige']) assert.match(html, new RegExp(label.replace('/', '\\/')));
+  assert.doesNotMatch(html, /STL-lopp/);
+  assert.match(html, /data-canonical-analysis-prompt="true"/);
+  assert.match(html, /startMethod:'all',raceScope:'all'/);
+  assert.match(html, /selected===false\?'Fel':'Ej rättad'/);
+  assert.doesNotMatch(html, /selected===false\?'Miss':'Ej rättad'/);
+  assert.doesNotMatch(html, /enhanceAnalysisImportGuide|app-page-scope-polish|Alla år|Alla startmetoder/);
 });
 
 test('private track contact operations require admin auth', async () => {
@@ -186,4 +211,7 @@ test('analysis-prompt app endpoint requires session and returns the copyable con
   const payload = await response.json();
   assert.equal(payload.contractVersion, 'kentaurai-analysis-v1');
   assert.equal(payload.recommendedFilename, 'kentaurai-analysis_openai_ÅÅÅÅ-MM-DD.json');
+  response = await worker.fetch(new Request('https://example.test/app/api/settings/analysis-prompt?provider=anthropic', { headers: { cookie } }), env);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).recommendedFilename, 'kentaurai-analysis_anthropic_ÅÅÅÅ-MM-DD.json');
 });

@@ -154,6 +154,7 @@ export default {
       try {
         const data = await getFilteredEntityStatBreakdowns(env, statBreakdownMatch[1], decodeURIComponent(statBreakdownMatch[2]), {
           year: url.searchParams.get('year'),
+          raceScope: url.searchParams.get('race_scope'),
           distanceStartMethod: url.searchParams.get('distance_start_method'),
           trackStartMethod: url.searchParams.get('track_start_method')
         });
