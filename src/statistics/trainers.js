@@ -133,7 +133,7 @@ function orderFor(metric) {
   throw new Error('unsupported trainer ranking metric');
 }
 
-function buildCoreRanking(filters, metric, extraConditions = [], { includePeriod = true, applyMinimumStarts = null, prefix = '' } = {}) {
+function buildCoreRanking(filters, metric, extraConditions = [], { includePeriod = true, applyMinimumStarts = null } = {}) {
   const conditions = ['re.scratched = 0', 're.trainer_id IS NOT NULL', ...extraConditions];
   const bindings = [];
   addTrainerFilters(conditions, bindings, filters, { includePeriod });
@@ -149,7 +149,7 @@ function buildCoreRanking(filters, metric, extraConditions = [], { includePeriod
   if (metric === 'top3Rate') denominator = ' AND result_starts > 0';
   if (metric === 'earningsPerVerifiedStart' || metric === 'earnings') denominator = ' AND prize_verified_starts > 0';
   return {
-    sql: `${prefix} WITH trainer_stats AS (
+    sql: `WITH trainer_stats AS (
       SELECT t.id AS entity_id,t.canonical_name AS name,${coreMetricSelectSql('rr')}
       FROM races r INDEXED BY idx_races_date
       JOIN race_entries re ON re.race_id=r.id
@@ -221,9 +221,9 @@ function buildHomeRanking(filters, home) {
   const condition = home
     ? 'EXISTS (SELECT 1 FROM trainer_home th WHERE th.trainer_id=re.trainer_id AND th.home_track_id IS NOT NULL AND th.home_track_id=r.track_id)'
     : 'EXISTS (SELECT 1 FROM trainer_home th WHERE th.trainer_id=re.trainer_id AND th.home_track_id IS NOT NULL AND th.home_track_id<>r.track_id)';
-  const q=buildCoreRanking(filters,'winRate',[condition],{applyMinimumStarts:true});
-  q.sql=q.sql.replace(/^ WITH /,`WITH ${verifiedHomeTrackCte()}, `);
-  return q;
+  const query = buildCoreRanking(filters,'winRate',[condition],{applyMinimumStarts:true});
+  query.sql=query.sql.replace(/^WITH /,`WITH ${verifiedHomeTrackCte()}, `);
+  return query;
 }
 
 function restSequenceCte() {
@@ -242,7 +242,9 @@ function addStagedFilters(conditions,bindings,filters) {
   if (filters.period !== 'all') { const w=trendDateWindow(filters.period,filters.asOfDate); conditions.push('s.race_date>=?','s.race_date<=?'); bindings.push(w.startDate,w.endDate); }
   else { conditions.push('s.race_date<=?'); bindings.push(filters.asOfDate); }
   if (filters.trackId) { conditions.push('s.track_id=?'); bindings.push(filters.trackId); }
-  if (filters.startMethod!=='all') conditions.push(`CASE WHEN LOWER(COALESCE(s.start_method,'')) IN ('auto','autostart') THEN 'auto' WHEN LOWER(COALESCE(s.start_method,'')) IN ('volt','volte','voltstart') THEN 'volt' ELSE LOWER(COALESCE(s.start_method,'')) END='${filters.startMethod}'`);
+  if (filters.startMethod!=='all') conditions.push(`${canonicalStartMethodSql('s')}='${filters.startMethod}'`);
+  if (filters.raceType==='monte') conditions.push(monteRaceCondition('s'));
+  if (filters.raceType==='sulky') conditions.push(`NOT ${monteRaceCondition('s')}`);
   if (filters.breedType==='warmblood') conditions.push("(LOWER(COALESCE(s.breed,'')) LIKE '%varmblod%' OR LOWER(COALESCE(s.breed,'')) LIKE '%warmblood%')");
   if (filters.breedType==='coldblood') conditions.push("(LOWER(COALESCE(s.breed,'')) LIKE '%kallblod%' OR LOWER(COALESCE(s.breed,'')) LIKE '%coldblood%')");
   if (filters.sex==='mare') conditions.push("LOWER(COALESCE(s.sex,'')) IN ('sto','mare','female','f')");
@@ -251,8 +253,14 @@ function addStagedFilters(conditions,bindings,filters) {
   if (filters.age!=null) { conditions.push('CAST(substr(?,1,4) AS INTEGER)-s.birth_year=?'); bindings.push(filters.asOfDate,filters.age); }
   addDistanceCondition(conditions,bindings,filters.distanceGroup,'s');
   addCanonicalRaceScopeCondition(conditions,filters.raceScope,'s');
-  if (filters.voltLane!=='all') conditions.push(filters.voltLane==='good'?'s.actual_lane IN (1,6,7)':'s.actual_lane IS NOT NULL AND s.actual_lane NOT IN (1,6,7)');
-  if (filters.handicapM!=null) { conditions.push('s.handicap_m=?','s.actual_start_distance_m IS NOT NULL','s.distance_m IS NOT NULL','s.actual_start_distance_m-s.distance_m=s.handicap_m');bindings.push(filters.handicapM); }
+  if (filters.voltLane!=='all') {
+    conditions.push(`${canonicalStartMethodSql('s')}='volt'`);
+    conditions.push(filters.voltLane==='good'?'s.actual_lane IN (1,6,7)':'s.actual_lane IS NOT NULL AND s.actual_lane NOT IN (1,6,7)');
+  }
+  if (filters.handicapM!=null) {
+    conditions.push(`${canonicalStartMethodSql('s')}='volt'`,'s.handicap_m=?','s.actual_start_distance_m IS NOT NULL','s.distance_m IS NOT NULL','s.actual_start_distance_m-s.distance_m=s.handicap_m');
+    bindings.push(filters.handicapM);
+  }
 }
 function buildRestRanking(filters,kind,trainerId=null,limit=true) {
   const conditions=[];const bindings=[];
@@ -301,10 +309,10 @@ export async function getTrainerRankings(env,options={}){
   }};
 }
 
-async function trainerSummary(env,f,id,extra=[]){const c=['re.scratched=0','t.id=?',...extra],b=[id];addTrainerFilters(c,b,f);const row=await env.DB.prepare(`SELECT ${coreMetricSelectSql('rr')} FROM races r JOIN race_entries re ON re.race_id=r.id JOIN race_results rr ON rr.race_entry_id=re.id JOIN horses h ON h.id=re.horse_id JOIN trainers t ON t.id=re.trainer_id WHERE ${c.join(' AND ')}`).bind(...b).first();return mapCoreMetricRow(row||{});}
+async function trainerSummary(env,f,id){const c=['re.scratched=0','t.id=?'],b=[id];addTrainerFilters(c,b,f);const row=await env.DB.prepare(`SELECT ${coreMetricSelectSql('rr')} FROM races r INDEXED BY idx_races_date JOIN race_entries re ON re.race_id=r.id JOIN race_results rr ON rr.race_entry_id=re.id JOIN horses h ON h.id=re.horse_id JOIN trainers t ON t.id=re.trainer_id WHERE ${c.join(' AND ')}`).bind(...b).first();return mapCoreMetricRow(row||{});}
 function marketSummary(rows){if(!rows.length)return{starts:0,resultStarts:0,wins:0,losses:0,top3:0,prizeVerifiedStarts:0,prizeSek:null,winRate:null,top3Rate:null};const c=mapCoreMetricRow(rows[0]);return{...c,earningsPerVerifiedStart:c.prizeVerifiedStarts?c.prizeSek/c.prizeVerifiedStarts:null};}
 function restSummary(rows){if(!rows.length)return{starts:0,wins:0,top3:0,winRate:null,top3Rate:null};const r=rows[0];return{starts:Number(r.starts),wins:Number(r.wins),top3:Number(r.top3),winRate:Number(r.win_rate),top3Rate:Number(r.top3_rate)};}
-async function homeSummary(env,f,id,home){const c=home?'EXISTS (SELECT 1 FROM trainer_home th WHERE th.trainer_id=re.trainer_id AND th.home_track_id IS NOT NULL AND th.home_track_id=r.track_id)':'EXISTS (SELECT 1 FROM trainer_home th WHERE th.trainer_id=re.trainer_id AND th.home_track_id IS NOT NULL AND th.home_track_id<>r.track_id)';const conditions=['re.scratched=0','t.id=?',c],bindings=[id];addTrainerFilters(conditions,bindings,f);const row=await env.DB.prepare(`WITH ${verifiedHomeTrackCte()} SELECT ${coreMetricSelectSql('rr')} FROM races r JOIN race_entries re ON re.race_id=r.id JOIN race_results rr ON rr.race_entry_id=re.id JOIN horses h ON h.id=re.horse_id JOIN trainers t ON t.id=re.trainer_id WHERE ${conditions.join(' AND ')}`).bind(...bindings).first();return mapCoreMetricRow(row||{});}
+async function homeSummary(env,f,id,home){const c=home?'EXISTS (SELECT 1 FROM trainer_home th WHERE th.trainer_id=re.trainer_id AND th.home_track_id IS NOT NULL AND th.home_track_id=r.track_id)':'EXISTS (SELECT 1 FROM trainer_home th WHERE th.trainer_id=re.trainer_id AND th.home_track_id IS NOT NULL AND th.home_track_id<>r.track_id)';const conditions=['re.scratched=0','t.id=?',c],bindings=[id];addTrainerFilters(conditions,bindings,f);const row=await env.DB.prepare(`WITH ${verifiedHomeTrackCte()} SELECT ${coreMetricSelectSql('rr')} FROM races r INDEXED BY idx_races_date JOIN race_entries re ON re.race_id=r.id JOIN race_results rr ON rr.race_entry_id=re.id JOIN horses h ON h.id=re.horse_id JOIN trainers t ON t.id=re.trainer_id WHERE ${conditions.join(' AND ')}`).bind(...bindings).first();return mapCoreMetricRow(row||{});}
 
 export async function getTrainerDetailStatistics(env,trainerId,options={}){
   if(!env.DB)throw new Error('DB is not configured');const f=normalizeTrainerStatsFilters(options);await validateTrack(env,f.trackId);
