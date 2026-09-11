@@ -42,7 +42,12 @@ test('horse statistics period queries reuse existing indexes and rest query keep
   assert.match(xlabsPlan, /idx_races_date/i);
   assert.match(xlabsPlan, /xlabs|source_records/i);
 
+  // Rest semantics must sequence the complete actual-start history before applying the
+  // target filters; filtering the input by date first would corrupt the 60-day boundary.
+  // SQLite therefore scans the entry sequence and then performs indexed identity lookups.
   const restPlan = planText(db, rest);
-  assert.match(restPlan, /race_entries|idx_entries_race/i);
-  assert.match(restPlan, /race_results/i);
+  assert.match(restPlan, /SCAN re/i, 'rest sequencing scans actual race entries in historical order');
+  assert.match(restPlan, /SEARCH r USING INDEX .*races.*\(id=\?\)/i, 'race lookup remains indexed by stable race id');
+  assert.match(restPlan, /SEARCH rr USING INDEX .*race_results.*\(race_entry_id=\?\)/i, 'result lookup remains indexed by race-entry id');
+  assert.match(restPlan, /SEARCH h USING INDEX .*horses.*\(id=\?\)/i, 'horse lookup remains indexed by stable horse id');
 });
