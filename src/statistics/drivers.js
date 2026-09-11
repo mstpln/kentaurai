@@ -19,6 +19,7 @@ const DISTANCES = new Set(['all', '640', '1640', '2140', '2640', '3140', '3640',
 const DISTANCE_STANDARDS = [640, 1640, 2140, 2640, 3140, 3640, 4140];
 const DISTANCE_TOLERANCE_M = 100;
 const VOLT_LANES = new Set(['all', 'good', 'other']);
+const SEX_VALUES = new Set(['all', 'mare', 'stallion', 'gelding']);
 
 function stockholmDateKey() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Stockholm' }).format(new Date());
@@ -34,6 +35,19 @@ function normalizeDistance(value) {
   const distance = String(value || 'all').trim().toLowerCase();
   if (!DISTANCES.has(distance)) throw new Error('distance_group is unsupported');
   return distance;
+}
+
+function normalizeSex(value) {
+  const sex = String(value || 'all').trim().toLowerCase();
+  if (!SEX_VALUES.has(sex)) throw new Error('sex must be all, mare, stallion or gelding');
+  return sex;
+}
+
+function normalizeAge(value) {
+  if (value == null || value === '' || value === 'all') return null;
+  const age = Number(value);
+  if (!Number.isInteger(age) || age < 2 || age > 30) throw new Error('age must be all or an integer between 2 and 30');
+  return age;
 }
 
 function normalizeVoltLane(value) {
@@ -80,6 +94,13 @@ function addDriverFilters(conditions, bindings, filters, { includePeriod = true 
   if (filters.raceType === 'sulky') conditions.push(`NOT ${monteRaceCondition('r')}`);
   if (filters.breedType === 'warmblood') conditions.push("(LOWER(COALESCE(h.breed,'')) LIKE '%varmblod%' OR LOWER(COALESCE(h.breed,'')) LIKE '%warmblood%')");
   if (filters.breedType === 'coldblood') conditions.push("(LOWER(COALESCE(h.breed,'')) LIKE '%kallblod%' OR LOWER(COALESCE(h.breed,'')) LIKE '%coldblood%')");
+  if (filters.sex === 'mare') conditions.push("LOWER(COALESCE(h.sex,'')) IN ('sto','mare','female','f')");
+  if (filters.sex === 'stallion') conditions.push("LOWER(COALESCE(h.sex,'')) IN ('hingst','stallion','male','m')");
+  if (filters.sex === 'gelding') conditions.push("LOWER(COALESCE(h.sex,'')) IN ('valack','gelding')");
+  if (filters.age != null) {
+    conditions.push('CAST(substr(?,1,4) AS INTEGER) - h.birth_year = ?');
+    bindings.push(filters.asOfDate, filters.age);
+  }
   addDistanceCondition(conditions, bindings, filters.distanceGroup, 'r');
   addCanonicalRaceScopeCondition(conditions, filters.raceScope, 'r');
   if (filters.voltLane !== 'all') {
@@ -102,6 +123,8 @@ export function normalizeDriverStatsFilters(options = {}) {
     breedType: normalizeTrendBreed(options.breedType),
     startMethod: normalizeTrendStartMethod(options.startMethod),
     distanceGroup: normalizeDistance(options.distanceGroup),
+    sex: normalizeSex(options.sex),
+    age: normalizeAge(options.age),
     minStarts: normalizeTrendMinStarts(options.minStarts),
     voltLane: normalizeVoltLane(options.voltLane),
     handicapM: normalizeHandicap(options.handicapM)
@@ -123,7 +146,7 @@ function orderFor(metric) {
   throw new Error('unsupported driver ranking metric');
 }
 
-function buildCoreRanking(filters, metric, extraConditions = [], { includePeriod = true } = {}) {
+function buildCoreRanking(filters, metric, extraConditions = [], { includePeriod = true, applyMinimumStarts = null } = {}) {
   const conditions = ['re.scratched = 0', 're.driver_id IS NOT NULL', ...extraConditions];
   const bindings = [];
   addDriverFilters(conditions, bindings, filters, { includePeriod });
@@ -132,8 +155,9 @@ function buildCoreRanking(filters, metric, extraConditions = [], { includePeriod
     conditions.push('r.race_date >= ?', 'r.race_date <= ?');
     bindings.push(`${year}-01-01`, filters.asOfDate);
   }
-  const minimumCondition = filters.minStarts == null ? 'starts > 0' : 'starts >= ?';
-  if (filters.minStarts != null) bindings.push(filters.minStarts);
+  const useMinimum = applyMinimumStarts == null ? (metric === 'winRate' || metric === 'top3Rate') : applyMinimumStarts;
+  const minimumCondition = useMinimum && filters.minStarts != null ? 'starts >= ?' : 'starts > 0';
+  if (useMinimum && filters.minStarts != null) bindings.push(filters.minStarts);
   let denominatorCondition = '';
   if (metric === 'top3Rate') denominatorCondition = ' AND result_starts > 0';
   if (metric === 'earningsPerVerifiedStart' || metric === 'earnings') denominatorCondition = ' AND prize_verified_starts > 0';
@@ -183,6 +207,7 @@ function marketAtStopCte() {
     JOIN game_legs gl ON gl.game_round_id=gr.id AND gl.leg_number=bs.leg_number
     JOIN race_entries market_re ON market_re.id=bs.race_entry_id AND market_re.race_id=gl.race_id
     WHERE gr.bet_stop_at IS NOT NULL
+      AND bs.source_record_id IS NOT NULL
       AND julianday(bs.captured_at) <= julianday(gr.bet_stop_at)
   ), market_at_stop AS (
     SELECT race_entry_id,bet_percent,market_rank,captured_at FROM market_candidates WHERE rn=1
@@ -195,7 +220,7 @@ function buildMarketRanking(filters, kind, driverId = null, limit = true) {
   if (driverId) { conditions.push('d.id=?'); bindings.push(driverId); }
   addDriverFilters(conditions, bindings, filters);
   if (kind === 'favorite') conditions.push('m.market_rank=1');
-  else { conditions.push('m.bet_percent IS NOT NULL', 'm.bet_percent <= ?'); bindings.push(DRIVER_LONGSHOT_PERCENT_MAX); }
+  else { conditions.push('m.bet_percent IS NOT NULL', 'm.bet_percent >= 0', 'm.bet_percent <= ?'); bindings.push(DRIVER_LONGSHOT_PERCENT_MAX); }
   const min = filters.minStarts == null || driverId ? 'starts > 0' : 'starts >= ?';
   if (filters.minStarts != null && !driverId) bindings.push(filters.minStarts);
   return {
@@ -216,7 +241,7 @@ function buildMarketRanking(filters, kind, driverId = null, limit = true) {
 
 function buildPositionRanking(filters, kind) {
   const flag = kind === 'leader' ? 'leader' : 'death_seat';
-  return buildCoreRanking(filters, 'winRate', [`EXISTS (SELECT 1 FROM race_positions rp WHERE rp.race_entry_id=re.id AND rp.${flag}=1 AND rp.source_record_id IS NOT NULL)`]);
+  return buildCoreRanking(filters, 'winRate', [`EXISTS (SELECT 1 FROM race_positions rp WHERE rp.race_entry_id=re.id AND rp.${flag}=1 AND rp.source_record_id IS NOT NULL)`], { applyMinimumStarts: true });
 }
 
 async function run(env, query) {
@@ -248,9 +273,9 @@ export async function getDriverRankings(env, options = {}) {
     run(env,buildCoreRanking(filters,'earningsPerVerifiedStart')),
     run(env,buildPositionRanking(filters,'leader')),
     run(env,buildPositionRanking(filters,'death')),
-    run(env,buildCoreRanking(filters,'winRate',[`${canonicalStartMethodSql('r')}='auto'`,'re.back_row=1'])),
-    run(env,buildCoreRanking(filters,'winRate',[`${canonicalStartMethodSql('r')}='auto'`])),
-    run(env,buildCoreRanking(filters,'winRate',[`${canonicalStartMethodSql('r')}='volt'`])),
+    run(env,buildCoreRanking(filters,'winRate',[`${canonicalStartMethodSql('r')}='auto'`,'re.back_row=1'],{applyMinimumStarts:true})),
+    run(env,buildCoreRanking(filters,'winRate',[`${canonicalStartMethodSql('r')}='auto'`],{applyMinimumStarts:true})),
+    run(env,buildCoreRanking(filters,'winRate',[`${canonicalStartMethodSql('r')}='volt'`],{applyMinimumStarts:true})),
     run(env,buildMarketRanking(filters,'favorite')),
     run(env,buildMarketRanking(filters,'longshot'))
   ]);
@@ -318,5 +343,5 @@ export async function getDriverFilterOptions(env) {
     env.DB.prepare(`SELECT DISTINCT t.id,t.canonical_name AS name FROM tracks t JOIN races r ON r.track_id=t.id JOIN race_entries re ON re.race_id=r.id JOIN race_results rr ON rr.race_entry_id=re.id WHERE re.scratched=0 AND re.driver_id IS NOT NULL ORDER BY t.canonical_name COLLATE NOCASE,t.id`).all(),
     env.DB.prepare(`SELECT DISTINCT re.handicap_m AS meters FROM race_entries re JOIN races r ON r.id=re.race_id JOIN race_results rr ON rr.race_entry_id=re.id WHERE re.scratched=0 AND re.driver_id IS NOT NULL AND ${canonicalStartMethodSql('r')}='volt' AND re.actual_start_distance_m IS NOT NULL AND r.distance_m IS NOT NULL AND re.actual_start_distance_m-r.distance_m=re.handicap_m AND re.handicap_m>=0 AND re.handicap_m%20=0 ORDER BY re.handicap_m`).all()
   ]);
-  return {tracks:tracks||[],distanceGroups:[640,1640,2140,2640,3140,3640,4140,'other-long'],handicapBuckets:(handicaps||[]).map(row=>Number(row.meters))};
+  return {tracks:tracks||[],distanceGroups:[640,1640,2140,2640,3140,3640,4140,'other-long'],ageOptions:Array.from({length:29},(_,index)=>index+2),handicapBuckets:(handicaps||[]).map(row=>Number(row.meters))};
 }
