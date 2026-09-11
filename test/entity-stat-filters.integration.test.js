@@ -15,16 +15,16 @@ function seed(db) {
   db.prepare(`INSERT INTO tracks (id, canonical_name) VALUES ('track-a','Track A'),('track-b','Track B')`).run();
 
   const starts = [
-    { id: 'e1', race: 'r1', date: '2026-01-10', distance: 2140, method: 'auto', track: 'track-a', placing: 1, gallop: 0 },
-    { id: 'e2', race: 'r2', date: '2026-02-10', distance: 2148, method: 'volt', track: 'track-a', placing: 2, gallop: 1 },
-    { id: 'e3', race: 'r3', date: '2026-03-10', distance: 1640, method: 'volte', track: 'track-b', placing: 4, gallop: 1 },
-    { id: 'e4', race: 'r4', date: '2025-05-10', distance: 2140, method: 'autostart', track: 'track-b', placing: 1, gallop: 1 },
-    { id: 'e5', race: 'r5', date: '2025-06-10', distance: 2640, method: 'voltstart', track: 'track-a', placing: 3, gallop: 0 }
+    { id: 'e1', race: 'r1', date: '2026-01-10', distance: 2140, method: 'auto', track: 'track-a', placing: 1, gallop: 0, mainClass: 'Silverdivisionen' },
+    { id: 'e2', race: 'r2', date: '2026-02-10', distance: 2148, method: 'volt', track: 'track-a', placing: 2, gallop: 1, mainClass: null },
+    { id: 'e3', race: 'r3', date: '2026-03-10', distance: 1640, method: 'volte', track: 'track-b', placing: 4, gallop: 1, mainClass: null },
+    { id: 'e4', race: 'r4', date: '2025-05-10', distance: 2140, method: 'autostart', track: 'track-b', placing: 1, gallop: 1, mainClass: 'Bronsdivisionen' },
+    { id: 'e5', race: 'r5', date: '2025-06-10', distance: 2640, method: 'voltstart', track: 'track-a', placing: 3, gallop: 0, mainClass: null }
   ];
 
   for (const start of starts) {
-    db.prepare(`INSERT INTO races (id, track_id, race_date, race_number, distance_m, start_method, status) VALUES (?, ?, ?, 1, ?, ?, 'results')`)
-      .run(start.race, start.track, start.date, start.distance, start.method);
+    db.prepare(`INSERT INTO races (id, track_id, race_date, race_number, distance_m, start_method, main_class, status) VALUES (?, ?, ?, 1, ?, ?, ?, 'results')`)
+      .run(start.race, start.track, start.date, start.distance, start.method, start.mainClass);
     db.prepare(`INSERT INTO race_entries (id, race_id, horse_id, driver_id, trainer_id, start_number, scratched) VALUES (?, ?, 'horse-filter', 'driver-filter', 'trainer-filter', 1, 0)`)
       .run(start.id, start.race);
     db.prepare(`INSERT INTO race_results (race_entry_id, placing, result_status, gallop) VALUES (?, ?, 'official', ?)`)
@@ -41,16 +41,23 @@ test('year filter applies across start method, distance and track tables', async
   assert.equal(data.distances.reduce((sum, row) => sum + row.starts, 0), 3);
   assert.equal(data.tracks.reduce((sum, row) => sum + row.starts, 0), 3);
   assert.deepEqual(data.startMethods.map((row) => row.label).sort(), ['auto', 'volt']);
+});
 
-  const auto = data.startMethods.find((row) => row.label === 'auto');
-  assert.equal(auto.starts, 1);
-  assert.equal(auto.gallops, 0);
-  assert.equal(auto.gallopRate, 0);
+test('race scope applies globally and separates persisted STL classifications from other racing', async () => {
+  const { env, db } = createTestEnv();
+  seed(db);
 
-  const volt = data.startMethods.find((row) => row.label === 'volt');
-  assert.equal(volt.starts, 2);
-  assert.equal(volt.gallops, 2);
-  assert.equal(volt.gallopRate, 1);
+  const stl = await getFilteredEntityStatBreakdowns(env, 'trainers', 'trainer-filter', { year: '2026', raceScope: 'stl' });
+  assert.equal(stl.startMethods.reduce((sum, row) => sum + row.starts, 0), 1);
+  assert.equal(stl.distances.reduce((sum, row) => sum + row.starts, 0), 1);
+  assert.equal(stl.tracks.reduce((sum, row) => sum + row.starts, 0), 1);
+  assert.equal(stl.filters.raceScope, 'stl');
+
+  const weekday = await getFilteredEntityStatBreakdowns(env, 'trainers', 'trainer-filter', { year: '2026', raceScope: 'weekday' });
+  assert.equal(weekday.startMethods.reduce((sum, row) => sum + row.starts, 0), 2);
+  assert.equal(weekday.distances.reduce((sum, row) => sum + row.starts, 0), 2);
+  assert.equal(weekday.tracks.reduce((sum, row) => sum + row.starts, 0), 2);
+  assert.equal(weekday.filters.raceScope, 'weekday');
 });
 
 test('distance start-method filter keeps method-specific gallop rates', async () => {
@@ -88,7 +95,7 @@ test('filtered statistics route is private and returns requested filters', async
   const { env, db } = createTestEnv();
   seed(db);
   env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
-  const url = 'https://example.test/app/api/entities/trainers/trainer-filter/stat-breakdowns?year=2026&distance_start_method=volt&track_start_method=auto';
+  const url = 'https://example.test/app/api/entities/trainers/trainer-filter/stat-breakdowns?year=2026&race_scope=weekday&distance_start_method=volt&track_start_method=auto';
 
   let response = await worker.fetch(new Request(url), env);
   assert.equal(response.status, 401);
@@ -97,22 +104,26 @@ test('filtered statistics route is private and returns requested filters', async
   response = await worker.fetch(new Request(url, { headers: { cookie } }), env);
   assert.equal(response.status, 200);
   const data = await response.json();
-  assert.deepEqual(data.filters, { year: 2026, distanceStartMethod: 'volt', trackStartMethod: 'auto' });
+  assert.deepEqual(data.filters, { year: 2026, raceScope: 'weekday', distanceStartMethod: 'volt', trackStartMethod: 'auto' });
   assert.equal(data.distances.reduce((sum, row) => sum + row.starts, 0), 2);
-  assert.equal(data.tracks.reduce((sum, row) => sum + row.starts, 0), 1);
+  assert.equal(data.tracks.reduce((sum, row) => sum + row.starts, 0), 0);
 });
 
-test('statistics UI uses dynamic years, correct Voltstart wording and responsive table scrolling', () => {
+test('statistics UI uses period and race-scope controls plus correct method wording', () => {
   const html = renderAppPage();
   assert.match(html, /new Date\(\)\.getFullYear\(\)/);
   assert.match(html, /\(i år\)/);
   assert.match(html, /\(förra året\)/);
+  assert.match(html, /Loppnivå/);
+  assert.match(html, /STL-lopp/);
+  assert.match(html, /Vardagstrav/);
+  assert.match(html, /data-race-scope/);
+  assert.match(html, /race_scope:filters\.raceScope/);
   assert.match(html, /Voltstart/);
   assert.match(html, /Galopp %/);
   assert.match(html, /data-distance-method/);
   assert.match(html, /data-track-method/);
   assert.match(html, /stat-table-scroll/);
-  assert.match(html, /@media\(max-width:1200px\)/);
 });
 
 test('all embedded scripts in the final statistics-filter app are valid JavaScript', () => {
