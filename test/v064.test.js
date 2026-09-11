@@ -197,7 +197,7 @@ test('analysis import prompt mirrors strict pre-market and final API rules', () 
   assert.match(prompt, /value_ratio/);
   assert.match(prompt, /own_probability/);
   assert.match(prompt, /Returnera endast giltig JSON/);
-  assert.equal(recommendedAnalysisFilename('claude'), 'kentaurai-analysis_anthropic_ÅÅÅÅ-MM-DD.json');
+  assert.equal(recommendedAnalysisFilename('claude'), 'kentaurai-analysis_anthropic_ACTUAL-MODEL_STAGE_ÅÅÅÅ-MM-DD.json');
 });
 
 test('analysis-prompt app endpoint requires session and returns the copyable contract prompt', async () => {
@@ -210,8 +210,8 @@ test('analysis-prompt app endpoint requires session and returns the copyable con
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.equal(payload.contractVersion, 'kentaurai-analysis-v1');
-  assert.equal(payload.recommendedFilename, 'kentaurai-analysis_openai_ÅÅÅÅ-MM-DD.json');
+  assert.equal(payload.recommendedFilename, 'kentaurai-analysis_openai_ACTUAL-MODEL_STAGE_ÅÅÅÅ-MM-DD.json');
   response = await worker.fetch(new Request('https://example.test/app/api/settings/analysis-prompt?provider=anthropic', { headers: { cookie } }), env);
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).recommendedFilename, 'kentaurai-analysis_anthropic_ÅÅÅÅ-MM-DD.json');
+  assert.equal((await response.json()).recommendedFilename, 'kentaurai-analysis_anthropic_ACTUAL-MODEL_STAGE_ÅÅÅÅ-MM-DD.json');
 });
