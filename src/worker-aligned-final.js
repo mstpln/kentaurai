@@ -54,6 +54,8 @@ const compactLegacyTrackRestoreHook = `const priorAlignedRenderStart=renderStart
 const finalTrackRestoreHook = `const priorAlignedRenderStart=renderStart;
 renderStart=async function(){const navState=history.state,view=navState?.view;if(view?.page==='tracks'){state.trackTab=navState.trackTab||'overview';if(navState.trackDetail)return renderTrackDetail(navState.trackDetail);return renderTracks()}return priorAlignedRenderStart()};`;
 
+const legacyInitialTrendBoot = `renderStart().catch(err=>{app.innerHTML='<div class="notice">Kunde inte läsa data: '+esc(err.message)+'</div>'});`;
+
 async function withFinalAlignment(request, response) {
   if (request.method !== 'GET') return response;
   const path = new URL(request.url).pathname;
@@ -69,6 +71,7 @@ async function withFinalAlignment(request, response) {
     .replace(legacyTrackHistoryHook, finalTrackHistoryHook)
     .replace(legacyTrackRestoreHook, finalTrackRestoreHook)
     .replace(compactLegacyTrackRestoreHook, finalTrackRestoreHook)
+    .replace(legacyInitialTrendBoot, '')
     .replace('</head>', `${finalHeaderCss}</head>`);
   return new Response(finalizeStatisticsHtml(alignedBody), {
     status: response.status,
