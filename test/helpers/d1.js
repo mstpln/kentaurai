@@ -18,7 +18,7 @@ class StatementAdapter {
 
 class D1Adapter {
   constructor(db) { this.db = db; }
-  prepare(sql) { return new StatementAdapter(db, sql); }
+  prepare(sql) { return new StatementAdapter(this.db, sql); }
 }
 
 export function createTestEnv() {
