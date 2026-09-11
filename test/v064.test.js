@@ -166,8 +166,9 @@ test('actual Wrangler worker serves the canonical completion UI after browser lo
   const html = await response.text();
   for (const label of ['Trend', 'Tränare', 'Hästar', 'Kuskar', 'Bana', 'Spel', 'AI', 'Data',
     'Skapa V85/V86-systemanalysfil för import', 'Kopiera instruktioner till AI', 'V85/V86-omgångar',
-    'All data', 'Loppnivå', 'STL-lopp', 'Vardagstrav', 'Översikt', 'Spårstatistik', 'Hemmatränare',
+    'All data', 'Loppnivå', 'Högre prissumma', 'Vardagstrav', 'Översikt', 'Spårstatistik', 'Hemmatränare',
     'Startmetod', 'STL-klass', 'Lopptyp', 'Sverige']) assert.match(html, new RegExp(label.replace('/', '\\/')));
+  assert.doesNotMatch(html, /STL-lopp/);
   assert.match(html, /data-canonical-analysis-prompt="true"/);
   assert.match(html, /startMethod:'all',raceScope:'all'/);
   assert.match(html, /selected===false\?'Fel':'Ej rättad'/);
