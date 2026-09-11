@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 
-import { renderAppPage } from '../src/app-page-aligned.js';
+import { formatTrackAddress, renderAppPage } from '../src/app-page-scope-polish.js';
 
 test('final aligned app adds Bana as the sixth bottom-navigation area', () => {
   const html = renderAppPage();
@@ -40,20 +40,23 @@ test('mobile entity statistic tables fit all six columns without horizontal scro
   assert.match(html, /white-space:nowrap!important/);
 });
 
-test('Bana detail owns STL and race-type filters in the canonical lane flow', () => {
+test('Bana detail owns all-method, race-scope, STL and race-type filters in the canonical lane flow', () => {
   const html = renderAppPage();
   assert.match(html, /\['overview','Översikt'\],\['lanes','Spårstatistik'\],\['home','Hemmatränare'\]/);
+  assert.match(html, /startMethod:'all',raceScope:'all'/);
+  assert.match(html, /\[\['all','All data'\],\['auto','Autostart'\],\['volt','Voltstart'\]\]/);
+  assert.match(html, /Loppnivå/);
+  assert.match(html, /\[\['all','All data'\],\['stl','STL-lopp'\],\['weekday','Vardagstrav'\]\]/);
+  assert.match(html, /race_scope:f\.raceScope/);
+  assert.match(html, /data-track-race-scope/);
+  assert.match(html, /f\.raceScope=b\.dataset\.trackRaceScope;trackLaneView\(detail\)/);
   assert.match(html, /STL-klass/);
   assert.match(html, /Lopptyp/);
   assert.match(html, /Alla STL-klasser/);
   assert.match(html, /Alla lopptyper/);
-  assert.match(html, /stlClass:'all',raceType:'all'/);
   assert.match(html, /data-canonical-track-class-filters="true"/);
   assert.match(html, /if\(f\.stlClass!=='all'\)q\.set\('stl_class',f\.stlClass\)/);
   assert.match(html, /if\(f\.raceType!=='all'\)q\.set\('race_type',f\.raceType\)/);
-  assert.match(html, /f\.stlClass=s\.value;trackLaneView\(detail\)/);
-  assert.match(html, /f\.raceType=s\.value;trackLaneView\(detail\)/);
-  assert.match(html, /\[\['all','All data'\]/);
   assert.doesNotMatch(html, /Alla år/);
   assert.doesNotMatch(html, /Alla startmetoder/);
 });
@@ -67,6 +70,21 @@ test('Bana overview localizes Sweden and renders contact facts only when present
   assert.match(html, /target="_blank" rel="noopener noreferrer"/);
   assert.match(html, /url\.protocol==='https:'/);
   assert.match(html, /if\(!address&&!website\)return ''/);
+});
+
+test('track address formatting removes duplicate city components before appending postal city', () => {
+  assert.equal(
+    formatTrackAddress({ address: { street: 'Travvägen 1, Malmö', postalCode: '212 00' }, city: 'Malmö' }),
+    'Travvägen 1, 212 00 Malmö'
+  );
+  assert.equal(
+    formatTrackAddress({ address: { street: 'Travvägen 1, 212 00 Malmö', postalCode: '212 00' }, city: 'Malmö' }),
+    'Travvägen 1, 212 00 Malmö'
+  );
+  assert.equal(
+    formatTrackAddress({ address: { street: 'Travvägen 1', postalCode: null }, city: 'Malmö' }),
+    'Travvägen 1, Malmö'
+  );
 });
 
 test('Bana detail retains statistics and home trainer behavior', () => {
