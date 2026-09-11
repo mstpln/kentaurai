@@ -32,7 +32,7 @@ function seedTrackData(db) {
     ['race-5', '2026-06-05', 3000, 'auto']
   ]) db.prepare(`INSERT INTO races (id, track_id, race_date, race_number, distance_m, start_method, status) VALUES (?, 'track-a', ?, 1, ?, ?, 'results')`).run(id, date, distance, method);
 
-  for (let i = 1; i <= 7; i += 1) db.prepare(`INSERT INTO horses (id, canonical_name) VALUES (?, ?)`).run(`horse-${i}`, `Synthetic Horse ${i}`);
+  for (let i = 1; i <= 8; i += 1) db.prepare(`INSERT INTO horses (id, canonical_name) VALUES (?, ?)`).run(`horse-${i}`, `Synthetic Horse ${i}`);
 
   const entries = [
     ['entry-1','race-1','horse-1',1,0,1,0,0],
@@ -41,7 +41,8 @@ function seedTrackData(db) {
     ['entry-4','race-2','horse-4',2,0,2,0,0],
     ['entry-5','race-2','horse-5',3,1,3,0,0],
     ['entry-6','race-3','horse-6',1,0,1,0,0],
-    ['entry-7','race-4','horse-7',1,0,1,0,0]
+    ['entry-7','race-4','horse-7',1,0,1,0,0],
+    ['entry-8','race-5','horse-8',1,0,1,0,0]
   ];
   for (const [entryId,raceId,horseId,lane,scratched,placing,gallop,disqualified] of entries) {
     db.prepare(`INSERT INTO race_entries (id, race_id, horse_id, start_number, actual_lane, scratched) VALUES (?, ?, ?, ?, ?, ?)`).run(entryId,raceId,horseId,lane,lane,scratched);
