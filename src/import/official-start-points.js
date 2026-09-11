@@ -13,23 +13,39 @@ export function verifiedOfficialStartPoints(horse) {
   return value;
 }
 
+function raceBlocks(payload) {
+  if (Array.isArray(payload?.races)) {
+    return payload.races.map((race) => ({
+      raceExternalId: race?.id == null ? null : String(race.id).trim() || null,
+      starts: Array.isArray(race?.starts) ? race.starts : []
+    }));
+  }
+  return [{
+    raceExternalId: payload?.id == null ? null : String(payload.id).trim() || null,
+    starts: Array.isArray(payload?.starts) ? payload.starts : []
+  }];
+}
+
 function collectHorseStartPoints(payload) {
-  const starts = Array.isArray(payload?.races)
-    ? payload.races.flatMap((race) => Array.isArray(race?.starts) ? race.starts : [])
-    : Array.isArray(payload?.starts) ? payload.starts : [];
   const observations = new Map();
-  for (const start of starts) {
-    const horse = start?.horse;
-    if (!horse || horse.id == null) continue;
-    const points = verifiedOfficialStartPoints(horse);
-    if (points == null) continue;
-    const externalHorseId = String(horse.id).trim();
-    if (!externalHorseId) continue;
-    const prior = observations.get(externalHorseId);
-    if (prior != null && prior !== points) {
-      throw new Error('official source contains conflicting startPoints values for the same horse');
+  for (const block of raceBlocks(payload)) {
+    for (const start of block.starts) {
+      const horse = start?.horse;
+      if (!horse || horse.id == null) continue;
+      const points = verifiedOfficialStartPoints(horse);
+      if (points == null) continue;
+      const externalHorseId = String(horse.id).trim();
+      if (!externalHorseId) continue;
+      const prior = observations.get(externalHorseId);
+      if (prior && prior.points !== points) {
+        throw new Error('official source contains conflicting startPoints values for the same horse');
+      }
+      if (!prior) {
+        observations.set(externalHorseId, { points, raceExternalId: block.raceExternalId });
+      } else if (prior.raceExternalId !== block.raceExternalId) {
+        prior.raceExternalId = null;
+      }
     }
-    observations.set(externalHorseId, points);
   }
   return observations;
 }
@@ -44,13 +60,30 @@ async function mapHorseId(env, externalHorseId) {
   return row?.id || null;
 }
 
-async function storeObservation(env, source, horseId, points) {
+async function mapRaceEntryId(env, horseId, raceExternalId) {
+  if (!raceExternalId) return null;
+  const { results } = await env.DB.prepare(`
+    SELECT re.id
+    FROM race_external_ids rx
+    JOIN race_entries re ON re.race_id = rx.race_id
+    WHERE rx.source_type = ?
+      AND rx.external_id = ?
+      AND re.horse_id = ?
+    ORDER BY re.id
+    LIMIT 2
+  `).bind(EXTERNAL_SOURCE, raceExternalId, horseId).all();
+  return results?.length === 1 ? results[0].id : null;
+}
+
+async function storeObservation(env, source, horseId, points, raceEntryId) {
   const id = stableId('horse-start-points', horseId, source.id);
   await env.DB.prepare(`
-    INSERT OR IGNORE INTO horse_start_points
-      (id, horse_id, points, observed_at, source_record_id)
-    VALUES (?, ?, ?, ?, ?)
-  `).bind(id, horseId, points, source.fetched_at, source.id).run();
+    INSERT INTO horse_start_points
+      (id, horse_id, points, observed_at, race_entry_id, source_record_id)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(horse_id, source_record_id) DO UPDATE SET
+      race_entry_id = COALESCE(horse_start_points.race_entry_id, excluded.race_entry_id)
+  `).bind(id, horseId, points, source.fetched_at, raceEntryId, source.id).run();
 
   await env.DB.prepare(`
     UPDATE horses
@@ -118,10 +151,11 @@ export async function syncHorseStartPointsFromSource(env, sourceRecordId) {
     }
     const observations = collectHorseStartPoints(payload);
     let stored = 0;
-    for (const [externalHorseId, points] of observations.entries()) {
+    for (const [externalHorseId, observation] of observations.entries()) {
       const horseId = await mapHorseId(env, externalHorseId);
       if (!horseId) continue;
-      await storeObservation(env, source, horseId, points);
+      const raceEntryId = await mapRaceEntryId(env, horseId, observation.raceExternalId);
+      await storeObservation(env, source, horseId, observation.points, raceEntryId);
       stored += 1;
     }
     await markSource(env, id, 'complete', stored);
