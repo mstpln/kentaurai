@@ -48,7 +48,7 @@ test('Bana detail owns STL and race-type filters in the canonical lane flow', ()
   assert.match(html, /Alla STL-klasser/);
   assert.match(html, /Alla lopptyper/);
   assert.match(html, /stlClass:'all',raceType:'all'/);
-  assert.match(html, /data-canonical-track-class-filters=\\"true\\"/);
+  assert.match(html, /data-canonical-track-class-filters="true"/);
   assert.match(html, /if\(f\.stlClass!=='all'\)q\.set\('stl_class',f\.stlClass\)/);
   assert.match(html, /if\(f\.raceType!=='all'\)q\.set\('race_type',f\.raceType\)/);
   assert.match(html, /f\.stlClass=s\.value;trackLaneView\(detail\)/);
@@ -64,7 +64,7 @@ test('Bana overview localizes Sweden and renders contact facts only when present
   assert.match(html, /trackCountry\(detail\.countryCode\)/);
   assert.match(html, /Kontakt & plats/);
   assert.match(html, /Öppna hemsida ↗/);
-  assert.match(html, /target=\\"_blank\\" rel=\\"noopener noreferrer\\"/);
+  assert.match(html, /target="_blank" rel="noopener noreferrer"/);
   assert.match(html, /url\.protocol==='https:'/);
   assert.match(html, /if\(!address&&!website\)return ''/);
 });
