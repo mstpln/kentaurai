@@ -66,5 +66,5 @@ export function raceScopeCondition(scope, raceAlias = 'r') {
   if (normalized === 'all') return null;
   if (normalized === 'stl') return stlRaceEvidenceCondition(raceAlias);
   const higherPrizeEvidence = higherPrizeRaceEvidenceCondition(raceAlias);
-  return normalized === 'high_prize' ? higherPrizeEvidence : `NOT ${higherPrizeEvidence}`;
+  return normalized === 'high_prize' ? higherPrizeEvidence : `COALESCE(${higherPrizeEvidence}, 0) = 0`;
 }
