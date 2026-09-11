@@ -1,15 +1,27 @@
 # Build state
 
 Version: 0.6.0
-Phase: verified official + X-Labs data foundation with production backfills active
-Status: v0.6.0 is deployed in production; migration 0008, Worker health, private login and the analysis-prompt route were verified by the successful production release after PR #77. PR #78 is merged and added the canonical track filters/contact infrastructure plus repository migration 0009. Migration 0009 has not been production-applied or verified as part of the post-#78 rollout, and real private track-contact enrichment is not complete. PR #79 is the current UI-integrity/completion build and is not production-live. The official multi-year historical backfill and separate multi-year X-Labs backfill remain active on their persisted cursors and were not touched by this build.
+Phase: verified official + X-Labs data foundation with production backfills active; statistics Build A pending review
+Status: v0.6.0 is deployed in production. Production remains unchanged by the statistics work on PR #83. Official and X-Labs multi-year backfills remain active on their persisted cursors and must not be reset or recreated.
+
+## Pending statistics Build A - PR #83
+- Branch `feat/trend-statistics-build-a` implements the first statistics vertical slice from the detailed statistics build plan.
+- Trend now has a real D1-backed top-10 leaderboard for trainers, horses and drivers over 2 weeks, 4 weeks, 3 months, 6 months and 1 year.
+- Ranking is deterministic: win percentage, then wins, then starts, then stable entity ID.
+- Shared statistics semantics define actual starts, wins, losses, top-three rate, verified-denominator gallop rate and null-safe prize sums. Scratched declarations are excluded.
+- The Trend race-level filter reuses canonical `all` / `high_prize` / `weekday` logic. Track, race type, breed type and start method are secondary AND-combined filters.
+- The approved Version 3 Trend presentation is wired into the actual `src/worker-v064.js` composition: win percentage at left, name plus starts/wins/losses, three equal Top 3% / Gallop% / Prispengar pills, whole-row navigation and a horizontal-sliders detail-filter control.
+- Existing entity statistic breakdowns now use the same shared core metric/denominator logic as Trend.
+- Query-plan QA verified reuse of the existing race-date, race-entry and race-classification indexes. No new aggregate table, migration or speculative statistics index is introduced by Build A.
+- Runtime/integration tests import the actual Worker entrypoint and guard the composed render chain, including the legacy Trend bootstrap race and preservation of existing `renderStart` wrappers.
+- GitHub Actions CI is required green on the exact final PR head before merge. This build is not production-live and must not be merged or deployed without explicit user authorization.
 
 ## Current production state
 - Worker: `kentaurai-api`.
 - D1: `kentaurai`.
 - R2: `kentaurai-raw`.
 - Production migrations are applied through migration 0008. The production release verified the 0008 track-contact columns and calculated race-classification tables before deploying the Worker.
-- Repository migration 0009 adds fact-level provenance for researched track contact facts. It is present on main after merged PR #78 but must not be assumed production-applied until an authorized release applies and verifies it.
+- Repository migration 0009 adds fact-level provenance for researched track contact facts. It is present on main but must not be assumed production-applied until an authorized release applies and verifies it.
 - Production `/health` was verified against KentaurAI `0.6.0`; `/app/login` and the private analysis-prompt route were also verified after the release.
 - Official historical backfill range: 2023-09-08 through 2026-09-07, newest-first, up to three sequential race checkpoints per minute when eligible.
 - X-Labs historical backfill range: 2023-09-08 through 2026-09-07, newest-first, up to three sequential X-Labs checkpoints per minute when eligible.
@@ -17,7 +29,7 @@ Status: v0.6.0 is deployed in production; migration 0008, Worker health, private
 - Daily V85/V86 X-Labs catch-up remains separate and has priority over the long historical X-Labs job.
 - A rolling three-day official ordinary-race catch-up is created at the existing 04:30 UTC scheduling point so recent historical coverage remains current and short scheduler gaps can self-heal.
 - The private `kentaurai-reference-v1` round is stored in production with archived source provenance and independently verified structural invariants.
-- Existing official and X-Labs backfill jobs are persistent and must continue from their stored cursors across deployments; this completion build does not recreate, reset or restart them.
+- Existing official and X-Labs backfill jobs are persistent and must continue from their stored cursors across deployments; statistics Build A does not recreate, reset or restart them.
 - The Worker entrypoint is `src/worker-v064.js` and includes the scoped PWA wrapper; public PWA metadata/assets are separate from authenticated app/API responses.
 - The minute Worker schedule also attempts at most one eligible deterministic post-race review pass; rounds without eight unambiguous factual winners remain untouched.
 
@@ -40,7 +52,7 @@ Status: v0.6.0 is deployed in production; migration 0008, Worker health, private
 - Official race first-prize mapping is implemented deterministically from verified prize text; malformed/unknown prize text stays null and existing source-backed facts are not overwritten by conflicting later observations.
 - Existing already-normalized official race observations can be repaired from archived source-backed data without refetching.
 - Form, class-exposure and development deterministic features use strict-null semantics so missing factual inputs do not silently become zero or partial certainty.
-- Trend readiness has an explicit fail-closed minimum-sample/date-coverage contract; actual leaderboards remain deferred until production history is sufficient.
+- Statistics Build A removes the old Trend readiness placeholder in the feature branch and calculates only from verified actual starts currently stored; backfill incompleteness is neither guessed away nor surfaced as a special warning.
 
 ## Automatic official live acquisition
 - `15 5 * * *` captures the current UTC date plus the next seven dates and discovers only verified V85/V86 eight-leg games.
@@ -74,7 +86,7 @@ Status: v0.6.0 is deployed in production; migration 0008, Worker health, private
 - Structural, provenance, host/path, payload-identity, timeout and normalization failures stay on the same checkpoint and stop the job after three consecutive technical errors until explicitly resumed.
 - The multi-year historical X-Labs job for 2023-09-08 through 2026-09-07 was explicitly authorized and successfully started in production through the guarded GitHub workflow.
 - Historical batches never parallelize source requests. Each successful race is durably checkpointed before the next begins; completion, busy/idle state, dependency waits or a technical failure stop the remaining source batch. Rate limits, access pushback, temporary upstream failures and timeouts apply bounded persistent cooldowns without advancing the failed checkpoint.
-- Existing official and X-Labs jobs continue from their stored cursors after deployment; this batching change does not recreate, restart or reinitialize them.
+- Existing official and X-Labs jobs continue from their stored cursors after deployment; statistics Build A does not recreate, restart or reinitialize them.
 
 ## Provider-neutral analysis exchange
 - KentaurAI is the factual database, deterministic calculation and persistence layer; it does not run a separate autonomous AI model inside the Worker.
@@ -107,8 +119,8 @@ Status: v0.6.0 is deployed in production; migration 0008, Worker health, private
 - Missing facts and unsupported derived values remain null/unknown.
 - Bana has list/detail views with **Översikt -> Spårstatistik -> Hemmatränare**. Stored track profile facts are shown only when verified; address/website fields are nullable and hidden when unavailable.
 - Bana spårstatistik supports period, startmetod, loppnivå and canonical distance together with independent optional **STL-klass** and **Lopptyp** filters. These filters combine in the backend query. STL/race-type classifications are deterministic calculated data stored separately from raw race facts.
-- PR #79 moves all essential Bana filter state/query wiring and address formatting into the canonical track renderer rather than exact generated-source replacement. It also makes the Settings analysis CTA and V85/V86 round-count label canonical Settings output rather than MutationObserver-created UI. `All data` remains literal and `SE` is presented as `Sverige` without altering stored country codes.
-- The completion build adds an `ADMIN_TOKEN`-protected exact-ID track-contact target/enrichment path. Researched real values stay private; conflicts are recorded and do not overwrite an existing different fact.
+- The existing track-contact infrastructure provides an `ADMIN_TOKEN`-protected exact-ID target/enrichment path. Researched real values stay private; conflicts are recorded and do not overwrite an existing different fact.
+- Statistics Build A adds private session-authenticated `/app/api/trend` and `/app/api/trend/filter-options` routes without exposing operational credentials to the browser.
 
 ## Navigation and visual direction
 - Bottom navigation is: **Trend -> Tränare -> Hästar -> Kuskar -> Bana -> Spel**.
@@ -116,6 +128,7 @@ Status: v0.6.0 is deployed in production; migration 0008, Worker health, private
 - Tränare uses clipboard/pen, Hästar uses the horse symbol and Kuskar uses the lightbulb symbol.
 - Entity detail tiles display entity initials rather than category icons.
 - Trend category controls remain Tränare / Hästar / Kuskar with 2 veckor / 4 veckor / 3 mån / 6 mån / 1 år.
+- Pending Build A adds the canonical visible Loppnivå control plus secondary sliders-filter panel and real top-10 Version 3 result rows while retaining the current dark minimal visual system.
 - Approved Sagittarius KentaurAI branding remains unchanged and is also used for the installable PWA icons.
 - General UI remains minimal/dark with black, grey, brown and beige plus restrained warm accent color.
 
@@ -128,7 +141,7 @@ Status: v0.6.0 is deployed in production; migration 0008, Worker health, private
 - Start history supports complete paginated stored history rather than a permanent latest-N cap.
 - Scratched declarations are excluded from performance and coverage denominators.
 - Missing values stay unknown rather than being inferred for presentation.
-- User-facing presentation uses natural Swedish labels for known statuses, rankings, post-race miss types, countries and structured data fields while keeping internal storage/API identifiers technical.
+- Statistics Build A shares core summary semantics between Trend and entity statistics; deeper horse/driver/trainer ranking sets remain subsequent scoped builds.
 
 ## Spel and post-race review
 - Spel has exactly three tabs: Översikt, V85 and V86.
@@ -151,31 +164,37 @@ Status: v0.6.0 is deployed in production; migration 0008, Worker health, private
 - Historical imports are checkpointed, lease-protected and idempotent.
 - Post-race review does not create model changes and does not infer unsupported scenario explanations.
 - PWA caching is restricted to public static metadata/assets and does not create an offline cache of private KentaurAI data.
+- Statistics tests use synthetic data only and do not commit private historical or reference-round values.
 
 ## Current verification/operations gate
 1. Keep the official and X-Labs multi-year backfills running independently through their persisted checkpoints; do not reset or recreate them.
-2. Review PR #79, require exact-head QA/CI, and merge only after explicit user approval.
-3. After merge authorization, apply pending migration 0009 if still needed and deploy the exact reviewed main head through the authorized production path.
-4. Verify health and private authentication, then verify the actual authenticated application shows the Settings AI CTA, V85/V86 count label, Swedish presentation and combined statistics/Bana filters.
-5. Confirm the existing official and X-Labs backfill state remains intact.
-6. Perform real track-contact research/enrichment separately through the private exact-ID path without committing the dataset.
-7. Confirm the official and X-Labs backfill rows/cursors still exist and have not been recreated or reset.
+2. Review statistics PR #83 at its exact head and require green full CI before merge.
+3. Merge PR #83 only after explicit user approval. No production deploy is implicit in merge approval.
+4. If a production release is separately authorized, apply any still-pending repository migrations in the normal guarded release sequence, deploy the exact reviewed main head, and verify health/private authentication.
+5. Verify the authenticated application shows real Trend rows, Loppnivå, secondary filters and correct entity navigation on production data after deployment.
+6. Confirm the existing official and X-Labs backfill rows/cursors remain intact after any authorized release.
+7. Continue private track-contact enrichment separately without committing the dataset.
 
 ## Next build sequence
-1. Complete the track-contact enrichment and production verification gate above.
-2. Let official + historical X-Labs population continue in the background and verify the natural rolling-history executions.
-3. Use the provider-neutral analysis exchange on an upcoming live V85/V86 round and verify the first private read -> external AI analysis -> stored submission round trip.
-4. Assess accumulated verified history against the Trend readiness contract and build deterministic Trend metrics/leaderboards once production history is sufficient.
-5. Expand deterministic factual features and objective post-race scoring/calibration only where stored source data supports the calculation.
-6. Keep interpretation, rankings, probabilities, value judgment and betting suggestions in the replaceable external AI analysis layer; do not add an autonomous Worker AI runner unless the product direction is explicitly changed later.
+1. Complete review/merge/release verification of statistics Build A only when explicitly authorized.
+2. Build B: horse statistics/detail, placements-only form-10, 60-day rest semantics, start-points history only after official field semantics are verified, and X-Labs start/closing rankings only from verified measurements.
+3. Build C: driver statistics/detail, volt-lane quality plus separate handicap dimension, favorite/longshot and placements-only form-30.
+4. Build D: trainer statistics/detail, home/other-track comparisons, rest, favorite/longshot and placements-only form-30.
+5. Then repair the provider-neutral analysis export bundle and perform the systematic official/X-Labs field inventory described in the detailed build plan.
+6. Keep interpretation, rankings, probabilities, value judgment and betting suggestions in the replaceable external AI analysis layer; deterministic statistics/features remain code-calculated.
 
 ## Not yet implemented / intentionally deferred
 - verified/persisted shared-person identity across trainer and driver roles
 - verified live scratch/withdrawal mapping
 - additional official-provider endpoint patterns not yet observed
-- historical trainer/driver/horse Trend leaderboards once production minimum-sample rules pass
+- horse statistics ranking suite beyond the shared Trend core, including start speed, form-10, start points, closing strength and rest-specific rankings
+- driver statistics ranking suite, including form-30, position-specific results, volt-lane/handicap and favorite/longshot breakdowns
+- trainer statistics ranking suite, including form-30, home-track comparison, rest and favorite/longshot breakdowns
+- start-points mapping/history until official semantics are verified against private source payloads
 - additional winner-trip categories requiring facts not currently represented in the schema
 - dead-heat-specific post-race semantics/presentation pending a verified source example
 - future deterministic feature-engine expansion
 - expanded objective probability/ranking/system calibration reports across accumulated rounds
+- provider-neutral self-contained analysis export bundle repair from the new statistics/analysis build plan
+- full field-by-field official/X-Labs data inventory and public generic data dictionary
 - any autonomous in-Worker AI analysis runner (not currently planned)
