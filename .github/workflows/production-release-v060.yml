@@ -1,0 +1,121 @@
+name: Release KentaurAI v0.6.0 production
+run-name: Release KentaurAI v0.6.0 production — @${{ github.actor }}
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/production-release-v060.trigger'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kentaurai-production-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact release head
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - name: Validate release marker and source build
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fxq 'release=kentaurai-v0.6.0' .github/production-release-v060.trigger
+          grep -Fxq 'source_main=27ab3a1ed0032691eb0a4cb4223d498b4f23cd15' .github/production-release-v060.trigger
+          git merge-base --is-ancestor 27ab3a1ed0032691eb0a4cb4223d498b4f23cd15 HEAD
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+
+      - name: Run full QA before production changes
+        run: npm run qa
+
+      - name: Validate Cloudflare configuration
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo 'CLOUDFLARE_API_TOKEN is not configured'; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'CLOUDFLARE_ACCOUNT_ID is not configured'; exit 1; }
+
+      - name: Apply pending production D1 migrations
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: npm run db:migrate:remote
+
+      - name: Verify migration 0008 schema without exposing production data
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT street_address, postal_code, website_url FROM tracks LIMIT 0; SELECT name FROM sqlite_master WHERE type='table' AND name IN ('race_stl_classifications','race_type_classifications') ORDER BY name; SELECT name FROM d1_migrations WHERE name='0008_track_contact_metadata.sql';" > /tmp/migration-check.txt
+          grep -q 'race_stl_classifications' /tmp/migration-check.txt
+          grep -q 'race_type_classifications' /tmp/migration-check.txt
+          grep -q '0008_track_contact_metadata.sql' /tmp/migration-check.txt
+
+      - name: Deploy Worker
+        id: deploy
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npm run deploy 2>&1 | tee /tmp/kentaurai-deploy.log
+          worker_url="$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' /tmp/kentaurai-deploy.log | tail -n 1)"
+          test -n "$worker_url" || { echo 'Could not determine workers.dev URL from Wrangler output'; exit 1; }
+          echo "worker_url=$worker_url" >> "$GITHUB_OUTPUT"
+
+      - name: Verify deployed public health endpoint and exact app version
+        shell: bash
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 "$WORKER_URL/health" > /tmp/health.json
+          node -e "const fs=require('fs'); const h=JSON.parse(fs.readFileSync('/tmp/health.json','utf8')); if(h.ok!==true||h.service!=='kentaurai-api'||h.version!=='0.6.0') process.exit(1);"
+
+      - name: Verify private app login remains available
+        shell: bash
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
+        run: |
+          set -euo pipefail
+          status="$(curl --silent --show-error --output /tmp/login.html --write-out '%{http_code}' "$WORKER_URL/app/login")"
+          test "$status" = '200' || { echo "Expected /app/login 200, got $status"; exit 1; }
+          test -s /tmp/login.html
+
+      - name: Verify new analysis-prompt route is deployed and private
+        shell: bash
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
+        run: |
+          set -euo pipefail
+          status="$(curl --silent --show-error --output /tmp/prompt-response.json --write-out '%{http_code}' "$WORKER_URL/app/api/settings/analysis-prompt?provider=anthropic")"
+          test "$status" = '401' || { echo "Expected private analysis-prompt route to return 401 without session, got $status"; cat /tmp/prompt-response.json; exit 1; }
+          grep -q 'unauthorized' /tmp/prompt-response.json
+
+      - name: Release summary
+        shell: bash
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
+        run: |
+          echo 'KentaurAI v0.6.0 production release completed.'
+          echo "Worker: $WORKER_URL"
+          echo 'Migration 0008 schema, exact app version, health, login and private analysis-prompt route checks passed.'
