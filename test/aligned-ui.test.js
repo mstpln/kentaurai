@@ -19,7 +19,7 @@ test('horse detail uses one compact expandable Starter history instead of a dupl
   assert.match(html, /Tidigare starter/);
   assert.match(html, /priorAlignedStartCards\(detail\)/);
   assert.match(html, /querySelectorAll\('\.start-card'\)/);
-  assert.doesNotMatch(html, /\['equipment','Utrustning'\]/);
+  assert.doesNotMatch(html, /return \[\['stats','Statistik'\],\['starts','Starter'\],\['equipment','Utrustning'\],\['data','Data'\]\];return priorAlignedDetailTabs/);
 });
 
 test('settings statuses use a dedicated labelled bottom row with words rather than standalone symbols', () => {
