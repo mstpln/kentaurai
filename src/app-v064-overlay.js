@@ -88,11 +88,17 @@ async function enhanceTrackContact(){
   contactLoads.add(id);
   try{const r=await originalFetch('/app/api/tracks/'+encodeURIComponent(id),{headers:{accept:'application/json'}});if(!r.ok)return;const detail=await r.json();if(currentTrackId()!==id||document.querySelector('.track-contact-section'))return;
     const address=[detail.address?.street,detail.address?.postalCode,detail.city].filter(Boolean).join(', ');if(!address&&!detail.websiteUrl)return;
-    const section=document.createElement('section');section.className='data-section track-contact-section';section.innerHTML='<div class="data-section-head"><h2>Kontakt & plats</h2></div><div class="data-grid">'+(address?'<div class="data-item"><div class="data-label">Adress</div><div class="data-value">'+escapeHtml(address)+'</div></div>':'')+(detail.websiteUrl?'<div class="data-item"><div class="data-label">Hemsida</div><div class="data-value"><a class="track-contact-link" target="_blank" rel="noopener noreferrer" href="'+escapeAttr(detail.websiteUrl)+'">Öppna hemsida ↗</a></div></div>':'')+'</div>';const groups=body.querySelector('.data-groups')||body;groups.appendChild(section);
+    const section=document.createElement('section');section.className='data-section track-contact-section';section.innerHTML='<div class="data-section-head"><h2>Kontakt & plats</h2></div><div class="data-grid">'+(address?'<div class="data-item"><div class="data-label">Adress</div><div class="data-value">'+escapeHtml(address)+'</div></div>':'')+(detail.websiteUrl?'<div class="data-item"><div class="data-label">Hemsida</div><div class="data-value"><a class="track-contact-link" target="_blank" rel="noopener noreferrer" href="'+escapeHtml(detail.websiteUrl)+'">Öppna hemsida ↗</a></div></div>':'')+'</div>';const groups=body.querySelector('.data-groups')||body;groups.appendChild(section);
   }catch{}finally{contactLoads.delete(id)}
 }
-function escapeHtml(v){return String(v).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
-function escapeAttr(v){return escapeHtml(v)}
+function escapeHtml(v){
+  return String(v)
+    .replaceAll('&','&amp;')
+    .replaceAll('<','&lt;')
+    .replaceAll('>','&gt;')
+    .replaceAll(String.fromCharCode(34),'&quot;')
+    .replaceAll(String.fromCharCode(39),'&#39;')
+}
 
 function enhanceAnalysisImportGuide(){
   const heads=[...document.querySelectorAll('.settings-card-head h2')];const head=heads.find(x=>x.textContent.trim()==='Importera AI-analys');if(!head)return;const card=head.closest('.settings-card'),body=card?.querySelector('.settings-card-body');if(!body||body.querySelector('.analysis-prompt-guide'))return;
