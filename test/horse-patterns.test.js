@@ -3,13 +3,19 @@ import assert from 'node:assert/strict';
 
 import { prepareAnalysisContext } from '../src/analysis-api.js';
 import { enhanceHorsePatternsHtml } from '../src/horse-patterns-ui.js';
-import { getHorseRelevantPatterns } from '../src/statistics/horse-patterns.js';
+import { getHorseRelevantPatterns, getHorseRelevantPatternsBatch } from '../src/statistics/horse-patterns.js';
 import { createTestEnv } from './helpers/d1.js';
 
-function source(db, id, fetchedAt) {
+function xlabsSource(db, id, fetchedAt) {
   db.prepare(`INSERT INTO source_records
     (id, source_type, fetched_at, quality_status)
     VALUES (?, 'xlabs_race_json', ?, 'normalized_verified_subset')`).run(id, fetchedAt);
+}
+
+function officialSource(db, id, fetchedAt, quality = 'normalized_verified_subset') {
+  db.prepare(`INSERT INTO source_records
+    (id, source_type, fetched_at, quality_status)
+    VALUES (?, 'official_provider', ?, ?)`).run(id, fetchedAt, quality);
 }
 
 function horse(db, id, name) {
@@ -37,8 +43,10 @@ test('horse patterns summarize only relevant verified facts with an as-of cutoff
   horse(db, 'h1', 'Testhästen');
   const entry1 = raceWithResult(db, { raceId: 'r1', horseId: 'h1', date: '2026-08-01', number: 1 });
   const entry2 = raceWithResult(db, { raceId: 'r2', horseId: 'h1', date: '2026-08-10', number: 2 });
-  source(db, 'x1', '2026-08-01T20:00:00Z');
-  source(db, 'x2', '2026-08-10T20:00:00Z');
+  xlabsSource(db, 'x1', '2026-08-01T20:00:00Z');
+  xlabsSource(db, 'x2', '2026-08-10T20:00:00Z');
+  officialSource(db, 'p-source-1', '2026-08-01T08:00:00Z');
+  officialSource(db, 'p-source-2', '2026-08-10T08:00:00Z');
   db.prepare(`INSERT INTO xlabs_data
     (id, race_entry_id, first_200_time, last_400_time, extra_distance_m, quality_status, source_record_id)
     VALUES ('xrow1', ?, '1.12,0', '1.11,0', 8, 'xlabs-telemetry-v1', 'x1')`).run(entry1);
@@ -48,13 +56,11 @@ test('horse patterns summarize only relevant verified facts with an as-of cutoff
 
   db.prepare(`INSERT INTO horse_start_points
     (id, horse_id, points, observed_at, source_record_id)
-    VALUES ('p1','h1',900,'2026-08-01T08:00:00Z','x1')`).run();
+    VALUES ('p1','h1',900,'2026-08-01T08:00:00Z','p-source-1')`).run();
   db.prepare(`INSERT INTO horse_start_points
     (id, horse_id, points, observed_at, source_record_id)
-    VALUES ('p2','h1',1100,'2026-08-10T08:00:00Z','x2')`).run();
-  db.prepare(`INSERT INTO source_records
-    (id, source_type, fetched_at, quality_status)
-    VALUES ('future-source','official_provider','2026-09-20T08:00:00Z','normalized_verified_subset')`).run();
+    VALUES ('p2','h1',1100,'2026-08-10T08:00:00Z','p-source-2')`).run();
+  officialSource(db, 'future-source', '2026-09-20T08:00:00Z');
   db.prepare(`INSERT INTO horse_start_points
     (id, horse_id, points, observed_at, source_record_id)
     VALUES ('p3','h1',1500,'2026-09-20T08:00:00Z','future-source')`).run();
@@ -69,15 +75,31 @@ test('horse patterns summarize only relevant verified facts with an as-of cutoff
   assert.equal(pattern.xlabs.extraDistance.averageMeters, 10);
 });
 
+test('horse patterns ignore unverified or wrong-source observations', async () => {
+  const { env, db } = createTestEnv();
+  horse(db, 'h1', 'Testhästen');
+  officialSource(db, 'verified', '2026-08-01T08:00:00Z');
+  officialSource(db, 'captured-only', '2026-08-02T08:00:00Z', 'captured_unmapped');
+  xlabsSource(db, 'wrong-source-for-points', '2026-08-03T08:00:00Z');
+  for (const [id, points, sourceId, observedAt] of [
+    ['p1', 800, 'verified', '2026-08-01T08:00:00Z'],
+    ['p2', 1200, 'captured-only', '2026-08-02T08:00:00Z'],
+    ['p3', 1500, 'wrong-source-for-points', '2026-08-03T08:00:00Z']
+  ]) {
+    db.prepare(`INSERT INTO horse_start_points (id,horse_id,points,observed_at,source_record_id)
+      VALUES (?, 'h1', ?, ?, ?)`).run(id, points, observedAt, sourceId);
+  }
+  const pattern = await getHorseRelevantPatterns(env, 'h1', '2026-09-01');
+  assert.equal(pattern.startPoints.current.points, 800);
+});
+
 test('market-blind AI context receives factual horse patterns, ranks Start Points within each leg and excludes market fields', async () => {
   const { env, db } = createTestEnv();
   db.prepare(`INSERT INTO tracks (id, canonical_name, country_code) VALUES ('round-track','Testbanan','SE')`).run();
   db.prepare(`INSERT INTO game_rounds
     (id, game_type, round_date, scheduled_start_at, bet_stop_at, status)
     VALUES ('round-pattern','V85','2099-01-01','2099-01-01T12:00:00Z','2099-01-01T11:55:00Z','upcoming')`).run();
-  db.prepare(`INSERT INTO source_records
-    (id, source_type, fetched_at, quality_status)
-    VALUES ('points-round','official_provider','2098-12-31T08:00:00Z','normalized_verified_subset')`).run();
+  officialSource(db, 'points-round', '2098-12-31T08:00:00Z');
 
   for (let leg = 1; leg <= 8; leg += 1) {
     const horseId = `round-h${leg}`;
@@ -105,15 +127,25 @@ test('market-blind AI context receives factual horse patterns, ranks Start Point
     (id, horse_id, points, observed_at, source_record_id)
     VALUES ('round-p1b', 'round-h1b', 700, '2098-12-31T08:00:00Z', 'points-round')`).run();
 
+  horse(db, 'round-h1scr', 'Stryken häst');
+  db.prepare(`INSERT INTO race_entries
+    (id, race_id, horse_id, start_number, actual_lane, scratched)
+    VALUES ('round-e1scr', 'round-r1', 'round-h1scr', 3, 3, 1)`).run();
+  db.prepare(`INSERT INTO horse_start_points
+    (id, horse_id, points, observed_at, source_record_id)
+    VALUES ('round-p1scr', 'round-h1scr', 2000, '2098-12-31T08:00:00Z', 'points-round')`).run();
+
   const context = await prepareAnalysisContext(env, 'round-pattern', 'pre_market');
   const firstLeg = context.legs[0].entries;
   const first = firstLeg.find((entry) => entry.horseId === 'round-h1');
   const second = firstLeg.find((entry) => entry.horseId === 'round-h1b');
+  const scratched = firstLeg.find((entry) => entry.horseId === 'round-h1scr');
   const secondLegOnlyHorse = context.legs[1].entries[0];
   assert.equal(first.relevantPatterns.startPoints.current.points, 990);
   assert.equal(first.relevantPatterns.startPoints.fieldRank, 1);
   assert.equal(first.relevantPatterns.startPoints.fieldObserved, 2);
   assert.equal(second.relevantPatterns.startPoints.fieldRank, 2);
+  assert.equal(scratched.relevantPatterns.startPoints.fieldRank, undefined);
   assert.equal(secondLegOnlyHorse.relevantPatterns.startPoints.fieldRank, 1);
   assert.equal(secondLegOnlyHorse.relevantPatterns.startPoints.fieldObserved, 1);
   assert.equal(context.round.turnoverSek, undefined);
@@ -126,15 +158,14 @@ test('AI pattern history excludes same-day results from the target round date', 
   horse(db, 'h1', 'Testhästen');
   const oldEntry = raceWithResult(db, { raceId: 'old-race', horseId: 'h1', date: '2026-08-31', number: 1 });
   const sameDayEntry = raceWithResult(db, { raceId: 'same-day-race', horseId: 'h1', date: '2026-09-01', number: 2 });
-  source(db, 'old-x', '2026-08-31T20:00:00Z');
-  source(db, 'same-day-x', '2026-09-01T10:00:00Z');
+  xlabsSource(db, 'old-x', '2026-08-31T20:00:00Z');
+  xlabsSource(db, 'same-day-x', '2026-09-01T10:00:00Z');
   db.prepare(`INSERT INTO xlabs_data
     (id,race_entry_id,first_200_time,last_400_time,extra_distance_m,quality_status,source_record_id)
     VALUES ('old-row',?,'1.12,0','1.11,0',8,'xlabs-telemetry-v1','old-x')`).run(oldEntry);
   db.prepare(`INSERT INTO xlabs_data
     (id,race_entry_id,first_200_time,last_400_time,extra_distance_m,quality_status,source_record_id)
     VALUES ('same-day-row',?,'1.05,0','1.04,0',2,'xlabs-telemetry-v1','same-day-x')`).run(sameDayEntry);
-  const { getHorseRelevantPatternsBatch } = await import('../src/statistics/horse-patterns.js');
   const patterns = await getHorseRelevantPatternsBatch(env, ['h1'], '2026-09-01', { historicalOnly: true });
   assert.equal(patterns.get('h1').xlabs.measuredStarts, 1);
   assert.equal(patterns.get('h1').xlabs.openingPace.averageSecondsPerKm, 72);
