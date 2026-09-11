@@ -2,7 +2,7 @@
 
 Version: 0.6.0
 Phase: verified official + X-Labs data foundation with production backfills active
-Status: v0.6.0 is deployed in production; migration 0008, Worker health, private login and the analysis-prompt route were verified by the successful production release after PR #77. PR #78 is merged and added the canonical track filters/contact infrastructure plus repository migration 0009. Migration 0009 has not been production-applied or verified as part of the post-#78 rollout, and real private track-contact enrichment is not complete. Draft PR #79 is the current UI-integrity/completion build and is not production-live. The official multi-year historical backfill and separate multi-year X-Labs backfill remain active on their persisted cursors and were not touched by this build.
+Status: v0.6.0 is deployed in production; migration 0008, Worker health, private login and the analysis-prompt route were verified by the successful production release after PR #77. PR #78 is merged and added the canonical track filters/contact infrastructure plus repository migration 0009. Migration 0009 has not been production-applied or verified as part of the post-#78 rollout, and real private track-contact enrichment is not complete. PR #79 is the current UI-integrity/completion build and is not production-live. The official multi-year historical backfill and separate multi-year X-Labs backfill remain active on their persisted cursors and were not touched by this build.
 
 ## Current production state
 - Worker: `kentaurai-api`.
@@ -107,7 +107,7 @@ Status: v0.6.0 is deployed in production; migration 0008, Worker health, private
 - Missing facts and unsupported derived values remain null/unknown.
 - Bana has list/detail views with **Översikt -> Spårstatistik -> Hemmatränare**. Stored track profile facts are shown only when verified; address/website fields are nullable and hidden when unavailable.
 - Bana spårstatistik supports period, startmetod, loppnivå and canonical distance together with independent optional **STL-klass** and **Lopptyp** filters. These filters combine in the backend query. STL/race-type classifications are deterministic calculated data stored separately from raw race facts.
-- Draft PR #79 moves all essential Bana filter state/query wiring and address formatting into the canonical track renderer rather than exact generated-source replacement. It also makes the Settings analysis CTA and V85/V86 round-count label canonical Settings output rather than MutationObserver-created UI. `All data` remains literal and `SE` is presented as `Sverige` without altering stored country codes.
+- PR #79 moves all essential Bana filter state/query wiring and address formatting into the canonical track renderer rather than exact generated-source replacement. It also makes the Settings analysis CTA and V85/V86 round-count label canonical Settings output rather than MutationObserver-created UI. `All data` remains literal and `SE` is presented as `Sverige` without altering stored country codes.
 - The completion build adds an `ADMIN_TOKEN`-protected exact-ID track-contact target/enrichment path. Researched real values stay private; conflicts are recorded and do not overwrite an existing different fact.
 
 ## Navigation and visual direction
@@ -154,7 +154,7 @@ Status: v0.6.0 is deployed in production; migration 0008, Worker health, private
 
 ## Current verification/operations gate
 1. Keep the official and X-Labs multi-year backfills running independently through their persisted checkpoints; do not reset or recreate them.
-2. Review draft PR #79, require exact-head QA/CI, and merge only after explicit user approval.
+2. Review PR #79, require exact-head QA/CI, and merge only after explicit user approval.
 3. After merge authorization, apply pending migration 0009 if still needed and deploy the exact reviewed main head through the authorized production path.
 4. Verify health and private authentication, then verify the actual authenticated application shows the Settings AI CTA, V85/V86 count label, Swedish presentation and combined statistics/Bana filters.
 5. Confirm the existing official and X-Labs backfill state remains intact.
