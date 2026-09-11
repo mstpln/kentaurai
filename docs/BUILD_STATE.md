@@ -2,25 +2,27 @@
 
 Version: 0.6.0
 Phase: verified official + X-Labs data foundation with production backfills active
-Status: official live acquisition is deployed and smoke-tested; the official multi-year historical backfill is running; verified X-Labs acquisition/normalization is deployed; the production X-Labs vertical-slice gate passed; the separate multi-year X-Labs backfill for 2023-09-08 through 2026-09-07 is running under the existing bounded scheduler; the private reference-round production import has been completed and independently verified; installable KentaurAI PWA packaging, automatic deterministic post-race review, six-area private navigation and Bana profiles are implemented; a provider-neutral pre-race analysis exchange is implemented for external AI clients such as ChatGPT or Claude.
+Status: v0.6.0 is deployed in production; migration 0008, Worker health, private login and the analysis-prompt route were verified by the successful production release after PR #77. The official multi-year historical backfill and the separate multi-year X-Labs backfill remain active on their persisted cursors. Six-area private navigation and Bana profiles are deployed. The current completion branch fixes the remaining track presentation/contact work and introduces migration 0009, which is not yet applied in production.
 
 ## Current production state
 - Worker: `kentaurai-api`.
 - D1: `kentaurai`.
 - R2: `kentaurai-raw`.
-- Production migrations are applied through migration 0007. Repository migration 0008 adds track contact metadata and calculated race classifications, but must not be assumed applied in production until an explicitly authorized production migration run succeeds.
+- Production migrations are applied through migration 0008. The production release verified the 0008 track-contact columns and calculated race-classification tables before deploying the Worker.
+- Repository migration 0009 adds fact-level provenance for researched track contact facts. It is pending review/merge and must not be assumed applied until the authorized completion release succeeds.
+- Production `/health` was verified against KentaurAI `0.6.0`; `/app/login` and the private analysis-prompt route were also verified after the release.
 - Official historical backfill range: 2023-09-08 through 2026-09-07, newest-first, up to three sequential race checkpoints per minute when eligible.
 - X-Labs historical backfill range: 2023-09-08 through 2026-09-07, newest-first, up to three sequential X-Labs checkpoints per minute when eligible.
 - The X-Labs historical job does not outrun official history: it waits until the corresponding official date is ready.
 - Daily V85/V86 X-Labs catch-up remains separate and has priority over the long historical X-Labs job.
 - A rolling three-day official ordinary-race catch-up is created at the existing 04:30 UTC scheduling point so recent historical coverage remains current and short scheduler gaps can self-heal.
 - The private `kentaurai-reference-v1` round is stored in production with archived source provenance and independently verified structural invariants.
-- GitHub Actions contains guarded manual production workflows for D1 migrations and for starting/resuming the fixed historical X-Labs job.
-- The Worker entrypoint includes the scoped PWA wrapper; public PWA metadata/assets are separate from authenticated app/API responses.
+- Existing official and X-Labs backfill jobs are persistent and must continue from their stored cursors across deployments; this completion build does not recreate, reset or restart them.
+- The Worker entrypoint is `src/worker-v064.js` and includes the scoped PWA wrapper; public PWA metadata/assets are separate from authenticated app/API responses.
 - The minute Worker schedule also attempts at most one eligible deterministic post-race review pass; rounds without eight unambiguous factual winners remain untouched.
 
 ## Verified foundation
-- D1 core schema, indexes, reference-round extensions, X-Labs backfill schema and current production migrations are provisioned.
+- D1 core schema, indexes, reference-round extensions, X-Labs backfill schema and production migrations through 0008 are provisioned.
 - R2/raw snapshot handling preserves exact private source payloads with source/import-run provenance.
 - Manual editorial structured import and `kentaurai-reference-v1` import paths are implemented with public/private separation.
 - The private reference-round browser import is deployed without a client-JavaScript dependency; production import and persistence were independently verified without exposing the private payload in GitHub.
@@ -105,6 +107,8 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 - Missing facts and unsupported derived values remain null/unknown.
 - Bana has list/detail views with **Översikt -> Spårstatistik -> Hemmatränare**. Stored track profile facts are shown only when verified; address/website fields are nullable and hidden when unavailable.
 - Bana spårstatistik supports period, startmetod and canonical distance together with independent optional **STL-klass** and **Lopptyp** filters. STL/race-type classifications are deterministic calculated data stored separately from raw race facts.
+- The completion build moves STL-klass/Lopptyp into the canonical track renderer/query state rather than depending on MutationObserver injection. `All data` remains literal and `SE` is presented as `Sverige` without altering stored country codes.
+- The completion build adds an `ADMIN_TOKEN`-protected exact-ID track-contact target/enrichment path. Researched real values stay private; conflicts are recorded and do not overwrite an existing different fact.
 
 ## Navigation and visual direction
 - Bottom navigation is: **Trend -> Tränare -> Hästar -> Kuskar -> Bana -> Spel**.
@@ -140,7 +144,7 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 
 ## Quality and privacy
 - GitHub contains code/schema/tests/docs/synthetic fixtures only.
-- No real racing payloads, private reference exports, database dumps, secrets or paid/private editorial provider identity/content may be committed.
+- No real racing payloads, private reference exports, database dumps, secrets, researched production track-contact dataset or paid/private editorial provider identity/content may be committed.
 - Production reference verification is aggregate/invariant based and must not print private reference values into public Actions logs.
 - X-Labs tests use synthetic HTML/JavaScript only; no real captured X-Labs payload or script is committed.
 - Raw facts, deterministic calculations and AI judgments remain explicitly separated.
@@ -150,15 +154,15 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 
 ## Current verification/operations gate
 1. Keep the official and X-Labs multi-year backfills running independently through their persisted checkpoints.
-2. Monitor for repeated technical failures rather than reacting to isolated neutral X-Labs unavailability.
-3. Verify upcoming/current V85/V86 official acquisition, rolling official ordinary-race history and daily X-Labs catch-up remain healthy while the long jobs run.
-4. Keep the verified private reference round as a fixed reference fixture in private production storage; do not commit its payload to GitHub.
-5. Keep post-race learning conservative: one wrong ranking, spike or round is evidence to review, not a reason to change logic automatically.
-6. Do not apply migration 0008 or deploy its Worker/UI changes to production without separate explicit production authorization.
+2. Review and merge the v0.6.0 completion PR only after explicit user approval.
+3. After merge, apply migration 0009 and deploy the exact reviewed main head using the authorized production path.
+4. Query the private exact track target set, research physical addresses and official HTTPS websites, then write verified facts/provenance to D1 without committing the real dataset.
+5. Verify Bana overview/country/contact presentation and combined Spårstatistik filters in the real production app.
+6. Confirm the official and X-Labs backfill rows/cursors still exist and have not been recreated or reset.
 
 ## Next build sequence
-1. After explicit production authorization, apply migration 0008, deploy the current Worker and verify the private Bana/contact/class-filter and analysis-import-helper flow without disturbing the running backfills.
-2. Let official + historical X-Labs population continue in the background and verify the first natural rolling-history execution.
+1. Complete the track-contact enrichment and production verification gate above.
+2. Let official + historical X-Labs population continue in the background and verify the natural rolling-history executions.
 3. Use the provider-neutral analysis exchange on an upcoming live V85/V86 round and verify the first private read -> external AI analysis -> stored submission round trip.
 4. Assess accumulated verified history against the Trend readiness contract and build deterministic Trend metrics/leaderboards once production history is sufficient.
 5. Expand deterministic factual features and objective post-race scoring/calibration only where stored source data supports the calculation.
