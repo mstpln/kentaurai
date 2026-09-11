@@ -11,6 +11,7 @@ function seedTrack(db) {
     { id: 'scope-stl-class', method: 'auto', mainClass: 'Silverdivisionen', raceName: 'Synthetic class race', firstPrize: 135000 },
     { id: 'scope-stl-text', method: 'volt', mainClass: null, raceName: 'STL Speciallopp', firstPrize: 90000 },
     { id: 'scope-league-text', method: 'auto', mainClass: null, raceName: 'Svenska Travligans syntetiska lopp', firstPrize: 80000 },
+    { id: 'scope-stl-terms', method: 'auto', mainClass: null, raceName: 'Synthetic terms race', firstPrize: 70000 },
     { id: 'scope-v85-feature', method: 'volt', mainClass: null, raceName: 'Synthetic feature race', firstPrize: 250000 },
     { id: 'scope-hastlopp', method: 'auto', mainClass: null, raceName: 'Hästloppet', firstPrize: 20000 }
   ];
@@ -33,6 +34,14 @@ function seedTrack(db) {
     VALUES ('scope-v85-round', 'V85', '2026-08-01', 'scope-track', 'results')`).run();
   db.prepare(`INSERT INTO game_legs (game_round_id, leg_number, race_id)
     VALUES ('scope-v85-round', 1, 'scope-v85-feature')`).run();
+
+  db.prepare(`INSERT INTO source_records
+    (id, source_type, external_id, source_url, fetched_at, quality_status)
+    VALUES ('scope-official-source', 'official_provider', 'race:scope-stl-terms', 'https://example.test/official-race', '2026-08-01T12:00:00Z', 'normalized_verified_subset')`).run();
+  db.prepare(`INSERT INTO normalized_observations
+    (id, entity_type, entity_id, source_record_id, observed_at, fields_json, quality_status)
+    VALUES ('scope-stl-terms-observation', 'race', 'scope-stl-terms', 'scope-official-source', '2026-08-01T12:00:00Z', ?, 'normalized_verified_subset')`)
+    .run(JSON.stringify({ terms: ['Svenska Travligans särskilda bestämmelser'] }));
 }
 
 test('race scope uses persisted STL class or explicit official STL text, never prize or game identity', () => {
@@ -44,6 +53,8 @@ test('race scope uses persisted STL class or explicit official STL text, never p
   assert.match(evidence, /race_name/);
   assert.match(evidence, /main_class/);
   assert.match(evidence, /class_flags_json/);
+  assert.match(evidence, /normalized_observations/);
+  assert.match(evidence, /official_provider/);
   assert.match(evidence, /SVENSKA TRAVLIGAN/);
   assert.match(evidence, / STL /);
   assert.doesNotMatch(evidence, /first_prize|game_round|game_leg/i);
@@ -58,17 +69,18 @@ test('Bana race scope recognizes explicit STL facts without treating every V85 o
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM race_stl_classifications WHERE race_id = 'scope-stl-class'").get().n, 1);
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM race_stl_classifications WHERE race_id = 'scope-stl-text'").get().n, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM race_stl_classifications WHERE race_id = 'scope-league-text'").get().n, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM race_stl_classifications WHERE race_id = 'scope-stl-terms'").get().n, 0);
 
   const all = await getTrackLaneStatsV064(env, 'scope-track', {
     year: '2026', startMethod: 'all', distanceGroup: '2140', raceScope: 'all'
   });
-  assert.equal(all.totals.starts, 5);
+  assert.equal(all.totals.starts, 6);
   assert.equal(all.filters.startMethod, 'all');
 
   const stl = await getTrackLaneStatsV064(env, 'scope-track', {
     year: '2026', startMethod: 'all', distanceGroup: '2140', raceScope: 'stl'
   });
-  assert.equal(stl.totals.starts, 3);
+  assert.equal(stl.totals.starts, 4, 'named STL class, explicit STL race name, league text and official terms are included');
 
   const weekday = await getTrackLaneStatsV064(env, 'scope-track', {
     year: '2026', startMethod: 'all', distanceGroup: '2140', raceScope: 'weekday'
