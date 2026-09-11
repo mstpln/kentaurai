@@ -22,6 +22,10 @@ function trainerHome(db,trainerId,trackExternalId,sourceId) {
   source(db,sourceId);
   db.prepare("INSERT INTO normalized_observations (id,entity_type,entity_id,source_record_id,observed_at,fields_json,quality_status) VALUES (?, 'trainer', ?, ?, '2026-09-11T10:00:00Z', ?, 'normalized_verified_subset')").run(`obs-${trainerId}`,trainerId,sourceId,JSON.stringify({homeTrackExternalId:trackExternalId,homeTrackName:trackExternalId==='A'?'Bana A':'Bana B'}));
 }
+function trainerHomeNameOnly(db,trainerId,trackName,sourceId) {
+  source(db,sourceId);
+  db.prepare("INSERT INTO normalized_observations (id,entity_type,entity_id,source_record_id,observed_at,fields_json,quality_status) VALUES (?, 'trainer', ?, ?, '2026-09-11T10:00:00Z', ?, 'normalized_verified_subset')").run(`obs-${trainerId}`,trainerId,sourceId,JSON.stringify({homeTrackName:trackName}));
+}
 function market(db,entryId,{percent=5,rank=1}={}) {
   source(db,`source-${entryId}`,'synthetic');
   db.prepare("INSERT INTO game_rounds (id,game_type,round_date,bet_stop_at) VALUES (?, 'V85','2026-09-05','2026-09-05T12:00:00Z')").run(`round-${entryId}`);
@@ -72,6 +76,17 @@ test('trainer home and away rankings require latest verified official home-track
   assert.equal(data.rankings.bestHomeTrack.some(x=>x.id==='trainer-b'),false,'unknown home track must not be inferred');
   const detail=await getTrainerDetailStatistics(env,'trainer-a',{period:'1y',asOfDate:'2026-09-11'});
   assert.equal(detail.homeTrackResults.starts,1);assert.equal(detail.homeTrackResults.wins,1);assert.equal(detail.otherTrackResults.starts,1);
+});
+
+test('trainer home-track rankings do not infer identity from a matching track name alone', async () => {
+  const {db,env}=createTestEnv();seedBase(db);trainerHomeNameOnly(db,'trainer-a','Bana A','home-name-only');
+  race(db,'rh-name','2026-09-01',{track:'track-a'});entry(db,'eh-name','rh-name','trainer-a',{placing:1});
+  const data=await getTrainerRankings(env,{period:'1y',asOfDate:'2026-09-11'});
+  assert.equal(data.rankings.bestHomeTrack.some(x=>x.id==='trainer-a'),false);
+  assert.equal(data.rankings.bestOtherTracks.some(x=>x.id==='trainer-a'),false);
+  const detail=await getTrainerDetailStatistics(env,'trainer-a',{period:'1y',asOfDate:'2026-09-11'});
+  assert.equal(detail.homeTrackResults.starts,0);
+  assert.equal(detail.otherTrackResults.starts,0);
 });
 
 test('trainer favorite/longshot and rest blocks use factual source-backed samples', async () => {
