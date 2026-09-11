@@ -67,6 +67,16 @@ function safeJsonArray(value) {
   }
 }
 
+function safeWebsiteUrl(value) {
+  if (!value) return null;
+  try {
+    const url = new URL(String(value));
+    return url.protocol === 'https:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getTrackDetailV064(env, id) {
   const detail = await getTrackDetail(env, id);
   if (!detail) return null;
@@ -80,7 +90,7 @@ export async function getTrackDetailV064(env, id) {
       street: metadata?.street_address || null,
       postalCode: metadata?.postal_code || null
     },
-    websiteUrl: metadata?.website_url || null
+    websiteUrl: safeWebsiteUrl(metadata?.website_url)
   };
 }
 
@@ -116,6 +126,7 @@ export async function getTrackLaneStatsV064(env, id, options = {}) {
   const { results } = await env.DB.prepare(`
     SELECT
       r.id AS race_id,
+      r.race_name,
       r.main_class,
       r.class_flags_json,
       re.actual_lane AS lane,
@@ -132,6 +143,7 @@ export async function getTrackLaneStatsV064(env, id, options = {}) {
   const grouped = new Map();
   for (const row of results || []) {
     const race = {
+      raceName: row.race_name || null,
       mainClass: row.main_class || null,
       classFlags: safeJsonArray(row.class_flags_json)
     };
