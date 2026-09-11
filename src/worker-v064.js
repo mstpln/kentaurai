@@ -1,7 +1,11 @@
 import worker from './worker-aligned-final.js';
 import { appAuthConfigured, hasValidAppSession } from './app-auth.js';
 import { getEnhancedTrackDetail, getEnhancedTrackLaneStats } from './routes/track-enhancements.js';
-import { buildAnalysisImportInstructions, ANALYSIS_IMPORT_INSTRUCTIONS_VERSION } from './analysis-import-instructions.js';
+import {
+  buildAnalysisImportInstructions,
+  ANALYSIS_IMPORT_CONTRACT_VERSION,
+  ANALYSIS_IMPORT_INSTRUCTIONS_VERSION
+} from './analysis-import-instructions.js';
 import { v064Css, v064Script } from './ui-v064.js';
 import { v064RacePresentationScript } from './ui-v064-race-presentation.js';
 
@@ -47,7 +51,7 @@ export default {
       if (denied) return denied;
       return json({
         version: ANALYSIS_IMPORT_INSTRUCTIONS_VERSION,
-        contractVersion: 'kentaurai-analysis-v1',
+        contractVersion: ANALYSIS_IMPORT_CONTRACT_VERSION,
         prompt: buildAnalysisImportInstructions()
       });
     }
