@@ -19,8 +19,10 @@ function seedTrack(db) {
     { id: 'scope-league-text', method: 'auto', mainClass: null, raceName: 'Svenska Travligans syntetiska lopp', firstPrize: 80000 },
     { id: 'scope-stl-terms', method: 'auto', mainClass: null, raceName: 'Synthetic terms race', firstPrize: 70000 },
     { id: 'scope-v85-feature', method: 'volt', mainClass: null, raceName: 'Synthetic V85 feature race', firstPrize: 80000 },
+    { id: 'scope-v75-calendar', method: 'auto', mainClass: null, raceName: 'Synthetic historical V75 race', firstPrize: 50000 },
     { id: 'scope-high-prize', method: 'auto', mainClass: null, raceName: 'Synthetic high-prize race', firstPrize: 100000 },
     { id: 'scope-gs75', method: 'auto', mainClass: null, raceName: 'Synthetic GS75 race', firstPrize: 35000 },
+    { id: 'scope-null-prize', method: 'auto', mainClass: null, raceName: 'Synthetic unknown prize race', firstPrize: null },
     { id: 'scope-hastlopp', method: 'auto', mainClass: null, raceName: 'Hästloppet', firstPrize: 20000 }
   ];
   let index = 0;
@@ -47,11 +49,16 @@ function seedTrack(db) {
 
   db.prepare(`INSERT INTO source_records
     (id, source_type, external_id, source_url, fetched_at, quality_status)
-    VALUES ('scope-official-source', 'official_provider', 'race:scope-stl-terms', 'https://example.test/official-race', '2026-08-01T12:00:00Z', 'normalized_verified_subset')`).run();
+    VALUES ('scope-official-source', 'official_provider', 'race:scope-stl-terms', 'https://example.test/official-race', '2026-08-01T12:00:00Z', 'normalized_verified_subset'),
+           ('scope-calendar-source', 'official_provider', 'calendar:2026-08-01', 'https://example.test/official-calendar', '2026-08-01T08:00:00Z', 'captured_unmapped')`).run();
   db.prepare(`INSERT INTO normalized_observations
     (id, entity_type, entity_id, source_record_id, observed_at, fields_json, quality_status)
-    VALUES ('scope-stl-terms-observation', 'race', 'scope-stl-terms', 'scope-official-source', '2026-08-01T12:00:00Z', ?, 'normalized_verified_subset')`)
-    .run(JSON.stringify({ terms: ['Svenska Travligans särskilda bestämmelser'] }));
+    VALUES ('scope-stl-terms-observation', 'race', 'scope-stl-terms', 'scope-official-source', '2026-08-01T12:00:00Z', ?, 'normalized_verified_subset'),
+           ('scope-v75-calendar-observation', 'race', 'scope-v75-calendar', 'scope-calendar-source', '2026-08-01T08:00:00Z', ?, 'normalized_verified_subset')`)
+    .run(
+      JSON.stringify({ terms: ['Svenska Travligans särskilda bestämmelser'] }),
+      JSON.stringify({ gameTypes: ['V75'] })
+    );
 }
 
 test('race level uses verified STL, V75/V85/V86 identity or at least 100k first prize', () => {
@@ -70,31 +77,33 @@ test('race level uses verified STL, V75/V85/V86 identity or at least 100k first 
   assert.match(higherPrizeEvidence, /first_prize_sek >= 100000/);
   assert.match(higherPrizeEvidence, /game_legs/);
   assert.match(higherPrizeEvidence, /game_rounds/);
+  assert.match(higherPrizeEvidence, /json_each/);
+  assert.match(higherPrizeEvidence, /gameTypes/);
   assert.match(higherPrizeEvidence, /'V75', 'V85', 'V86'/);
   assert.doesNotMatch(higherPrizeEvidence, /GS75/);
-  assert.match(raceScopeCondition('weekday'), /^NOT /);
+  assert.match(raceScopeCondition('weekday'), /^COALESCE\(/);
   assert.throws(() => normalizeRaceScope('gs75'), /race scope/);
 });
 
-test('Bana separates Högre prissumma from Vardagstrav without promoting GS75 by game identity', async () => {
+test('Bana separates Högre prissumma from Vardagstrav, includes historical V75 and keeps unknown prize null-safe', async () => {
   const { env, db } = createTestEnv();
   seedTrack(db);
 
   const all = await getTrackLaneStatsV064(env, 'scope-track', {
     year: '2026', startMethod: 'all', distanceGroup: '2140', raceScope: 'all'
   });
-  assert.equal(all.totals.starts, 8);
+  assert.equal(all.totals.starts, 10);
 
   const higherPrize = await getTrackLaneStatsV064(env, 'scope-track', {
     year: '2026', startMethod: 'all', distanceGroup: '2140', raceScope: 'high_prize'
   });
-  assert.equal(higherPrize.totals.starts, 6, 'STL evidence, V85 identity and 100k+ first prize all qualify');
+  assert.equal(higherPrize.totals.starts, 7, 'STL evidence, stored V85, historical calendar V75 and 100k+ first prize all qualify');
   assert.equal(higherPrize.filters.raceScope, 'high_prize');
 
   const weekday = await getTrackLaneStatsV064(env, 'scope-track', {
     year: '2026', startMethod: 'all', distanceGroup: '2140', raceScope: 'weekday'
   });
-  assert.equal(weekday.totals.starts, 2, 'GS75 at 35k and ordinary low-prize racing remain Vardagstrav');
+  assert.equal(weekday.totals.starts, 3, 'GS75 at 35k, ordinary low-prize and unknown-prize races remain in the complement');
 
   const weekdayVolt = await getTrackLaneStatsV064(env, 'scope-track', {
     year: '2026', startMethod: 'volt', distanceGroup: '2140', raceScope: 'weekday'
