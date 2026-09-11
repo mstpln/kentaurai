@@ -16,6 +16,8 @@ function addRace(db,id,date,{method='auto',lane=1,handicap=0,actual=2140,placing
   if (monte) db.prepare("INSERT INTO race_type_classifications (race_id,race_type) VALUES (?, 'monte')").run(id);
 }
 
+// These assertions protect the Build D rule that filters describe the comeback start,
+// while the >=60-day sequence itself is always derived from the horse's full actual-start history.
 test('trainer rest rankings apply race type and start method to the comeback start itself', async () => {
   const { db, env } = createTestEnv(); seed(db);
   addRace(db,'old','2026-01-01',{method:'auto'});
