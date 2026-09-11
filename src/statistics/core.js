@@ -32,6 +32,14 @@ export const TREND_START_METHOD_OPTIONS = Object.freeze([
   ['volt', 'Voltstart']
 ]);
 
+export const TREND_MIN_STARTS_OPTIONS = Object.freeze([
+  ['all', 'Alla'],
+  ['3', 'Minst 3'],
+  ['5', 'Minst 5'],
+  ['10', 'Minst 10'],
+  ['20', 'Minst 20']
+]);
+
 function assertDateKey(value, name = 'date') {
   const text = String(value || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) throw new Error(`${name} must use YYYY-MM-DD`);
@@ -112,6 +120,12 @@ export function normalizeTrendStartMethod(value) {
   const method = String(value || 'all').trim().toLowerCase();
   if (!TREND_START_METHOD_OPTIONS.some(([key]) => key === method)) throw new Error('start_method must be all, auto or volt');
   return method;
+}
+
+export function normalizeTrendMinStarts(value) {
+  const raw = String(value == null || value === '' ? 'all' : value).trim().toLowerCase();
+  if (!TREND_MIN_STARTS_OPTIONS.some(([key]) => key === raw)) throw new Error('min_starts must be all, 3, 5, 10 or 20');
+  return raw === 'all' ? null : Number(raw);
 }
 
 export function normalizeTrackId(value) {
