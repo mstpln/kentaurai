@@ -14,6 +14,7 @@ function putHistory(db, horseId='horse-a') {
   db.prepare("INSERT INTO drivers (id,canonical_name) VALUES ('driver-a','Kusk A')").run();
   db.prepare("INSERT INTO trainers (id,canonical_name) VALUES ('trainer-a','Tränare A')").run();
   db.prepare("INSERT INTO races (id,track_id,race_date,race_number,distance_m,start_method,first_prize_sek,race_name,source_quality) VALUES ('race-a','track-a','2026-09-01',1,2140,'auto',50000,'Vanligt lopp','verified')").run();
+  db.prepare("INSERT INTO race_external_ids (race_id,source_type,external_id) VALUES ('race-a','official','race-a')").run();
   db.prepare("INSERT INTO race_entries (id,race_id,horse_id,driver_id,trainer_id,start_number,scratched) VALUES ('entry-a','race-a',?,'driver-a','trainer-a',1,0)").run(horseId);
   db.prepare("INSERT INTO race_results (race_entry_id,placing,prize_sek,gallop,result_status) VALUES ('entry-a',1,10000,0,'official')").run();
 }
@@ -32,8 +33,8 @@ function rawBucket(objects) {
   };
 }
 
-function gamePayload(externalHorseId, points) {
-  return { races: [{ starts: [{ horse: { id: externalHorseId, name: 'Synthetic Horse', statistics: { life: { startPoints: points } } } }] }] };
+function gamePayload(externalHorseId, points, raceId=null) {
+  return { races: [{ id: raceId, starts: [{ horse: { id: externalHorseId, name: 'Synthetic Horse', statistics: { life: { startPoints: points } } } }] }] };
 }
 
 test('official startPoints field is fail-closed and exact', () => {
@@ -57,8 +58,8 @@ test('source sync stores idempotent timeline observations and never lets an olde
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM horse_start_points').get().n,2,'older verified observation is preserved as history');
 });
 
-test('start-point statistics use latest verified observation at the selected as-of date', async () => {
-  const {db,env}=createTestEnv();putHorse(db);putHistory(db);env.RAW_BUCKET=rawBucket({old:gamePayload('100',900),new:gamePayload('100',1200)});
+test('start-point statistics use latest verified observation at the selected as-of date and retain race linkage when provable', async () => {
+  const {db,env}=createTestEnv();putHorse(db);putHistory(db);env.RAW_BUCKET=rawBucket({old:gamePayload('100',900,'race-a'),new:gamePayload('100',1200,'race-a')});
   source(db,'source-old','2026-09-05T10:00:00Z','old');source(db,'source-new','2026-09-11T10:00:00Z','new');
   await syncHorseStartPointsFromSource(env,'source-old');await syncHorseStartPointsFromSource(env,'source-new');
   let data=await getHorseRankings(env,{period:'1y',asOfDate:'2026-09-10'});
@@ -70,6 +71,7 @@ test('start-point statistics use latest verified observation at the selected as-
   assert.equal(detail.currentStartPoints.points,1200);
   assert.deepEqual(detail.startPointHistory.map(x=>x.points),[1200,900]);
   assert.equal(detail.startPointHistory[0].sourceRecordId,'source-new');
+  assert.equal(detail.startPointHistory[0].raceEntryId,'entry-a');
 });
 
 test('source sync records schema failures without inventing a value', async () => {
