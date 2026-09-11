@@ -106,7 +106,14 @@ test('v0.6.4 app overlay contains compact class filters, Swedish labels and impo
   assert.match(html, /Omräknad km-tid/);
   assert.match(html, /Öppna hemsida/);
   const scripts = [...html.matchAll(/<script(?: [^>]*)?>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
-  scripts.forEach((script, index) => new vm.Script(script, { filename: `v064-embedded-${index}.js` }));
+  scripts.forEach((script, index) => {
+    try {
+      new vm.Script(script, { filename: `v064-embedded-${index}.js` });
+    } catch (error) {
+      console.error(`Generated v064 script ${index}:\n${script.split('\n').map((line, lineIndex) => `${String(lineIndex + 1).padStart(4, '0')}: ${line}`).join('\n')}`);
+      throw error;
+    }
+  });
 });
 
 test('analysis-prompt app endpoint requires session and returns the copyable contract prompt', async () => {
