@@ -7,7 +7,12 @@ import {
 
 export { KENTAURAI_APP_VERSION, createFullDataExportResponse, importAnalysisUpload };
 
-export function friendlyRunName(sourceType, fallback = 'Körning') {
+function looksTechnical(value) {
+  const text = String(value || '').trim();
+  return /[_:/.-]/.test(text) || /\b(orchestrator|scheduled|capture|normalize|backfill|provider|official|job|worker)\b/i.test(text);
+}
+
+export function friendlyRunName(sourceType, fallback = 'Automatisk körning') {
   const value = String(sourceType || '').toLowerCase();
   if (value.includes('xlab')) return 'X-Labs';
   if (value.includes('post') && value.includes('race')) return 'Resultatgenomgång';
@@ -16,9 +21,11 @@ export function friendlyRunName(sourceType, fallback = 'Körning') {
   if (value.includes('historical') && (value.includes('official') || value.includes('provider') || value.includes('race'))) {
     return 'Historiska lopp & resultat';
   }
+  if (value.includes('scheduled') || value.includes('orchestrator')) return 'Schemalagd datasynk';
   if (value.includes('live') || value.includes('calendar') || value.includes('game')) return 'Kommande V85/V86';
   if (value.includes('official') || value.includes('provider') || value.includes('race_capture')) return 'Lopp- och resultatdata';
-  return fallback || 'Körning';
+  const candidate = String(fallback || '').trim();
+  return candidate && !looksTechnical(candidate) ? candidate : 'Automatisk körning';
 }
 
 export async function getSettingsStatus(env) {
