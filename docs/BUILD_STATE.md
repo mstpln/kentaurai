@@ -8,12 +8,12 @@ Updated: 2026-09-11
 - D1: `kentaurai`.
 - R2: `kentaurai-raw`.
 - Actual Worker entrypoint: `src/worker-v064.js`.
-- Statistics Build C is merged and production-live after GitHub Actions release run `34631237134`.
-- Release QA passed with 411 tests and zero failures before production changes.
+- Statistics Build D is merged and production-live after GitHub Actions release run `34634926117`.
+- Release QA passed with 426 tests and zero failures before production changes.
 - Worker deployment, `/health`, `/app/login` and the private analysis-prompt authorization check all passed.
-- Deployed Worker version ID from that release: `e6619d15-554c-475f-ab0b-fbfeb89f854a`.
-- Production D1 reported `No migrations to apply` during that release. Repository migrations through `0011_driver_statistics_indexes.sql` were therefore already registered/applied at release time.
-- Official and X-Labs historical backfills use persisted jobs/cursors. Deployments and statistics work must never recreate, reset or silently restart them.
+- Deployed Worker version ID from that release: `91254e23-9446-4934-8f1f-1d28d4c92399`.
+- Production D1 reported `No migrations to apply` during that release. Repository migration tracking was therefore current through `0012_trainer_statistics_indexes.sql`; this does not by itself constitute a separate content inspection of that schema.
+- Official and X-Labs historical backfills use persisted jobs/cursors. Deployments and analysis work must never recreate, reset or silently restart them.
 
 ## Statistics programme
 ### Build A - Trend - merged and production-live
@@ -42,12 +42,23 @@ Updated: 2026-09-11
 - Favorite/longshot statistics require source-backed betting snapshots at or before a verified betting stop. Favorite is stored market rank 1; longshot uses the shared threshold `<=5%`; missing evidence fails closed.
 - Migration `0011_driver_statistics_indexes.sql` adds only measured query indexes and is part of the production schema.
 
-### Build D - Trainer statistics - active feature branch
-- Branch: `feat/trainer-statistics-build-d`.
-- Scope follows the detailed statistics plan and reuses the shared core, market, volt-lane, handicap and rest semantics established by Builds A-C.
-- Planned rankings include win/top-three rates, wins, latest-30 placements-only form, annual/average earnings, auto/volt, volt-lane/tillägg, verified home/other track performance, distance profile, favorite/longshot, and first/second start after at least 60 days of rest.
-- Trainer home-track statistics must use verified official home-track observations rather than inferred location/name relationships.
-- No production migration/deployment or backfill mutation is part of Build D until separately released after review and explicit merge authorization.
+### Build D - Trainer statistics - merged and production-live
+- PR #86 is merged; merge commit `8069026fe1cd5fceb3a11ee1ab6d1e881d82fe2c`.
+- Final reviewed Build D head was `96db1f11fa28a9a358a3e87d3d69ab425081cbd1` with 426 tests passing and zero failures.
+- Trainer statistics reuse shared factual denominators and provide win/top-three rates, wins, latest-30 placements-only form, annual/average earnings, auto/volt, verified volt-lane/tillägg, home/other-track, distance-profile, favorite/longshot, and first/second start after at least 60 days of rest.
+- Trainer home-track statistics require an exact source-backed official external track ID mapping. A matching track name alone is not accepted as identity.
+- Migration `0012_trainer_statistics_indexes.sql` adds only the measured trainer query index.
+
+## Controlled AI programme
+### Build E - Controlled AI via JSON - active feature branch
+- Branch: `feat/controlled-ai-build-e` from production-release main commit `ba3759732c9afd8687a31b749b00ede8f6b047ca`.
+- Build E completes the existing provider-neutral analysis exchange rather than creating a second AI pipeline.
+- Strength is stored first in a `pre_market` artifact that excludes current market percentages/odds/turnover/jackpot; ABCD remains relative winning strength, not value.
+- A later market-aware final artifact must reference one stored pre-market parent and cannot rewrite that parent's probability/rank/ABCD assessment.
+- OpenAI/ChatGPT and Anthropic/Claude analyses remain independent submissions and must not overwrite each other.
+- Build E starts by tightening market context to source-backed snapshots at or before the verified betting stop, using the same fail-closed factual discipline as driver/trainer market statistics.
+- App presentation must keep own analysis, other AI analyses and editorial signals visibly distinct and later show stored own probability alongside factual market percentage without feeding market back into the strength assessment.
+- No production deploy, migration or backfill mutation belongs to Build E until separately reviewed and authorized.
 
 ## Data and analysis foundation
 - GitHub contains public code, schema, tests, configuration and synthetic fixtures only.
