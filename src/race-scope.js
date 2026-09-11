@@ -1,13 +1,17 @@
+export const HIGHER_PRIZE_THRESHOLD_SEK = 100000;
+
 export const RACE_SCOPE_OPTIONS = Object.freeze([
   ['all', 'All data'],
-  ['stl', 'STL-lopp'],
+  ['high_prize', 'Högre prissumma'],
   ['weekday', 'Vardagstrav']
 ]);
 
 export function normalizeRaceScope(value) {
   const scope = String(value || 'all').trim().toLowerCase();
   if (RACE_SCOPE_OPTIONS.some(([key]) => key === scope)) return scope;
-  throw new Error('race scope must be all, stl or weekday');
+  // Temporary compatibility for links/API calls created before the Loppnivå definition changed.
+  if (scope === 'stl') return 'stl';
+  throw new Error('race scope must be all, high_prize or weekday');
 }
 
 function normalizedTextSql(expression) {
@@ -44,9 +48,23 @@ export function stlRaceEvidenceCondition(raceAlias = 'r') {
   return `(${classified} OR ${persistedEvidence} OR ${officialObservationEvidence})`;
 }
 
+export function higherPrizeRaceEvidenceCondition(raceAlias = 'r') {
+  const stlEvidence = stlRaceEvidenceCondition(raceAlias);
+  const gameEvidence = `EXISTS (
+    SELECT 1
+    FROM game_legs gl_scope
+    JOIN game_rounds gr_scope ON gr_scope.id = gl_scope.game_round_id
+    WHERE gl_scope.race_id = ${raceAlias}.id
+      AND UPPER(TRIM(gr_scope.game_type)) IN ('V75', 'V85', 'V86')
+  )`;
+  const prizeEvidence = `${raceAlias}.first_prize_sek >= ${HIGHER_PRIZE_THRESHOLD_SEK}`;
+  return `(${stlEvidence} OR ${gameEvidence} OR ${prizeEvidence})`;
+}
+
 export function raceScopeCondition(scope, raceAlias = 'r') {
   const normalized = normalizeRaceScope(scope);
   if (normalized === 'all') return null;
-  const stlEvidence = stlRaceEvidenceCondition(raceAlias);
-  return normalized === 'stl' ? stlEvidence : `NOT ${stlEvidence}`;
+  if (normalized === 'stl') return stlRaceEvidenceCondition(raceAlias);
+  const higherPrizeEvidence = higherPrizeRaceEvidenceCondition(raceAlias);
+  return normalized === 'high_prize' ? higherPrizeEvidence : `NOT ${higherPrizeEvidence}`;
 }
