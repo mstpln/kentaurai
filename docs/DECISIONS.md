@@ -43,8 +43,10 @@
 19. Trend uses the approved chart-line symbol and the singular label `Trend` in both navigation and page heading.
 20. KentaurAI is packaged as an installable PWA scoped to `/app/` with standalone launch and dedicated Sagittarius icons. Its service worker may cache public PWA metadata/icon assets only; authenticated app HTML and API data remain outside the offline cache.
 21. Bana uses **Översikt -> Spårstatistik -> Hemmatränare**. User-facing country codes are localized (for example `SE` -> `Sverige`) while storage/API identities remain unchanged.
-22. Spårstatistik owns Period, Startmetod, Distans, STL-klass and Lopptyp in the canonical lane-statistics flow. Optional filters combine with AND semantics; the literal all-period label is `All data`.
-23. Verified track address/website facts remain nullable. Real enrichment values live only in private D1 with fact-level source URL/type and verification timestamps; conflicts are preserved rather than silently overwriting a previously verified fact.
+22. Spårstatistik owns Period, Startmetod, Loppnivå, Distans, STL-klass and Lopptyp in the canonical lane-statistics flow. Optional filters combine with AND semantics; the literal all-period label is `All data`.
+23. `Loppnivå` is **All data / Högre prissumma / Vardagstrav**. `Högre prissumma` is a deterministic analytical grouping: a race qualifies through stored V75/V85/V86 game identity, source-backed historical V75/V85/V86 calendar membership, verified STL evidence, or an official normalized first prize of at least 100,000 SEK. GS75 identity alone does not qualify. `Vardagstrav` is the null-safe complement: no verified `Högre prissumma` signal. Missing first prize remains unknown and is never invented.
+24. Entity summary statistics and their breakdown tables use the same global Period/Loppnivå scope, so a selected Loppnivå changes both totals/rates/prize money and the detailed breakdowns consistently.
+25. Verified track address/website facts remain nullable. Real enrichment values live only in private D1 with fact-level source URL/type and verification timestamps; conflicts are preserved rather than silently overwriting a previously verified fact.
 
 ## Historical data and X-Labs
 1. Historical starter/result data is imported once, stored permanently and updated incrementally. The planned backfill remains approximately 2-3 years of Swedish racing, with older starts fetched selectively when useful for active horse profiles.
