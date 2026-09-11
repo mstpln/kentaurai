@@ -6,7 +6,9 @@ import { KENTAURAI_APP_VERSION, createFullDataExportResponse, getSettingsStatus,
 import { getEnhancedGameHistoryDetail } from './routes/game-detail-display.js';
 import { getFilteredEntityStatBreakdowns } from './routes/entity-stat-breakdowns.js';
 import { getTrackDetail, getTrackHomeTrainers, getTrackLaneStats, listTracks } from './routes/tracks.js';
+import { getHorseDetailStatistics, getHorseFilterOptions, getHorseRankings } from './statistics/horses.js';
 import { getTrendFilterOptions, getTrendLeaderboard } from './statistics/trend.js';
+import { enhanceHorseStatisticsHtml } from './horse-statistics-ui.js';
 import { enhanceTrendHtml } from './trend-ui.js';
 
 function json(data, status = 200) {
@@ -34,6 +36,21 @@ function canonicalizeAppRedirect(response) {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
+function horseStatsOptions(url) {
+  return {
+    period: url.searchParams.get('period'),
+    raceScope: url.searchParams.get('race_scope'),
+    trackId: url.searchParams.get('track_id'),
+    raceType: url.searchParams.get('race_type'),
+    breedType: url.searchParams.get('breed_type'),
+    startMethod: url.searchParams.get('start_method'),
+    distanceGroup: url.searchParams.get('distance_group'),
+    sex: url.searchParams.get('sex'),
+    age: url.searchParams.get('age'),
+    minStarts: url.searchParams.get('min_starts')
+  };
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -47,7 +64,9 @@ export default {
     if (request.method === 'GET' && path === '/app') return redirectResponse('/app/');
 
     if (request.method === 'GET' && path === '/app/') {
-      if (appAuthConfigured(env) && await hasValidAppSession(request, env)) return htmlResponse(enhanceTrendHtml(renderAppPage()));
+      if (appAuthConfigured(env) && await hasValidAppSession(request, env)) {
+        return htmlResponse(enhanceHorseStatisticsHtml(enhanceTrendHtml(renderAppPage())));
+      }
       return canonicalizeAppRedirect(await worker.fetch(request, env));
     }
 
@@ -113,6 +132,41 @@ export default {
           startMethod: url.searchParams.get('start_method'),
           minStarts: url.searchParams.get('min_starts')
         }));
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    if (path === '/app/api/horses/statistics/filter-options' && request.method === 'GET') {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        return json(await getHorseFilterOptions(env));
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    if (path === '/app/api/horses/statistics' && request.method === 'GET') {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        return json(await getHorseRankings(env, horseStatsOptions(url)));
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    const horseStatisticsMatch = path.match(/^\/app\/api\/horses\/([^/]+)\/statistics$/);
+    if (request.method === 'GET' && horseStatisticsMatch) {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        const data = await getHorseDetailStatistics(env, decodeURIComponent(horseStatisticsMatch[1]), horseStatsOptions(url));
+        return data ? json(data) : json({ error: 'not_found' }, 404);
       } catch (error) {
         console.error(error);
         return json({ error: 'request_failed', message: error.message }, 400);

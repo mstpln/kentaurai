@@ -3,15 +3,19 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 
-const migration1 = readFileSync(new URL('../migrations/0001_core.sql', import.meta.url), 'utf8');
-const migration2 = readFileSync(new URL('../migrations/0002_reference_round.sql', import.meta.url), 'utf8');
-const migration3 = readFileSync(new URL('../migrations/0003_nullable_reference_prediction.sql', import.meta.url), 'utf8');
-const migration4 = readFileSync(new URL('../migrations/0004_official_live_observations.sql', import.meta.url), 'utf8');
-const migration5 = readFileSync(new URL('../migrations/0005_historical_backfill.sql', import.meta.url), 'utf8');
-const migration6 = readFileSync(new URL('../migrations/0006_xlabs_backfill.sql', import.meta.url), 'utf8');
-const migration7 = readFileSync(new URL('../migrations/0007_official_first_prize.sql', import.meta.url), 'utf8');
-const migration8 = readFileSync(new URL('../migrations/0008_track_contact_metadata.sql', import.meta.url), 'utf8');
-const sql = `${migration1}\n${migration2}\n${migration3}\n${migration4}\n${migration5}\n${migration6}\n${migration7}\n${migration8}`;
+const migrations = [
+  '0001_core.sql',
+  '0002_reference_round.sql',
+  '0003_nullable_reference_prediction.sql',
+  '0004_official_live_observations.sql',
+  '0005_historical_backfill.sql',
+  '0006_xlabs_backfill.sql',
+  '0007_official_first_prize.sql',
+  '0008_track_contact_metadata.sql',
+  '0009_track_contact_provenance.sql',
+  '0010_horse_start_points.sql'
+];
+const sql = migrations.map((name) => readFileSync(new URL(`../migrations/${name}`, import.meta.url), 'utf8')).join('\n');
 
 test('core migrations apply cleanly and create required tables', () => {
   const db = new DatabaseSync(':memory:');
@@ -24,7 +28,8 @@ test('core migrations apply cleanly and create required tables', () => {
     'learning_hypotheses', 'learning_observations', 'model_change_log',
     'reference_round_exports', 'reference_observations', 'normalized_observations',
     'historical_backfill_jobs', 'xlabs_backfill_jobs',
-    'race_stl_classifications', 'race_type_classifications'
+    'race_stl_classifications', 'race_type_classifications',
+    'horse_start_points', 'horse_start_point_source_sync'
   ]) {
     assert.ok(names.has(required), `missing ${required}`);
   }
@@ -90,6 +95,21 @@ test('official live observation migration keeps source provenance mandatory', ()
   assert.equal(columns.get('observed_at').notnull, 1);
   assert.equal(columns.get('fields_json').notnull, 1);
   assert.equal(columns.get('quality_status').notnull, 1);
+});
+
+test('horse start-point migration preserves timestamped source provenance and nullable current cache', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(sql);
+  const historyColumns = new Map(db.prepare('PRAGMA table_info(horse_start_points)').all().map((r) => [r.name, r]));
+  for (const required of ['horse_id', 'points', 'observed_at', 'source_record_id']) assert.ok(historyColumns.has(required));
+  assert.equal(historyColumns.get('horse_id').notnull, 1);
+  assert.equal(historyColumns.get('points').notnull, 1);
+  assert.equal(historyColumns.get('observed_at').notnull, 1);
+  assert.equal(historyColumns.get('source_record_id').notnull, 1);
+  const horseColumns = new Map(db.prepare('PRAGMA table_info(horses)').all().map((r) => [r.name, r]));
+  assert.equal(horseColumns.get('current_start_points').notnull, 0);
+  assert.equal(horseColumns.get('current_start_points_observed_at').notnull, 0);
+  assert.equal(horseColumns.get('current_start_points_source_record_id').notnull, 0);
 });
 
 test('reference prediction schema allows a null probability for entries without a pre-race probability', () => {

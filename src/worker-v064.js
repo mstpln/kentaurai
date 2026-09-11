@@ -6,6 +6,8 @@ import { buildAnalysisImportPrompt, recommendedAnalysisFilename } from './analys
 import { ANALYSIS_SUBMISSION_VERSION } from './analysis-exchange.js';
 import { getTrackDetailV064, getTrackLaneStatsV064 } from './routes/tracks-v064.js';
 import { applyTrackContactEnrichment, listTrackContactTargets } from './track-contact-enrichment.js';
+import { syncOnePendingHorseStartPointSource } from './import/official-start-points.js';
+import { getHorseDetailStatistics, getHorseRankings } from './statistics/horses-complete.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -32,6 +34,21 @@ async function enhancedAppResponse(request, response) {
   const headers = new Headers(response.headers);
   headers.delete('content-length');
   return new Response(body, { status: response.status, statusText: response.statusText, headers });
+}
+
+function horseStatsOptions(url) {
+  return {
+    period: url.searchParams.get('period'),
+    raceScope: url.searchParams.get('race_scope'),
+    trackId: url.searchParams.get('track_id'),
+    raceType: url.searchParams.get('race_type'),
+    breedType: url.searchParams.get('breed_type'),
+    startMethod: url.searchParams.get('start_method'),
+    distanceGroup: url.searchParams.get('distance_group'),
+    sex: url.searchParams.get('sex'),
+    age: url.searchParams.get('age'),
+    minStarts: url.searchParams.get('min_starts')
+  };
 }
 
 export default {
@@ -72,6 +89,30 @@ export default {
       });
     }
 
+    if (request.method === 'GET' && path === '/app/api/horses/statistics') {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        return json(await getHorseRankings(env, horseStatsOptions(url)));
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    const horseStatisticsMatch = path.match(/^\/app\/api\/horses\/([^/]+)\/statistics$/);
+    if (request.method === 'GET' && horseStatisticsMatch) {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        const data = await getHorseDetailStatistics(env, decodeURIComponent(horseStatisticsMatch[1]), horseStatsOptions(url));
+        return data ? json(data) : json({ error: 'not_found' }, 404);
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
     const trackLaneStatsMatch = path.match(/^\/app\/api\/tracks\/([^/]+)\/lane-stats$/);
     if (request.method === 'GET' && trackLaneStatsMatch) {
       const denied = await requireSession(request, env);
@@ -109,6 +150,10 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    return worker.scheduled(controller, env, ctx);
+    const result = await worker.scheduled(controller, env, ctx);
+    const startPointSync = syncOnePendingHorseStartPointSource(env);
+    if (ctx?.waitUntil) ctx.waitUntil(startPointSync);
+    else await startPointSync;
+    return result;
   }
 };
