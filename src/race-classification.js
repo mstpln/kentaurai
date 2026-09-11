@@ -69,8 +69,8 @@ function arrayValue(value) {
   return [value];
 }
 
-function textCorpus(mainClass, classFlags) {
-  return [mainClass, ...arrayValue(classFlags)]
+function textCorpus(raceName, mainClass, classFlags) {
+  return [raceName, mainClass, ...arrayValue(classFlags)]
     .filter((value) => value != null && value !== '')
     .map(String)
     .join(' | ');
@@ -96,8 +96,8 @@ export function normalizeRaceType(value) {
   return null;
 }
 
-export function classifyRace({ mainClass = null, classFlags = null, stlClass = null, raceTypes = null } = {}) {
-  const corpus = textCorpus(mainClass, classFlags);
+export function classifyRace({ raceName = null, mainClass = null, classFlags = null, stlClass = null, raceTypes = null } = {}) {
+  const corpus = textCorpus(raceName, mainClass, classFlags);
   const explicitStl = normalizeStlClass(stlClass);
   let detectedStl = explicitStl;
   if (!detectedStl) {
