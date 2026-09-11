@@ -3,6 +3,7 @@ import { appAuthConfigured, hasValidAppSession } from './app-auth.js';
 import { getEnhancedTrackDetail, getEnhancedTrackLaneStats } from './routes/track-enhancements.js';
 import { buildAnalysisImportInstructions, ANALYSIS_IMPORT_INSTRUCTIONS_VERSION } from './analysis-import-instructions.js';
 import { v064Css, v064Script } from './ui-v064.js';
+import { v064RacePresentationScript } from './ui-v064-race-presentation.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -29,7 +30,9 @@ async function enhanceHtml(request, response) {
   const headers = new Headers(response.headers);
   headers.delete('content-length');
   return new Response(
-    body.replace('</head>', `${v064Css}</head>`).replace('</body>', `${v064Script}</body>`),
+    body
+      .replace('</head>', `${v064Css}</head>`)
+      .replace('</body>', `${v064RacePresentationScript}${v064Script}</body>`),
     { status: response.status, statusText: response.statusText, headers }
   );
 }
