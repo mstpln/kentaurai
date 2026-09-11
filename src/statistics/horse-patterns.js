@@ -84,9 +84,10 @@ function xlabsPattern(rows) {
   };
 }
 
-async function loadPatternRows(env, horseIds, cutoff) {
+async function loadPatternRows(env, horseIds, cutoff, historicalOnly) {
   if (!horseIds.length) return { pointsByHorse: new Map(), xlabsByHorse: new Map() };
   const slots = placeholders(horseIds);
+  const historyDateCondition = historicalOnly ? 'r.race_date < ?' : 'r.race_date <= ?';
   const [{ results: pointRows }, { results: xlabsRows }] = await Promise.all([
     env.DB.prepare(`
       WITH ranked AS (
@@ -127,7 +128,7 @@ async function loadPatternRows(env, horseIds, cutoff) {
         WHERE re.horse_id IN (${slots})
           AND re.scratched = 0
           AND rr.result_status = 'official'
-          AND r.race_date <= ?
+          AND ${historyDateCondition}
       )
       SELECT horse_id, first_200_time, last_400_time, extra_distance_m
       FROM recent
@@ -147,7 +148,7 @@ export async function getHorseRelevantPatternsBatch(env, horseIds, asOfDate, opt
   if (!env.DB) throw new Error('DB is not configured');
   const cutoff = dateOnly(asOfDate);
   const ids = [...new Set((horseIds || []).map(requiredHorseId))];
-  const { pointsByHorse, xlabsByHorse } = await loadPatternRows(env, ids, cutoff);
+  const { pointsByHorse, xlabsByHorse } = await loadPatternRows(env, ids, cutoff, options.historicalOnly === true);
   const result = new Map();
   for (const id of ids) {
     result.set(id, {
@@ -157,23 +158,6 @@ export async function getHorseRelevantPatternsBatch(env, horseIds, asOfDate, opt
       interpretationRule: 'facts_only'
     });
   }
-
-  if (options.includeFieldRank) {
-    const ranked = [...result.entries()]
-      .filter(([, value]) => value.startPoints.current)
-      .sort((a, b) => b[1].startPoints.current.points - a[1].startPoints.current.points || a[0].localeCompare(b[0]));
-    let priorPoints = null;
-    let priorRank = 0;
-    ranked.forEach(([id, value], index) => {
-      const points = value.startPoints.current.points;
-      const rank = points === priorPoints ? priorRank : index + 1;
-      value.startPoints.fieldRank = rank;
-      value.startPoints.fieldObserved = ranked.length;
-      priorPoints = points;
-      priorRank = rank;
-    });
-  }
-
   return result;
 }
 
