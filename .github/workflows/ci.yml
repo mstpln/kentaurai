@@ -6,6 +6,11 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -19,4 +24,25 @@ jobs:
           node-version: 22
 
       - name: Run QA
-        run: npm run qa
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          npm run qa > qa.log 2>&1
+          status=$?
+          cat qa.log
+          if [ "$status" -ne 0 ] && [ "${{ github.event_name }}" = "pull_request" ]; then
+            tail -n 100 qa.log > qa-tail.log
+            python - <<'PY' > qa-comment.txt
+          from pathlib import Path
+          text = Path('qa-tail.log').read_text(errors='replace')
+          print('<!-- kentaurai-ci-diagnostic -->')
+          print('Temporary CI diagnostic from the current PR head:')
+          print('```text')
+          print(text[-12000:])
+          print('```')
+          PY
+            gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" -f body="$(cat qa-comment.txt)"
+          fi
+          exit "$status"
