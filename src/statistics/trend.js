@@ -5,6 +5,7 @@ import {
   normalizeTrackId,
   normalizeTrendBreed,
   normalizeTrendCategory,
+  normalizeTrendMinStarts,
   normalizeTrendRaceScope,
   normalizeTrendRaceType,
   normalizeTrendStartMethod,
@@ -29,6 +30,7 @@ export function buildTrendQuery(options = {}) {
   const raceType = normalizeTrendRaceType(options.raceType);
   const breedType = normalizeTrendBreed(options.breedType);
   const startMethod = normalizeTrendStartMethod(options.startMethod);
+  const minStarts = normalizeTrendMinStarts(options.minStarts);
   const trackId = normalizeTrackId(options.trackId);
   const window = trendDateWindow(options.period, options.asOfDate);
   const config = CATEGORY_CONFIG[category];
@@ -39,6 +41,9 @@ export function buildTrendQuery(options = {}) {
   ];
   const bindings = [window.startDate, window.endDate];
   addTrendRaceFilters(conditions, bindings, { raceScope, raceType, breedType, startMethod, trackId });
+
+  const minimumCondition = minStarts == null ? 'starts > 0' : 'starts >= ?';
+  if (minStarts != null) bindings.push(minStarts);
 
   const sql = `
     WITH trend_stats AS (
@@ -55,7 +60,7 @@ export function buildTrendQuery(options = {}) {
       GROUP BY entity.id, entity.canonical_name
     )
     SELECT * FROM trend_stats
-    WHERE starts > 0
+    WHERE ${minimumCondition}
     ORDER BY (wins * 1.0 / starts) DESC, wins DESC, starts DESC, entity_id ASC
     LIMIT 10
   `;
@@ -72,7 +77,8 @@ export function buildTrendQuery(options = {}) {
       trackId,
       raceType,
       breedType,
-      startMethod
+      startMethod,
+      minStarts
     }
   };
 }
@@ -92,7 +98,8 @@ export async function getTrendLeaderboard(env, options = {}) {
       trackId: query.normalized.trackId,
       raceType: query.normalized.raceType,
       breedType: query.normalized.breedType,
-      startMethod: query.normalized.startMethod
+      startMethod: query.normalized.startMethod,
+      minStarts: query.normalized.minStarts
     },
     items: results.map((row, index) => ({
       rank: index + 1,
