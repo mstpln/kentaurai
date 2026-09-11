@@ -65,15 +65,19 @@ Updated: 2026-09-11
 - Server-side validation rejects stale fingerprints, wrong/missing parents, wrong/missing race-entry identities, post-deadline pre-market creation, invalid spike structure and changed content under an existing submission ID. Exact retries remain idempotent no-ops.
 - No new D1 migration was required by Build E and the release did not reset or recreate historical backfills.
 
-## Data inventory programme
-### Build F - Full received-versus-used data inventory - active feature branch
+## Data inventory and relevant-pattern programme
+### Build F - Received-versus-used inventory plus first relevant horse patterns - active PR #88
 - Branch: `feat/data-inventory-build-f`, based on the post-Build-E production-release main commit `5ba8cb154b65da14bc7c71845549236198f0bfb0`.
 - `docs/DATA_INVENTORY.md` traces current official calendar/game/historical-race data, Start Points, X-Labs telemetry, normalized D1 storage, deterministic features and AI exposure.
 - The inventory distinguishes actual available source facts from schema columns that merely exist but are not reliably populated.
-- Highest-value received-but-underused findings include X-Labs 100 m interval/trajectory data, official horse record and aggregate statistics beyond Start Points, Start Points history/dynamics, structured race terms, driver-horse combinations, trainer-relative form and equipment-response history.
-- Current official marking-pool `trend`, turnover and system-count fields are treated as market-stage candidates only; exact trend semantics must be verified before normalization.
-- Current official age must not be converted into a guessed birth year, and unsupported breed/position/equipment fields remain null.
-- Build F is inventory/prioritization only. It does not silently promote unverified raw fields into model logic and does not change production schema or backfills.
+- Build F promotes only already verified facts with clear analytical value: current Start Points plus latest verified change, recent verified X-Labs first-200 pace, last-400 pace and extra travelled distance.
+- Horse detail statistics expose these as a compact Swedish `Utveckling & löpstyrka` section with natural labels `Startpoäng`, `Starttempo`, `Avslutning` and `Extra distans`. The section explicitly identifies the values as factual patterns rather than AI judgement and states that its latest-observation summary is independent of the statistics filters above.
+- Pre-market AI context receives the same factual pattern family. X-Labs history is restricted to races strictly before the target round date, preventing same-day result leakage.
+- Start Points are ranked only against non-scratched horses with verified observations in the same current race leg; missing observations remain missing and do not distort the denominator.
+- Start Points pattern inputs require a normalized official-provider source record. X-Labs pattern inputs require the verified telemetry quality marker plus the captured race-json source family.
+- Higher-risk or not-yet-verified inventory candidates remain deferred: raw 100 m interval/trajectory interpretation, official aggregate snapshots beyond Start Points, structured race-term parsing, equipment-response logic and market `trend` semantics.
+- Current official age is not converted into a guessed birth year, and unsupported schema fields remain null rather than inferred.
+- Build F changes no model weights, adds no external source, requires no schema migration and does not mutate or reset historical backfills.
 
 ## Data and analysis foundation
 - GitHub contains public code, schema, tests, configuration and synthetic fixtures only.
