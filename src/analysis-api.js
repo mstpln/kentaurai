@@ -144,6 +144,7 @@ function isolateMarketBlindContext(context) {
 function withLegStartPointRanks(leg, patterns) {
   const entries = leg.entries || [];
   const ranked = entries
+    .filter((entry) => !entry.scratched)
     .map((entry) => ({ entry, pattern: patterns.get(entry.horseId) }))
     .filter(({ pattern }) => pattern?.startPoints?.current)
     .sort((a, b) => b.pattern.startPoints.current.points - a.pattern.startPoints.current.points || a.entry.raceEntryId.localeCompare(b.entry.raceEntryId));
