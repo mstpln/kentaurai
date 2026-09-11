@@ -50,15 +50,27 @@ export function stlRaceEvidenceCondition(raceAlias = 'r') {
 
 export function higherPrizeRaceEvidenceCondition(raceAlias = 'r') {
   const stlEvidence = stlRaceEvidenceCondition(raceAlias);
-  const gameEvidence = `EXISTS (
+  const storedGameEvidence = `EXISTS (
     SELECT 1
     FROM game_legs gl_scope
     JOIN game_rounds gr_scope ON gr_scope.id = gl_scope.game_round_id
     WHERE gl_scope.race_id = ${raceAlias}.id
       AND UPPER(TRIM(gr_scope.game_type)) IN ('V75', 'V85', 'V86')
   )`;
+  const historicalCalendarGameEvidence = `EXISTS (
+    SELECT 1
+    FROM normalized_observations no_game_scope
+    JOIN source_records sr_game_scope ON sr_game_scope.id = no_game_scope.source_record_id
+    JOIN json_each(no_game_scope.fields_json, '$.gameTypes') game_type_scope
+    WHERE no_game_scope.entity_type = 'race'
+      AND no_game_scope.entity_id = ${raceAlias}.id
+      AND sr_game_scope.source_type = 'official_provider'
+      AND json_valid(no_game_scope.fields_json)
+      AND json_type(no_game_scope.fields_json, '$.gameTypes') = 'array'
+      AND UPPER(TRIM(CAST(game_type_scope.value AS TEXT))) IN ('V75', 'V85', 'V86')
+  )`;
   const prizeEvidence = `${raceAlias}.first_prize_sek >= ${HIGHER_PRIZE_THRESHOLD_SEK}`;
-  return `(${stlEvidence} OR ${gameEvidence} OR ${prizeEvidence})`;
+  return `(${stlEvidence} OR ${storedGameEvidence} OR ${historicalCalendarGameEvidence} OR ${prizeEvidence})`;
 }
 
 export function raceScopeCondition(scope, raceAlias = 'r') {
