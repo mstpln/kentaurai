@@ -27,9 +27,9 @@ test('horse statistics routes are private through actual Worker', async () => {
   let response=await worker.fetch(new Request(url),env);assert.equal(response.status,401);
   const cookie=await authenticatedCookie(env);
   response=await worker.fetch(new Request(url,{headers:{cookie}}),env);assert.equal(response.status,200);
-  const data=await response.json();assert.equal(data.rankings.highestWinRate[0].id,'horse-h');
+  const data=await response.json();assert.equal(data.rankings.highestWinRate[0].id,'horse-h');assert.equal(data.startPointsStatus,'verified_official_life_statistics');
   response=await worker.fetch(new Request('https://example.test/app/api/horses/horse-h/statistics?period=1y',{headers:{cookie}}),env);assert.equal(response.status,200);
-  const detail=await response.json();assert.equal(detail.summary.winRate,1);assert.equal(detail.startPointsStatus,'unverified_official_semantics');
+  const detail=await response.json();assert.equal(detail.summary.winRate,1);assert.equal(detail.startPointsStatus,'verified_official_life_statistics');assert.equal(detail.currentStartPoints,null);
 });
 
 test('horse statistics route returns 400 for invalid filters and 404 for missing horse', async () => {
@@ -43,8 +43,8 @@ test('actual Worker HTML contains horse Build B UI after Trend composition', asy
   const response=await worker.fetch(new Request('https://example.test/app/',{headers:{cookie}}),env);assert.equal(response.status,200);const html=await response.text();
   assert.match(html,/id="kentaurai-trend-build-a-script"/);assert.match(html,/id="kentaurai-horse-statistics-build-b-script"/);
   assert.ok(html.indexOf('kentaurai-trend-build-a-script')<html.indexOf('kentaurai-horse-statistics-build-b-script'));
-  for(const text of ['Högst segerprocent','Högst topp 3-procent','Bäst form – senaste 10','Startsnabbaste','Starkaste avslutare','Första starten efter vila','Andra starten efter vila']) assert.match(html,new RegExp(text));
-  assert.match(html,/@media\(max-width:360px\)/);assert.match(html,/Startpoäng visas först när fältets officiella semantik/);
+  for(const text of ['Högst segerprocent','Högst topp 3-procent','Bäst form – senaste 10','Startsnabbaste','Högst startpoäng','Starkaste avslutare','Första starten efter vila','Andra starten efter vila']) assert.match(html,new RegExp(text));
+  assert.match(html,/@media\(max-width:360px\)/);assert.match(html,/Senast verifierade officiella observation/);
 });
 
 test('horse UI enhancer preserves HTML and injects syntactically valid JavaScript', () => {
