@@ -46,20 +46,32 @@ test('race classification separates Loppklass, STL-klass and Lopptyp', () => {
   assert.deepEqual(race.raceTypes.sort(), ['lane_ladder', 'mares']);
   assert.equal(matchesRaceClassification({ mainClass: 'Silverdivisionen', classFlags: ['Stolopp'] }, { stlClass: 'silver', raceType: 'mares' }), true);
   assert.equal(matchesRaceClassification({ mainClass: 'Bronsdivisionen', classFlags: ['Stolopp'] }, { stlClass: 'silver', raceType: 'mares' }), false);
+  assert.equal(classifyRace({ raceName: 'Silverdivisionen - Stolopp' }).stlClass, 'silver');
+  assert.deepEqual(classifyRace({ raceName: 'Silverdivisionen - Stolopp' }).raceTypes, ['mares']);
 });
 
-test('track detail exposes optional verified address and website fields', async () => {
+test('track detail exposes optional verified address and HTTPS website fields', async () => {
   const { env, db } = createTestEnv();
   seedClassifiedTrack(db);
-  const detail = await getTrackDetailV064(env, 'track-v064');
+  let detail = await getTrackDetailV064(env, 'track-v064');
   assert.equal(detail.address.street, 'Testvägen 1');
   assert.equal(detail.address.postalCode, '123 45');
   assert.equal(detail.websiteUrl, 'https://example.test/track');
+
+  db.prepare("UPDATE tracks SET website_url='javascript:alert(1)' WHERE id='track-v064'").run();
+  detail = await getTrackDetailV064(env, 'track-v064');
+  assert.equal(detail.websiteUrl, null);
 });
 
-test('lane statistics combine STL-class and race-type filters with existing filters', async () => {
+test('lane statistics combine persisted STL-class and race-type filters with existing filters', async () => {
   const { env, db } = createTestEnv();
   seedClassifiedTrack(db);
+
+  assert.equal(db.prepare("SELECT stl_class FROM race_stl_classifications WHERE race_id='r-silver-sto'").get().stl_class, 'silver');
+  assert.deepEqual(
+    db.prepare("SELECT race_type FROM race_type_classifications WHERE race_id='r-silver-sto' ORDER BY race_type").all().map((row) => row.race_type),
+    ['lane_ladder', 'mares']
+  );
 
   const all = await getTrackLaneStatsV064(env, 'track-v064', {
     year: '2026', startMethod: 'auto', distanceGroup: '2140'
@@ -79,7 +91,7 @@ test('lane statistics combine STL-class and race-type filters with existing filt
   assert.equal(silverMares.filters.raceType, 'mares');
 });
 
-test('analysis import prompt is version-bound and states the strict system contract', () => {
+test('analysis import prompt mirrors strict pre-market and final API rules', () => {
   const prompt = buildAnalysisImportPrompt('anthropic');
   assert.match(prompt, /kentaurai-analysis-v1/);
   assert.match(prompt, /EXAKT 3 spikavdelningar/);
@@ -88,23 +100,37 @@ test('analysis import prompt is version-bound and states the strict system contr
   assert.match(prompt, /market_percent/);
   assert.match(prompt, /value_ratio/);
   assert.match(prompt, /own_probability/);
-  assert.match(prompt, /Returnera endast en ren JSON-fil/);
+  assert.match(prompt, /Returnera endast giltig JSON/);
+  assert.match(prompt, /data_snapshot_at får INTE finnas/);
+  assert.match(prompt, /legs får inte finnas i final-filen/);
+  assert.match(prompt, /gemena a-z, siffror och enkla bindestreck/);
+  assert.match(prompt, /producer\.model är obligatoriskt/);
+  assert.match(prompt, /producer\.provider måste vara exakt "anthropic"/);
   assert.equal(recommendedAnalysisFilename('anthropic'), 'kentaurai-analysis_anthropic_ÅÅÅÅ-MM-DD.json');
+  assert.equal(recommendedAnalysisFilename('claude'), 'kentaurai-analysis_anthropic_ÅÅÅÅ-MM-DD.json');
 });
 
-test('v0.6.4 app overlay contains compact class filters, Swedish labels and import-prompt control', () => {
+test('v0.6.4 app overlay contains compact class filters, natural Swedish and import-prompt control', () => {
   const html = enhanceAppHtmlV064('<html><head></head><body><div id="app"></div></body></html>');
   assert.match(html, /STL-klass/);
   assert.match(html, /Alla STL-klasser/);
   assert.match(html, /Alla lopptyper/);
+  assert.match(html, /Alla år/);
+  assert.match(html, /Alla startmetoder/);
   assert.match(html, /Skapa V85\/V86-systemanalysfil för import/);
   assert.match(html, /Kopiera instruktioner till AI/);
   assert.match(html, /V85\/V86-omgångar/);
   assert.match(html, /Missad spik/);
   assert.match(html, /Vinnaren saknades på systemet/);
+  assert.match(html, /Inga registrerade lärdomar för omgången ännu/);
+  assert.match(html, /\['Miss', 'Missad'\]/);
+  assert.match(html, /Loppkategorier/);
   assert.match(html, /Faktisk distans/);
   assert.match(html, /Omräknad km-tid/);
+  assert.match(html, /3:e utvändigt/);
+  assert.match(html, /structured-key/);
   assert.match(html, /Öppna hemsida/);
+  assert.match(html, /url\.origin === location\.origin/);
   const scripts = [...html.matchAll(/<script(?: [^>]*)?>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
   scripts.forEach((script, index) => {
     try {
@@ -130,4 +156,6 @@ test('analysis-prompt app endpoint requires session and returns the copyable con
   assert.equal(payload.contractVersion, 'kentaurai-analysis-v1');
   assert.equal(payload.recommendedFilename, 'kentaurai-analysis_openai_ÅÅÅÅ-MM-DD.json');
   assert.match(payload.prompt, /exakt 8 avdelningar/i);
+  assert.match(payload.prompt, /producer\.provider måste vara exakt "openai"/);
+  assert.match(payload.prompt, /legs får inte finnas i final-filen/);
 });
