@@ -1,6 +1,7 @@
 import { ANALYSIS_SUBMISSION_VERSION } from './analysis-exchange.js';
 
 export const ANALYSIS_IMPORT_INSTRUCTIONS_VERSION = 'kentaurai-analysis-import-instructions-v1';
+export const ANALYSIS_IMPORT_CONTRACT_VERSION = ANALYSIS_SUBMISSION_VERSION;
 
 export function buildAnalysisImportInstructions() {
   return `Du ska skapa en JSON-fil som kan importeras direkt i KentaurAI.
