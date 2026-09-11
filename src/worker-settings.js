@@ -1,10 +1,11 @@
 import worker from './worker-pwa.js';
 import { appAuthConfigured, clearAppSessionCookie, hasValidAppSession } from './app-auth.js';
-import { htmlResponse, redirectResponse, renderAppPage } from './app-page-localization.js';
+import { htmlResponse, redirectResponse, renderAppPage } from './app-page-aligned.js';
 import { XLABS_SCRIPT_SELECTOR_VERSION } from './provider/xlabs-script.js';
 import { KENTAURAI_APP_VERSION, createFullDataExportResponse, getSettingsStatus, importAnalysisUpload } from './settings-data-display.js';
 import { getEnhancedGameHistoryDetail } from './routes/game-detail-display.js';
 import { getFilteredEntityStatBreakdowns } from './routes/entity-stat-breakdowns.js';
+import { getTrackDetail, getTrackHomeTrainers, getTrackLaneStats, listTracks } from './routes/tracks.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -79,6 +80,67 @@ export default {
       if (denied) return denied;
       try {
         return json(await importAnalysisUpload(env, request), 201);
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    if (path === '/app/api/tracks' && request.method === 'GET') {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        return json(await listTracks(env, {
+          q: url.searchParams.get('q'),
+          limit: url.searchParams.get('limit'),
+          offset: url.searchParams.get('offset')
+        }));
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    const trackHomeTrainerMatch = path.match(/^\/app\/api\/tracks\/([^/]+)\/home-trainers$/);
+    if (request.method === 'GET' && trackHomeTrainerMatch) {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        const data = await getTrackHomeTrainers(env, decodeURIComponent(trackHomeTrainerMatch[1]), {
+          limit: url.searchParams.get('limit'),
+          offset: url.searchParams.get('offset')
+        });
+        return data ? json(data) : json({ error: 'not_found' }, 404);
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    const trackLaneStatsMatch = path.match(/^\/app\/api\/tracks\/([^/]+)\/lane-stats$/);
+    if (request.method === 'GET' && trackLaneStatsMatch) {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        const data = await getTrackLaneStats(env, decodeURIComponent(trackLaneStatsMatch[1]), {
+          year: url.searchParams.get('year'),
+          startMethod: url.searchParams.get('start_method'),
+          distanceGroup: url.searchParams.get('distance_group')
+        });
+        return data ? json(data) : json({ error: 'not_found' }, 404);
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    const trackDetailMatch = path.match(/^\/app\/api\/tracks\/([^/]+)$/);
+    if (request.method === 'GET' && trackDetailMatch) {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        const data = await getTrackDetail(env, decodeURIComponent(trackDetailMatch[1]));
+        return data ? json(data) : json({ error: 'not_found' }, 404);
       } catch (error) {
         console.error(error);
         return json({ error: 'request_failed', message: error.message }, 400);
