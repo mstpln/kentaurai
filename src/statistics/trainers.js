@@ -208,13 +208,14 @@ function verifiedHomeTrackCte() {
     FROM normalized_observations o JOIN source_records sr ON sr.id=o.source_record_id
     WHERE o.entity_type='trainer' AND sr.source_type='official_provider'
   ), trainer_home AS (
-    SELECT lto.trainer_id,
-      CASE WHEN json_extract(lto.fields_json,'$.homeTrackExternalId') IS NOT NULL THEN tei.track_id ELSE tn.id END AS home_track_id
+    SELECT lto.trainer_id,tei.track_id AS home_track_id
     FROM latest_trainer_observation lto
-    LEFT JOIN track_external_ids tei ON tei.source_type='official' AND tei.external_id=CAST(json_extract(lto.fields_json,'$.homeTrackExternalId') AS TEXT)
-    LEFT JOIN tracks tn ON json_extract(lto.fields_json,'$.homeTrackExternalId') IS NULL
-      AND LOWER(TRIM(tn.canonical_name))=LOWER(TRIM(COALESCE(json_extract(lto.fields_json,'$.homeTrackName'),'')))
-    WHERE lto.rn=1 AND json_valid(lto.fields_json)
+    JOIN track_external_ids tei
+      ON tei.source_type='official'
+      AND tei.external_id=CAST(json_extract(lto.fields_json,'$.homeTrackExternalId') AS TEXT)
+    WHERE lto.rn=1
+      AND json_valid(lto.fields_json)
+      AND json_extract(lto.fields_json,'$.homeTrackExternalId') IS NOT NULL
   )`;
 }
 function buildHomeRanking(filters, home) {
