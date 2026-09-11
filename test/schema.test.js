@@ -23,7 +23,8 @@ test('core migrations apply cleanly and create required tables', () => {
     'ai_race_analyses', 'ai_horse_predictions', 'systems', 'post_race_reviews', 'import_runs',
     'learning_hypotheses', 'learning_observations', 'model_change_log',
     'reference_round_exports', 'reference_observations', 'normalized_observations',
-    'historical_backfill_jobs', 'xlabs_backfill_jobs'
+    'historical_backfill_jobs', 'xlabs_backfill_jobs',
+    'race_stl_classifications', 'race_type_classifications'
   ]) {
     assert.ok(names.has(required), `missing ${required}`);
   }
@@ -58,7 +59,7 @@ test('reference migration adds captured factual fields without changing raw/anal
   assert.ok(editorialColumns.has('game_round_id'));
 });
 
-test('track contact migration adds nullable factual address and website fields only', () => {
+test('track migration keeps contact facts separate from calculated race classifications', () => {
   const db = new DatabaseSync(':memory:');
   db.exec(sql);
   const trackColumns = new Set(db.prepare('PRAGMA table_info(tracks)').all().map((r) => r.name));
@@ -66,6 +67,19 @@ test('track contact migration adds nullable factual address and website fields o
   for (const required of ['street_address', 'postal_code', 'website_url']) assert.ok(trackColumns.has(required));
   assert.equal(raceColumns.has('stl_class'), false);
   assert.equal(raceColumns.has('race_types_json'), false);
+
+  db.prepare("INSERT INTO tracks (id, canonical_name) VALUES ('t1','Testbanan')").run();
+  db.prepare(`INSERT INTO races (id, track_id, race_date, race_number, race_name, main_class, class_flags_json)
+    VALUES ('r1','t1','2026-09-11',1,'Silverdivisionen - Stolopp','Silverdivisionen','["Spårtrappa"]')`).run();
+  assert.equal(db.prepare("SELECT stl_class FROM race_stl_classifications WHERE race_id='r1'").get().stl_class, 'silver');
+  assert.deepEqual(
+    db.prepare("SELECT race_type FROM race_type_classifications WHERE race_id='r1' ORDER BY race_type").all().map((row) => row.race_type),
+    ['lane_ladder', 'mares']
+  );
+
+  db.prepare("UPDATE races SET race_name='Gulddivisionen' WHERE id='r1'").run();
+  assert.equal(db.prepare("SELECT stl_class FROM race_stl_classifications WHERE race_id='r1'").get().stl_class, 'gold');
+  assert.deepEqual(db.prepare("SELECT race_type FROM race_type_classifications WHERE race_id='r1'").all(), []);
 });
 
 test('official live observation migration keeps source provenance mandatory', () => {
