@@ -268,5 +268,7 @@ function browserScript() {
 }
 
 export function enhanceAppHtmlV064(html) {
-  return String(html).replace('</head>', `${css}</head>`).replace('</body>', `${browserScript()}</body>`);
+  return String(html)
+    .replace('</head>', () => `${css}</head>`)
+    .replace('</body>', () => `${browserScript()}</body>`);
 }
