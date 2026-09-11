@@ -13,12 +13,13 @@ export function friendlyRunName(sourceType, fallback = 'Körning') {
   if (value.includes('post') && value.includes('race')) return 'Resultatgenomgång';
   if (value.includes('reference')) return 'Referensomgång';
   if (value.includes('editorial')) return 'Redaktionell import';
+  if (value.includes('scheduled') || value.includes('orchestrator')) return 'Schemalagd datasynk';
   if (value.includes('historical') && (value.includes('official') || value.includes('provider') || value.includes('race'))) {
     return 'Historiska lopp & resultat';
   }
   if (value.includes('live') || value.includes('calendar') || value.includes('game')) return 'Kommande V85/V86';
   if (value.includes('official') || value.includes('provider') || value.includes('race_capture')) return 'Lopp- och resultatdata';
-  return fallback || 'Körning';
+  return 'Automatisk körning';
 }
 
 export async function getSettingsStatus(env) {
