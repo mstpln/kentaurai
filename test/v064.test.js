@@ -44,7 +44,7 @@ test('race classification separates Loppklass, STL-klass and Lopptyp', () => {
   const race = classifyRace({ mainClass: 'Silverdivisionen', classFlags: ['Stolopp', 'Spårtrappa', 'Gr I'] });
   assert.equal(race.raceClass, 'Silverdivisionen');
   assert.equal(race.stlClass, 'silver');
-  assert.deepEqual(race.raceTypes.sort(), ['lane_ladder', 'mares']);
+  assert.deepEqual([...race.raceTypes].sort(), ['lane_ladder', 'mares']);
   assert.equal(matchesRaceClassification({ mainClass: 'Silverdivisionen', classFlags: ['Stolopp'] }, { stlClass: 'silver', raceType: 'mares' }), true);
   assert.equal(matchesRaceClassification({ mainClass: 'Bronsdivisionen', classFlags: ['Stolopp'] }, { stlClass: 'silver', raceType: 'mares' }), false);
 });
@@ -98,7 +98,9 @@ test('track contact enrichment is exact-id, idempotent, provenance-backed and co
   let result = await applyTrackContactEnrichment(env, payload);
   assert.equal(result.verifiedFacts, 3);
   let track = db.prepare("SELECT street_address, postal_code, website_url FROM tracks WHERE id='track-contact'").get();
-  assert.deepEqual(track, { street_address: 'Testgatan 7', postal_code: '123 45', website_url: 'https://example.test/track' });
+  assert.equal(track.street_address, 'Testgatan 7');
+  assert.equal(track.postal_code, '123 45');
+  assert.equal(track.website_url, 'https://example.test/track');
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM track_contact_fact_observations WHERE track_id='track-contact' AND status='verified'").get().n, 3);
 
   result = await applyTrackContactEnrichment(env, payload);
