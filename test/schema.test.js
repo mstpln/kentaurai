@@ -10,7 +10,7 @@ const migration4 = readFileSync(new URL('../migrations/0004_official_live_observ
 const migration5 = readFileSync(new URL('../migrations/0005_historical_backfill.sql', import.meta.url), 'utf8');
 const migration6 = readFileSync(new URL('../migrations/0006_xlabs_backfill.sql', import.meta.url), 'utf8');
 const migration7 = readFileSync(new URL('../migrations/0007_official_first_prize.sql', import.meta.url), 'utf8');
-const migration8 = readFileSync(new URL('../migrations/0008_track_metadata_and_race_classification.sql', import.meta.url), 'utf8');
+const migration8 = readFileSync(new URL('../migrations/0008_track_contact_metadata.sql', import.meta.url), 'utf8');
 const sql = `${migration1}\n${migration2}\n${migration3}\n${migration4}\n${migration5}\n${migration6}\n${migration7}\n${migration8}`;
 
 test('core migrations apply cleanly and create required tables', () => {
@@ -58,13 +58,14 @@ test('reference migration adds captured factual fields without changing raw/anal
   assert.ok(editorialColumns.has('game_round_id'));
 });
 
-test('track metadata/classification migration adds address, website and normalized race-classification fields', () => {
+test('track contact migration adds nullable factual address and website fields only', () => {
   const db = new DatabaseSync(':memory:');
   db.exec(sql);
   const trackColumns = new Set(db.prepare('PRAGMA table_info(tracks)').all().map((r) => r.name));
   const raceColumns = new Set(db.prepare('PRAGMA table_info(races)').all().map((r) => r.name));
   for (const required of ['street_address', 'postal_code', 'website_url']) assert.ok(trackColumns.has(required));
-  for (const required of ['stl_class', 'race_types_json']) assert.ok(raceColumns.has(required));
+  assert.equal(raceColumns.has('stl_class'), false);
+  assert.equal(raceColumns.has('race_types_json'), false);
 });
 
 test('official live observation migration keeps source provenance mandatory', () => {
