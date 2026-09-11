@@ -7,6 +7,7 @@ import {
   importAnalysisSubmission,
   listAnalysisSubmissions
 } from './analysis-exchange.js';
+import { getVerifiedAnalysisMarket } from './analysis-market.js';
 
 const MAX_SUBMISSION_BYTES = 1024 * 1024;
 const MARKET_BLIND_FEATURE_VERSIONS = new Set(['form-v2', 'class-exposure-v2', 'development-v2']);
@@ -142,7 +143,13 @@ export async function prepareAnalysisContext(env, roundId, stage = 'pre_market',
   await assertRoundOpenForAnalysis(env, normalizedRoundId);
   const normalizedStage = String(stage || 'pre_market').toLowerCase();
   const rawContext = await getAnalysisContext(env, normalizedRoundId, normalizedStage, options);
-  const context = normalizedStage === 'pre_market' ? isolateMarketBlindContext(rawContext) : rawContext;
+  let context;
+  if (normalizedStage === 'pre_market') {
+    context = isolateMarketBlindContext(rawContext);
+  } else {
+    const verifiedMarket = await getVerifiedAnalysisMarket(env, normalizedRoundId, rawContext.generatedAt);
+    context = { ...rawContext, market: verifiedMarket };
+  }
   const contextFingerprint = await stableContextFingerprint(context);
   const common = {
     ...context,
@@ -170,6 +177,7 @@ export async function prepareAnalysisContext(env, roundId, stage = 'pre_market',
       strengthAssessmentIsCopiedFromParent: true,
       systemsMayBeSubmitted: true,
       exactlyThreeSpikeLegs: true,
+      marketDefinitionVersion: context.market.definitionVersion,
       note: 'Final submission supplies recommendations and systems only; KentaurAI copies the stored market-blind race analysis unchanged.'
     }
   };
