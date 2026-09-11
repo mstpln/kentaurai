@@ -3,7 +3,7 @@
 Private V85/V86 data, analysis backend and read-only intelligence interface with a public codebase.
 
 ## Current build
-Version 0.5.0 contains the verified official/X-Labs data foundation, resumable ordinary-race history pipeline, automatic official V85/V86 pre-race acquisition, separately checkpointed X-Labs acquisition, installable PWA packaging and deterministic automatic post-race review. Real provider payloads and private reference/editorial data remain outside the public repository; GitHub contains code, migrations, tests, documentation and synthetic fixtures only.
+Version 0.6.0 contains the verified official/X-Labs data foundation, resumable ordinary-race history pipeline, automatic official V85/V86 pre-race acquisition, separately checkpointed X-Labs acquisition, installable PWA packaging, deterministic automatic post-race review and the private Bana workspace. Real provider payloads and private reference/editorial/contact data remain outside the public repository; GitHub contains code, migrations, tests, documentation and synthetic fixtures only.
 
 The current build contains:
 - D1 normalized relational schema and provenance model
@@ -22,6 +22,8 @@ The current build contains:
 - paginated full start-history reads per horse/trainer/driver, with all stored measurement families enriched only for the current page
 - paginated linked-horse history for trainer/driver profiles
 - Trend workspace with category/time-period controls
+- Bana list/detail with Översikt, Spårstatistik and Hemmatränare; track statistics combine period, start method, distance, STL class and race type
+- nullable track address/website presentation with fact-level provenance for private enrichment
 - Spel area with Översikt / V85 / V86 plus saved-round post-race detail
 - deterministic automatic post-race review for fully settled saved V85/V86 systems, with misses recorded as candidate learning only and no automatic model changes
 - complete presentation of currently stored measurement families on entity/start detail, while internal provenance remains backend-only
@@ -39,15 +41,18 @@ Bottom navigation order is:
 2. Tränare
 3. Hästar
 4. Kuskar
-5. Spel
+5. Bana
+6. Spel
 
 Trend is the start workspace. It switches between Tränare / Hästar / Kuskar and 2 weeks / 4 weeks / 3 months / 6 months / 1 year. Trend output remains unavailable until sufficient verified result history exists; the interface never fabricates rankings.
 
 Entity detail views group profile/activity data and measured start history instead of flattening every field into one page. Stored race/start/result facts, market/odds histories, equipment, X-Labs, positions, conditions, calculated features, AI analyses and structured editorial signals are separated into natural sections. Unknown facts remain null/unknown. Start history is paginated rather than capped to a fixed latest-100 window, so the same interface can support the planned multi-year backfill.
 
+Bana is a separate factual workspace. Track overview presents only stored facts and hides missing contact fields. The user-facing country label is localized while DB/API country codes remain unchanged. Spårstatistik uses deterministic race classifications and applies all selected filters with AND semantics; the all/default period label remains literally `All data`.
+
 Spel is separate from entity browsing. Översikt shows compact performance statistics, V85/V86 tabs list saved rounds, and each round has a dedicated post-race detail view. Saved systems preserve the exactly-three-spikes system rule. Once all eight legs have one unambiguous factual winner, KentaurAI can automatically write deterministic per-leg post-race reviews. Covered winners are recorded as no change; misses are candidate learning only. Dead heats remain unreviewed automatically until dedicated verified semantics exist.
 
-The visual system is minimal, dark and structured. The approved Sagittarius mark is used for the KentaurAI brand. Bottom navigation uses the approved chart icon for Trend, clipboard/pen for Tränare, horse for Hästar, lightbulb for Kuskar and ticket for Spel. Entity profile tiles use initials rather than category icons.
+The visual system is minimal, dark and structured. The approved Sagittarius mark is used for the KentaurAI brand. Bottom navigation uses the approved chart icon for Trend, clipboard/pen for Tränare, horse for Hästar, lightbulb for Kuskar, map-pin/oval for Bana and ticket for Spel. Entity profile tiles use initials rather than category icons.
 
 KentaurAI is packaged as an installable PWA. Its manifest is scoped to `/app/`, launches standalone and uses dedicated normal/maskable Sagittarius icons. The service worker caches only public PWA metadata/icon assets; authenticated app HTML and `/app/api/*` responses are never placed in its offline cache.
 
@@ -58,6 +63,7 @@ Never commit:
 - real imported editorial data
 - real reference-round exports
 - database dumps or raw provider payloads
+- researched production track/contact datasets
 - private source names or URLs that are not intended to be public
 - API keys, tokens, passwords or Cloudflare secrets
 
@@ -90,6 +96,8 @@ Real source data belongs only in the private Cloudflare D1/R2 deployment or is s
 - `GET /v1/xlabs/backfill/status?job_id=...` - Bearer ADMIN_TOKEN
 - `POST /v1/xlabs/inspect` - Bearer ADMIN_TOKEN; sanitized structural inspection of a captured X-Labs date page
 - `POST /v1/xlabs/inspect-script` - Bearer ADMIN_TOKEN; sanitized read-only inspection of a captured X-Labs script for request mechanisms and endpoint candidates
+- `GET /v1/admin/tracks/contact-targets` - Bearer ADMIN_TOKEN; returns the private exact track identities requiring contact verification
+- `POST /v1/admin/tracks/contact-enrichment` - Bearer ADMIN_TOKEN; exact-ID, provenance-backed, conflict-preserving private track contact update
 - `POST /v1/import/editorial` - Bearer ADMIN_TOKEN
 - `POST /v1/import/reference-round` - Bearer ADMIN_TOKEN
 - `POST /v1/import/raw` - Bearer ADMIN_TOKEN
