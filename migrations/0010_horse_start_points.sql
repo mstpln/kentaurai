@@ -17,8 +17,10 @@ CREATE INDEX idx_horse_start_points_points_observed
 
 CREATE TABLE horse_start_point_source_sync (
   source_record_id TEXT PRIMARY KEY REFERENCES source_records(id) ON DELETE CASCADE,
+  status TEXT NOT NULL CHECK (status IN ('complete', 'failed')),
   processed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  horse_observation_count INTEGER NOT NULL DEFAULT 0 CHECK (horse_observation_count >= 0)
+  horse_observation_count INTEGER NOT NULL DEFAULT 0 CHECK (horse_observation_count >= 0),
+  error_message TEXT
 );
 
 ALTER TABLE horses ADD COLUMN current_start_points INTEGER CHECK (current_start_points >= 0);
