@@ -1,3 +1,5 @@
+import { normalizeRaceScope, raceScopeCondition } from '../race-scope.js';
+
 const ENTITY_STATS_CONFIG = {
   horses: { table: 'horses', relationColumn: 'horse_id' },
   trainers: { table: 'trainers', relationColumn: 'trainer_id' },
@@ -47,6 +49,11 @@ function addMethodFilter(conditions, method) {
   conditions.push(`${canonicalStartMethodSql()} = '${method}'`);
 }
 
+function addRaceScopeFilter(conditions, scope) {
+  const condition = raceScopeCondition(scope);
+  if (condition) conditions.push(condition);
+}
+
 async function entityExists(env, config, id) {
   const row = await env.DB.prepare(`SELECT 1 AS ok FROM ${config.table} WHERE id = ? LIMIT 1`).bind(id).first();
   return Boolean(row?.ok);
@@ -72,10 +79,11 @@ function mapRows(rows) {
   });
 }
 
-async function groupedRows(env, { relationColumn, id, year, method, groupExpression, orderBy, limit = null }) {
+async function groupedRows(env, { relationColumn, id, year, raceScope, method, groupExpression, orderBy, limit = null }) {
   const conditions = [`re.${relationColumn} = ?`, 're.scratched = 0'];
   const bindings = [id];
   addPeriodFilter(conditions, bindings, year);
+  addRaceScopeFilter(conditions, raceScope);
   addMethodFilter(conditions, method);
   const sql = `
     SELECT ${groupExpression} AS label,
@@ -105,6 +113,7 @@ export async function getFilteredEntityStatBreakdowns(env, type, id, options = {
   if (!(await entityExists(env, config, normalizedId))) return null;
 
   const year = parseYear(options.year);
+  const raceScope = normalizeRaceScope(options.raceScope);
   const distanceStartMethod = normalizeStartMethod(options.distanceStartMethod);
   const trackStartMethod = normalizeStartMethod(options.trackStartMethod);
   const canonicalMethod = canonicalStartMethodSql();
@@ -114,6 +123,7 @@ export async function getFilteredEntityStatBreakdowns(env, type, id, options = {
       relationColumn: config.relationColumn,
       id: normalizedId,
       year,
+      raceScope,
       method: null,
       groupExpression: canonicalMethod,
       orderBy: 'starts DESC, label ASC'
@@ -122,6 +132,7 @@ export async function getFilteredEntityStatBreakdowns(env, type, id, options = {
       relationColumn: config.relationColumn,
       id: normalizedId,
       year,
+      raceScope,
       method: distanceStartMethod,
       groupExpression: `COALESCE(CAST(r.distance_m AS TEXT), 'unknown')`,
       orderBy: 'starts DESC, r.distance_m ASC'
@@ -130,6 +141,7 @@ export async function getFilteredEntityStatBreakdowns(env, type, id, options = {
       relationColumn: config.relationColumn,
       id: normalizedId,
       year,
+      raceScope,
       method: trackStartMethod,
       groupExpression: `COALESCE(t.canonical_name, 'Okänd bana')`,
       orderBy: 'starts DESC, label COLLATE NOCASE ASC',
@@ -140,6 +152,7 @@ export async function getFilteredEntityStatBreakdowns(env, type, id, options = {
   return {
     filters: {
       year,
+      raceScope,
       distanceStartMethod: distanceStartMethod || 'all',
       trackStartMethod: trackStartMethod || 'all'
     },
