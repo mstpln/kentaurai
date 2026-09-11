@@ -240,7 +240,7 @@ export async function runHistoricalBackfillStep(env, jobId = null, options = {})
       let calendarSource = await sourceForIdentity(env, `calendar:${job.next_date}`);
       if (!calendarSource) {
         const captured = await captureCalendar(env, job.next_date, { fetchImpl: options.fetchImpl });
-        calendarSource = { id: captured.sourceRecordId, fetched_at: new Date().toISOString(), raw_object_key: captured.rawObjectKey, quality_status: 'captured_unmapped' };
+        calendarSource = { id: captured.sourceRecordId, fetched_at: captured.fetchedAt, raw_object_key: captured.rawObjectKey, quality_status: 'captured_unmapped' };
         counts.inserted += Number(!captured.reused);
         counts.skipped += Number(captured.reused);
       } else {
