@@ -33,14 +33,20 @@ jobs:
           status=$?
           cat qa.log
           if [ "$status" -ne 0 ] && [ "${{ github.event_name }}" = "pull_request" ]; then
-            tail -n 100 qa.log > qa-tail.log
             python - <<'PY' > qa-comment.txt
           from pathlib import Path
-          text = Path('qa-tail.log').read_text(errors='replace')
+          lines = Path('qa.log').read_text(errors='replace').splitlines()
+          hits = [i for i, line in enumerate(lines) if line.startswith('not ok ')]
+          excerpts = []
+          for i in hits:
+              start = max(0, i - 8)
+              end = min(len(lines), i + 32)
+              excerpts.append('\n'.join(lines[start:end]))
+          text = '\n\n---\n\n'.join(excerpts) or '\n'.join(lines[-140:])
           print('<!-- kentaurai-ci-diagnostic -->')
           print('Temporary CI diagnostic from the current PR head:')
           print('```text')
-          print(text[-12000:])
+          print(text[-20000:])
           print('```')
           PY
             gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" -f body="$(cat qa-comment.txt)"
