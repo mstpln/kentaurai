@@ -336,6 +336,7 @@ export async function submitAnalysis(env, payload) {
     const verifiedContext = await verifyContext(env, roundId, 'market', contextFingerprint, parentSubmissionId);
     const systems = payload.systems ?? [];
     validateExactThreeSpikes(systems);
+    const finalSnapshotAt = new Date(Math.max(Date.now(), Date.parse(parent.dataSnapshotAt))).toISOString();
     result = await importAnalysisSubmission(env, {
       ...payload,
       contract_version: ANALYSIS_SUBMISSION_VERSION,
@@ -344,7 +345,7 @@ export async function submitAnalysis(env, payload) {
       stage: 'final',
       parent_submission_id: parentSubmissionId,
       producer: { provider, model },
-      data_snapshot_at: verifiedContext.market.cutoff,
+      data_snapshot_at: finalSnapshotAt,
       legs: parentLegsForFinal(parent),
       systems
     });
