@@ -3,13 +3,17 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 
-const migration1 = readFileSync(new URL('../migrations/0001_core.sql', import.meta.url), 'utf8');
-const migration2 = readFileSync(new URL('../migrations/0002_reference_round.sql', import.meta.url), 'utf8');
-const migration3 = readFileSync(new URL('../migrations/0003_nullable_reference_prediction.sql', import.meta.url), 'utf8');
-const migration4 = readFileSync(new URL('../migrations/0004_official_live_observations.sql', import.meta.url), 'utf8');
-const migration5 = readFileSync(new URL('../migrations/0005_historical_backfill.sql', import.meta.url), 'utf8');
-const migration6 = readFileSync(new URL('../migrations/0006_xlabs_backfill.sql', import.meta.url), 'utf8');
-const sql = `${migration1}\n${migration2}\n${migration3}\n${migration4}\n${migration5}\n${migration6}`;
+const migrations = [
+  '0001_core.sql',
+  '0002_reference_round.sql',
+  '0003_nullable_reference_prediction.sql',
+  '0004_official_live_observations.sql',
+  '0005_historical_backfill.sql',
+  '0006_xlabs_backfill.sql',
+  '0007_official_first_prize.sql',
+  '0008_track_metadata_and_classification.sql'
+].map((name) => readFileSync(new URL(`../migrations/${name}`, import.meta.url), 'utf8'));
+const sql = migrations.join('\n');
 
 test('core migrations apply cleanly and create required tables', () => {
   const db = new DatabaseSync(':memory:');
@@ -50,10 +54,26 @@ test('reference migration adds captured factual fields without changing raw/anal
   assert.ok(horseColumns.has('career_earnings_sek'));
   assert.ok(horseColumns.has('record_text'));
   assert.ok(raceColumns.has('starters_declared'));
+  assert.ok(raceColumns.has('first_prize_sek'));
   assert.ok(analysisColumns.has('analysis_origin'));
   assert.ok(analysisColumns.has('method_note'));
   assert.ok(editorialColumns.has('race_id'));
   assert.ok(editorialColumns.has('game_round_id'));
+});
+
+test('track metadata and race classification migration adds nullable normalized fields', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(sql);
+  const trackColumns = new Map(db.prepare('PRAGMA table_info(tracks)').all().map((r) => [r.name, r]));
+  const raceColumns = new Map(db.prepare('PRAGMA table_info(races)').all().map((r) => [r.name, r]));
+  for (const name of ['street_address', 'postal_code', 'website_url']) {
+    assert.ok(trackColumns.has(name), `missing tracks.${name}`);
+    assert.equal(trackColumns.get(name).notnull, 0);
+  }
+  for (const name of ['stl_class', 'race_types_json']) {
+    assert.ok(raceColumns.has(name), `missing races.${name}`);
+    assert.equal(raceColumns.get(name).notnull, 0);
+  }
 });
 
 test('official live observation migration keeps source provenance mandatory', () => {
