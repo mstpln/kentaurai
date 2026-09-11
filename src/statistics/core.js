@@ -36,9 +36,7 @@ function assertDateKey(value, name = 'date') {
   const text = String(value || '').trim();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) throw new Error(`${name} must use YYYY-MM-DD`);
   const parsed = new Date(`${text}T00:00:00Z`);
-  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== text) {
-    throw new Error(`${name} is invalid`);
-  }
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== text) throw new Error(`${name} is invalid`);
   return text;
 }
 
@@ -135,6 +133,7 @@ export function canonicalStartMethodSql(raceAlias = 'r') {
 export function coreMetricSelectSql(resultAlias = 'rr') {
   return `
       COUNT(*) AS starts,
+      SUM(CASE WHEN ${resultAlias}.race_entry_id IS NOT NULL THEN 1 ELSE 0 END) AS result_starts,
       SUM(CASE WHEN ${resultAlias}.placing = 1 THEN 1 ELSE 0 END) AS wins,
       SUM(CASE WHEN ${resultAlias}.placing = 2 THEN 1 ELSE 0 END) AS seconds,
       SUM(CASE WHEN ${resultAlias}.placing = 3 THEN 1 ELSE 0 END) AS thirds,
@@ -148,6 +147,7 @@ export function coreMetricSelectSql(resultAlias = 'rr') {
 
 export function mapCoreMetricRow(row) {
   const starts = Number(row?.starts ?? 0);
+  const resultStarts = Number(row?.result_starts ?? 0);
   const wins = Number(row?.wins ?? 0);
   const seconds = Number(row?.seconds ?? 0);
   const thirds = Number(row?.thirds ?? 0);
@@ -159,7 +159,7 @@ export function mapCoreMetricRow(row) {
   const prizeSek = prizeVerifiedStarts ? Number(row.prize_sek) : null;
   return {
     starts,
-    resultStarts: starts,
+    resultStarts,
     wins,
     losses: starts - wins,
     seconds,
@@ -171,7 +171,7 @@ export function mapCoreMetricRow(row) {
     prizeVerifiedStarts,
     prizeSek,
     winRate: starts ? wins / starts : null,
-    top3Rate: starts ? top3 / starts : null,
+    top3Rate: resultStarts ? top3 / resultStarts : null,
     gallopRate: gallopVerifiedStarts ? gallops / gallopVerifiedStarts : null
   };
 }
@@ -196,11 +196,7 @@ export function addTrendRaceFilters(conditions, bindings, filters, { raceAlias =
   if (filters.startMethod !== 'all') conditions.push(`${canonicalStartMethodSql(raceAlias)} = '${filters.startMethod}'`);
   if (filters.raceType === 'monte') conditions.push(monteRaceCondition(raceAlias));
   if (filters.raceType === 'sulky') conditions.push(`NOT ${monteRaceCondition(raceAlias)}`);
-  if (filters.breedType === 'warmblood') {
-    conditions.push(`(LOWER(COALESCE(${horseAlias}.breed, '')) LIKE '%varmblod%' OR LOWER(COALESCE(${horseAlias}.breed, '')) LIKE '%warmblood%')`);
-  }
-  if (filters.breedType === 'coldblood') {
-    conditions.push(`(LOWER(COALESCE(${horseAlias}.breed, '')) LIKE '%kallblod%' OR LOWER(COALESCE(${horseAlias}.breed, '')) LIKE '%coldblood%')`);
-  }
+  if (filters.breedType === 'warmblood') conditions.push(`(LOWER(COALESCE(${horseAlias}.breed, '')) LIKE '%varmblod%' OR LOWER(COALESCE(${horseAlias}.breed, '')) LIKE '%warmblood%')`);
+  if (filters.breedType === 'coldblood') conditions.push(`(LOWER(COALESCE(${horseAlias}.breed, '')) LIKE '%kallblod%' OR LOWER(COALESCE(${horseAlias}.breed, '')) LIKE '%coldblood%')`);
   addCanonicalRaceScopeCondition(conditions, filters.raceScope, raceAlias);
 }
