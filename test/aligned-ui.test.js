@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 
-import { formatTrackAddress, renderAppPage } from '../src/app-page-scope-polish.js';
+import { formatTrackAddress, renderAppPage } from '../src/app-page-aligned.js';
 
 test('final aligned app adds Bana as the sixth bottom-navigation area', () => {
   const html = renderAppPage();
