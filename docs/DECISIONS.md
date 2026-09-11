@@ -23,7 +23,7 @@
 
 ## Interface direction
 1. Horse, trainer and driver remain primary detail entities, with V85/V86 system/performance history available in a dedicated Spel area.
-2. Bottom navigation is fixed as **Trend -> Tränare -> Hästar -> Kuskar -> Spel**.
+2. Bottom navigation is fixed as **Trend -> Tränare -> Hästar -> Kuskar -> Bana -> Spel**.
 3. Trend is the start workspace and uses category switching for Tränare / Hästar / Kuskar plus rolling periods 2 weeks / 4 weeks / 3 months / 6 months / 1 year.
 4. Trend leaderboards must be deterministic and use sensible minimum-sample rules; insufficient history remains unavailable rather than estimated.
 5. A global search bar searches all three primary entity types.
@@ -39,9 +39,12 @@
 15. There is no visible logout control; the private session expires normally.
 16. Visual direction is minimal and strongly structured, using black/grey/brown/beige as the base with restrained warm accent color and clear card/divider/tab separation.
 17. The approved Sagittarius KentaurAI brand stays separate from entity navigation symbolism.
-18. Bottom-navigation symbols are Trend = approved chart-line, Tränare = clipboard/pen, Hästar = horse, Kuskar = lightbulb, Spel = ticket. Entity profile tiles use initials rather than category symbols.
+18. Bottom-navigation symbols are Trend = approved chart-line, Tränare = clipboard/pen, Hästar = horse, Kuskar = lightbulb, Bana = map-pin/oval, Spel = ticket. Entity profile tiles use initials rather than category symbols.
 19. Trend uses the approved chart-line symbol and the singular label `Trend` in both navigation and page heading.
 20. KentaurAI is packaged as an installable PWA scoped to `/app/` with standalone launch and dedicated Sagittarius icons. Its service worker may cache public PWA metadata/icon assets only; authenticated app HTML and API data remain outside the offline cache.
+21. Bana uses **Översikt -> Spårstatistik -> Hemmatränare**. User-facing country codes are localized (for example `SE` -> `Sverige`) while storage/API identities remain unchanged.
+22. Spårstatistik owns Period, Startmetod, Distans, STL-klass and Lopptyp in the canonical lane-statistics flow. Optional filters combine with AND semantics; the literal all-period label is `All data`.
+23. Verified track address/website facts remain nullable. Real enrichment values live only in private D1 with fact-level source URL/type and verification timestamps; conflicts are preserved rather than silently overwriting a previously verified fact.
 
 ## Historical data and X-Labs
 1. Historical starter/result data is imported once, stored permanently and updated incrementally. The planned backfill remains approximately 2-3 years of Swedish racing, with older starts fetched selectively when useful for active horse profiles.

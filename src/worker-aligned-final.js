@@ -29,6 +29,7 @@ const finalHeaderCss = `
 
 const brokenSettingsHook = `const priorAlignedRenderData=renderData;
 renderData=async function(){await priorAlignedRenderData();if(state.settingsOpen&&state.settingsTab==='data')alignSettingsStatuses()};`;
+const compactBrokenSettingsHook = `const priorAlignedRenderData=renderData;renderData=async function(){await priorAlignedRenderData();if(state.settingsOpen&&state.settingsTab==='data')alignSettingsStatuses()};`;
 
 const settingsObserverHook = `const settingsStatusHost=document.getElementById('app');
 if(settingsStatusHost){
@@ -47,6 +48,7 @@ const finalTrackHistoryHook = `function patchTrackHistory(id,tab){
 
 const legacyTrackRestoreHook = `const priorAlignedRenderStart=renderStart;
 renderStart=async function(){const view=history.state?.view;if(view?.page==='tracks'){state.trackTab=view.trackTab||'overview';if(view.trackDetail)return renderTrackDetail(view.trackDetail);return renderTracks()}return priorAlignedRenderStart()};`;
+const compactLegacyTrackRestoreHook = `const priorAlignedRenderStart=renderStart;renderStart=async function(){const view=history.state?.view;if(view?.page==='tracks'){state.trackTab=view.trackTab||'overview';if(view.trackDetail)return renderTrackDetail(view.trackDetail);return renderTracks()}return priorAlignedRenderStart()};`;
 
 const finalTrackRestoreHook = `const priorAlignedRenderStart=renderStart;
 renderStart=async function(){const navState=history.state,view=navState?.view;if(view?.page==='tracks'){state.trackTab=navState.trackTab||'overview';if(navState.trackDetail)return renderTrackDetail(navState.trackDetail);return renderTracks()}return priorAlignedRenderStart()};`;
@@ -63,8 +65,10 @@ async function withFinalAlignment(request, response) {
   return new Response(
     body
       .replace(brokenSettingsHook, settingsObserverHook)
+      .replace(compactBrokenSettingsHook, settingsObserverHook)
       .replace(legacyTrackHistoryHook, finalTrackHistoryHook)
       .replace(legacyTrackRestoreHook, finalTrackRestoreHook)
+      .replace(compactLegacyTrackRestoreHook, finalTrackRestoreHook)
       .replace('</head>', `${finalHeaderCss}</head>`),
     {
       status: response.status,

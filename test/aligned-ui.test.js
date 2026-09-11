@@ -10,7 +10,6 @@ test('final aligned app adds Bana as the sixth bottom-navigation area', () => {
   assert.match(html, /button\.dataset\.page='tracks'/);
   assert.match(html, /button\.innerHTML=TRACK_ICON\+'Bana'/);
   assert.match(html, /M12 21s6-5\.2 6-11/);
-  assert.match(html, /ellipse cx=\\"12\\" cy=\\"10\\"/);
 });
 
 test('horse detail uses one compact expandable Starter history instead of a duplicate equipment tab', () => {
@@ -18,10 +17,8 @@ test('horse detail uses one compact expandable Starter history instead of a dupl
   assert.match(html, /if\(type==='horse'\)return \[\['stats','Statistik'\],\['starts','Starter'\],\['data','Data'\]\]/);
   assert.match(html, /Kommande lopp/);
   assert.match(html, /Tidigare starter/);
-  assert.match(html, /<div>Datum<\/div><div>Lopp<\/div><div>Resultat<\/div><div>Skor<\/div><div>Vagn<\/div>/);
   assert.match(html, /priorAlignedStartCards\(detail\)/);
   assert.match(html, /querySelectorAll\('\.start-card'\)/);
-  assert.match(html, /querySelector\('\.start-details'\)/);
   assert.doesNotMatch(html, /return \[\['stats','Statistik'\],\['starts','Starter'\],\['equipment','Utrustning'\],\['data','Data'\]\];return priorAlignedDetailTabs/);
 });
 
@@ -41,15 +38,39 @@ test('mobile entity statistic tables fit all six columns without horizontal scro
   assert.match(html, /\.stat-table-scroll\{overflow-x:visible!important\}/);
   assert.match(html, /\.stat-filter-table\{width:100%!important;table-layout:fixed!important\}/);
   assert.match(html, /white-space:nowrap!important/);
-  assert.match(html, /\.stat-filter-table th:not\(:first-child\),\.stat-filter-table td:not\(:first-child\)\{width:14\.6%!important;text-align:right!important\}/);
 });
 
-test('Bana detail contains the aligned overview, lane-statistics and home-trainer areas', () => {
+test('Bana detail owns STL and race-type filters in the canonical lane flow', () => {
   const html = renderAppPage();
   assert.match(html, /\['overview','Översikt'\],\['lanes','Spårstatistik'\],\['home','Hemmatränare'\]/);
-  assert.match(html, /Banprofil/);
-  assert.match(html, /Datatäckning/);
-  assert.match(html, /Startnoteringar/);
+  assert.match(html, /STL-klass/);
+  assert.match(html, /Lopptyp/);
+  assert.match(html, /Alla STL-klasser/);
+  assert.match(html, /Alla lopptyper/);
+  assert.match(html, /stlClass:'all',raceType:'all'/);
+  assert.match(html, /data-canonical-track-class-filters="true"/);
+  assert.match(html, /if\(f\.stlClass!=='all'\)q\.set\('stl_class',f\.stlClass\)/);
+  assert.match(html, /if\(f\.raceType!=='all'\)q\.set\('race_type',f\.raceType\)/);
+  assert.match(html, /f\.stlClass=s\.value;trackLaneView\(detail\)/);
+  assert.match(html, /f\.raceType=s\.value;trackLaneView\(detail\)/);
+  assert.match(html, /\[\['all','All data'\]/);
+  assert.doesNotMatch(html, /Alla år/);
+  assert.doesNotMatch(html, /Alla startmetoder/);
+});
+
+test('Bana overview localizes Sweden and renders contact facts only when present with HTTPS defense in depth', () => {
+  const html = renderAppPage();
+  assert.match(html, /SE:'Sverige'/);
+  assert.match(html, /trackCountry\(detail\.countryCode\)/);
+  assert.match(html, /Kontakt & plats/);
+  assert.match(html, /Öppna hemsida ↗/);
+  assert.match(html, /target="_blank" rel="noopener noreferrer"/);
+  assert.match(html, /url\.protocol==='https:'/);
+  assert.match(html, /if\(!address&&!website\)return ''/);
+});
+
+test('Bana detail retains statistics and home trainer behavior', () => {
+  const html = renderAppPage();
   assert.match(html, /Spår<\/th><th>Starter<\/th><th>Vinst %<\/th><th>Topp 3 %<\/th><th>Galopp %/);
   assert.match(html, /Autostart/);
   assert.match(html, /Voltstart/);

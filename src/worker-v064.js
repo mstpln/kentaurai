@@ -1,9 +1,11 @@
 import worker from './worker-aligned-final.js';
 import { appAuthConfigured, hasValidAppSession } from './app-auth.js';
+import { requireAdmin } from './auth.js';
 import { enhanceAppHtmlV064 } from './app-v064-overlay.js';
 import { buildAnalysisImportPrompt, recommendedAnalysisFilename } from './analysis-import-prompt.js';
 import { ANALYSIS_SUBMISSION_VERSION } from './analysis-exchange.js';
 import { getTrackDetailV064, getTrackLaneStatsV064 } from './routes/tracks-v064.js';
+import { applyTrackContactEnrichment, listTrackContactTargets } from './track-contact-enrichment.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -36,6 +38,28 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
+
+    if (request.method === 'GET' && path === '/v1/admin/tracks/contact-targets') {
+      const denied = requireAdmin(request, env);
+      if (denied) return denied;
+      try {
+        return json(await listTrackContactTargets(env));
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    if (request.method === 'POST' && path === '/v1/admin/tracks/contact-enrichment') {
+      const denied = requireAdmin(request, env);
+      if (denied) return denied;
+      try {
+        return json(await applyTrackContactEnrichment(env, await request.json()));
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
 
     if (request.method === 'GET' && path === '/app/api/settings/analysis-prompt') {
       const denied = await requireSession(request, env);
