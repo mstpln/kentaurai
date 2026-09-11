@@ -1,5 +1,6 @@
 import { getTrackDetail } from './tracks.js';
 import { normalizeRaceType, normalizeStlClass } from '../race-classification.js';
+import { normalizeRaceScope, raceScopeCondition } from '../race-scope.js';
 
 const STANDARD_DISTANCE_GROUPS = [640, 1640, 2140, 2640, 3140, 3640, 4140];
 const OTHER_LONG_DISTANCE_KEY = 'other-long';
@@ -15,10 +16,11 @@ function parseYear(value) {
 }
 
 function normalizeStartMethod(value) {
-  const method = String(value || 'auto').trim().toLowerCase();
+  const method = String(value || 'all').trim().toLowerCase();
+  if (method === 'all') return null;
   if (['auto', 'autostart'].includes(method)) return 'auto';
   if (['volt', 'volte', 'voltstart'].includes(method)) return 'volt';
-  throw new Error('start method must be auto or volt');
+  throw new Error('start method must be all, auto or volt');
 }
 
 function canonicalStartMethodSql() {
@@ -89,6 +91,7 @@ export async function getTrackLaneStatsV064(env, id, options = {}) {
   const year = parseYear(options.year);
   const startMethod = normalizeStartMethod(options.startMethod);
   const distanceGroup = normalizeDistanceGroup(options.distanceGroup);
+  const raceScope = normalizeRaceScope(options.raceScope);
   const stlClass = normalizeStlClass(options.stlClass);
   const raceType = normalizeRaceType(options.raceType);
   if (options.stlClass && options.stlClass !== 'all' && !stlClass) throw new Error('unsupported STL class');
@@ -98,15 +101,20 @@ export async function getTrackLaneStatsV064(env, id, options = {}) {
     'r.track_id = ?',
     're.scratched = 0',
     're.actual_lane IS NOT NULL',
-    're.actual_lane > 0',
-    `${canonicalStartMethodSql()} = ?`
+    're.actual_lane > 0'
   ];
-  const bindings = [trackId, startMethod];
+  const bindings = [trackId];
+  if (startMethod) {
+    conditions.push(`${canonicalStartMethodSql()} = ?`);
+    bindings.push(startMethod);
+  }
   if (year != null) {
     conditions.push('r.race_date >= ? AND r.race_date < ?');
     bindings.push(`${year}-01-01`, `${year + 1}-01-01`);
   }
   conditions.push(distanceCondition(distanceGroup, bindings));
+  const scopeCondition = raceScopeCondition(raceScope);
+  if (scopeCondition) conditions.push(scopeCondition);
   if (stlClass) {
     conditions.push(`EXISTS (
       SELECT 1 FROM race_stl_classifications rsc
@@ -157,7 +165,7 @@ export async function getTrackLaneStatsV064(env, id, options = {}) {
   });
 
   return {
-    filters: { year, startMethod, distanceGroup, stlClass, raceType },
+    filters: { year, startMethod: startMethod || 'all', distanceGroup, raceScope, stlClass, raceType },
     totals: {
       starts: rows.reduce((sum, row) => sum + row.starts, 0),
       resultStarts: rows.reduce((sum, row) => sum + row.resultStarts, 0)
