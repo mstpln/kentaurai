@@ -53,17 +53,7 @@ function trendPct(value){return value==null?'—':pct(value)}
 function trendMoney(value){return value==null?'—':money(value)}
 function metricPill(label,value){return '<span class="trend-metric-pill"><span>'+esc(label)+'</span><strong>'+esc(value)+'</strong></span>'}
 function trendRows(items){if(!items.length)return '<div class="trend-no-data"><strong>Ingen statistik för valt urval</strong>Rankingen fylls automatiskt när verifierade resultat finns inom filtren.</div>';return '<div class="trend-results">'+items.map(item=>'<button type="button" class="trend-result-row" data-trend-id="'+esc(item.id)+'"><span class="trend-win-block"><span class="trend-win-value">'+esc(trendPct(item.winRate))+'</span><span class="trend-win-label">Seger%</span></span><span class="trend-result-main"><span class="trend-result-name">'+esc(item.name)+'</span><span class="trend-result-core"><span>Starter '+num(item.starts)+'</span><span>Vinster '+num(item.wins)+'</span><span>Förluster '+num(item.losses)+'</span></span><span class="trend-result-pills">'+metricPill('Topp 3%',trendPct(item.top3Rate))+metricPill('Galopp%',trendPct(item.gallopRate))+metricPill('Prispengar',trendMoney(item.prizeSek))+'</span></span></button>').join('')+'</div>'}
-function bindTrendBuildA(){
-  document.querySelectorAll('[data-trend-category]').forEach(button=>button.onclick=()=>{state.trendCategory=button.dataset.trendCategory;renderStart()});
-  document.querySelectorAll('[data-trend-range]').forEach(button=>button.onclick=()=>{state.trendRange=button.dataset.trendRange;renderStart()});
-  document.querySelectorAll('[data-trend-scope]').forEach(button=>button.onclick=()=>{state.trendRaceScope=button.dataset.trendScope;renderStart()});
-  const toggle=document.getElementById('trendFilterToggle');if(toggle)toggle.onclick=()=>{state.trendFilterOpen=!state.trendFilterOpen;renderStart()};
-  document.querySelectorAll('[data-trend-detail]').forEach(select=>select.onchange=()=>{state.trendDetailFilters[select.dataset.trendDetail]=select.value;renderStart()});
-  const reset=document.getElementById('trendReset');if(reset)reset.onclick=()=>{state.trendDetailFilters={trackId:'all',raceType:'all',breedType:'all',startMethod:'all'};renderStart()};
-  document.querySelectorAll('[data-trend-id]').forEach(button=>button.onclick=()=>openDetail(state.trendCategory,button.dataset.trendId));
-}
-async function loadTrendFilterOptions(){if(state.trendFilterOptions)return;try{state.trendFilterOptions=await api('/trend/filter-options')}catch{state.trendFilterOptions={tracks:[]}}}
-renderStart=async function(){
+async function renderTrendBuildA(){
   state.detail=null;state.gameDetail=null;state.gameSystemId=null;state.page='start';setNav('start');
   const token=++trendRequestToken;
   await loadTrendFilterOptions();
@@ -80,6 +70,22 @@ renderStart=async function(){
     if(token!==trendRequestToken||state.page!=='start')return;
     const target=document.getElementById('trendResults');if(target){target.className='trend-no-data';target.innerHTML='<strong>Kunde inte läsa Trend</strong>'+esc(err.message)}
   }
+}
+function bindTrendBuildA(){
+  document.querySelectorAll('[data-trend-category]').forEach(button=>button.onclick=()=>{state.trendCategory=button.dataset.trendCategory;renderTrendBuildA()});
+  document.querySelectorAll('[data-trend-range]').forEach(button=>button.onclick=()=>{state.trendRange=button.dataset.trendRange;renderTrendBuildA()});
+  document.querySelectorAll('[data-trend-scope]').forEach(button=>button.onclick=()=>{state.trendRaceScope=button.dataset.trendScope;renderTrendBuildA()});
+  const toggle=document.getElementById('trendFilterToggle');if(toggle)toggle.onclick=()=>{state.trendFilterOpen=!state.trendFilterOpen;renderTrendBuildA()};
+  document.querySelectorAll('[data-trend-detail]').forEach(select=>select.onchange=()=>{state.trendDetailFilters[select.dataset.trendDetail]=select.value;renderTrendBuildA()});
+  const reset=document.getElementById('trendReset');if(reset)reset.onclick=()=>{state.trendDetailFilters={trackId:'all',raceType:'all',breedType:'all',startMethod:'all'};renderTrendBuildA()};
+  document.querySelectorAll('[data-trend-id]').forEach(button=>button.onclick=()=>openDetail(state.trendCategory,button.dataset.trendId));
+}
+async function loadTrendFilterOptions(){if(state.trendFilterOptions)return;try{state.trendFilterOptions=await api('/trend/filter-options')}catch{state.trendFilterOptions={tracks:[]}}}
+const priorTrendRenderStart=renderStart;
+renderStart=async function(){
+  await priorTrendRenderStart();
+  if(state.page!=='start')return;
+  return renderTrendBuildA();
 };
 })();
 </script>`;
