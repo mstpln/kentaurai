@@ -63,15 +63,23 @@ function mapRows(rows) {
   return rows.map((row) => {
     const resultStarts = Number(row.result_starts ?? 0);
     const wins = Number(row.wins ?? 0);
+    const seconds = Number(row.seconds ?? 0);
+    const thirds = Number(row.thirds ?? 0);
     const top3 = Number(row.top3 ?? 0);
     const gallops = Number(row.gallops ?? 0);
+    const disqualifications = Number(row.disqualifications ?? 0);
+    const prizeSek = Number(row.prize_sek ?? 0);
     return {
       label: row.label,
       starts: Number(row.starts ?? 0),
       resultStarts,
       wins,
+      seconds,
+      thirds,
       top3,
       gallops,
+      disqualifications,
+      prizeSek,
       winRate: resultStarts ? wins / resultStarts : null,
       top3Rate: resultStarts ? top3 / resultStarts : null,
       gallopRate: resultStarts ? gallops / resultStarts : null
@@ -90,8 +98,12 @@ async function groupedRows(env, { relationColumn, id, year, raceScope, method, g
       COUNT(*) AS starts,
       SUM(CASE WHEN rr.race_entry_id IS NOT NULL THEN 1 ELSE 0 END) AS result_starts,
       SUM(CASE WHEN rr.placing = 1 THEN 1 ELSE 0 END) AS wins,
+      SUM(CASE WHEN rr.placing = 2 THEN 1 ELSE 0 END) AS seconds,
+      SUM(CASE WHEN rr.placing = 3 THEN 1 ELSE 0 END) AS thirds,
       SUM(CASE WHEN rr.placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) AS top3,
-      SUM(CASE WHEN rr.gallop = 1 THEN 1 ELSE 0 END) AS gallops
+      SUM(CASE WHEN rr.gallop = 1 THEN 1 ELSE 0 END) AS gallops,
+      SUM(CASE WHEN rr.disqualified = 1 THEN 1 ELSE 0 END) AS disqualifications,
+      SUM(COALESCE(rr.prize_sek, 0)) AS prize_sek
     FROM race_entries re
     JOIN races r ON r.id = re.race_id
     LEFT JOIN tracks t ON t.id = r.track_id
@@ -103,6 +115,23 @@ async function groupedRows(env, { relationColumn, id, year, raceScope, method, g
   `;
   const { results } = await env.DB.prepare(sql).bind(...bindings).all();
   return mapRows(results);
+}
+
+function emptySummary() {
+  return {
+    starts: 0,
+    resultStarts: 0,
+    wins: 0,
+    seconds: 0,
+    thirds: 0,
+    top3: 0,
+    gallops: 0,
+    disqualifications: 0,
+    prizeSek: 0,
+    winRate: null,
+    top3Rate: null,
+    gallopRate: null
+  };
 }
 
 export async function getFilteredEntityStatBreakdowns(env, type, id, options = {}) {
@@ -118,7 +147,16 @@ export async function getFilteredEntityStatBreakdowns(env, type, id, options = {
   const trackStartMethod = normalizeStartMethod(options.trackStartMethod);
   const canonicalMethod = canonicalStartMethodSql();
 
-  const [startMethods, distances, tracks] = await Promise.all([
+  const [summaryRows, startMethods, distances, tracks] = await Promise.all([
+    groupedRows(env, {
+      relationColumn: config.relationColumn,
+      id: normalizedId,
+      year,
+      raceScope,
+      method: null,
+      groupExpression: `'all'`,
+      orderBy: 'label'
+    }),
     groupedRows(env, {
       relationColumn: config.relationColumn,
       id: normalizedId,
@@ -149,6 +187,9 @@ export async function getFilteredEntityStatBreakdowns(env, type, id, options = {
     })
   ]);
 
+  const summary = summaryRows[0] ? { ...summaryRows[0] } : emptySummary();
+  delete summary.label;
+
   return {
     filters: {
       year,
@@ -156,6 +197,7 @@ export async function getFilteredEntityStatBreakdowns(env, type, id, options = {
       distanceStartMethod: distanceStartMethod || 'all',
       trackStartMethod: trackStartMethod || 'all'
     },
+    summary,
     startMethods,
     distances,
     tracks
