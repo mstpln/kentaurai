@@ -7,7 +7,7 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "test:schema": "node --test test/schema.test.js",
-    "qa": "npm test && node --check src/index.js && node --check src/worker-settings.js && node --check src/settings-data.js && node --check src/app-page-settings.js",
+    "qa": "npm test && node --check src/index.js && node --check src/worker-v064.js && node --check src/routes/track-enhancements.js && node --check src/analysis-import-instructions.js && node --check src/ui-v064.js && node --check src/ui-v064-race-presentation.js",
     "dev": "npx --yes wrangler@4.114.0 dev",
     "deploy": "npx --yes wrangler@4.114.0 deploy",
     "db:migrate:local": "npx --yes wrangler@4.114.0 d1 migrations apply kentaurai --local",
