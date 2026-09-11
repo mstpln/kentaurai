@@ -23,8 +23,8 @@ test('horse statistics composes after Trend and before the shared final statisti
 
 test('horse statistics async renderers guard navigation and entity changes after awaited reads', async () => {
   const source = await readFile(new URL('../src/horse-statistics-ui.js', import.meta.url), 'utf8');
-  assert.match(source, /token!==horseStatsToken\|\|state\.page!=='horses'\|\|state\.tab!=='stats'/);
-  assert.match(source, /token!==horseDetailStatsToken\|\|state\.detail\?\.id!==id\|\|state\.tab!=='stats'/);
-  assert.match(source, /horseStatsToken\+\+;return previousHorseEntityList/);
-  assert.match(source, /const token=\+\+horseDetailStatsToken/);
+  assert.match(source, /token!==rankingToken\|\|state\.page!=='horses'\|\|state\.tab!=='stats'/);
+  assert.match(source, /token!==detailToken\|\|state\.detail\?\.id!==id\|\|state\.tab!=='stats'/);
+  assert.match(source, /rankingToken\+\+;return previousHorseEntityList/);
+  assert.match(source, /const token=\+\+detailToken/);
 });
