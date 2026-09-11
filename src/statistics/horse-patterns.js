@@ -91,14 +91,17 @@ async function loadPatternRows(env, horseIds, cutoff, historicalOnly) {
   const [{ results: pointRows }, { results: xlabsRows }] = await Promise.all([
     env.DB.prepare(`
       WITH ranked AS (
-        SELECT horse_id, points, observed_at,
+        SELECT hp.horse_id, hp.points, hp.observed_at,
                ROW_NUMBER() OVER (
-                 PARTITION BY horse_id
-                 ORDER BY observed_at DESC, id DESC
+                 PARTITION BY hp.horse_id
+                 ORDER BY hp.observed_at DESC, hp.id DESC
                ) AS rn
-        FROM horse_start_points
-        WHERE horse_id IN (${slots})
-          AND substr(observed_at, 1, 10) <= ?
+        FROM horse_start_points hp
+        JOIN source_records sr ON sr.id = hp.source_record_id
+        WHERE hp.horse_id IN (${slots})
+          AND substr(hp.observed_at, 1, 10) <= ?
+          AND sr.source_type = 'official_provider'
+          AND sr.quality_status = 'normalized_verified_subset'
       )
       SELECT horse_id, points, observed_at
       FROM ranked
@@ -115,6 +118,7 @@ async function loadPatternRows(env, horseIds, cutoff, historicalOnly) {
         FROM xlabs_data x
         JOIN source_records sr ON sr.id = x.source_record_id
         WHERE x.quality_status = 'xlabs-telemetry-v1'
+          AND sr.source_type = 'xlabs_race_json'
       ), recent AS (
         SELECT re.horse_id, x.first_200_time, x.last_400_time, x.extra_distance_m,
                ROW_NUMBER() OVER (
