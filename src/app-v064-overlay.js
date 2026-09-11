@@ -3,8 +3,8 @@ import { RACE_TYPE_OPTIONS, STL_CLASS_OPTIONS } from './race-classification.js';
 const css = `
 <style id="kentaurai-v064-overlay">
 .track-class-filter-line{display:grid!important;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px!important;align-items:end!important}
-.track-select-wrap{min-width:0}.track-select{width:100%;min-height:39px;border:1px solid var(--line);background:#10100f;color:var(--text);border-radius:10px;padding:8px 32px 8px 10px;font:550 12px inherit;appearance:auto}.track-select.active{border-color:#6a5336;color:var(--accent-soft);background:#17130f}.track-select-mobile{display:none;width:100%;min-height:39px;border:1px solid var(--line);background:#10100f;color:var(--text);border-radius:10px;padding:8px 10px;font:550 12px inherit;text-align:left;align-items:center;justify-content:space-between;gap:8px}.track-select-mobile.active{border-color:#6a5336;color:var(--accent-soft);background:#17130f}
-.kentaur-filter-sheet-backdrop{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.64);display:flex;align-items:flex-end}.kentaur-filter-sheet{width:100%;max-height:78vh;overflow:auto;background:#121210;border:1px solid var(--line);border-bottom:0;border-radius:18px 18px 0 0;padding:8px 12px calc(14px + env(safe-area-inset-bottom))}.kentaur-filter-sheet-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 4px 12px;border-bottom:1px solid var(--line-soft);font-size:14px;font-weight:650}.kentaur-filter-sheet-close{border:0;background:transparent;color:var(--muted);font:inherit;padding:5px 7px}.kentaur-filter-option{width:100%;border:0;border-bottom:1px solid var(--line-soft);background:transparent;color:var(--text);padding:13px 5px;display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;font:550 13px inherit}.kentaur-filter-option.selected{color:var(--accent-soft)}
+.track-select-wrap{min-width:0}.track-select{width:100%;min-height:39px;border:1px solid var(--line);background:#10100f;color:var(--text);border-radius:10px;padding:8px 32px 8px 10px;font-family:inherit;font-size:12px;font-weight:550;appearance:auto}.track-select.active{border-color:#6a5336;color:var(--accent-soft);background:#17130f}.track-select-mobile{display:none;width:100%;min-height:39px;border:1px solid var(--line);background:#10100f;color:var(--text);border-radius:10px;padding:8px 10px;font-family:inherit;font-size:12px;font-weight:550;text-align:left;align-items:center;justify-content:space-between;gap:8px}.track-select-mobile.active{border-color:#6a5336;color:var(--accent-soft);background:#17130f}
+.kentaur-filter-sheet-backdrop{position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.64);display:flex;align-items:flex-end}.kentaur-filter-sheet{width:100%;max-height:78vh;overflow:auto;background:#121210;border:1px solid var(--line);border-bottom:0;border-radius:18px 18px 0 0;padding:8px 12px calc(14px + env(safe-area-inset-bottom))}.kentaur-filter-sheet-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 4px 12px;border-bottom:1px solid var(--line-soft);font-size:14px;font-weight:650}.kentaur-filter-sheet-close{border:0;background:transparent;color:var(--muted);font:inherit;padding:5px 7px}.kentaur-filter-option{width:100%;border:0;border-bottom:1px solid var(--line-soft);background:transparent;color:var(--text);padding:13px 5px;display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;font-family:inherit;font-size:13px;font-weight:550}.kentaur-filter-option.selected{color:var(--accent-soft)}
 .track-contact-link{color:var(--accent-soft);text-decoration:none}.track-contact-link:hover{text-decoration:underline}
 .analysis-prompt-guide{margin-top:16px;padding-top:15px;border-top:1px solid var(--line-soft)}.analysis-prompt-guide h3{font-size:14px;font-weight:650;margin:0 0 6px}.analysis-prompt-guide p{font-size:12px;line-height:1.55;color:var(--muted);margin:0 0 12px}.analysis-prompt-copy{width:auto}
 @media(max-width:620px){.track-select{display:none}.track-select-mobile{display:flex}.track-class-filter-line{grid-template-columns:1fr 1fr!important;gap:9px!important}.analysis-prompt-copy{width:100%}}
@@ -16,6 +16,7 @@ const script = `
 const STL_OPTIONS=${JSON.stringify(STL_CLASS_OPTIONS)};
 const RACE_TYPE_OPTIONS=${JSON.stringify(RACE_TYPE_OPTIONS)};
 const classFilters=new Map();
+const contactLoads=new Set();
 const originalFetch=window.fetch.bind(window);
 
 function currentTrackId(){return history.state?.trackDetail||null}
@@ -32,7 +33,7 @@ window.fetch=function(input,init){
       if(f.stlClass&&f.stlClass!=='all')url.searchParams.set('stl_class',f.stlClass);else url.searchParams.delete('stl_class');
       if(f.raceType&&f.raceType!=='all')url.searchParams.set('race_type',f.raceType);else url.searchParams.delete('race_type');
       if(typeof input==='string'||input instanceof URL)return originalFetch(url.toString(),init);
-      return originalFetch(new Request(url.toString(),input),init);
+      if(input?.method==='GET'||!input?.method)return originalFetch(url.toString(),{...init,headers:input?.headers||init?.headers,credentials:input?.credentials||init?.credentials});
     }
   }catch{}
   return originalFetch(input,init);
@@ -57,16 +58,24 @@ function enhanceTrackFilters(){
 }
 
 const exactText=new Map([
-  ['spike_miss','Missad spik'],['coverage_miss','Vinnaren saknades på systemet'],['Learnings','Lärdomar'],['Omgångens learnings','Omgångens lärdomar'],['Miss','Fel'],['Vår rank','Vår rankning'],['Marknadsrank','Marknadsrankning'],['Auto','Autostart'],['pre_market','Förhandsanalys'],['final','Slutanalys'],['normalized_verified_subset','Verifierad delmängd'],['captured_unmapped','Infångad, ej normaliserad'],['unknown','Okänd'],['X-Labs segment','X-Labs-segment'],['Main Class','Loppklass'],['Huvudklass','Loppklass'],['Class Flags','Loppklassificering'],['Klassflaggor','Loppklassificering']
+  ['spike_miss','Missad spik'],['coverage_miss','Vinnaren saknades på systemet'],['Learnings','Lärdomar'],['Omgångens learnings','Omgångens lärdomar'],['Miss','Fel'],['Vår rank','Vår rankning'],['Marknadsrank','Marknadsrankning'],['Auto','Autostart'],['pre_market','Förhandsanalys'],['final','Slutanalys'],['normalized_verified_subset','Verifierad delmängd'],['captured_unmapped','Infångad, ej normaliserad'],['unknown','Okänd'],['X-Labs segment','X-Labs-segment'],['Main Class','Loppklass'],['Main class','Loppklass'],['Huvudklass','Loppklass']
 ]);
 const fieldLabels=new Map([
   ['Actual Distance M','Faktisk distans'],['Actual Distance','Faktisk distans'],['actualDistanceM','Faktisk distans'],['Extra Distance M','Extra distans'],['Extra Distance','Extra distans'],['extraDistanceM','Extra distans'],['Converted Km Time','Omräknad km-tid'],['convertedKmTime','Omräknad km-tid'],['Leader','Spets'],['leader','Spets'],['Pocket','Rygg ledaren'],['pocket','Rygg ledaren'],['Death Seat','Dödens'],['deathSeat','Dödens'],['Second Over','2:a utvändigt'],['secondOver','2:a utvändigt'],['Wide Trip','Brett spår'],['wideTrip','Brett spår'],['Uncovered Move','Attack utan rygg'],['uncoveredMove','Attack utan rygg'],['Traffic Event','Loppincident'],['trafficEvent','Loppincident'],['Summary','Sammanfattning'],['summary','Sammanfattning']
 ]);
 const countries={SE:'Sverige',NO:'Norge',DK:'Danmark',FI:'Finland',DE:'Tyskland',FR:'Frankrike',IT:'Italien',NL:'Nederländerna',BE:'Belgien',EE:'Estland',LV:'Lettland',LT:'Litauen',US:'USA',CA:'Kanada'};
 function replaceNodeText(node,map){const raw=node.textContent,trim=raw.trim();if(map.has(trim))node.textContent=raw.replace(trim,map.get(trim));else if(/^rank\\s+\\d+$/i.test(trim))node.textContent=raw.replace(trim,trim.replace(/^rank/i,'rankning'))}
+function normalizeClassFlagField(label){
+  const raw=label.textContent.trim();if(!['Class Flags','Class flags','Klassflaggor'].includes(raw))return;
+  const item=label.closest('.data-item'),value=item?.querySelector('.data-value');if(!item||!value)return;
+  const text=value.textContent.toLowerCase();const found=[];
+  for(const [key,name] of RACE_TYPE_OPTIONS){if(text.includes(key.toLowerCase())||text.includes(name.toLowerCase()))found.push(name)}
+  if(!found.length){item.remove();return}label.textContent='Lopptyp';value.textContent=[...new Set(found)].join(' · ');
+}
 function localizeVisible(){
   const app=document.getElementById('app');if(!app)return;
   const walker=document.createTreeWalker(app,NodeFilter.SHOW_TEXT,{acceptNode(node){const tag=node.parentElement?.tagName;return ['SCRIPT','STYLE','CODE','PRE','TEXTAREA'].includes(tag)?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_ACCEPT}});let node;while((node=walker.nextNode()))replaceNodeText(node,exactText);
+  document.querySelectorAll('.data-label').forEach(normalizeClassFlagField);
   document.querySelectorAll('.data-label,.history-fact-label,.coverage-label').forEach(el=>replaceNodeText(el,fieldLabels));
   document.querySelectorAll('.data-value').forEach(el=>{const t=el.textContent.trim();if(countries[t])el.textContent=countries[t]});
   document.querySelectorAll('.detail-meta').forEach(el=>{let t=el.textContent;for(const [code,name] of Object.entries(countries))t=t.replace(new RegExp(' · '+code+'$'), ' · '+name);el.textContent=t});
@@ -74,12 +83,13 @@ function localizeVisible(){
 }
 
 async function enhanceTrackContact(){
-  const id=currentTrackId();if(!id||document.querySelector('.track-contact-section'))return;
+  const id=currentTrackId();if(!id||document.querySelector('.track-contact-section')||contactLoads.has(id))return;
   const body=document.getElementById('trackTabBody');if(!body||!document.querySelector('[data-track-tab="overview"].active'))return;
+  contactLoads.add(id);
   try{const r=await originalFetch('/app/api/tracks/'+encodeURIComponent(id),{headers:{accept:'application/json'}});if(!r.ok)return;const detail=await r.json();if(currentTrackId()!==id||document.querySelector('.track-contact-section'))return;
     const address=[detail.address?.street,detail.address?.postalCode,detail.city].filter(Boolean).join(', ');if(!address&&!detail.websiteUrl)return;
     const section=document.createElement('section');section.className='data-section track-contact-section';section.innerHTML='<div class="data-section-head"><h2>Kontakt & plats</h2></div><div class="data-grid">'+(address?'<div class="data-item"><div class="data-label">Adress</div><div class="data-value">'+escapeHtml(address)+'</div></div>':'')+(detail.websiteUrl?'<div class="data-item"><div class="data-label">Hemsida</div><div class="data-value"><a class="track-contact-link" target="_blank" rel="noopener noreferrer" href="'+escapeAttr(detail.websiteUrl)+'">Öppna hemsida ↗</a></div></div>':'')+'</div>';const groups=body.querySelector('.data-groups')||body;groups.appendChild(section);
-  }catch{}
+  }catch{}finally{contactLoads.delete(id)}
 }
 function escapeHtml(v){return String(v).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
 function escapeAttr(v){return escapeHtml(v)}
