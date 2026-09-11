@@ -1,9 +1,5 @@
 import { getTrackDetail } from './tracks.js';
-import {
-  matchesRaceClassification,
-  normalizeRaceType,
-  normalizeStlClass
-} from '../race-classification.js';
+import { normalizeRaceType, normalizeStlClass } from '../race-classification.js';
 
 const STANDARD_DISTANCE_GROUPS = [640, 1640, 2140, 2640, 3140, 3640, 4140];
 const OTHER_LONG_DISTANCE_KEY = 'other-long';
@@ -54,17 +50,6 @@ function distanceCondition(group, bindings) {
   const distance = Number(group);
   bindings.push(distance - DISTANCE_TOLERANCE_M, distance + DISTANCE_TOLERANCE_M);
   return 'r.distance_m BETWEEN ? AND ?';
-}
-
-function safeJsonArray(value) {
-  if (!value) return [];
-  if (Array.isArray(value)) return value;
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
 }
 
 function safeWebsiteUrl(value) {
@@ -122,50 +107,54 @@ export async function getTrackLaneStatsV064(env, id, options = {}) {
     bindings.push(`${year}-01-01`, `${year + 1}-01-01`);
   }
   conditions.push(distanceCondition(distanceGroup, bindings));
+  if (stlClass) {
+    conditions.push(`EXISTS (
+      SELECT 1 FROM race_stl_classifications rsc
+      WHERE rsc.race_id = r.id AND rsc.stl_class = ?
+    )`);
+    bindings.push(stlClass);
+  }
+  if (raceType) {
+    conditions.push(`EXISTS (
+      SELECT 1 FROM race_type_classifications rtc
+      WHERE rtc.race_id = r.id AND rtc.race_type = ?
+    )`);
+    bindings.push(raceType);
+  }
 
   const { results } = await env.DB.prepare(`
     SELECT
-      r.id AS race_id,
-      r.race_name,
-      r.main_class,
-      r.class_flags_json,
       re.actual_lane AS lane,
-      rr.race_entry_id AS result_entry_id,
-      rr.placing,
-      rr.gallop
+      COUNT(*) AS starts,
+      SUM(CASE WHEN rr.race_entry_id IS NOT NULL THEN 1 ELSE 0 END) AS result_starts,
+      SUM(CASE WHEN rr.placing = 1 THEN 1 ELSE 0 END) AS wins,
+      SUM(CASE WHEN rr.placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) AS top3,
+      SUM(CASE WHEN rr.race_entry_id IS NOT NULL AND rr.gallop = 1 THEN 1 ELSE 0 END) AS gallops
     FROM race_entries re
     JOIN races r ON r.id = re.race_id
     LEFT JOIN race_results rr ON rr.race_entry_id = re.id
     WHERE ${conditions.join(' AND ')}
-    ORDER BY re.actual_lane ASC, r.race_date ASC, r.id ASC, re.id ASC
+    GROUP BY re.actual_lane
+    ORDER BY re.actual_lane ASC
   `).bind(...bindings).all();
 
-  const grouped = new Map();
-  for (const row of results || []) {
-    const race = {
-      raceName: row.race_name || null,
-      mainClass: row.main_class || null,
-      classFlags: safeJsonArray(row.class_flags_json)
+  const rows = (results || []).map((row) => {
+    const resultStarts = Number(row.result_starts || 0);
+    const wins = Number(row.wins || 0);
+    const top3 = Number(row.top3 || 0);
+    const gallops = Number(row.gallops || 0);
+    return {
+      lane: Number(row.lane),
+      starts: Number(row.starts || 0),
+      resultStarts,
+      wins,
+      top3,
+      gallops,
+      winRate: resultStarts ? wins / resultStarts : null,
+      top3Rate: resultStarts ? top3 / resultStarts : null,
+      gallopRate: resultStarts ? gallops / resultStarts : null
     };
-    if (!matchesRaceClassification(race, { stlClass, raceType })) continue;
-    const lane = Number(row.lane);
-    if (!grouped.has(lane)) grouped.set(lane, { lane, starts: 0, resultStarts: 0, wins: 0, top3: 0, gallops: 0 });
-    const bucket = grouped.get(lane);
-    bucket.starts += 1;
-    if (row.result_entry_id) {
-      bucket.resultStarts += 1;
-      if (Number(row.placing) === 1) bucket.wins += 1;
-      if (Number(row.placing) >= 1 && Number(row.placing) <= 3) bucket.top3 += 1;
-      if (Number(row.gallop) === 1) bucket.gallops += 1;
-    }
-  }
-
-  const rows = [...grouped.values()].sort((a, b) => a.lane - b.lane).map((row) => ({
-    ...row,
-    winRate: row.resultStarts ? row.wins / row.resultStarts : null,
-    top3Rate: row.resultStarts ? row.top3 / row.resultStarts : null,
-    gallopRate: row.resultStarts ? row.gallops / row.resultStarts : null
-  }));
+  });
 
   return {
     filters: { year, startMethod, distanceGroup, stlClass, raceType },
