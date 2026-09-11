@@ -2,10 +2,16 @@ function validIso(value) {
   return typeof value === 'string' && value.trim() && Number.isFinite(Date.parse(value));
 }
 
-function effectiveCutoff(asOf, betStopAt) {
+function stableAsOf(asOf) {
   if (!validIso(asOf)) throw new Error('analysis market as_of must be a valid timestamp');
+  const minute = Math.floor(Date.parse(asOf) / 60000) * 60000;
+  return new Date(minute).toISOString();
+}
+
+function effectiveCutoff(asOf, betStopAt) {
   if (!validIso(betStopAt)) throw new Error('analysis market context requires a verified betting stop');
-  return Date.parse(asOf) <= Date.parse(betStopAt) ? asOf : betStopAt;
+  const stable = stableAsOf(asOf);
+  return Date.parse(stable) <= Date.parse(betStopAt) ? stable : betStopAt;
 }
 
 export async function getVerifiedAnalysisMarket(env, roundId, asOf) {
@@ -18,7 +24,8 @@ export async function getVerifiedAnalysisMarket(env, roundId, asOf) {
   `).bind(roundId).first();
   if (!round) throw new Error('V85/V86 round was not found');
 
-  const cutoff = effectiveCutoff(asOf, round.bet_stop_at);
+  const marketAsOf = stableAsOf(asOf);
+  const cutoff = effectiveCutoff(marketAsOf, round.bet_stop_at);
   const { results: betting } = await env.DB.prepare(`
     WITH candidates AS (
       SELECT bs.race_entry_id,
@@ -76,7 +83,7 @@ export async function getVerifiedAnalysisMarket(env, roundId, asOf) {
     definitionVersion: 'verified-market-at-stop-v1',
     roundId,
     betStopAt: round.bet_stop_at,
-    asOf,
+    asOf: marketAsOf,
     cutoff,
     betting: (betting || []).map((row) => ({
       raceEntryId: row.race_entry_id,
