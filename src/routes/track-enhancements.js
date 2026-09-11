@@ -82,7 +82,9 @@ export function classifyStlClass(row) {
 }
 
 export function classifyRaceTypes(row) {
-  const explicit = parseFlags(row?.race_types_json).map((value) => normalizedText(value).replaceAll(' ', '_')).filter((key) => RACE_TYPE_KEYS.has(key));
+  const explicit = parseFlags(row?.race_types_json)
+    .map((value) => normalizedText(value).replaceAll(' ', '_'))
+    .filter((key) => RACE_TYPE_KEYS.has(key));
   const found = new Set(explicit);
   const text = sourceClassificationText(row || {});
   if (!text) return [...found];
@@ -126,23 +128,43 @@ function normalizeDistanceGroup(value) {
   throw new Error('unsupported distance group');
 }
 
-function canonicalStartMethod(value) {
-  const method = String(value || '').trim().toLowerCase();
-  if (['auto', 'autostart'].includes(method)) return 'auto';
-  if (['volt', 'volte', 'voltstart'].includes(method)) return 'volt';
-  return method || 'unknown';
-}
-
-function distanceMatches(distance, group) {
-  const key = trackDistanceGroup(distance);
-  return key === group;
-}
-
 function normalizeOptionalFilter(value, allowed, label) {
   const key = String(value || '').trim();
   if (!key || key === 'all') return null;
   if (!allowed.has(key)) throw new Error(`unsupported ${label}`);
   return key;
+}
+
+function safeWebsiteUrl(value) {
+  if (!value) return null;
+  try {
+    const url = new URL(String(value));
+    return url.protocol === 'https:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function startMethodCondition(bindings, method) {
+  if (method === 'auto') {
+    return "LOWER(COALESCE(r.start_method, '')) IN ('auto','autostart')";
+  }
+  bindings.push('volt', 'volte', 'voltstart');
+  return "LOWER(COALESCE(r.start_method, '')) IN (?,?,?)";
+}
+
+function distanceCondition(bindings, group) {
+  if (group === OTHER_LONG_DISTANCE_KEY) {
+    let sql = 'r.distance_m > 2640';
+    for (const standard of STANDARD_DISTANCE_GROUPS.filter((distance) => distance >= 2640)) {
+      sql += ' AND NOT (r.distance_m BETWEEN ? AND ?)';
+      bindings.push(standard - DISTANCE_TOLERANCE_M, standard + DISTANCE_TOLERANCE_M);
+    }
+    return sql;
+  }
+  const standard = Number(group);
+  bindings.push(standard - DISTANCE_TOLERANCE_M, standard + DISTANCE_TOLERANCE_M);
+  return 'r.distance_m BETWEEN ? AND ?';
 }
 
 export async function getEnhancedTrackDetail(env, id) {
@@ -161,7 +183,7 @@ export async function getEnhancedTrackDetail(env, id) {
       postalCode: metadata?.postal_code || null,
       city: detail.city || null
     },
-    websiteUrl: metadata?.website_url || null
+    websiteUrl: safeWebsiteUrl(metadata?.website_url)
   };
 }
 
@@ -182,13 +204,11 @@ export async function getEnhancedTrackLaneStats(env, id, options = {}) {
     conditions.push('r.race_date >= ? AND r.race_date < ?');
     bindings.push(`${year}-01-01`, `${year + 1}-01-01`);
   }
+  conditions.push(startMethodCondition(bindings, startMethod));
+  conditions.push(distanceCondition(bindings, distanceGroup));
 
   const { results } = await env.DB.prepare(`
     SELECT
-      r.id AS race_id,
-      r.race_date,
-      r.distance_m,
-      r.start_method,
       r.main_class,
       r.class_flags_json,
       r.stl_class,
@@ -206,8 +226,6 @@ export async function getEnhancedTrackLaneStats(env, id, options = {}) {
 
   const grouped = new Map();
   for (const row of results || []) {
-    if (canonicalStartMethod(row.start_method) !== startMethod) continue;
-    if (!distanceMatches(row.distance_m, distanceGroup)) continue;
     if (stlClass && classifyStlClass(row) !== stlClass) continue;
     if (raceType && !classifyRaceTypes(row).includes(raceType)) continue;
 
