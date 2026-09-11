@@ -110,7 +110,8 @@ export default {
           trackId: url.searchParams.get('track_id'),
           raceType: url.searchParams.get('race_type'),
           breedType: url.searchParams.get('breed_type'),
-          startMethod: url.searchParams.get('start_method')
+          startMethod: url.searchParams.get('start_method'),
+          minStarts: url.searchParams.get('min_starts')
         }));
       } catch (error) {
         console.error(error);
