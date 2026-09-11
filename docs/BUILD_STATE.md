@@ -8,12 +8,12 @@ Updated: 2026-09-11
 - D1: `kentaurai`.
 - R2: `kentaurai-raw`.
 - Actual Worker entrypoint: `src/worker-v064.js`.
-- Statistics Build C is merged and production-live after GitHub Actions release run `34631237134`.
-- Release QA passed with 411 tests and zero failures before production changes.
+- Statistics Build D is merged and production-live after GitHub Actions release run `34634926117`.
+- Release QA passed with 426 tests and zero failures before production changes.
 - Worker deployment, `/health`, `/app/login` and the private analysis-prompt authorization check all passed.
-- Deployed Worker version ID from that release: `e6619d15-554c-475f-ab0b-fbfeb89f854a`.
-- Production D1 reported `No migrations to apply` during that release. Repository migrations through `0011_driver_statistics_indexes.sql` were therefore already registered/applied at release time.
-- Official and X-Labs historical backfills use persisted jobs/cursors. Deployments and statistics work must never recreate, reset or silently restart them.
+- Deployed Worker version ID from that release: `91254e23-9446-4934-8f1f-1d28d4c92399`.
+- Production D1 reported `No migrations to apply` during that release. Repository migration tracking was therefore current through `0012_trainer_statistics_indexes.sql`; this does not by itself constitute a separate content inspection of that schema.
+- Official and X-Labs historical backfills use persisted jobs/cursors. Deployments and analysis work must never recreate, reset or silently restart them.
 
 ## Statistics programme
 ### Build A - Trend - merged and production-live
@@ -42,12 +42,27 @@ Updated: 2026-09-11
 - Favorite/longshot statistics require source-backed betting snapshots at or before a verified betting stop. Favorite is stored market rank 1; longshot uses the shared threshold `<=5%`; missing evidence fails closed.
 - Migration `0011_driver_statistics_indexes.sql` adds only measured query indexes and is part of the production schema.
 
-### Build D - Trainer statistics - active feature branch
-- Branch: `feat/trainer-statistics-build-d`.
-- Scope follows the detailed statistics plan and reuses the shared core, market, volt-lane, handicap and rest semantics established by Builds A-C.
-- Planned rankings include win/top-three rates, wins, latest-30 placements-only form, annual/average earnings, auto/volt, volt-lane/tillägg, verified home/other track performance, distance profile, favorite/longshot, and first/second start after at least 60 days of rest.
-- Trainer home-track statistics must use verified official home-track observations rather than inferred location/name relationships.
-- No production migration/deployment or backfill mutation is part of Build D until separately released after review and explicit merge authorization.
+### Build D - Trainer statistics - merged and production-live
+- PR #86 is merged; merge commit `8069026fe1cd5fceb3a11ee1ab6d1e881d82fe2c`.
+- Final reviewed Build D head was `96db1f11fa28a9a358a3e87d3d69ab425081cbd1` with 426 tests passing and zero failures.
+- Trainer statistics reuse shared factual denominators and provide win/top-three rates, wins, latest-30 placements-only form, annual/average earnings, auto/volt, verified volt-lane/tillägg, home/other-track, distance-profile, favorite/longshot, and first/second start after at least 60 days of rest.
+- Trainer home-track statistics require an exact source-backed official external track ID mapping. A matching track name alone is not accepted as identity.
+- Migration `0012_trainer_statistics_indexes.sql` adds only the measured trainer query index.
+
+## Controlled AI programme
+### Build E - Repair controlled AI export flow - active PR #87
+- Branch: `feat/controlled-ai-build-e`, based on production-release main commit `ba3759732c9afd8687a31b749b00ede8f6b047ca`.
+- The existing provider-neutral analysis exchange remains the single AI pipeline; Build E repairs and hardens its export/import contract rather than introducing autonomous model execution in the Worker.
+- Every export already carries the immutable KentaurAI context envelope in `analysis_contexts`: `round_id`, all eight stored race identities, canonical race-entry identities and the exact context fingerprint are supplied by KentaurAI rather than entered by the user.
+- `pre_market` remains market-blind. Current betting percentages, odds, turnover and jackpot are excluded until that provider has a stored pre-market analysis.
+- Final analysis remains parent-bound. Its market context is generated only for an existing pre-market parent from the same provider and the final submission cannot rewrite stored probability/rank/ABCD strength.
+- Build E now replaces the older broad market reader in the final context with `verified-market-at-stop-v1`: betting and odds rows must be source-backed, belong to the exact round/race entry and be observed no later than the verified betting stop/current stable analysis cutoff.
+- Market context timestamps are stabilized to the current minute so an unchanged exported context has a usable deterministic fingerprint while newer market evidence still invalidates stale work on refresh.
+- New analysis submissions accept only explicitly allowed canonical producer providers (`openai` or `anthropic` at this version). Aliases are accepted for UI/export selection only; stored producer attribution is canonical.
+- `producer.model` is required, retained as the actual model identity and rejects control characters. Output filename guidance now includes provider, actual-model slug and phase without treating the filename as authoritative identity.
+- Server-side validation continues to reject changed fingerprints, wrong/missing parents, wrong/missing race-entry identities, post-deadline pre-market creation, invalid spike structure and changed content under an existing submission ID. Exact retries remain idempotent no-ops.
+- Synthetic Build E regression coverage explicitly covers OpenAI, Anthropic, unknown providers, stale fingerprints, missing entry IDs, wrong parents, post-race/pre-market blocking and idempotent retries.
+- No new D1 migration is required by Build E. No production deploy or backfill mutation is part of PR #87 before final review and explicit authorization.
 
 ## Data and analysis foundation
 - GitHub contains public code, schema, tests, configuration and synthetic fixtures only.

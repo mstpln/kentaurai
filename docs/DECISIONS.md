@@ -20,6 +20,11 @@
 7. Every context has a stable SHA-256 fingerprint. Stale context submissions are rejected. Submission IDs are immutable idempotency keys: exact retries are no-ops; revised content requires a new ID.
 8. Analysis exchange routes remain private under existing `ADMIN_TOKEN` authentication. Real analyses live in private D1 and are not committed to GitHub.
 9. Stored analyses/systems feed deterministic post-race scoring. A wrong outcome is evidence to review, not an automatic logic/model change; learning remains No change / Candidate / Confirmed.
+10. Build E treats each `analysis_contexts` object in the KentaurAI export as the immutable analysis envelope. KentaurAI supplies the canonical round ID, all eight race IDs, race-entry IDs and context fingerprint; the user and external AI must never invent or transform those identities.
+11. Final market context is generated only for a stored pre-market parent from the same canonical provider. Market exposure is source-backed, round/race-entry-bound and capped by the verified betting stop. An unchanged context uses a minute-stabilized market cutoff so its fingerprint is usable for a client round-trip without admitting future observations.
+12. Stored producer identity uses an explicit allowlist. This version permits canonical `openai` and `anthropic`; UI aliases such as ChatGPT/Claude are presentation conveniences and are not stored as producer-provider identities. `producer.model` must contain the actual model name and is validated independently from the output filename.
+13. Recommended analysis filenames are provider/model/stage descriptive only. They use a safe slug of the actual model when known, but the JSON `producer` fields remain authoritative and filenames never determine attribution.
+14. Build E requires fail-closed server validation for stale fingerprints, wrong parents, missing/cross-round canonical IDs, post-deadline pre-market creation and changed content under an existing submission ID. Exact retries remain idempotent and write nothing new.
 
 ## Interface direction
 1. Horse, trainer and driver remain primary detail entities, with V85/V86 system/performance history available in a dedicated Spel area.

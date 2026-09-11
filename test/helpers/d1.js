@@ -19,6 +19,18 @@ class StatementAdapter {
 class D1Adapter {
   constructor(db) { this.db = db; }
   prepare(sql) { return new StatementAdapter(this.db, sql); }
+  async batch(statements) {
+    this.db.exec('BEGIN');
+    try {
+      const results = [];
+      for (const statement of statements) results.push(await statement.run());
+      this.db.exec('COMMIT');
+      return results;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
 }
 
 export function createTestEnv() {

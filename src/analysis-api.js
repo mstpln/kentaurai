@@ -7,6 +7,9 @@ import {
   importAnalysisSubmission,
   listAnalysisSubmissions
 } from './analysis-exchange.js';
+import { importVerifiedFinalAnalysis } from './analysis-final-import.js';
+import { getVerifiedAnalysisMarket } from './analysis-market.js';
+import { normalizeAnalysisModel, normalizeAnalysisProvider } from './analysis-provider.js';
 
 const MAX_SUBMISSION_BYTES = 1024 * 1024;
 const MARKET_BLIND_FEATURE_VERSIONS = new Set(['form-v2', 'class-exposure-v2', 'development-v2']);
@@ -142,7 +145,13 @@ export async function prepareAnalysisContext(env, roundId, stage = 'pre_market',
   await assertRoundOpenForAnalysis(env, normalizedRoundId);
   const normalizedStage = String(stage || 'pre_market').toLowerCase();
   const rawContext = await getAnalysisContext(env, normalizedRoundId, normalizedStage, options);
-  const context = normalizedStage === 'pre_market' ? isolateMarketBlindContext(rawContext) : rawContext;
+  let context;
+  if (normalizedStage === 'pre_market') {
+    context = isolateMarketBlindContext(rawContext);
+  } else {
+    const verifiedMarket = await getVerifiedAnalysisMarket(env, normalizedRoundId, rawContext.generatedAt);
+    context = { ...rawContext, market: verifiedMarket };
+  }
   const contextFingerprint = await stableContextFingerprint(context);
   const common = {
     ...context,
@@ -170,6 +179,7 @@ export async function prepareAnalysisContext(env, roundId, stage = 'pre_market',
       strengthAssessmentIsCopiedFromParent: true,
       systemsMayBeSubmitted: true,
       exactlyThreeSpikeLegs: true,
+      marketDefinitionVersion: context.market.definitionVersion,
       note: 'Final submission supplies recommendations and systems only; KentaurAI copies the stored market-blind race analysis unchanged.'
     }
   };
@@ -226,8 +236,8 @@ export async function submitAnalysis(env, payload) {
   const roundId = requiredText(payload.round_id ?? payload.roundId, 'round_id', 200);
   const stage = requiredText(payload.stage, 'stage', 20).toLowerCase();
   const id = submissionId(payload.submission_id ?? payload.submissionId);
-  const provider = requiredText(payload.producer?.provider, 'producer.provider', 100);
-  const model = requiredText(payload.producer?.model, 'producer.model', 200);
+  const provider = normalizeAnalysisProvider(payload.producer?.provider);
+  const model = normalizeAnalysisModel(payload.producer?.model);
   const contextFingerprint = payload.context_fingerprint ?? payload.contextFingerprint;
   const clientPayloadDigest = await sha256(payload);
   const modelVersionId = stableId('analysis', roundId, id);
@@ -266,20 +276,23 @@ export async function submitAnalysis(env, payload) {
     const parent = await getAnalysisSubmission(env, roundId, parentSubmissionId);
     if (!parent || parent.stage !== 'pre_market') throw new Error('parent_submission_id must identify a stored pre-market submission for this round');
     if (parent.producer.provider !== provider) throw new Error('final submission producer.provider must match its pre-market parent');
-    await verifyContext(env, roundId, 'market', contextFingerprint, parentSubmissionId);
+    const verifiedContext = await verifyContext(env, roundId, 'market', contextFingerprint, parentSubmissionId);
     const systems = payload.systems ?? [];
     validateExactThreeSpikes(systems);
-    result = await importAnalysisSubmission(env, {
-      ...payload,
-      contract_version: ANALYSIS_SUBMISSION_VERSION,
-      submission_id: id,
-      round_id: roundId,
-      stage: 'final',
-      parent_submission_id: parentSubmissionId,
-      producer: { provider, model },
-      data_snapshot_at: new Date().toISOString(),
+    result = await importVerifiedFinalAnalysis(env, {
+      roundId,
+      submissionId: id,
+      parentSubmissionId,
+      provider,
+      model,
+      analysisVersion: payload.analysis_version ?? payload.analysisVersion ?? null,
+      contextFingerprint: verifiedContext.contextFingerprint,
+      dataSnapshotAt: verifiedContext.market.cutoff,
+      roundSummary: payload.round_summary ?? payload.roundSummary ?? null,
+      recommendations: payload.recommendations ?? null,
       legs: parentLegsForFinal(parent),
-      systems
+      systems,
+      market: verifiedContext.market
     });
   }
 

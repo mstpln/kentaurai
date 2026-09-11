@@ -1,4 +1,5 @@
 import { ANALYSIS_SUBMISSION_VERSION } from './analysis-exchange.js';
+import { analysisModelSlug } from './analysis-provider.js';
 
 const PROVIDERS = Object.freeze({
   openai: { key: 'openai', label: 'ChatGPT' },
@@ -11,10 +12,12 @@ function providerInfo(value) {
   return PROVIDERS[String(value || '').trim().toLowerCase()] || null;
 }
 
-export function recommendedAnalysisFilename(provider = 'ai') {
+export function recommendedAnalysisFilename(provider = 'ai', model = null, stage = null) {
   const info = providerInfo(provider);
-  const safe = info?.key || 'ai';
-  return `kentaurai-analysis_${safe}_ÅÅÅÅ-MM-DD.json`;
+  const safeProvider = info?.key || 'ai';
+  const safeModel = model ? analysisModelSlug(model) : 'ACTUAL-MODEL';
+  const safeStage = stage === 'pre_market' ? 'pre-market' : stage === 'final' ? 'final' : 'STAGE';
+  return `kentaurai-analysis_${safeProvider}_${safeModel}_${safeStage}_ÅÅÅÅ-MM-DD.json`;
 }
 
 export function buildAnalysisImportPrompt(provider = 'ai') {
@@ -34,7 +37,8 @@ VIKTIGT
 - För en slutanalys får legs INTE finnas i klientfilen. KentaurAI kopierar den lagrade marknadsblinda styrkeanalysen från förhandsanalysen.
 
 FILNAMN
-Namnge filen enligt: ${filename}
+Namnge filen enligt mönstret: ${filename}
+Ersätt ACTUAL-MODEL med en säker gemen filslug av den faktiska producer.model som gjort analysen, och STAGE med pre-market eller final. Exempel: kentaurai-analysis_openai_gpt-5-6-sol_pre-market_2026-09-12.json. Filnamnet får aldrig användas som källa för producer-identiteten; JSON-fälten är auktoritativa.
 
 KONTRAKT OCH PRODUCENT
 - contract_version måste vara exakt "${ANALYSIS_SUBMISSION_VERSION}".
