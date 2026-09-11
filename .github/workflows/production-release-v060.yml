@@ -57,15 +57,17 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: npm run db:migrate:remote
 
-      - name: Verify migration 0008 objects
+      - name: Verify migration 0008 schema without exposing production data
+        shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-        run: >-
-          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command
-          "SELECT street_address, postal_code, website_url FROM tracks LIMIT 0;
-          SELECT COUNT(*) AS stl_rows FROM race_stl_classifications;
-          SELECT COUNT(*) AS race_type_rows FROM race_type_classifications;"
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT street_address, postal_code, website_url FROM tracks LIMIT 0; SELECT name FROM sqlite_master WHERE type='table' AND name IN ('race_stl_classifications','race_type_classifications') ORDER BY name; SELECT name FROM d1_migrations WHERE name='0008_track_contact_metadata.sql';" > /tmp/migration-check.txt
+          grep -q 'race_stl_classifications' /tmp/migration-check.txt
+          grep -q 'race_type_classifications' /tmp/migration-check.txt
+          grep -q '0008_track_contact_metadata.sql' /tmp/migration-check.txt
 
       - name: Deploy Worker
         id: deploy
@@ -80,14 +82,14 @@ jobs:
           test -n "$worker_url" || { echo 'Could not determine workers.dev URL from Wrangler output'; exit 1; }
           echo "worker_url=$worker_url" >> "$GITHUB_OUTPUT"
 
-      - name: Verify deployed public health endpoint
+      - name: Verify deployed public health endpoint and exact app version
         shell: bash
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --retry 5 --retry-delay 2 "$WORKER_URL/health" > /tmp/health.json
-          test -s /tmp/health.json
+          node -e "const fs=require('fs'); const h=JSON.parse(fs.readFileSync('/tmp/health.json','utf8')); if(h.ok!==true||h.service!=='kentaurai-api'||h.version!=='0.6.0') process.exit(1);"
 
       - name: Verify private app login remains available
         shell: bash
@@ -116,4 +118,4 @@ jobs:
         run: |
           echo 'KentaurAI v0.6.0 production release completed.'
           echo "Worker: $WORKER_URL"
-          echo 'Migration 0008 verified; health, login and private analysis-prompt route checks passed.'
+          echo 'Migration 0008 schema, exact app version, health, login and private analysis-prompt route checks passed.'
