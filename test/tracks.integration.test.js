@@ -140,4 +140,4 @@ test('track app routes require a private app session and return track data when 
   assert.equal(response.status, 200);
   const stats = await response.json();
   assert.equal(stats.totals.starts, 4);
-}
+});
