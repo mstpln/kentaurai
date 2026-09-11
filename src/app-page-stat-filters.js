@@ -56,7 +56,7 @@ function filtersForCurrentEntity(){
 }
 function currentYears(){const year=new Date().getFullYear();return [year,year-1]}
 function periodOptions(){const [current,previous]=currentYears();return [['all','All data'],[String(current),current+' (i år)'],[String(previous),previous+' (förra året)']]}
-function raceScopeOptions(){return [['all','All data'],['stl','STL-lopp'],['weekday','Vardagstrav']]}
+function raceScopeOptions(){return [['all','All data'],['high_prize','Högre prissumma'],['weekday','Vardagstrav']]}
 function methodOptions(){return [['all','All data'],['auto','Auto'],['volt','Voltstart']]}
 function pills(options,active,attribute){return '<div class="stat-pills">'+options.map(([value,label])=>'<button type="button" class="stat-pill '+(String(active)===String(value)?'active':'')+'" '+attribute+'="'+esc(value)+'">'+esc(label)+'</button>').join('')+'</div>'}
 function globalFilters(filters){return '<div data-global-stat-filters="true"><div class="stat-period-bar"><span class="stat-filter-label">Period</span>'+pills(periodOptions(),filters.year,'data-stat-year')+'</div><div class="stat-period-bar"><span class="stat-filter-label">Loppnivå</span>'+pills(raceScopeOptions(),filters.raceScope,'data-race-scope')+'</div></div>'}
