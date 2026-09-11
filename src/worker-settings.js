@@ -7,6 +7,7 @@ import { getEnhancedGameHistoryDetail } from './routes/game-detail-display.js';
 import { getFilteredEntityStatBreakdowns } from './routes/entity-stat-breakdowns.js';
 import { getTrackDetail, getTrackHomeTrainers, getTrackLaneStats, listTracks } from './routes/tracks.js';
 import { getTrendFilterOptions, getTrendLeaderboard } from './statistics/trend.js';
+import { enhanceTrendHtml } from './trend-ui.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -46,7 +47,7 @@ export default {
     if (request.method === 'GET' && path === '/app') return redirectResponse('/app/');
 
     if (request.method === 'GET' && path === '/app/') {
-      if (appAuthConfigured(env) && await hasValidAppSession(request, env)) return htmlResponse(renderAppPage());
+      if (appAuthConfigured(env) && await hasValidAppSession(request, env)) return htmlResponse(enhanceTrendHtml(renderAppPage()));
       return canonicalizeAppRedirect(await worker.fetch(request, env));
     }
 
