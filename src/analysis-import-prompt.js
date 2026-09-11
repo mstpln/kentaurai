@@ -1,78 +1,72 @@
 import { ANALYSIS_SUBMISSION_VERSION } from './analysis-exchange.js';
 
-const PROVIDER_NAMES = Object.freeze({
-  openai: 'ChatGPT',
-  anthropic: 'Claude'
+const PROVIDERS = Object.freeze({
+  openai: { key: 'openai', label: 'ChatGPT' },
+  chatgpt: { key: 'openai', label: 'ChatGPT' },
+  anthropic: { key: 'anthropic', label: 'Claude' },
+  claude: { key: 'anthropic', label: 'Claude' }
 });
 
-function providerName(value) {
-  const key = String(value || '').trim().toLowerCase();
-  return PROVIDER_NAMES[key] || 'AI';
+function providerInfo(value) {
+  return PROVIDERS[String(value || '').trim().toLowerCase()] || null;
 }
 
 export function recommendedAnalysisFilename(provider = 'ai') {
-  const key = String(provider || 'ai').trim().toLowerCase();
-  const safe = key === 'openai' || key === 'anthropic' ? key : 'ai';
+  const info = providerInfo(provider);
+  const safe = info?.key || 'ai';
   return `kentaurai-analysis_${safe}_ÅÅÅÅ-MM-DD.json`;
 }
 
 export function buildAnalysisImportPrompt(provider = 'ai') {
-  const producer = providerName(provider);
+  const info = providerInfo(provider);
+  const providerKey = info?.key || '<openai eller anthropic enligt KentaurAI-underlaget>';
+  const providerLabel = info?.label || 'den AI som gjort analysen';
   const filename = recommendedAnalysisFilename(provider);
-  return `Du ska skapa en JSON-fil som kan importeras direkt i KentaurAI som en V85/V86-systemanalys.
+
+  return `Du ska skapa en ren JSON-fil som kan importeras direkt i KentaurAI som en V85/V86-analys.
 
 VIKTIGT
-- Returnera endast en ren JSON-fil. Ingen markdown, inga kodstaket och ingen förklarande text före eller efter JSON.
-- Gissa aldrig KentaurAI-identiteter eller fingerprints. round_id, race_id, race_entry_id, context_fingerprint och parent_submission_id måste kopieras från KentaurAI-underlaget eller från en tidigare KentaurAI-submission i denna konversation.
-- Om någon obligatorisk KentaurAI-identitet saknas: skapa inte en påhittad fil. Säg istället att användaren måste ladda upp rätt KentaurAI-underlag.
-- Använd null för verkligt okända frivilliga värden. Utelämna inte obligatoriska fält.
-- Ändra inte marknadsblind styrkebedömning i slutsteget.
+- Returnera endast giltig JSON. Ingen markdown, inga kodstaket och ingen förklarande text före eller efter JSON.
+- Gissa aldrig KentaurAI-identiteter eller fingerprints. round_id, race_id, race_entry_id, context_fingerprint och parent_submission_id måste kopieras exakt från rätt KentaurAI-underlag eller från en tidigare sparad KentaurAI-submission i denna konversation.
+- Om en obligatorisk KentaurAI-identitet saknas: skapa inte en påhittad fil. Be användaren om rätt KentaurAI-underlag.
+- Använd null för verkligt okända frivilliga värden. Hitta aldrig på råfakta.
+- data_snapshot_at får INTE finnas i klientfilen. KentaurAI sätter den tiden vid import.
+- För en slutanalys får legs INTE finnas i klientfilen. KentaurAI kopierar den lagrade marknadsblinda styrkeanalysen från förhandsanalysen.
 
 FILNAMN
 Namnge filen enligt: ${filename}
 
-KONTRAKT
-contract_version måste vara exakt: ${ANALYSIS_SUBMISSION_VERSION}
-producer.provider ska beskriva ${producer} utan att hitta på någon annan producent.
-producer.model ska vara den faktiska modell som gjort analysen om den är känd.
-submission_id måste vara unikt för just denna fil och endast innehålla bokstäver, siffror, punkt, understreck, kolon och bindestreck.
-data_snapshot_at måste vara en giltig ISO 8601-tidpunkt.
-context_fingerprint måste vara exakt det sha256-värde som hör till KentaurAI-underlaget.
+KONTRAKT OCH PRODUCENT
+- contract_version måste vara exakt "${ANALYSIS_SUBMISSION_VERSION}".
+- producer.provider måste vara exakt "${providerKey}" för ${providerLabel}.
+- producer.model är obligatoriskt och ska vara den faktiska modell som gjort analysen. Om den inte kan fastställas utan att gissa ska du inte skapa importfilen.
+- submission_id är en idempotensnyckel och måste vara unik för filens innehåll. Den får endast bestå av gemena a-z, siffror och enkla bindestreck, till exempel "anthropic-20260912-v85-final-1". Ingen punkt, inget understreck, inga versaler och inga dubbla/ledande/avslutande bindestreck.
+- context_fingerprint måste vara exakt sha256-värdet från det KentaurAI-underlag som hör till aktuellt steg.
 
-TVÅ ANALYSSTEG
-1. Förhandsanalys: stage = "pre_market".
-   - Marknadsblind styrkebedömning.
-   - parent_submission_id får inte finnas.
-   - systems måste vara en tom array.
-   - Alla aktiva, ej strukna hästar i samtliga 8 avdelningar måste finnas exakt en gång under predictions.
-2. Slutanalys/systemfil: stage = "final".
-   - Kräver parent_submission_id från en redan sparad förhandsanalys för samma omgång och samma AI-producent.
-   - win_probability, raw_rank och abcd_group måste vara exakt samma som i förhandsanalysen.
-   - System, värdebedömning och rekommendationer får läggas till här.
-   - Om parent_submission_id saknas i konversationen eller underlaget får du inte hitta på ett. Be då om rätt KentaurAI-underlag eller en importerad förhandsanalys först.
+DET FINNS TVÅ OLIKA KLIENTFORMAT
 
-OBLIGATORISK TOPPNIVÅSTRUKTUR
+1. FÖRHANDSANALYS — stage = "pre_market"
+Använd endast KentaurAI:s pre_market-context. Bedöm styrka marknadsblint innan streck/värde. Filen ska innehålla legs med alla aktiva, ej strukna hästar. parent_submission_id ska utelämnas eller vara null. systems ska vara en tom array.
+
+PRE_MARKET-STRUKTUR
 {
   "contract_version": "${ANALYSIS_SUBMISSION_VERSION}",
-  "submission_id": "<unik-id>",
+  "submission_id": "<unik-gemen-id-med-bindestreck>",
   "round_id": "<exakt KentaurAI round_id>",
-  "stage": "pre_market eller final",
-  "parent_submission_id": "<krävs endast för final>",
+  "stage": "pre_market",
   "producer": {
-    "provider": "<faktisk producent>",
+    "provider": "${providerKey}",
     "model": "<faktisk modell>"
   },
   "analysis_version": "<frivillig versionsetikett eller null>",
-  "data_snapshot_at": "<ISO 8601>",
-  "context_fingerprint": "sha256:<64 hextecken>",
+  "context_fingerprint": "sha256:<64 hextecken från pre_market-context>",
   "round_summary": "<kort sammanfattning eller null>",
   "recommendations": null,
   "legs": [ ... exakt 8 avdelningar ... ],
   "systems": []
 }
 
-VARJE AVDELNING
-Varje objekt i legs måste innehålla:
+VARJE AVDELNING I PRE_MARKET
 {
   "leg_number": 1,
   "race_id": "<exakt race_id från KentaurAI>",
@@ -82,11 +76,12 @@ Varje objekt i legs måste innehålla:
   "data_quality": "<kort kvalitetsbedömning eller unknown>",
   "predictions": [ ... ]
 }
+Regler:
 - legs måste innehålla exakt avdelning 1 till 8.
 - race_id måste motsvara rätt lagrat lopp för avdelningen.
 - predictions måste täcka varje ej struken start exakt en gång och får inte innehålla strukna hästar.
 
-VARJE HÄSTBEDÖMNING
+VARJE HÄSTBEDÖMNING I PRE_MARKET
 {
   "race_entry_id": "<exakt KentaurAI race_entry_id>",
   "win_probability": 0.0,
@@ -99,20 +94,47 @@ VARJE HÄSTBEDÖMNING
 }
 Regler:
 - win_probability anges som decimal 0–1, inte procent 0–100.
-- Summan av win_probability i varje avdelning måste vara exakt 1.0 inom avrundningstolerans.
+- Summan av win_probability i varje avdelning måste vara 1.0 inom KentaurAI:s avrundningstolerans.
 - raw_rank måste vara unik och obruten: 1, 2, 3 ... utan luckor eller dubbletter.
 - abcd_group måste vara A, B, C eller D och avser relativ vinststyrka, inte spelvärde.
 - uncertainty_low får inte överstiga win_probability.
 - uncertainty_high får inte understiga win_probability.
-- Skapa aldrig market_percent eller value_ratio. KentaurAI fyller/beräknar dessa själv.
+- Skapa aldrig market_percent eller value_ratio. KentaurAI hämtar/beräknar dessa själv.
 
-SYSTEM – ENDAST VID stage = "final"
-Varje system i systems ska ha:
+2. SLUTANALYS OCH SYSTEM — stage = "final"
+Använd endast KentaurAI:s market-context som skapats för en redan sparad pre_market-submission. Slutfilen får INTE innehålla legs, predictions, win_probability, raw_rank eller abcd_group. KentaurAI kopierar den tidigare marknadsblinda styrkeanalysen oförändrad.
+
+FINAL-STRUKTUR
 {
-  "system_id": "<unik etikett i filen, t.ex. main>",
-  "system_type": "main eller alternative",
-  "budget_sek": 0.0,
-  "line_price_sek": 0.0,
+  "contract_version": "${ANALYSIS_SUBMISSION_VERSION}",
+  "submission_id": "<ny-unik-gemen-id-med-bindestreck>",
+  "round_id": "<exakt KentaurAI round_id>",
+  "stage": "final",
+  "parent_submission_id": "<exakt lagrad pre_market submission_id>",
+  "producer": {
+    "provider": "${providerKey}",
+    "model": "<faktisk modell>"
+  },
+  "analysis_version": "<frivillig versionsetikett eller null>",
+  "context_fingerprint": "sha256:<64 hextecken från market-context för parent_submission_id>",
+  "round_summary": "<kort slutlig sammanfattning eller null>",
+  "recommendations": {
+    "summary": "<spelidé, värdebedömning och reservationer>"
+  },
+  "systems": [ ... ]
+}
+Regler:
+- parent_submission_id är obligatorisk och måste identifiera en redan sparad pre_market-submission för samma omgång.
+- producer.provider måste vara samma canonical provider som i förhandsanalysen.
+- context_fingerprint ska komma från market-context som hör till just denna parent_submission_id.
+- legs får inte finnas i final-filen.
+
+VARJE SYSTEM — ENDAST I FINAL
+{
+  "system_id": "<unik etikett i filen, till exempel main>",
+  "system_type": "main",
+  "budget_sek": 200,
+  "line_price_sek": null,
   "risk_profile": null,
   "notes": null,
   "selections": [ ... ]
@@ -125,25 +147,27 @@ Varje selection ska ha:
   "selection_reason": "<kort motivering eller null>"
 }
 Systemregler:
+- system_type måste vara "main" eller "alternative".
 - Alla 8 avdelningar måste ha minst en vald häst.
-- Varje system måste ha EXAKT 3 spikavdelningar.
-- En spikavdelning måste ha exakt en vald häst och den selectionen ska ha is_spike = true.
+- Varje V85/V86-system måste ha EXAKT 3 spikavdelningar i tre olika avdelningar.
+- Varje spikavdelning måste ha exakt en vald häst och den selectionen ska ha is_spike = true.
+- Varje avdelning med exakt en vald häst är en spik och måste markeras is_spike = true.
 - Ingen flervalsavdelning får markeras som spik.
 - Samma race_entry_id får inte förekomma två gånger i samma avdelning.
 - Radantalet är produkten av antalet valda hästar i samtliga 8 avdelningar.
-- Om line_price_sek anges måste budget_sek vara exakt radantal × line_price_sek.
-- Skapa inte own_probability eller market_percent i systemets selections. KentaurAI fyller dessa från den sparade analysen och marknaden.
+- budget_sek är obligatorisk och måste vara större än 0. För huvudsystemet är normal målbudget 150–250 SEK om inget annat uttryckligen beslutats.
+- line_price_sek är frivillig/null. Om den anges måste budget_sek vara exakt radantal × line_price_sek inom KentaurAI:s tolerans.
+- Skapa inte own_probability eller market_percent i selections. KentaurAI fyller dessa från den sparade analysen och marknaden.
 
 KONTROLLERA INNAN FILEN SKAPAS
-1. contract_version är exakt ${ANALYSIS_SUBMISSION_VERSION}.
-2. round_id, alla race_id, alla race_entry_id och context_fingerprint kommer från KentaurAI-underlaget och är inte gissade.
-3. Det finns exakt 8 avdelningar.
-4. Varje ej struken häst finns exakt en gång i predictions för sitt lopp.
-5. Varje avdelnings win_probability summerar till 1.0.
-6. raw_rank är obruten från 1 till antal aktiva hästar.
-7. Vid final: parent_submission_id finns och styrkevärdena matchar förhandsanalysen exakt.
-8. Varje system täcker alla 8 avdelningar och har exakt 3 spikar.
-9. budget_sek, line_price_sek och systemets urval är matematiskt konsekventa.
-10. JSON innehåller inga förbjudna AI-skapade market_percent, value_ratio eller own_probability.
-11. Filen innehåller endast giltig JSON och inget annat.`;
+1. contract_version är exakt "${ANALYSIS_SUBMISSION_VERSION}".
+2. submission_id följer strikt formatet gemena a-z/siffror med enkla bindestreck.
+3. round_id, race_id, race_entry_id, context_fingerprint och eventuell parent_submission_id är kopierade från rätt KentaurAI-context och inte gissade.
+4. data_snapshot_at finns inte i filen.
+5. PRE_MARKET: exakt 8 legs; varje aktiv häst exakt en gång; sannolikheter summerar till 1.0; raw_rank är obruten; systems är tom.
+6. FINAL: parent_submission_id finns; provider matchar parent; context_fingerprint kommer från rätt market-context; legs finns inte.
+7. Varje system täcker alla 8 avdelningar och har exakt 3 en-hästs-spikar.
+8. budget_sek, eventuell line_price_sek och systemets urval är matematiskt konsekventa.
+9. JSON innehåller inga AI-skapade market_percent, value_ratio eller own_probability.
+10. Filen innehåller endast giltig JSON och inget annat.`;
 }
