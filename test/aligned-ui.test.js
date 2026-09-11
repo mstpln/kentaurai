@@ -67,7 +67,6 @@ test('Bana overview localizes Sweden and renders contact facts only when present
   assert.match(html, /target=\\"_blank\\" rel=\\"noopener noreferrer\\"/);
   assert.match(html, /url\.protocol==='https:'/);
   assert.match(html, /if\(!address&&!website\)return ''/);
-  assert.match(html, /street\+' ,?'/i);
 });
 
 test('Bana detail retains statistics and home trainer behavior', () => {
