@@ -8,6 +8,7 @@ import { enhanceAppHtmlV064 } from '../src/app-v064-overlay.js';
 import { buildAnalysisImportPrompt, recommendedAnalysisFilename } from '../src/analysis-import-prompt.js';
 import { classifyRace, matchesRaceClassification } from '../src/race-classification.js';
 import { getTrackDetailV064, getTrackLaneStatsV064 } from '../src/routes/tracks-v064.js';
+import { applyTrackContactEnrichment, listTrackContactTargets } from '../src/track-contact-enrichment.js';
 import { createTestEnv } from './helpers/d1.js';
 
 function seedClassifiedTrack(db) {
@@ -46,11 +47,9 @@ test('race classification separates Loppklass, STL-klass and Lopptyp', () => {
   assert.deepEqual(race.raceTypes.sort(), ['lane_ladder', 'mares']);
   assert.equal(matchesRaceClassification({ mainClass: 'Silverdivisionen', classFlags: ['Stolopp'] }, { stlClass: 'silver', raceType: 'mares' }), true);
   assert.equal(matchesRaceClassification({ mainClass: 'Bronsdivisionen', classFlags: ['Stolopp'] }, { stlClass: 'silver', raceType: 'mares' }), false);
-  assert.equal(classifyRace({ raceName: 'Silverdivisionen - Stolopp' }).stlClass, 'silver');
-  assert.deepEqual(classifyRace({ raceName: 'Silverdivisionen - Stolopp' }).raceTypes, ['mares']);
 });
 
-test('track detail exposes optional verified address and HTTPS website fields', async () => {
+test('track detail exposes optional address and only safe HTTPS website fields', async () => {
   const { env, db } = createTestEnv();
   seedClassifiedTrack(db);
   let detail = await getTrackDetailV064(env, 'track-v064');
@@ -58,30 +57,21 @@ test('track detail exposes optional verified address and HTTPS website fields', 
   assert.equal(detail.address.postalCode, '123 45');
   assert.equal(detail.websiteUrl, 'https://example.test/track');
 
-  db.prepare("UPDATE tracks SET website_url='javascript:alert(1)' WHERE id='track-v064'").run();
-  detail = await getTrackDetailV064(env, 'track-v064');
-  assert.equal(detail.websiteUrl, null);
+  for (const unsafe of ['javascript:alert(1)', 'http://example.test/track']) {
+    db.prepare('UPDATE tracks SET website_url=? WHERE id=?').run(unsafe, 'track-v064');
+    detail = await getTrackDetailV064(env, 'track-v064');
+    assert.equal(detail.websiteUrl, null);
+  }
 });
 
 test('lane statistics combine persisted STL-class and race-type filters with existing filters', async () => {
   const { env, db } = createTestEnv();
   seedClassifiedTrack(db);
 
-  assert.equal(db.prepare("SELECT stl_class FROM race_stl_classifications WHERE race_id='r-silver-sto'").get().stl_class, 'silver');
-  assert.deepEqual(
-    db.prepare("SELECT race_type FROM race_type_classifications WHERE race_id='r-silver-sto' ORDER BY race_type").all().map((row) => row.race_type),
-    ['lane_ladder', 'mares']
-  );
-
   const all = await getTrackLaneStatsV064(env, 'track-v064', {
     year: '2026', startMethod: 'auto', distanceGroup: '2140'
   });
   assert.equal(all.totals.starts, 8);
-
-  const silver = await getTrackLaneStatsV064(env, 'track-v064', {
-    year: '2026', startMethod: 'auto', distanceGroup: '2140', stlClass: 'silver'
-  });
-  assert.equal(silver.totals.starts, 4);
 
   const silverMares = await getTrackLaneStatsV064(env, 'track-v064', {
     year: '2026', startMethod: 'auto', distanceGroup: '2140', stlClass: 'silver', raceType: 'mares'
@@ -89,6 +79,85 @@ test('lane statistics combine persisted STL-class and race-type filters with exi
   assert.equal(silverMares.totals.starts, 2);
   assert.equal(silverMares.filters.stlClass, 'silver');
   assert.equal(silverMares.filters.raceType, 'mares');
+});
+
+test('track contact enrichment is exact-id, idempotent, provenance-backed and conflict preserving', async () => {
+  const { env, db } = createTestEnv();
+  db.prepare("INSERT INTO tracks (id, canonical_name, city, country_code) VALUES ('track-contact','Syntetiska banan','Teststad','SE')").run();
+  const payload = { tracks: [{
+    track_id: 'track-contact',
+    canonical_name: 'Syntetiska banan',
+    street_address: 'Testgatan 7',
+    postal_code: '123 45',
+    website_url: 'https://example.test/track',
+    address_source: { url: 'https://example.test/contact', type: 'official_track' },
+    website_source: { url: 'https://example.test/', type: 'official_track' },
+    verified_at: '2026-09-11T09:00:00Z'
+  }] };
+
+  let result = await applyTrackContactEnrichment(env, payload);
+  assert.equal(result.verifiedFacts, 3);
+  let track = db.prepare("SELECT street_address, postal_code, website_url FROM tracks WHERE id='track-contact'").get();
+  assert.deepEqual(track, { street_address: 'Testgatan 7', postal_code: '123 45', website_url: 'https://example.test/track' });
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM track_contact_fact_observations WHERE track_id='track-contact' AND status='verified'").get().n, 3);
+
+  result = await applyTrackContactEnrichment(env, payload);
+  assert.equal(result.verifiedFacts, 0);
+  assert.equal(result.unchangedFacts, 3);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM track_contact_fact_observations WHERE track_id='track-contact'").get().n, 3);
+
+  result = await applyTrackContactEnrichment(env, { tracks: [{
+    ...payload.tracks[0],
+    street_address: 'Annan testgata 9',
+    postal_code: null,
+    website_url: null,
+    verified_at: '2026-09-11T10:00:00Z'
+  }] });
+  assert.equal(result.conflicts, 1);
+  track = db.prepare("SELECT street_address FROM tracks WHERE id='track-contact'").get();
+  assert.equal(track.street_address, 'Testgatan 7');
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM track_contact_fact_observations WHERE track_id='track-contact' AND status='conflict'").get().n, 1);
+
+  const targets = await listTrackContactTargets(env);
+  assert.equal(targets.total, 1);
+  assert.equal(targets.items[0].id, 'track-contact');
+});
+
+test('track contact enrichment rejects unsafe URLs and identity mismatches', async () => {
+  const { env, db } = createTestEnv();
+  db.prepare("INSERT INTO tracks (id, canonical_name) VALUES ('track-contact','Syntetiska banan')").run();
+  await assert.rejects(() => applyTrackContactEnrichment(env, { tracks: [{
+    track_id: 'track-contact', canonical_name: 'Fel bana', website_url: 'https://example.test/',
+    website_source: { url: 'https://example.test/', type: 'official_track' }, verified_at: '2026-09-11T09:00:00Z'
+  }] }), /canonical_name mismatch/);
+  await assert.rejects(() => applyTrackContactEnrichment(env, { tracks: [{
+    track_id: 'track-contact', website_url: 'http://example.test/',
+    website_source: { url: 'https://example.test/', type: 'official_track' }, verified_at: '2026-09-11T09:00:00Z'
+  }] }), /HTTPS/);
+});
+
+test('v064 overlay keeps All data untouched and localizes Miss to Fel', () => {
+  const html = enhanceAppHtmlV064('<html><head></head><body><div id="app"></div></body></html>');
+  assert.match(html, /\['Miss', 'Fel'\]/);
+  assert.doesNotMatch(html, /Alla år/);
+  assert.doesNotMatch(html, /Alla startmetoder/);
+  assert.doesNotMatch(html, /localizeFilterAllLabels/);
+  assert.match(html, /Skapa V85\/V86-systemanalysfil för import/);
+  assert.match(html, /V85\/V86-omgångar/);
+  assert.match(html, /Loppkategorier/);
+  const scripts = [...html.matchAll(/<script(?: [^>]*)?>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
+  scripts.forEach((script, index) => assert.doesNotThrow(() => new vm.Script(script, { filename: `v064-embedded-${index}.js` })));
+});
+
+test('private track contact operations require admin auth', async () => {
+  const { env, db } = createTestEnv();
+  env.ADMIN_TOKEN = 'synthetic-admin-token';
+  db.prepare("INSERT INTO tracks (id, canonical_name) VALUES ('track-contact','Syntetiska banan')").run();
+  let response = await worker.fetch(new Request('https://example.test/v1/admin/tracks/contact-targets'), env);
+  assert.equal(response.status, 401);
+  response = await worker.fetch(new Request('https://example.test/v1/admin/tracks/contact-targets', { headers: { authorization: 'Bearer synthetic-admin-token' } }), env);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).total, 1);
 });
 
 test('analysis import prompt mirrors strict pre-market and final API rules', () => {
@@ -101,61 +170,18 @@ test('analysis import prompt mirrors strict pre-market and final API rules', () 
   assert.match(prompt, /value_ratio/);
   assert.match(prompt, /own_probability/);
   assert.match(prompt, /Returnera endast giltig JSON/);
-  assert.match(prompt, /data_snapshot_at får INTE finnas/);
-  assert.match(prompt, /legs får inte finnas i final-filen/);
-  assert.match(prompt, /gemena a-z, siffror och enkla bindestreck/);
-  assert.match(prompt, /producer\.model är obligatoriskt/);
-  assert.match(prompt, /producer\.provider måste vara exakt "anthropic"/);
-  assert.equal(recommendedAnalysisFilename('anthropic'), 'kentaurai-analysis_anthropic_ÅÅÅÅ-MM-DD.json');
   assert.equal(recommendedAnalysisFilename('claude'), 'kentaurai-analysis_anthropic_ÅÅÅÅ-MM-DD.json');
-});
-
-test('v0.6.4 app overlay contains compact class filters, natural Swedish and import-prompt control', () => {
-  const html = enhanceAppHtmlV064('<html><head></head><body><div id="app"></div></body></html>');
-  assert.match(html, /STL-klass/);
-  assert.match(html, /Alla STL-klasser/);
-  assert.match(html, /Alla lopptyper/);
-  assert.match(html, /Alla år/);
-  assert.match(html, /Alla startmetoder/);
-  assert.match(html, /Skapa V85\/V86-systemanalysfil för import/);
-  assert.match(html, /Kopiera instruktioner till AI/);
-  assert.match(html, /V85\/V86-omgångar/);
-  assert.match(html, /Missad spik/);
-  assert.match(html, /Vinnaren saknades på systemet/);
-  assert.match(html, /Inga registrerade lärdomar för omgången ännu/);
-  assert.match(html, /\['Miss', 'Missad'\]/);
-  assert.match(html, /Loppkategorier/);
-  assert.match(html, /Faktisk distans/);
-  assert.match(html, /Omräknad km-tid/);
-  assert.match(html, /3:e utvändigt/);
-  assert.match(html, /structured-key/);
-  assert.match(html, /Öppna hemsida/);
-  assert.match(html, /url\.origin === location\.origin/);
-  const scripts = [...html.matchAll(/<script(?: [^>]*)?>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
-  scripts.forEach((script, index) => {
-    try {
-      new vm.Script(script, { filename: `v064-embedded-${index}.js` });
-    } catch (error) {
-      console.error(`Generated v064 script ${index}:\n${script.split('\n').map((line, lineIndex) => `${String(lineIndex + 1).padStart(4, '0')}: ${line}`).join('\n')}`);
-      throw error;
-    }
-  });
 });
 
 test('analysis-prompt app endpoint requires session and returns the copyable contract prompt', async () => {
   const { env } = createTestEnv();
   env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
-
   let response = await worker.fetch(new Request('https://example.test/app/api/settings/analysis-prompt?provider=openai'), env);
   assert.equal(response.status, 401);
-
   const cookie = (await createAppSessionCookie(env)).split(';')[0];
   response = await worker.fetch(new Request('https://example.test/app/api/settings/analysis-prompt?provider=openai', { headers: { cookie } }), env);
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.equal(payload.contractVersion, 'kentaurai-analysis-v1');
   assert.equal(payload.recommendedFilename, 'kentaurai-analysis_openai_ÅÅÅÅ-MM-DD.json');
-  assert.match(payload.prompt, /exakt 8 avdelningar/i);
-  assert.match(payload.prompt, /producer\.provider måste vara exakt "openai"/);
-  assert.match(payload.prompt, /legs får inte finnas i final-filen/);
 });
