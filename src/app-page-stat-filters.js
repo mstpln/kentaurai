@@ -60,14 +60,14 @@ function raceScopeOptions(){return [['all','All data'],['high_prize','Högre pri
 function methodOptions(){return [['all','All data'],['auto','Auto'],['volt','Voltstart']]}
 function pills(options,active,attribute){return '<div class="stat-pills">'+options.map(([value,label])=>'<button type="button" class="stat-pill '+(String(active)===String(value)?'active':'')+'" '+attribute+'="'+esc(value)+'">'+esc(label)+'</button>').join('')+'</div>'}
 function globalFilters(filters){return '<div data-global-stat-filters="true"><div class="stat-period-bar"><span class="stat-filter-label">Period</span>'+pills(periodOptions(),filters.year,'data-stat-year')+'</div><div class="stat-period-bar"><span class="stat-filter-label">Loppnivå</span>'+pills(raceScopeOptions(),filters.raceScope,'data-race-scope')+'</div></div>'}
-function summaryStats(detail){
-  const s=detail.stats||{};
-  const gallopRate=s.resultStarts?Number(s.gallops||0)/Number(s.resultStarts):null;
-  return dataSection('Resultat',[['Starter med resultat',s.resultStarts],['Vinster',s.wins],['Andraplatser',s.seconds],['Tredjeplatser',s.thirds],['Topp 3',s.top3],['Vinstprocent',pct(s.winRate)],['Topp 3-procent',pct(s.top3Rate)],['Prispengar',money(s.prizeSek)]])+dataSection('Galopp & diskvalifikation',[['Galopper',s.gallops],['Galopp %',pct(gallopRate)],['Diskvalifikationer',s.disqualifications]]);
+function summaryStatsFrom(s){
+  const stats=s||{};
+  const gallopRate=stats.gallopRate!=null?stats.gallopRate:(stats.resultStarts?Number(stats.gallops||0)/Number(stats.resultStarts):null);
+  return dataSection('Resultat',[['Starter med resultat',stats.resultStarts],['Vinster',stats.wins],['Andraplatser',stats.seconds],['Tredjeplatser',stats.thirds],['Topp 3',stats.top3],['Vinstprocent',pct(stats.winRate)],['Topp 3-procent',pct(stats.top3Rate)],['Prispengar',money(stats.prizeSek)]])+dataSection('Galopp & diskvalifikation',[['Galopper',stats.gallops],['Galopp %',pct(gallopRate)],['Diskvalifikationer',stats.disqualifications]]);
 }
 statsView=function(detail){
   const filters=filtersForCurrentEntity();
-  return '<div class="data-groups">'+summaryStats(detail)+'<div class="entity-stat-filter-shell">'+globalFilters(filters)+'<div id="entityStatTables" class="breakdown-grid entity-filter-grid"><div class="card stat-filter-loading">Läser statistik…</div></div></div></div>';
+  return '<div class="data-groups"><div id="entityStatSummary">'+summaryStatsFrom(detail.stats||{})+'</div><div class="entity-stat-filter-shell">'+globalFilters(filters)+'<div id="entityStatTables" class="breakdown-grid entity-filter-grid"><div class="card stat-filter-loading">Läser statistik…</div></div></div></div>';
 };
 function formatRate(value){return value==null?'—':pct(value)}
 function formatLabel(kind,label){
@@ -102,6 +102,8 @@ async function renderStatFilters(){
     const query=new URLSearchParams({year:filters.year,race_scope:filters.raceScope,distance_start_method:filters.distanceMethod,track_start_method:filters.trackMethod});
     const data=await api('/entities/'+encodeURIComponent(state.detail.page)+'/'+encodeURIComponent(state.detail.id)+'/stat-breakdowns?'+query.toString());
     if(token!==statRequestToken||key!==entityStatKey()||state.tab!=='stats')return;
+    const summary=document.getElementById('entityStatSummary');
+    if(summary)summary.innerHTML=summaryStatsFrom(data.summary||{});
     const groupedDistances=groupDistanceRows(data.distances||[]);
     target.innerHTML=statTable('Startmetod','method',data.startMethods||[],'all')+statTable('Distans','distance',groupedDistances,filters.distanceMethod)+statTable('Bana','track',data.tracks||[],filters.trackMethod);
     bindFilterButtons();
