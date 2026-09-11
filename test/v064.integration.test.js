@@ -4,7 +4,10 @@ import vm from 'node:vm';
 
 import worker from '../src/worker-v064.js';
 import { createAppSessionCookie } from '../src/app-auth.js';
-import { buildAnalysisImportInstructions } from '../src/analysis-import-instructions.js';
+import {
+  ANALYSIS_IMPORT_CONTRACT_VERSION,
+  buildAnalysisImportInstructions
+} from '../src/analysis-import-instructions.js';
 import {
   classifyRaceTypes,
   classifyStlClass,
@@ -13,11 +16,21 @@ import {
 } from '../src/routes/track-enhancements.js';
 import { createTestEnv } from './helpers/d1.js';
 import { v064Script } from '../src/ui-v064.js';
+import { v064RacePresentationScript } from '../src/ui-v064-race-presentation.js';
+
+function browserScript(markup) {
+  const match = String(markup).match(/<script[^>]*>([\s\S]*)<\/script>/);
+  assert.ok(match, 'expected an embedded browser script');
+  return match[1];
+}
 
 function seed(db) {
   db.prepare(`INSERT INTO tracks
     (id, canonical_name, city, country_code, street_address, postal_code, website_url)
     VALUES ('track-v064','Syntetiska Travbanan','Teststad','SE','Testvägen 1','123 45','https://example.test/track')`).run();
+  db.prepare(`INSERT INTO tracks
+    (id, canonical_name, city, country_code, website_url)
+    VALUES ('track-unsafe','Osäker Testbana','Teststad','SE','javascript:alert(1)')`).run();
 
   const races = [
     ['race-silver-mares','2026-01-01',2140,'auto','Silverdivisionen',JSON.stringify(['Stolopp'])],
@@ -56,7 +69,7 @@ test('race classification separates STL class from race type', () => {
   assert.deepEqual(classifyRaceTypes({ main_class: 'Silverdivisionen', class_flags_json: '["Stolopp","Spårtrappa"]' }).sort(), ['lane_ladder','mares']);
 });
 
-test('enhanced track detail exposes nullable address and website metadata', async () => {
+test('enhanced track detail exposes nullable metadata and rejects unsafe website protocols', async () => {
   const { env, db } = createTestEnv();
   seed(db);
   const detail = await getEnhancedTrackDetail(env, 'track-v064');
@@ -64,6 +77,8 @@ test('enhanced track detail exposes nullable address and website metadata', asyn
   assert.equal(detail.address.postalCode, '123 45');
   assert.equal(detail.address.city, 'Teststad');
   assert.equal(detail.websiteUrl, 'https://example.test/track');
+  const unsafe = await getEnhancedTrackDetail(env, 'track-unsafe');
+  assert.equal(unsafe.websiteUrl, null);
 });
 
 test('lane stats combine track period method distance STL class and race type', async () => {
@@ -87,8 +102,9 @@ test('lane stats combine track period method distance STL class and race type', 
   assert.equal(impossibleCombination.totals.starts, 0);
 });
 
-test('analysis import instructions describe the exact KentaurAI contract and never encourage invented ids', () => {
+test('analysis import instructions describe the validator-backed KentaurAI contract and never encourage invented ids', () => {
   const prompt = buildAnalysisImportInstructions();
+  assert.equal(ANALYSIS_IMPORT_CONTRACT_VERSION, 'kentaurai-analysis-v1');
   assert.match(prompt, /kentaurai-analysis-v1/);
   assert.match(prompt, /EXAKT TRE spikavdelningar/);
   assert.match(prompt, /Summan av win_probability.*1\.0/s);
@@ -98,15 +114,16 @@ test('analysis import instructions describe the exact KentaurAI contract and nev
   assert.match(prompt, /ren JSON-fil/);
 });
 
-test('v064 browser overlay is syntactically valid and contains aligned labels and filter choices', () => {
-  const script = v064Script.replace(/^<script[^>]*>/, '').replace(/<\/script>$/, '');
-  assert.doesNotThrow(() => new vm.Script(script));
+test('v064 browser overlays are syntactically valid and contain aligned Swedish labels and filter choices', () => {
+  assert.doesNotThrow(() => new vm.Script(browserScript(v064Script)));
+  assert.doesNotThrow(() => new vm.Script(browserScript(v064RacePresentationScript)));
   assert.match(v064Script, /Skapa V85\/V86-systemanalysfil för import/);
   assert.match(v064Script, /Alla STL-klasser/);
   assert.match(v064Script, /Alla lopptyper/);
   assert.match(v064Script, /V85\/V86-omgångar/);
   assert.match(v064Script, /Miss:'Fel'/);
   assert.match(v064Script, /Klass:'Loppklass'/);
+  assert.match(v064RacePresentationScript, /Lopptyp/);
 });
 
 test('v064 private endpoints require session and return filtered track data and prompt', async () => {
@@ -121,7 +138,7 @@ test('v064 private endpoints require session and return filtered track data and 
   response = await worker.fetch(new Request('https://example.test/app/api/settings/analysis-import-instructions', { headers: { cookie } }), env);
   assert.equal(response.status, 200);
   const instructions = await response.json();
-  assert.equal(instructions.contractVersion, 'kentaurai-analysis-v1');
+  assert.equal(instructions.contractVersion, ANALYSIS_IMPORT_CONTRACT_VERSION);
   assert.match(instructions.prompt, /parent_submission_id/);
 
   response = await worker.fetch(new Request('https://example.test/app/api/tracks/track-v064/lane-stats?year=2026&start_method=auto&distance_group=2140&stl_class=silver&race_type=mares', { headers: { cookie } }), env);
