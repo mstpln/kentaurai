@@ -106,7 +106,7 @@ test('v0.6.4 app overlay contains compact class filters, Swedish labels and impo
   assert.match(html, /Omräknad km-tid/);
   assert.match(html, /Öppna hemsida/);
   const scripts = [...html.matchAll(/<script(?: [^>]*)?>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
-  for (const script of scripts) assert.doesNotThrow(() => new vm.Script(script));
+  scripts.forEach((script, index) => new vm.Script(script, { filename: `v064-embedded-${index}.js` }));
 });
 
 test('analysis-prompt app endpoint requires session and returns the copyable contract prompt', async () => {
