@@ -2,12 +2,14 @@ import worker from './worker-aligned-final.js';
 import { appAuthConfigured, hasValidAppSession } from './app-auth.js';
 import { requireAdmin } from './auth.js';
 import { enhanceAppHtmlV064 } from './app-v064-overlay.js';
+import { enhanceDriverStatisticsHtml } from './driver-statistics-ui.js';
 import { buildAnalysisImportPrompt, recommendedAnalysisFilename } from './analysis-import-prompt.js';
 import { ANALYSIS_SUBMISSION_VERSION } from './analysis-exchange.js';
 import { getTrackDetailV064, getTrackLaneStatsV064 } from './routes/tracks-v064.js';
 import { applyTrackContactEnrichment, listTrackContactTargets } from './track-contact-enrichment.js';
 import { syncOnePendingHorseStartPointSource } from './import/official-start-points.js';
 import { getHorseDetailStatistics, getHorseRankings } from './statistics/horses-complete.js';
+import { getDriverDetailStatistics, getDriverFilterOptions, getDriverRankings } from './statistics/drivers.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -30,7 +32,7 @@ async function enhancedAppResponse(request, response) {
   if (request.method !== 'GET' || new URL(request.url).pathname !== '/app/') return response;
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('text/html')) return response;
-  const body = enhanceAppHtmlV064(await response.text());
+  const body = enhanceDriverStatisticsHtml(enhanceAppHtmlV064(await response.text()));
   const headers = new Headers(response.headers);
   headers.delete('content-length');
   return new Response(body, { status: response.status, statusText: response.statusText, headers });
@@ -47,6 +49,21 @@ function horseStatsOptions(url) {
     distanceGroup: url.searchParams.get('distance_group'),
     sex: url.searchParams.get('sex'),
     age: url.searchParams.get('age'),
+    minStarts: url.searchParams.get('min_starts')
+  };
+}
+
+function driverStatsOptions(url) {
+  return {
+    period: url.searchParams.get('period'),
+    raceScope: url.searchParams.get('race_scope'),
+    trackId: url.searchParams.get('track_id'),
+    raceType: url.searchParams.get('race_type'),
+    breedType: url.searchParams.get('breed_type'),
+    startMethod: url.searchParams.get('start_method'),
+    distanceGroup: url.searchParams.get('distance_group'),
+    voltLane: url.searchParams.get('volt_lane'),
+    handicapM: url.searchParams.get('handicap_m'),
     minStarts: url.searchParams.get('min_starts')
   };
 }
@@ -106,6 +123,41 @@ export default {
       if (denied) return denied;
       try {
         const data = await getHorseDetailStatistics(env, decodeURIComponent(horseStatisticsMatch[1]), horseStatsOptions(url));
+        return data ? json(data) : json({ error: 'not_found' }, 404);
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    if (request.method === 'GET' && path === '/app/api/drivers/statistics/filter-options') {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        return json(await getDriverFilterOptions(env));
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    if (request.method === 'GET' && path === '/app/api/drivers/statistics') {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        return json(await getDriverRankings(env, driverStatsOptions(url)));
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    const driverStatisticsMatch = path.match(/^\/app\/api\/drivers\/([^/]+)\/statistics$/);
+    if (request.method === 'GET' && driverStatisticsMatch) {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        const data = await getDriverDetailStatistics(env, decodeURIComponent(driverStatisticsMatch[1]), driverStatsOptions(url));
         return data ? json(data) : json({ error: 'not_found' }, 404);
       } catch (error) {
         console.error(error);
