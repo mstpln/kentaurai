@@ -1,7 +1,8 @@
 import {
   addCanonicalRaceScopeCondition,
   canonicalStartMethodSql,
-  monteRaceCondition
+  monteRaceCondition,
+  trendDateWindow
 } from './core.js';
 
 const DISTANCE_TOLERANCE_M = 100;
@@ -9,15 +10,9 @@ const DISTANCE_STANDARDS = [640, 1640, 2140, 2640, 3140, 3640, 4140];
 
 function addEligibilityFilters(conditions, bindings, filters) {
   if (filters.period !== 'all') {
-    const periodDays = filters.period === '2w' ? 13 : filters.period === '4w' ? 27 : null;
-    if (periodDays != null) {
-      conditions.push(`r.race_date >= date(?, '-${periodDays} days')`, 'r.race_date <= ?');
-      bindings.push(filters.asOfDate, filters.asOfDate);
-    } else {
-      const months = filters.period === '3m' ? 3 : filters.period === '6m' ? 6 : 12;
-      conditions.push(`r.race_date >= date(?, '-${months} months')`, 'r.race_date <= ?');
-      bindings.push(filters.asOfDate, filters.asOfDate);
-    }
+    const window = trendDateWindow(filters.period, filters.asOfDate);
+    conditions.push('r.race_date >= ?', 'r.race_date <= ?');
+    bindings.push(window.startDate, window.endDate);
   }
   if (filters.trackId) {
     conditions.push('r.track_id = ?');
