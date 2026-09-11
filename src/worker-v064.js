@@ -6,6 +6,7 @@ import { buildAnalysisImportPrompt, recommendedAnalysisFilename } from './analys
 import { ANALYSIS_SUBMISSION_VERSION } from './analysis-exchange.js';
 import { getTrackDetailV064, getTrackLaneStatsV064 } from './routes/tracks-v064.js';
 import { applyTrackContactEnrichment, listTrackContactTargets } from './track-contact-enrichment.js';
+import { syncOnePendingHorseStartPointSource } from './import/official-start-points.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -109,6 +110,10 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    return worker.scheduled(controller, env, ctx);
+    const result = await worker.scheduled(controller, env, ctx);
+    const startPointSync = syncOnePendingHorseStartPointSource(env);
+    if (ctx?.waitUntil) ctx.waitUntil(startPointSync);
+    else await startPointSync;
+    return result;
   }
 };
