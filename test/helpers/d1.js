@@ -31,7 +31,7 @@ export function createTestEnv() {
     '../../migrations/0005_historical_backfill.sql',
     '../../migrations/0006_xlabs_backfill.sql',
     '../../migrations/0007_official_first_prize.sql',
-    '../../migrations/0008_track_metadata_and_race_classification.sql'
+    '../../migrations/0008_track_contact_metadata.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }
