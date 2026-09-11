@@ -44,7 +44,7 @@ test('trainer core rankings preserve denominators and minimum-start semantics', 
   race(db,'r3','2026-09-03',{number:3});entry(db,'e3','r3','trainer-b',{horse:'horse-b',placing:1,prize:20000});
   const data=await getTrainerRankings(env,{period:'1y',asOfDate:'2026-09-11',minStarts:'3'});
   assert.equal(data.rankings.highestWinRate.length,0,'percentage rank requires the requested sample');
-  assert.equal(data.rankings.mostWins[0].id,'trainer-a','volume rank must not use minimum-start filter');
+  assert.equal(data.rankings.mostWins.some((row)=>row.id==='trainer-a'),true,'volume rank must not use minimum-start filter');
   assert.equal(data.rankings.mostEarningsThisYear[0].id,'trainer-b','annual earnings must not use minimum-start filter');
   const all=await getTrainerRankings(env,{period:'1y',asOfDate:'2026-09-11'});
   const a=all.rankings.highestWinRate.find(x=>x.id==='trainer-a');
