@@ -18,7 +18,7 @@ class StatementAdapter {
 
 class D1Adapter {
   constructor(db) { this.db = db; }
-  prepare(sql) { return new StatementAdapter(this.db, sql); }
+  prepare(sql) { return new StatementAdapter(db, sql); }
 }
 
 export function createTestEnv() {
@@ -31,7 +31,8 @@ export function createTestEnv() {
     '../../migrations/0005_historical_backfill.sql',
     '../../migrations/0006_xlabs_backfill.sql',
     '../../migrations/0007_official_first_prize.sql',
-    '../../migrations/0008_track_contact_metadata.sql'
+    '../../migrations/0008_track_contact_metadata.sql',
+    '../../migrations/0009_track_contact_provenance.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }
