@@ -7,7 +7,7 @@ import { renderAppPage } from '../src/app-page-aligned.js';
 test('final aligned app adds Bana as the sixth bottom-navigation area', () => {
   const html = renderAppPage();
   assert.match(html, /grid-template-columns:repeat\(6,minmax\(0,1fr\)\)/);
-  assert.match(html, /data-page=\\"tracks\\"/);
+  assert.match(html, /button\.dataset\.page='tracks'/);
   assert.match(html, /button\.innerHTML=TRACK_ICON\+'Bana'/);
   assert.match(html, /M12 21s6-5\.2 6-11/);
   assert.match(html, /ellipse cx=\\"12\\" cy=\\"10\\"/);
