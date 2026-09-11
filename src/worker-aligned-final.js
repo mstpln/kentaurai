@@ -1,4 +1,5 @@
 import worker from './worker-settings.js';
+import { finalizeStatisticsHtml } from './statistics-ui-finalize.js';
 
 const finalHeaderCss = `
 <style id="kentaurai-aligned-header-final">
@@ -53,6 +54,8 @@ const compactLegacyTrackRestoreHook = `const priorAlignedRenderStart=renderStart
 const finalTrackRestoreHook = `const priorAlignedRenderStart=renderStart;
 renderStart=async function(){const navState=history.state,view=navState?.view;if(view?.page==='tracks'){state.trackTab=navState.trackTab||'overview';if(navState.trackDetail)return renderTrackDetail(navState.trackDetail);return renderTracks()}return priorAlignedRenderStart()};`;
 
+const legacyInitialTrendBoot = `renderStart().catch(err=>{app.innerHTML='<div class="notice">Kunde inte läsa data: '+esc(err.message)+'</div>'});`;
+
 async function withFinalAlignment(request, response) {
   if (request.method !== 'GET') return response;
   const path = new URL(request.url).pathname;
@@ -62,20 +65,19 @@ async function withFinalAlignment(request, response) {
   const body = await response.text();
   const headers = new Headers(response.headers);
   headers.delete('content-length');
-  return new Response(
-    body
-      .replace(brokenSettingsHook, settingsObserverHook)
-      .replace(compactBrokenSettingsHook, settingsObserverHook)
-      .replace(legacyTrackHistoryHook, finalTrackHistoryHook)
-      .replace(legacyTrackRestoreHook, finalTrackRestoreHook)
-      .replace(compactLegacyTrackRestoreHook, finalTrackRestoreHook)
-      .replace('</head>', `${finalHeaderCss}</head>`),
-    {
-      status: response.status,
-      statusText: response.statusText,
-      headers
-    }
-  );
+  const alignedBody = body
+    .replace(brokenSettingsHook, settingsObserverHook)
+    .replace(compactBrokenSettingsHook, settingsObserverHook)
+    .replace(legacyTrackHistoryHook, finalTrackHistoryHook)
+    .replace(legacyTrackRestoreHook, finalTrackRestoreHook)
+    .replace(compactLegacyTrackRestoreHook, finalTrackRestoreHook)
+    .replace(legacyInitialTrendBoot, '')
+    .replace('</head>', `${finalHeaderCss}</head>`);
+  return new Response(finalizeStatisticsHtml(alignedBody), {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
 }
 
 export default {

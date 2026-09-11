@@ -6,6 +6,8 @@ import { KENTAURAI_APP_VERSION, createFullDataExportResponse, getSettingsStatus,
 import { getEnhancedGameHistoryDetail } from './routes/game-detail-display.js';
 import { getFilteredEntityStatBreakdowns } from './routes/entity-stat-breakdowns.js';
 import { getTrackDetail, getTrackHomeTrainers, getTrackLaneStats, listTracks } from './routes/tracks.js';
+import { getTrendFilterOptions, getTrendLeaderboard } from './statistics/trend.js';
+import { enhanceTrendHtml } from './trend-ui.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -45,7 +47,7 @@ export default {
     if (request.method === 'GET' && path === '/app') return redirectResponse('/app/');
 
     if (request.method === 'GET' && path === '/app/') {
-      if (appAuthConfigured(env) && await hasValidAppSession(request, env)) return htmlResponse(renderAppPage());
+      if (appAuthConfigured(env) && await hasValidAppSession(request, env)) return htmlResponse(enhanceTrendHtml(renderAppPage()));
       return canonicalizeAppRedirect(await worker.fetch(request, env));
     }
 
@@ -80,6 +82,37 @@ export default {
       if (denied) return denied;
       try {
         return json(await importAnalysisUpload(env, request), 201);
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    if (path === '/app/api/trend/filter-options' && request.method === 'GET') {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        return json(await getTrendFilterOptions(env));
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    if (path === '/app/api/trend' && request.method === 'GET') {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        return json(await getTrendLeaderboard(env, {
+          category: url.searchParams.get('category'),
+          period: url.searchParams.get('period'),
+          raceScope: url.searchParams.get('race_scope'),
+          trackId: url.searchParams.get('track_id'),
+          raceType: url.searchParams.get('race_type'),
+          breedType: url.searchParams.get('breed_type'),
+          startMethod: url.searchParams.get('start_method'),
+          minStarts: url.searchParams.get('min_starts')
+        }));
       } catch (error) {
         console.error(error);
         return json({ error: 'request_failed', message: error.message }, 400);
