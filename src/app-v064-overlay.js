@@ -28,8 +28,11 @@ function v064Client(STL_OPTIONS, RACE_TYPE_OPTIONS) {
   window.fetch = function enhancedFetch(input, init) {
     try {
       const raw = typeof input === 'string' || input instanceof URL ? String(input) : input?.url;
+      if (!raw) return originalFetch(input, init);
       const url = new URL(raw, location.href);
-      const match = url.pathname.match(/^\/app\/api\/tracks\/([^/]+)\/lane-stats$/);
+      const match = url.origin === location.origin
+        ? url.pathname.match(/^\/app\/api\/tracks\/([^/]+)\/lane-stats$/)
+        : null;
       if (match) {
         const id = decodeURIComponent(match[1]);
         const filters = filtersFor(id);
@@ -37,14 +40,11 @@ function v064Client(STL_OPTIONS, RACE_TYPE_OPTIONS) {
         else url.searchParams.delete('stl_class');
         if (filters.raceType && filters.raceType !== 'all') url.searchParams.set('race_type', filters.raceType);
         else url.searchParams.delete('race_type');
-        if (typeof input === 'string' || input instanceof URL) return originalFetch(url.toString(), init);
-        if (input?.method === 'GET' || !input?.method) {
-          return originalFetch(url.toString(), {
-            ...init,
-            headers: input?.headers || init?.headers,
-            credentials: input?.credentials || init?.credentials
-          });
+        if (typeof Request !== 'undefined' && input instanceof Request) {
+          const rewritten = new Request(url.toString(), input);
+          return originalFetch(init ? new Request(rewritten, init) : rewritten);
         }
+        return originalFetch(url.toString(), init);
       }
     } catch {}
     return originalFetch(input, init);
@@ -113,21 +113,29 @@ function v064Client(STL_OPTIONS, RACE_TYPE_OPTIONS) {
 
   const exactText = new Map([
     ['spike_miss', 'Missad spik'], ['coverage_miss', 'Vinnaren saknades på systemet'],
-    ['Learnings', 'Lärdomar'], ['Omgångens learnings', 'Omgångens lärdomar'], ['Miss', 'Fel'],
-    ['Vår rank', 'Vår rankning'], ['Marknadsrank', 'Marknadsrankning'], ['Auto', 'Autostart'],
+    ['Learnings', 'Lärdomar'], ['Omgångens learnings', 'Omgångens lärdomar'],
+    ['Inga registrerade learnings för omgången ännu.', 'Inga registrerade lärdomar för omgången ännu.'],
+    ['Miss', 'Missad'], ['Vår rank', 'Vår rankning'], ['Marknadsrank', 'Marknadsrankning'], ['Auto', 'Autostart'],
     ['pre_market', 'Förhandsanalys'], ['final', 'Slutanalys'],
     ['normalized_verified_subset', 'Verifierad delmängd'], ['captured_unmapped', 'Infångad, ej normaliserad'],
     ['unknown', 'Okänd'], ['X-Labs segment', 'X-Labs-segment'],
-    ['Main Class', 'Loppklass'], ['Main class', 'Loppklass'], ['Huvudklass', 'Loppklass']
+    ['Main Class', 'Loppklass'], ['Main class', 'Loppklass'], ['Huvudklass', 'Loppklass'],
+    ['Class Flags', 'Loppkategorier'], ['Class flags', 'Loppkategorier'], ['Klassflaggor', 'Loppkategorier']
   ]);
   const fieldLabels = new Map([
     ['Actual Distance M', 'Faktisk distans'], ['Actual Distance', 'Faktisk distans'], ['actualDistanceM', 'Faktisk distans'],
-    ['Extra Distance M', 'Extra distans'], ['Extra Distance', 'Extra distans'], ['extraDistanceM', 'Extra distans'],
-    ['Converted Km Time', 'Omräknad km-tid'], ['convertedKmTime', 'Omräknad km-tid'],
+    ['actual_distance_m', 'Faktisk distans'], ['Extra Distance M', 'Extra distans'], ['Extra Distance', 'Extra distans'],
+    ['extraDistanceM', 'Extra distans'], ['extra_distance_m', 'Extra distans'],
+    ['Converted Km Time', 'Omräknad km-tid'], ['convertedKmTime', 'Omräknad km-tid'], ['converted_km_time', 'Omräknad km-tid'],
     ['Leader', 'Spets'], ['leader', 'Spets'], ['Pocket', 'Rygg ledaren'], ['pocket', 'Rygg ledaren'],
-    ['Death Seat', 'Dödens'], ['deathSeat', 'Dödens'], ['Second Over', '2:a utvändigt'], ['secondOver', '2:a utvändigt'],
-    ['Wide Trip', 'Brett spår'], ['wideTrip', 'Brett spår'], ['Uncovered Move', 'Attack utan rygg'], ['uncoveredMove', 'Attack utan rygg'],
-    ['Traffic Event', 'Loppincident'], ['trafficEvent', 'Loppincident'], ['Summary', 'Sammanfattning'], ['summary', 'Sammanfattning']
+    ['Death Seat', 'Dödens'], ['deathSeat', 'Dödens'], ['death_seat', 'Dödens'],
+    ['Second Over', '2:a utvändigt'], ['secondOver', '2:a utvändigt'], ['second_over', '2:a utvändigt'],
+    ['Third Over', '3:e utvändigt'], ['thirdOver', '3:e utvändigt'], ['third_over', '3:e utvändigt'],
+    ['Wide Trip', 'Brett spår'], ['wideTrip', 'Brett spår'], ['wide_trip', 'Brett spår'],
+    ['Uncovered Move', 'Attack utan rygg'], ['uncoveredMove', 'Attack utan rygg'], ['uncovered_move', 'Attack utan rygg'],
+    ['Traffic Event', 'Loppincident'], ['trafficEvent', 'Loppincident'], ['traffic_event', 'Loppincident'],
+    ['Summary', 'Sammanfattning'], ['summary', 'Sammanfattning'], ['Position', 'Position'], ['position', 'Position'],
+    ['Lane', 'Spår'], ['lane', 'Spår'], ['Observed At M', 'Mätpunkt'], ['observedAtM', 'Mätpunkt'], ['observed_at_m', 'Mätpunkt']
   ]);
   const countries = { SE: 'Sverige', NO: 'Norge', DK: 'Danmark', FI: 'Finland', DE: 'Tyskland', FR: 'Frankrike', IT: 'Italien', NL: 'Nederländerna', BE: 'Belgien', EE: 'Estland', LV: 'Lettland', LT: 'Litauen', US: 'USA', CA: 'Kanada' };
 
@@ -139,18 +147,33 @@ function v064Client(STL_OPTIONS, RACE_TYPE_OPTIONS) {
   }
   function normalizeClassFlagField(label) {
     const raw = label.textContent.trim();
-    if (!['Class Flags', 'Class flags', 'Klassflaggor'].includes(raw)) return;
+    if (!['Class Flags', 'Class flags', 'Klassflaggor', 'Loppkategorier'].includes(raw)) return;
     const item = label.closest('.data-item');
     const value = item?.querySelector('.data-value');
     if (!item || !value) return;
-    const text = value.textContent.toLowerCase();
-    const found = [];
-    for (const [key, name] of RACE_TYPE_OPTIONS) {
-      if (text.includes(key.toLowerCase()) || text.includes(name.toLowerCase())) found.push(name);
-    }
-    if (!found.length) { item.remove(); return; }
-    label.textContent = 'Lopptyp';
-    value.textContent = [...new Set(found)].join(' · ');
+    label.textContent = 'Loppkategorier';
+    let text = value.textContent;
+    for (const [key, name] of RACE_TYPE_OPTIONS) text = text.replaceAll(key, name);
+    value.textContent = text;
+  }
+  function localizeFilterAllLabels() {
+    document.querySelectorAll('[data-stat-year="all"]').forEach((element) => { element.textContent = 'Alla år'; });
+    document.querySelectorAll('[data-distance-method="all"],[data-track-method="all"]').forEach((element) => { element.textContent = 'Alla startmetoder'; });
+  }
+  function localizeTechnicalAnalysisHeadings() {
+    document.querySelectorAll('.data-section').forEach((section) => {
+      const heading = section.querySelector('.data-section-head h2')?.textContent.trim();
+      section.querySelectorAll('.analysis-head strong').forEach((strong) => {
+        const text = strong.textContent.trim();
+        if (heading === 'Redaktionella signaler' && /(^|\s)[a-z0-9]+_[a-z0-9_]+($|\s)/i.test(text)) {
+          strong.textContent = 'Redaktionell signal';
+        }
+        if (heading === 'Lagrade AI-bedömningar' && /^[a-z0-9]+_[a-z0-9_]+/i.test(text)) {
+          const suffix = text.includes(' · ') ? ' · ' + text.split(' · ').slice(1).join(' · ') : '';
+          strong.textContent = 'AI-analys' + suffix;
+        }
+      });
+    });
   }
   function localizeVisible() {
     const app = document.getElementById('app');
@@ -164,7 +187,7 @@ function v064Client(STL_OPTIONS, RACE_TYPE_OPTIONS) {
     let node;
     while ((node = walker.nextNode())) replaceNodeText(node, exactText);
     document.querySelectorAll('.data-label').forEach(normalizeClassFlagField);
-    document.querySelectorAll('.data-label,.history-fact-label,.coverage-label').forEach((element) => replaceNodeText(element, fieldLabels));
+    document.querySelectorAll('.data-label,.history-fact-label,.coverage-label,.structured-key').forEach((element) => replaceNodeText(element, fieldLabels));
     document.querySelectorAll('.data-value').forEach((element) => {
       const text = element.textContent.trim();
       if (countries[text]) element.textContent = countries[text];
@@ -177,6 +200,8 @@ function v064Client(STL_OPTIONS, RACE_TYPE_OPTIONS) {
     document.querySelectorAll('.settings-count span').forEach((element) => {
       if (element.textContent.trim() === 'Spel') element.textContent = 'V85/V86-omgångar';
     });
+    localizeFilterAllLabels();
+    localizeTechnicalAnalysisHeadings();
   }
 
   function escapeHtml(value) {
