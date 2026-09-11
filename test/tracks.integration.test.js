@@ -29,10 +29,11 @@ function seedTrackData(db) {
     ['race-2', '2026-06-02', 2148, 'autostart'],
     ['race-3', '2025-06-03', 2140, 'auto'],
     ['race-4', '2026-06-04', 2640, 'volte'],
-    ['race-5', '2026-06-05', 3000, 'auto']
+    ['race-5', '2026-06-05', 3000, 'auto'],
+    ['race-6', '2026-06-06', 2700, 'auto']
   ]) db.prepare(`INSERT INTO races (id, track_id, race_date, race_number, distance_m, start_method, status) VALUES (?, 'track-a', ?, 1, ?, ?, 'results')`).run(id, date, distance, method);
 
-  for (let i = 1; i <= 8; i += 1) db.prepare(`INSERT INTO horses (id, canonical_name) VALUES (?, ?)`).run(`horse-${i}`, `Synthetic Horse ${i}`);
+  for (let i = 1; i <= 9; i += 1) db.prepare(`INSERT INTO horses (id, canonical_name) VALUES (?, ?)`).run(`horse-${i}`, `Synthetic Horse ${i}`);
 
   const entries = [
     ['entry-1','race-1','horse-1',1,0,1,0,0],
@@ -42,7 +43,8 @@ function seedTrackData(db) {
     ['entry-5','race-2','horse-5',3,1,3,0,0],
     ['entry-6','race-3','horse-6',1,0,1,0,0],
     ['entry-7','race-4','horse-7',1,0,1,0,0],
-    ['entry-8','race-5','horse-8',1,0,1,0,0]
+    ['entry-8','race-5','horse-8',1,0,1,0,0],
+    ['entry-9','race-6','horse-9',1,0,1,0,0]
   ];
   for (const [entryId,raceId,horseId,lane,scratched,placing,gallop,disqualified] of entries) {
     db.prepare(`INSERT INTO race_entries (id, race_id, horse_id, start_number, actual_lane, scratched) VALUES (?, ?, ?, ?, ?, ?)`).run(entryId,raceId,horseId,lane,lane,scratched);
@@ -65,6 +67,7 @@ function seedTrackData(db) {
 test('track distance grouping mirrors the canonical presentation groups', () => {
   assert.equal(trackDistanceGroup(2140), '2140');
   assert.equal(trackDistanceGroup(2148), '2140');
+  assert.equal(trackDistanceGroup(2700), '2640');
   assert.equal(trackDistanceGroup(2740), '2640');
   assert.equal(trackDistanceGroup(2800), 'other-long');
   assert.equal(trackDistanceGroup(3040), '3140');
@@ -78,7 +81,7 @@ test('track list and detail expose verified profile fields and database coverage
   assert.equal(list.total, 2);
   assert.equal(list.items[0].name, 'Another Track');
   assert.equal(list.items[1].name, 'Synthetic Track');
-  assert.equal(list.items[1].races, 5);
+  assert.equal(list.items[1].races, 6);
 
   const detail = await getTrackDetail(env, 'track-a');
   assert.equal(detail.name, 'Synthetic Track');
@@ -90,9 +93,10 @@ test('track list and detail expose verified profile fields and database coverage
   assert.equal(detail.profile.angledMobileWing, true);
   assert.match(detail.description, /Verifierade mått/);
   assert.match(detail.description, /Syntetisk bannotering/);
-  assert.equal(detail.coverage.races, 5);
+  assert.equal(detail.coverage.races, 6);
   assert.equal(detail.coverage.homeTrainers, 1);
   assert.ok(detail.distanceGroups.some((row) => row.key === '2140'));
+  assert.ok(detail.distanceGroups.some((row) => row.key === '2640'));
   assert.ok(detail.distanceGroups.some((row) => row.key === 'other-long'));
 });
 
@@ -112,6 +116,15 @@ test('lane statistics combine track, canonical distance and start method and exc
   assert.equal(lane2.starts, 2);
   assert.equal(lane2.wins, 0);
   assert.equal(lane2.top3Rate, 1);
+});
+
+test('other-long lane statistics exclude distances assigned to the 2640 tolerance group', async () => {
+  const { env, db } = createTestEnv();
+  seedTrackData(db);
+  const otherLong = await getTrackLaneStats(env, 'track-a', { year: '2026', startMethod: 'auto', distanceGroup: 'other-long' });
+  assert.equal(otherLong.totals.starts, 1);
+  const standard2640 = await getTrackLaneStats(env, 'track-a', { year: '2026', startMethod: 'auto', distanceGroup: '2640' });
+  assert.equal(standard2640.totals.starts, 1);
 });
 
 test('home trainers use only the latest verified official home-track observation', async () => {
