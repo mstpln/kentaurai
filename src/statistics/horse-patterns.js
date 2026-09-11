@@ -10,6 +10,10 @@ function dateOnly(value) {
   return text;
 }
 
+function placeholders(values) {
+  return values.map(() => '?').join(',');
+}
+
 function paceSeconds(value) {
   if (value == null || value === '') return null;
   const text = String(value).trim();
@@ -80,22 +84,26 @@ function xlabsPattern(rows) {
   };
 }
 
-export async function getHorseRelevantPatterns(env, horseId, asOfDate) {
-  if (!env.DB) throw new Error('DB is not configured');
-  const id = requiredHorseId(horseId);
-  const cutoff = dateOnly(asOfDate);
-
-  const horse = await env.DB.prepare('SELECT 1 AS ok FROM horses WHERE id = ? LIMIT 1').bind(id).first();
-  if (!horse?.ok) return null;
-
+async function loadPatternRows(env, horseIds, cutoff) {
+  if (!horseIds.length) return { pointsByHorse: new Map(), xlabsByHorse: new Map() };
+  const slots = placeholders(horseIds);
   const [{ results: pointRows }, { results: xlabsRows }] = await Promise.all([
     env.DB.prepare(`
-      SELECT points, observed_at
-      FROM horse_start_points
-      WHERE horse_id = ? AND substr(observed_at, 1, 10) <= ?
-      ORDER BY observed_at DESC, id DESC
-      LIMIT 50
-    `).bind(id, cutoff).all(),
+      WITH ranked AS (
+        SELECT horse_id, points, observed_at,
+               ROW_NUMBER() OVER (
+                 PARTITION BY horse_id
+                 ORDER BY observed_at DESC, id DESC
+               ) AS rn
+        FROM horse_start_points
+        WHERE horse_id IN (${slots})
+          AND substr(observed_at, 1, 10) <= ?
+      )
+      SELECT horse_id, points, observed_at
+      FROM ranked
+      WHERE rn <= 50
+      ORDER BY horse_id, rn
+    `).bind(...horseIds, cutoff).all(),
     env.DB.prepare(`
       WITH latest_x AS (
         SELECT x.*,
@@ -107,30 +115,70 @@ export async function getHorseRelevantPatterns(env, horseId, asOfDate) {
         JOIN source_records sr ON sr.id = x.source_record_id
         WHERE x.quality_status = 'xlabs-telemetry-v1'
       ), recent AS (
-        SELECT x.first_200_time, x.last_400_time, x.extra_distance_m,
+        SELECT re.horse_id, x.first_200_time, x.last_400_time, x.extra_distance_m,
                ROW_NUMBER() OVER (
+                 PARTITION BY re.horse_id
                  ORDER BY r.race_date DESC, COALESCE(r.race_number, 0) DESC, re.id DESC
                ) AS recent_rank
         FROM races r
         JOIN race_entries re ON re.race_id = r.id
         JOIN race_results rr ON rr.race_entry_id = re.id
         JOIN latest_x x ON x.race_entry_id = re.id AND x.observation_rank = 1
-        WHERE re.horse_id = ?
+        WHERE re.horse_id IN (${slots})
           AND re.scratched = 0
           AND rr.result_status = 'official'
           AND r.race_date <= ?
       )
-      SELECT first_200_time, last_400_time, extra_distance_m
+      SELECT horse_id, first_200_time, last_400_time, extra_distance_m
       FROM recent
       WHERE recent_rank <= 10
-      ORDER BY recent_rank
-    `).bind(id, cutoff).all()
+      ORDER BY horse_id, recent_rank
+    `).bind(...horseIds, cutoff).all()
   ]);
 
-  return {
-    asOfDate: cutoff,
-    startPoints: startPointPattern(pointRows || []),
-    xlabs: xlabsPattern(xlabsRows || []),
-    interpretationRule: 'facts_only'
-  };
+  const pointsByHorse = new Map(horseIds.map((id) => [id, []]));
+  for (const row of pointRows || []) pointsByHorse.get(row.horse_id)?.push(row);
+  const xlabsByHorse = new Map(horseIds.map((id) => [id, []]));
+  for (const row of xlabsRows || []) xlabsByHorse.get(row.horse_id)?.push(row);
+  return { pointsByHorse, xlabsByHorse };
+}
+
+export async function getHorseRelevantPatternsBatch(env, horseIds, asOfDate, options = {}) {
+  if (!env.DB) throw new Error('DB is not configured');
+  const cutoff = dateOnly(asOfDate);
+  const ids = [...new Set((horseIds || []).map(requiredHorseId))];
+  const { pointsByHorse, xlabsByHorse } = await loadPatternRows(env, ids, cutoff);
+  const result = new Map();
+  for (const id of ids) {
+    result.set(id, {
+      asOfDate: cutoff,
+      startPoints: startPointPattern(pointsByHorse.get(id) || []),
+      xlabs: xlabsPattern(xlabsByHorse.get(id) || []),
+      interpretationRule: 'facts_only'
+    });
+  }
+
+  if (options.includeFieldRank) {
+    const ranked = [...result.entries()]
+      .filter(([, value]) => value.startPoints.current)
+      .sort((a, b) => b[1].startPoints.current.points - a[1].startPoints.current.points || a[0].localeCompare(b[0]));
+    let priorPoints = null;
+    let priorRank = 0;
+    ranked.forEach(([id, value], index) => {
+      const points = value.startPoints.current.points;
+      const rank = points === priorPoints ? priorRank : index + 1;
+      value.startPoints.fieldRank = rank;
+      value.startPoints.fieldObserved = ranked.length;
+      priorPoints = points;
+      priorRank = rank;
+    });
+  }
+
+  return result;
+}
+
+export async function getHorseRelevantPatterns(env, horseId, asOfDate) {
+  const id = requiredHorseId(horseId);
+  const rows = await getHorseRelevantPatternsBatch(env, [id], asOfDate);
+  return rows.get(id) || null;
 }
