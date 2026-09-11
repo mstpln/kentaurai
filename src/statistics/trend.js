@@ -23,9 +23,7 @@ async function validateTrack(env, trackId) {
   if (!found?.ok) throw new Error('track_id does not identify a stored track');
 }
 
-export async function getTrendLeaderboard(env, options = {}) {
-  if (!env.DB) throw new Error('DB is not configured');
-
+export function buildTrendQuery(options = {}) {
   const category = normalizeTrendCategory(options.category);
   const raceScope = normalizeTrendRaceScope(options.raceScope);
   const raceType = normalizeTrendRaceType(options.raceType);
@@ -33,8 +31,6 @@ export async function getTrendLeaderboard(env, options = {}) {
   const startMethod = normalizeTrendStartMethod(options.startMethod);
   const trackId = normalizeTrackId(options.trackId);
   const window = trendDateWindow(options.period, options.asOfDate);
-  await validateTrack(env, trackId);
-
   const config = CATEGORY_CONFIG[category];
   const conditions = [
     're.scratched = 0',
@@ -42,8 +38,7 @@ export async function getTrendLeaderboard(env, options = {}) {
     'r.race_date <= ?'
   ];
   const bindings = [window.startDate, window.endDate];
-  const filters = { raceScope, raceType, breedType, startMethod, trackId };
-  addTrendRaceFilters(conditions, bindings, filters);
+  addTrendRaceFilters(conditions, bindings, { raceScope, raceType, breedType, startMethod, trackId });
 
   const sql = `
     WITH trend_stats AS (
@@ -65,10 +60,11 @@ export async function getTrendLeaderboard(env, options = {}) {
     LIMIT 10
   `;
 
-  const { results } = await env.DB.prepare(sql).bind(...bindings).all();
   return {
-    category,
-    filters: {
+    sql,
+    bindings,
+    normalized: {
+      category,
       period: window.period,
       startDate: window.startDate,
       endDate: window.endDate,
@@ -77,6 +73,26 @@ export async function getTrendLeaderboard(env, options = {}) {
       raceType,
       breedType,
       startMethod
+    }
+  };
+}
+
+export async function getTrendLeaderboard(env, options = {}) {
+  if (!env.DB) throw new Error('DB is not configured');
+  const query = buildTrendQuery(options);
+  await validateTrack(env, query.normalized.trackId);
+  const { results } = await env.DB.prepare(query.sql).bind(...query.bindings).all();
+  return {
+    category: query.normalized.category,
+    filters: {
+      period: query.normalized.period,
+      startDate: query.normalized.startDate,
+      endDate: query.normalized.endDate,
+      raceScope: query.normalized.raceScope,
+      trackId: query.normalized.trackId,
+      raceType: query.normalized.raceType,
+      breedType: query.normalized.breedType,
+      startMethod: query.normalized.startMethod
     },
     items: results.map((row, index) => ({
       rank: index + 1,
