@@ -32,13 +32,15 @@ function marketRound(db,{round='round-a',raceId='race-market',stop='2026-09-05T1
   db.prepare("INSERT INTO game_legs (game_round_id,leg_number,race_id) VALUES (?,1,?)").run(round,raceId);
 }
 
-function market(db,id,entryId,{round='round-a',captured='2026-09-05T11:50:00Z',percent=5,rank=1}={}) {
-  db.prepare("INSERT INTO betting_snapshots (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank) VALUES (?,?,1,?,?,?,?)").run(id,round,entryId,captured,percent,rank);
+function market(db,id,entryId,{round='round-a',captured='2026-09-05T11:50:00Z',percent=5,rank=1,sourceId='source-a'}={}) {
+  db.prepare("INSERT INTO betting_snapshots (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id) VALUES (?,?,1,?,?,?,?,?)").run(id,round,entryId,captured,percent,rank,sourceId);
 }
 
 test('driver filter contract rejects unsupported values', () => {
   assert.throws(()=>normalizeDriverStatsFilters({period:'bad'}),/period must be/);
   assert.throws(()=>normalizeDriverStatsFilters({distanceGroup:'2000'}),/distance_group/);
+  assert.throws(()=>normalizeDriverStatsFilters({sex:'unknown'}),/sex must be/);
+  assert.throws(()=>normalizeDriverStatsFilters({age:'1'}),/age must be/);
   assert.throws(()=>normalizeDriverStatsFilters({voltLane:'inside'}),/volt_lane/);
   assert.throws(()=>normalizeDriverStatsFilters({handicapM:'10'}),/handicap_m/);
   assert.throws(()=>normalizeDriverStatsFilters({minStarts:'2'}),/min_starts/);
@@ -59,15 +61,26 @@ test('driver rankings use shared core denominators and deterministic ranking mea
   assert.equal(data.rankings.bestFormLast30.find(x=>x.id==='driver-a').averagePlacing,3);
 });
 
-test('driver filters combine volt lane and verified handicap with other common filters', async () => {
+test('driver filters combine horse age and sex with volt lane, handicap and common filters', async () => {
   const {db,env}=createTestEnv();seedBase(db);
   race(db,'rv','2026-09-01',{track:'track-b',method:'volt',distance:2140,firstPrize:150000,name:'Montélopp'});
   entry(db,'ev','rv','driver-b',{horse:'horse-b',placing:1,lane:6,handicap:20,actualDistance:2160});
   race(db,'rv2','2026-09-02',{track:'track-b',method:'volt',distance:2140,firstPrize:150000,name:'Montélopp',number:2});
   entry(db,'ev2','rv2','driver-a',{placing:1,lane:2,handicap:20,actualDistance:2160});
-  const data=await getDriverRankings(env,{period:'1y',asOfDate:'2026-09-11',trackId:'track-b',raceScope:'high_prize',raceType:'monte',breedType:'coldblood',startMethod:'volt',distanceGroup:'2140',voltLane:'good',handicapM:'20'});
+  const data=await getDriverRankings(env,{period:'1y',asOfDate:'2026-09-11',trackId:'track-b',raceScope:'high_prize',raceType:'monte',breedType:'coldblood',sex:'gelding',age:'7',startMethod:'volt',distanceGroup:'2140',voltLane:'good',handicapM:'20'});
   assert.deepEqual(data.rankings.highestWinRate.map(x=>x.id),['driver-b']);
+  assert.equal(data.filters.sex,'gelding');assert.equal(data.filters.age,7);
   assert.deepEqual(data.definitions.voltLaneGood,[1,6,7]);
+});
+
+test('minimum starts applies to percentage rankings but not volume or earnings rankings', async () => {
+  const {db,env}=createTestEnv();seedBase(db);
+  race(db,'m1','2026-09-01',{number:1});entry(db,'me1','m1','driver-a',{placing:1,prize:50000});
+  for(let i=2;i<=4;i++){race(db,`m${i}`,`2026-09-0${i}`,{number:i});entry(db,`me${i}`,`m${i}`,'driver-b',{placing:i===2?1:4,prize:1000});}
+  const data=await getDriverRankings(env,{period:'1y',asOfDate:'2026-09-11',minStarts:'3'});
+  assert.equal(data.rankings.highestWinRate.some(x=>x.id==='driver-a'),false,'one-start percentage must be filtered');
+  assert.equal(data.rankings.mostWins.some(x=>x.id==='driver-a'),true,'volume ranking must not inherit percentage threshold');
+  assert.equal(data.rankings.mostEarningsThisYear[0].id,'driver-a','annual earnings must not inherit percentage threshold');
 });
 
 test('form last 30 is placements-only, latest-first and capped at 30 starts', async () => {
@@ -82,11 +95,12 @@ test('form last 30 is placements-only, latest-first and capped at 30 starts', as
   assert.equal(detail.formLast30.averagePlacing,1,'oldest 31st result must be excluded');
 });
 
-test('favorite and longshot use only the final valid pre-stop snapshot and fail closed without a stop', async () => {
-  const {db,env}=createTestEnv();seedBase(db);
+test('favorite and longshot use the final source-backed pre-stop snapshot and fail closed without a stop', async () => {
+  const {db,env}=createTestEnv();seedBase(db);source(db);
   race(db,'race-market','2026-09-05',{number:1});entry(db,'entry-market','race-market','driver-a',{placing:1,prize:25000});marketRound(db,{});
   market(db,'m-old','entry-market',{captured:'2026-09-05T11:40:00Z',percent:4.9,rank:2});
-  market(db,'m-final','entry-market',{captured:'2026-09-05T11:59:00Z',percent:5,rank:1});
+  market(db,'m-final','entry-market',{captured:'2026-09-05T11:58:00Z',percent:5,rank:1});
+  market(db,'m-unprovenanced','entry-market',{captured:'2026-09-05T11:59:00Z',percent:40,rank:3,sourceId:null});
   market(db,'m-after','entry-market',{captured:'2026-09-05T12:01:00Z',percent:40,rank:3});
   race(db,'race-no-stop','2026-09-06',{number:2});entry(db,'entry-no-stop','race-no-stop','driver-b',{placing:1});
   marketRound(db,{round:'round-no-stop',raceId:'race-no-stop',stop:null});market(db,'m-no-stop','entry-no-stop',{round:'round-no-stop',captured:'2026-09-06T11:00:00Z',percent:1,rank:1});
