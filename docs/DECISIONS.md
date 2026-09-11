@@ -25,26 +25,29 @@
 1. Horse, trainer and driver remain primary detail entities, with V85/V86 system/performance history available in a dedicated Spel area.
 2. Bottom navigation is fixed as **Trend -> Tränare -> Hästar -> Kuskar -> Bana -> Spel**.
 3. Trend is the start workspace and uses category switching for Tränare / Hästar / Kuskar plus rolling periods 2 weeks / 4 weeks / 3 months / 6 months / 1 year.
-4. Trend leaderboards must be deterministic and use sensible minimum-sample rules; insufficient history remains unavailable rather than estimated.
-5. A global search bar searches all three primary entity types.
-6. Spel contains exactly three tabs: Översikt / V85 / V86. V85/V86 list saved rounds; each round can open a detailed post-race page.
-7. Entity and round pages should use tabs, collapsible start cards and natural data groups instead of long unstructured field lists.
-8. Entity detail views expose all relevant data families already stored/measured by the current schema, while internal IDs/provenance remain backend concerns rather than normal UI content.
-9. Factual race/start/result/market/equipment/X-Labs/position/condition data is presented separately from calculated features, AI analyses and editorial signals.
-10. Multiple timestamped observations remain available as histories rather than silently collapsing all data to one current value; a latest value may be highlighted for convenience.
-11. Entity start history is paginated and must support the complete stored history rather than being permanently capped to a latest-N window. Enrichment of betting, odds, equipment, X-Labs, positions, features, AI and editorial data is done only for the current history page to keep D1 reads bounded.
-12. Trainer/driver linked-horse lists are paginated independently from start history so older horse relationships remain discoverable after multi-year backfill.
-13. The interface is read-only and private.
-14. Browser access uses a separate `APP_PASSWORD` secret and secure HttpOnly session cookie. `ADMIN_TOKEN` remains reserved for operational APIs and is never exposed to the interface.
-15. There is no visible logout control; the private session expires normally.
-16. Visual direction is minimal and strongly structured, using black/grey/brown/beige as the base with restrained warm accent color and clear card/divider/tab separation.
-17. The approved Sagittarius KentaurAI brand stays separate from entity navigation symbolism.
-18. Bottom-navigation symbols are Trend = approved chart-line, Tränare = clipboard/pen, Hästar = horse, Kuskar = lightbulb, Bana = map-pin/oval, Spel = ticket. Entity profile tiles use initials rather than category symbols.
-19. Trend uses the approved chart-line symbol and the singular label `Trend` in both navigation and page heading.
-20. KentaurAI is packaged as an installable PWA scoped to `/app/` with standalone launch and dedicated Sagittarius icons. Its service worker may cache public PWA metadata/icon assets only; authenticated app HTML and API data remain outside the offline cache.
-21. Bana uses **Översikt -> Spårstatistik -> Hemmatränare**. User-facing country codes are localized (for example `SE` -> `Sverige`) while storage/API identities remain unchanged.
-22. Spårstatistik owns Period, Startmetod, Distans, STL-klass and Lopptyp in the canonical lane-statistics flow. Optional filters combine with AND semantics; the literal all-period label is `All data`.
-23. Verified track address/website facts remain nullable. Real enrichment values live only in private D1 with fact-level source URL/type and verification timestamps; conflicts are preserved rather than silently overwriting a previously verified fact.
+4. Trend uses the verified actual starts currently present in D1; an incomplete historical backfill does not create guessed values or a special UI warning. Ranking is deterministic by win rate -> wins -> starts -> stable entity ID and is capped at ten rows.
+5. Trend and individual entity statistics share the same core definitions and denominator rules. Scratched entries are not starts; win rate uses actual starts, top-three rate uses result starts, gallop rate uses only starts with verified gallop status, and missing prize data stays distinguishable from zero.
+6. Trend race level reuses the canonical **All data / Högre prissumma / Vardagstrav** logic. Track, race type, breed type and start method are secondary AND-combined filters behind the horizontal-sliders control.
+7. Trend rows use the approved Version 3 hierarchy: win percentage at left, name plus starts/wins/losses in the main area, and equal Top 3%, Gallop% and Prispengar pills beneath. The whole row navigates to the canonical entity detail page.
+8. A global search bar searches all three primary entity types.
+9. Spel contains exactly three tabs: Översikt / V85 / V86. V85/V86 list saved rounds; each round can open a detailed post-race page.
+10. Entity and round pages should use tabs, collapsible start cards and natural data groups instead of long unstructured field lists.
+11. Entity detail views expose all relevant data families already stored/measured by the current schema, while internal IDs/provenance remain backend concerns rather than normal UI content.
+12. Factual race/start/result/market/equipment/X-Labs/position/condition data is presented separately from calculated features, AI analyses and editorial signals.
+13. Multiple timestamped observations remain available as histories rather than silently collapsing all data to one current value; a latest value may be highlighted for convenience.
+14. Entity start history is paginated and must support the complete stored history rather than being permanently capped to a latest-N window. Enrichment of betting, odds, equipment, X-Labs, positions, features, AI and editorial data is done only for the current history page to keep D1 reads bounded.
+15. Trainer/driver linked-horse lists are paginated independently from start history so older horse relationships remain discoverable after multi-year backfill.
+16. The interface is read-only and private.
+17. Browser access uses a separate `APP_PASSWORD` secret and secure HttpOnly session cookie. `ADMIN_TOKEN` remains reserved for operational APIs and is never exposed to the interface.
+18. There is no visible logout control; the private session expires normally.
+19. Visual direction is minimal and strongly structured, using black/grey/brown/beige as the base with restrained warm accent color and clear card/divider/tab separation.
+20. The approved Sagittarius KentaurAI brand stays separate from entity navigation symbolism.
+21. Bottom-navigation symbols are Trend = approved chart-line, Tränare = clipboard/pen, Hästar = horse, Kuskar = lightbulb, Bana = map-pin/oval, Spel = ticket. Entity profile tiles use initials rather than category symbols.
+22. Trend uses the approved chart-line symbol and the singular label `Trend` in both navigation and page heading.
+23. KentaurAI is packaged as an installable PWA scoped to `/app/` with standalone launch and dedicated Sagittarius icons. Its service worker may cache public PWA metadata/icon assets only; authenticated app HTML and API data remain outside the offline cache.
+24. Bana uses **Översikt -> Spårstatistik -> Hemmatränare**. User-facing country codes are localized (for example `SE` -> `Sverige`) while storage/API identities remain unchanged.
+25. Spårstatistik owns Period, Startmetod, Distans, STL-klass and Lopptyp in the canonical lane-statistics flow. Optional filters combine with AND semantics; the literal all-period label is `All data`.
+26. Verified track address/website facts remain nullable. Real enrichment values live only in private D1 with fact-level source URL/type and verification timestamps; conflicts are preserved rather than silently overwriting a previously verified fact.
 
 ## Historical data and X-Labs
 1. Historical starter/result data is imported once, stored permanently and updated incrementally. The planned backfill remains approximately 2-3 years of Swedish racing, with older starts fetched selectively when useful for active horse profiles.
