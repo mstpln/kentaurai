@@ -229,6 +229,64 @@ async function persistClientPayloadDigest(env, modelVersionId, digest) {
   if (Number(result.meta?.changes ?? 0) !== 1) throw new Error('analysis submission metadata could not be finalized');
 }
 
+async function persistVerifiedFinalMarket(env, modelVersionId, roundId, cutoff) {
+  if (typeof env.DB.batch !== 'function') throw new Error('D1 batch support is required for verified final market persistence');
+  const marketPercentSql = `
+    SELECT bs.bet_percent
+    FROM betting_snapshots bs
+    JOIN source_records sr ON sr.id = bs.source_record_id
+    JOIN game_legs gl
+      ON gl.game_round_id = bs.game_round_id
+     AND gl.leg_number = bs.leg_number
+    JOIN race_entries re
+      ON re.id = bs.race_entry_id
+     AND re.race_id = gl.race_id
+    WHERE bs.game_round_id = ?
+      AND bs.race_entry_id = ai_horse_predictions.race_entry_id
+      AND bs.source_record_id IS NOT NULL
+      AND julianday(bs.captured_at) <= julianday(?)
+    ORDER BY julianday(bs.captured_at) DESC, bs.id DESC
+    LIMIT 1
+  `;
+  const selectionMarketPercentSql = `
+    SELECT bs.bet_percent
+    FROM betting_snapshots bs
+    JOIN source_records sr ON sr.id = bs.source_record_id
+    JOIN game_legs gl
+      ON gl.game_round_id = bs.game_round_id
+     AND gl.leg_number = bs.leg_number
+    JOIN race_entries re
+      ON re.id = bs.race_entry_id
+     AND re.race_id = gl.race_id
+    WHERE bs.game_round_id = ?
+      AND bs.leg_number = system_selections.leg_number
+      AND bs.race_entry_id = system_selections.race_entry_id
+      AND bs.source_record_id IS NOT NULL
+      AND julianday(bs.captured_at) <= julianday(?)
+    ORDER BY julianday(bs.captured_at) DESC, bs.id DESC
+    LIMIT 1
+  `;
+  const predictionUpdate = env.DB.prepare(`
+    UPDATE ai_horse_predictions
+    SET value_ratio = CASE
+      WHEN (${marketPercentSql}) > 0
+      THEN win_probability / ((${marketPercentSql}) / 100.0)
+      ELSE NULL
+    END
+    WHERE ai_race_analysis_id IN (
+      SELECT id FROM ai_race_analyses WHERE model_version_id = ?
+    )
+  `).bind(roundId, cutoff, roundId, cutoff, modelVersionId);
+  const selectionUpdate = env.DB.prepare(`
+    UPDATE system_selections
+    SET market_percent = (${selectionMarketPercentSql})
+    WHERE system_id IN (
+      SELECT id FROM systems WHERE model_version_id = ? AND game_round_id = ?
+    )
+  `).bind(roundId, cutoff, modelVersionId, roundId);
+  await env.DB.batch([predictionUpdate, selectionUpdate]);
+}
+
 export async function submitAnalysis(env, payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('analysis submission must be an object');
   if ('data_snapshot_at' in payload || 'dataSnapshotAt' in payload) throw new Error('data_snapshot_at is assigned by KentaurAI and must not be supplied by the client');
@@ -275,7 +333,7 @@ export async function submitAnalysis(env, payload) {
     const parent = await getAnalysisSubmission(env, roundId, parentSubmissionId);
     if (!parent || parent.stage !== 'pre_market') throw new Error('parent_submission_id must identify a stored pre-market submission for this round');
     if (parent.producer.provider !== provider) throw new Error('final submission producer.provider must match its pre-market parent');
-    await verifyContext(env, roundId, 'market', contextFingerprint, parentSubmissionId);
+    const verifiedContext = await verifyContext(env, roundId, 'market', contextFingerprint, parentSubmissionId);
     const systems = payload.systems ?? [];
     validateExactThreeSpikes(systems);
     result = await importAnalysisSubmission(env, {
@@ -286,10 +344,11 @@ export async function submitAnalysis(env, payload) {
       stage: 'final',
       parent_submission_id: parentSubmissionId,
       producer: { provider, model },
-      data_snapshot_at: new Date().toISOString(),
+      data_snapshot_at: verifiedContext.market.cutoff,
       legs: parentLegsForFinal(parent),
       systems
     });
+    await persistVerifiedFinalMarket(env, result.modelVersionId, roundId, verifiedContext.market.cutoff);
   }
 
   await persistClientPayloadDigest(env, result.modelVersionId, clientPayloadDigest);
