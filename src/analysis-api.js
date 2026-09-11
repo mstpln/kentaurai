@@ -10,6 +10,7 @@ import {
 import { importVerifiedFinalAnalysis } from './analysis-final-import.js';
 import { getVerifiedAnalysisMarket } from './analysis-market.js';
 import { normalizeAnalysisModel, normalizeAnalysisProvider } from './analysis-provider.js';
+import { getHorseRelevantPatternsBatch } from './statistics/horse-patterns.js';
 
 const MAX_SUBMISSION_BYTES = 1024 * 1024;
 const MARKET_BLIND_FEATURE_VERSIONS = new Set(['form-v2', 'class-exposure-v2', 'development-v2']);
@@ -140,6 +141,52 @@ function isolateMarketBlindContext(context) {
   return { ...context, round, legs };
 }
 
+function withLegStartPointRanks(leg, patterns) {
+  const entries = leg.entries || [];
+  const ranked = entries
+    .filter((entry) => !entry.scratched)
+    .map((entry) => ({ entry, pattern: patterns.get(entry.horseId) }))
+    .filter(({ pattern }) => pattern?.startPoints?.current)
+    .sort((a, b) => b.pattern.startPoints.current.points - a.pattern.startPoints.current.points || a.entry.raceEntryId.localeCompare(b.entry.raceEntryId));
+  const ranks = new Map();
+  let priorPoints = null;
+  let priorRank = 0;
+  ranked.forEach(({ entry, pattern }, index) => {
+    const points = pattern.startPoints.current.points;
+    const rank = points === priorPoints ? priorRank : index + 1;
+    ranks.set(entry.raceEntryId, { rank, observed: ranked.length });
+    priorPoints = points;
+    priorRank = rank;
+  });
+  return {
+    ...leg,
+    entries: entries.map((entry) => {
+      const base = patterns.get(entry.horseId);
+      if (!base) return { ...entry, relevantPatterns: null };
+      const rank = ranks.get(entry.raceEntryId);
+      return {
+        ...entry,
+        relevantPatterns: {
+          ...base,
+          startPoints: rank ? { ...base.startPoints, fieldRank: rank.rank, fieldObserved: rank.observed } : base.startPoints
+        }
+      };
+    })
+  };
+}
+
+async function addRelevantHorsePatterns(env, context) {
+  const horseIds = [...new Set((context.legs || []).flatMap((leg) => (leg.entries || []).map((entry) => entry.horseId).filter(Boolean)))];
+  if (!horseIds.length) return context;
+  const asOfDate = context.round?.roundDate;
+  if (!asOfDate) return context;
+  const patterns = await getHorseRelevantPatternsBatch(env, horseIds, asOfDate, { historicalOnly: true });
+  return {
+    ...context,
+    legs: (context.legs || []).map((leg) => withLegStartPointRanks(leg, patterns))
+  };
+}
+
 export async function prepareAnalysisContext(env, roundId, stage = 'pre_market', options = {}) {
   const normalizedRoundId = requiredText(roundId, 'round_id', 200);
   await assertRoundOpenForAnalysis(env, normalizedRoundId);
@@ -147,7 +194,7 @@ export async function prepareAnalysisContext(env, roundId, stage = 'pre_market',
   const rawContext = await getAnalysisContext(env, normalizedRoundId, normalizedStage, options);
   let context;
   if (normalizedStage === 'pre_market') {
-    context = isolateMarketBlindContext(rawContext);
+    context = await addRelevantHorsePatterns(env, isolateMarketBlindContext(rawContext));
   } else {
     const verifiedMarket = await getVerifiedAnalysisMarket(env, normalizedRoundId, rawContext.generatedAt);
     context = { ...rawContext, market: verifiedMarket };
@@ -167,7 +214,8 @@ export async function prepareAnalysisContext(env, roundId, stage = 'pre_market',
         probabilitiesPerLegMustSumTo: 1,
         rankingsMustCoverAllActiveEntries: true,
         abcdMeaning: 'relative winning strength, not value',
-        acceptedFeatureVersions: [...MARKET_BLIND_FEATURE_VERSIONS]
+        acceptedFeatureVersions: [...MARKET_BLIND_FEATURE_VERSIONS],
+        relevantPatternRule: 'Start Points development and verified X-Labs pace/distance summaries are factual context; fieldRank is within the current race leg. AI interprets them without changing raw facts.'
       }
     };
   }

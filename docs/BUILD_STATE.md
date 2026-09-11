@@ -8,11 +8,11 @@ Updated: 2026-09-11
 - D1: `kentaurai`.
 - R2: `kentaurai-raw`.
 - Actual Worker entrypoint: `src/worker-v064.js`.
-- Statistics Build D is merged and production-live after GitHub Actions release run `34634926117`.
-- Release QA passed with 426 tests and zero failures before production changes.
+- Controlled AI Build E is merged and production-live after GitHub Actions release run `34642352908`.
+- Release QA passed with 441 tests and zero failures before production changes.
 - Worker deployment, `/health`, `/app/login` and the private analysis-prompt authorization check all passed.
-- Deployed Worker version ID from that release: `91254e23-9446-4934-8f1f-1d28d4c92399`.
-- Production D1 reported `No migrations to apply` during that release. Repository migration tracking was therefore current through `0012_trainer_statistics_indexes.sql`; this does not by itself constitute a separate content inspection of that schema.
+- Deployed Worker version ID from that release: `465768c5-3106-4164-a27c-69ae34d9e6ec`.
+- Production D1 reported `No migrations to apply` during that release. Repository migration tracking remains current through `0012_trainer_statistics_indexes.sql`.
 - Official and X-Labs historical backfills use persisted jobs/cursors. Deployments and analysis work must never recreate, reset or silently restart them.
 
 ## Statistics programme
@@ -50,19 +50,34 @@ Updated: 2026-09-11
 - Migration `0012_trainer_statistics_indexes.sql` adds only the measured trainer query index.
 
 ## Controlled AI programme
-### Build E - Repair controlled AI export flow - active PR #87
-- Branch: `feat/controlled-ai-build-e`, based on production-release main commit `ba3759732c9afd8687a31b749b00ede8f6b047ca`.
-- The existing provider-neutral analysis exchange remains the single AI pipeline; Build E repairs and hardens its export/import contract rather than introducing autonomous model execution in the Worker.
-- Every export already carries the immutable KentaurAI context envelope in `analysis_contexts`: `round_id`, all eight stored race identities, canonical race-entry identities and the exact context fingerprint are supplied by KentaurAI rather than entered by the user.
-- `pre_market` remains market-blind. Current betting percentages, odds, turnover and jackpot are excluded until that provider has a stored pre-market analysis.
-- Final analysis remains parent-bound. Its market context is generated only for an existing pre-market parent from the same provider and the final submission cannot rewrite stored probability/rank/ABCD strength.
-- Build E now replaces the older broad market reader in the final context with `verified-market-at-stop-v1`: betting and odds rows must be source-backed, belong to the exact round/race entry and be observed no later than the verified betting stop/current stable analysis cutoff.
-- Market context timestamps are stabilized to the current minute so an unchanged exported context has a usable deterministic fingerprint while newer market evidence still invalidates stale work on refresh.
-- New analysis submissions accept only explicitly allowed canonical producer providers (`openai` or `anthropic` at this version). Aliases are accepted for UI/export selection only; stored producer attribution is canonical.
-- `producer.model` is required, retained as the actual model identity and rejects control characters. Output filename guidance now includes provider, actual-model slug and phase without treating the filename as authoritative identity.
-- Server-side validation continues to reject changed fingerprints, wrong/missing parents, wrong/missing race-entry identities, post-deadline pre-market creation, invalid spike structure and changed content under an existing submission ID. Exact retries remain idempotent no-ops.
-- Synthetic Build E regression coverage explicitly covers OpenAI, Anthropic, unknown providers, stale fingerprints, missing entry IDs, wrong parents, post-race/pre-market blocking and idempotent retries.
-- No new D1 migration is required by Build E. No production deploy or backfill mutation is part of PR #87 before final review and explicit authorization.
+### Build E - Repair controlled AI export flow - merged and production-live
+- PR #87 is merged; merge commit `42901f281eb8405f6aa72cbce104baf77199c6df`.
+- Final reviewed branch head was `532d698fbe30e6f8fae6fce2efb606b62f71877e`; CI #551 passed with 441 tests and zero failures before merge.
+- Production release run `34642352908` passed the same 441-test QA suite, reported no pending D1 migrations and deployed Worker version `465768c5-3106-4164-a27c-69ae34d9e6ec`.
+- The existing provider-neutral analysis exchange remains the single AI pipeline; Build E hardens its export/import contract rather than introducing autonomous model execution in the Worker.
+- Every export carries the immutable KentaurAI context envelope in `analysis_contexts`: canonical round/race/race-entry identities and exact context fingerprint are supplied by KentaurAI rather than entered by the user.
+- `pre_market` is market-blind. Current betting percentages, odds, turnover and jackpot remain excluded until that provider has a stored pre-market analysis.
+- Final analysis is parent-bound and cannot rewrite stored probability/rank/ABCD strength.
+- Final market context uses `verified-market-at-stop-v1`: betting and odds rows must be source-backed, belong to the exact round/race entry and be observed no later than the verified betting stop/current stable analysis cutoff.
+- Supported final submissions write analysis, predictions, systems and selections through the dedicated verified final importer using the already verified market object as the sole market input.
+- New analysis submissions accept only canonical `openai` or `anthropic` producer identities at this version; `producer.model` stores the actual model identity.
+- Output filename guidance includes provider, actual-model slug and phase, while JSON producer fields remain authoritative.
+- Server-side validation rejects stale fingerprints, wrong/missing parents, wrong/missing race-entry identities, post-deadline pre-market creation, invalid spike structure and changed content under an existing submission ID. Exact retries remain idempotent no-ops.
+- No new D1 migration was required by Build E and the release did not reset or recreate historical backfills.
+
+## Data inventory and relevant-pattern programme
+### Build F - Received-versus-used inventory plus first relevant horse patterns - active PR #88
+- Branch: `feat/data-inventory-build-f`, based on the post-Build-E production-release main commit `5ba8cb154b65da14bc7c71845549236198f0bfb0`.
+- `docs/DATA_INVENTORY.md` traces current official calendar/game/historical-race data, Start Points, X-Labs telemetry, normalized D1 storage, deterministic features and AI exposure.
+- The inventory distinguishes actual available source facts from schema columns that merely exist but are not reliably populated.
+- Build F promotes only already verified facts with clear analytical value: current Start Points plus latest verified change, recent verified X-Labs first-200 pace, last-400 pace and extra travelled distance.
+- Horse detail statistics expose these as a compact Swedish `Utveckling & löpstyrka` section with natural labels `Startpoäng`, `Starttempo`, `Avslutning` and `Extra distans`. The section explicitly identifies the values as factual patterns rather than AI judgement and states that its latest-observation summary is independent of the statistics filters above.
+- Pre-market AI context receives the same factual pattern family. X-Labs history is restricted to races strictly before the target round date, preventing same-day result leakage.
+- Start Points are ranked only against non-scratched horses with verified observations in the same current race leg; missing observations remain missing and do not distort the denominator.
+- Start Points pattern inputs require a normalized official-provider source record. X-Labs pattern inputs require the verified telemetry quality marker plus the captured race-json source family.
+- Higher-risk or not-yet-verified inventory candidates remain deferred: raw 100 m interval/trajectory interpretation, official aggregate snapshots beyond Start Points, structured race-term parsing, equipment-response logic and market `trend` semantics.
+- Current official age is not converted into a guessed birth year, and unsupported schema fields remain null rather than inferred.
+- Build F changes no model weights, adds no external source, requires no schema migration and does not mutate or reset historical backfills.
 
 ## Data and analysis foundation
 - GitHub contains public code, schema, tests, configuration and synthetic fixtures only.

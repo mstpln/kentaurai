@@ -4,6 +4,7 @@ import { requireAdmin } from './auth.js';
 import { enhanceAppHtmlV064 } from './app-v064-overlay.js';
 import { enhanceDriverStatisticsHtml } from './driver-statistics-ui.js';
 import { enhanceTrainerStatisticsHtml } from './trainer-statistics-ui.js';
+import { enhanceHorsePatternsHtml } from './horse-patterns-ui.js';
 import { buildAnalysisImportPrompt, recommendedAnalysisFilename } from './analysis-import-prompt.js';
 import { ANALYSIS_SUBMISSION_VERSION } from './analysis-exchange.js';
 import { getTrackDetailV064, getTrackLaneStatsV064 } from './routes/tracks-v064.js';
@@ -34,7 +35,7 @@ async function enhancedAppResponse(request, response) {
   if (request.method !== 'GET' || new URL(request.url).pathname !== '/app/') return response;
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('text/html')) return response;
-  const body = enhanceTrainerStatisticsHtml(enhanceDriverStatisticsHtml(enhanceAppHtmlV064(await response.text())));
+  const body = enhanceHorsePatternsHtml(enhanceTrainerStatisticsHtml(enhanceDriverStatisticsHtml(enhanceAppHtmlV064(await response.text()))));
   const headers = new Headers(response.headers);
   headers.delete('content-length');
   return new Response(body, { status: response.status, statusText: response.statusText, headers });
