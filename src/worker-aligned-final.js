@@ -27,7 +27,16 @@ const finalHeaderCss = `
 }
 </style>`;
 
-async function withFinalHeaderAlignment(request, response) {
+const brokenSettingsHook = `const priorAlignedRenderData=renderData;
+renderData=async function(){await priorAlignedRenderData();if(state.settingsOpen&&state.settingsTab==='data')alignSettingsStatuses()};`;
+
+const settingsObserverHook = `const settingsStatusHost=document.getElementById('app');
+if(settingsStatusHost){
+  const settingsStatusObserver=new MutationObserver(()=>{if(state.settingsOpen&&state.settingsTab==='data')alignSettingsStatuses()});
+  settingsStatusObserver.observe(settingsStatusHost,{childList:true,subtree:true});
+}`;
+
+async function withFinalAlignment(request, response) {
   if (request.method !== 'GET') return response;
   const path = new URL(request.url).pathname;
   if (path !== '/app/') return response;
@@ -36,16 +45,21 @@ async function withFinalHeaderAlignment(request, response) {
   const body = await response.text();
   const headers = new Headers(response.headers);
   headers.delete('content-length');
-  return new Response(body.replace('</head>', `${finalHeaderCss}</head>`), {
-    status: response.status,
-    statusText: response.statusText,
-    headers
-  });
+  return new Response(
+    body
+      .replace(brokenSettingsHook, settingsObserverHook)
+      .replace('</head>', `${finalHeaderCss}</head>`),
+    {
+      status: response.status,
+      statusText: response.statusText,
+      headers
+    }
+  );
 }
 
 export default {
   async fetch(request, env, ctx) {
-    return withFinalHeaderAlignment(request, await worker.fetch(request, env, ctx));
+    return withFinalAlignment(request, await worker.fetch(request, env, ctx));
   },
   async scheduled(controller, env, ctx) {
     return worker.scheduled(controller, env, ctx);
