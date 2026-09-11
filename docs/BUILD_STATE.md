@@ -1,14 +1,14 @@
 # Build state
 
-Version: 0.5.0
+Version: 0.6.0
 Phase: verified official + X-Labs data foundation with production backfills active
-Status: official live acquisition is deployed and smoke-tested; the official multi-year historical backfill is running; verified X-Labs acquisition/normalization is deployed; the production X-Labs vertical-slice gate passed; the separate multi-year X-Labs backfill for 2023-09-08 through 2026-09-07 is running under the existing bounded scheduler; the private reference-round production import has been completed and independently verified; installable KentaurAI PWA packaging and automatic deterministic post-race review are merged to `main`; a provider-neutral pre-race analysis exchange is implemented for external AI clients such as ChatGPT or Claude.
+Status: official live acquisition is deployed and smoke-tested; the official multi-year historical backfill is running; verified X-Labs acquisition/normalization is deployed; the production X-Labs vertical-slice gate passed; the separate multi-year X-Labs backfill for 2023-09-08 through 2026-09-07 is running under the existing bounded scheduler; the private reference-round production import has been completed and independently verified; installable KentaurAI PWA packaging, automatic deterministic post-race review, six-area private navigation and Bana profiles are implemented; a provider-neutral pre-race analysis exchange is implemented for external AI clients such as ChatGPT or Claude.
 
 ## Current production state
 - Worker: `kentaurai-api`.
 - D1: `kentaurai`.
 - R2: `kentaurai-raw`.
-- Production migrations are applied through migration 0007; the manual GitHub migration workflow reported no pending migrations at the latest production check.
+- Production migrations are applied through migration 0007. Repository migration 0008 adds track contact metadata and calculated race classifications, but must not be assumed applied in production until an explicitly authorized production migration run succeeds.
 - Official historical backfill range: 2023-09-08 through 2026-09-07, newest-first, up to three sequential race checkpoints per minute when eligible.
 - X-Labs historical backfill range: 2023-09-08 through 2026-09-07, newest-first, up to three sequential X-Labs checkpoints per minute when eligible.
 - The X-Labs historical job does not outrun official history: it waits until the corresponding official date is ready.
@@ -86,6 +86,7 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 - Submission IDs are immutable idempotency keys: an exact retry is a no-op, while changed content under the same ID is rejected.
 - Every stored V85/V86 system must cover all eight legs and contain exactly three actual one-horse spike legs. KentaurAI derives row count and spike count rather than trusting client totals.
 - Analysis exchange routes live under `/v1/analysis/*` and use existing `ADMIN_TOKEN` authentication; real submissions remain private in D1.
+- The private Settings view also contains a version-bound helper for copying the exact client instructions needed to create a compatible JSON import file. The helper keeps pre-market and final submission shapes separate and does not allow an AI client to supply KentaurAI-calculated market/value fields.
 - The detailed contract is documented in `docs/ANALYSIS_EXCHANGE.md`.
 
 ## Private interface
@@ -102,10 +103,12 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 - Trainer/driver **Hästar** tabs use a separate paginated linked-horse query so older horse relationships remain discoverable after multi-year backfill.
 - Internal provider/source IDs are not primary user-facing content.
 - Missing facts and unsupported derived values remain null/unknown.
+- Bana has list/detail views with **Översikt -> Spårstatistik -> Hemmatränare**. Stored track profile facts are shown only when verified; address/website fields are nullable and hidden when unavailable.
+- Bana spårstatistik supports period, startmetod and canonical distance together with independent optional **STL-klass** and **Lopptyp** filters. STL/race-type classifications are deterministic calculated data stored separately from raw race facts.
 
 ## Navigation and visual direction
-- Bottom navigation is: **Trend -> Tränare -> Hästar -> Kuskar -> Spel**.
-- Trend uses the approved chart-line symbol.
+- Bottom navigation is: **Trend -> Tränare -> Hästar -> Kuskar -> Bana -> Spel**.
+- Trend uses the approved chart-line symbol and Bana uses the approved map-pin/oval symbol.
 - Tränare uses clipboard/pen, Hästar uses the horse symbol and Kuskar uses the lightbulb symbol.
 - Entity detail tiles display entity initials rather than category icons.
 - Trend category controls remain Tränare / Hästar / Kuskar with 2 veckor / 4 veckor / 3 mån / 6 mån / 1 år.
@@ -115,12 +118,13 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 ## Entity/data coverage
 - Horse, trainer and driver remain separate analytical entities.
 - Person detail tabs are **Statistik -> Starter -> Hästar -> Data**.
-- Horse detail tabs are **Statistik -> Starter -> Utrustning -> Data**.
+- Horse detail tabs are **Statistik -> Starter -> Data**; equipment for historical starts is shown within the expandable Starter history instead of a duplicate Utrustning tab.
 - A conservative exact-name cross-role link may connect trainer/driver views; this is not a persisted shared-person identity assertion.
 - Stored views expose factual race/start/result/market/equipment/X-Labs/position/condition data separately from calculated features, AI analyses and editorial signals.
 - Start history supports complete paginated stored history rather than a permanent latest-N cap.
 - Scratched declarations are excluded from performance and coverage denominators.
 - Missing values stay unknown rather than being inferred for presentation.
+- User-facing presentation uses natural Swedish labels for known statuses, rankings, post-race miss types, countries and structured data fields while keeping internal storage/API identifiers technical.
 
 ## Spel and post-race review
 - Spel has exactly three tabs: Översikt, V85 and V86.
@@ -132,6 +136,7 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 - Review writes are deterministic, resumable and idempotent per system/race, including protection against duplicate legacy review rows.
 - Covered winners are No change; missed winners are Candidate learning, with spike misses distinguished from ordinary coverage misses.
 - Learning remains No change / Candidate / Confirmed; one race or round never changes analysis rules or model weights directly.
+- Settings counts stored V85/V86 rounds separately from the Spel overview count of actually saved systems; the Settings label is **V85/V86-omgångar** to avoid conflating those measures.
 
 ## Quality and privacy
 - GitHub contains code/schema/tests/docs/synthetic fixtures only.
@@ -149,13 +154,15 @@ Status: official live acquisition is deployed and smoke-tested; the official mul
 3. Verify upcoming/current V85/V86 official acquisition, rolling official ordinary-race history and daily X-Labs catch-up remain healthy while the long jobs run.
 4. Keep the verified private reference round as a fixed reference fixture in private production storage; do not commit its payload to GitHub.
 5. Keep post-race learning conservative: one wrong ranking, spike or round is evidence to review, not a reason to change logic automatically.
+6. Do not apply migration 0008 or deploy its Worker/UI changes to production without separate explicit production authorization.
 
 ## Next build sequence
-1. Let official + historical X-Labs population continue in the background and verify the first natural rolling-history execution.
-2. Use the provider-neutral analysis exchange on an upcoming live V85/V86 round and verify the first private read -> external AI analysis -> stored submission round trip.
-3. Assess accumulated verified history against the Trend readiness contract and build deterministic Trend metrics/leaderboards once production history is sufficient.
-4. Expand deterministic factual features and objective post-race scoring/calibration only where stored source data supports the calculation.
-5. Keep interpretation, rankings, probabilities, value judgment and betting suggestions in the replaceable external AI analysis layer; do not add an autonomous Worker AI runner unless the product direction is explicitly changed later.
+1. After explicit production authorization, apply migration 0008, deploy the current Worker and verify the private Bana/contact/class-filter and analysis-import-helper flow without disturbing the running backfills.
+2. Let official + historical X-Labs population continue in the background and verify the first natural rolling-history execution.
+3. Use the provider-neutral analysis exchange on an upcoming live V85/V86 round and verify the first private read -> external AI analysis -> stored submission round trip.
+4. Assess accumulated verified history against the Trend readiness contract and build deterministic Trend metrics/leaderboards once production history is sufficient.
+5. Expand deterministic factual features and objective post-race scoring/calibration only where stored source data supports the calculation.
+6. Keep interpretation, rankings, probabilities, value judgment and betting suggestions in the replaceable external AI analysis layer; do not add an autonomous Worker AI runner unless the product direction is explicitly changed later.
 
 ## Not yet implemented / intentionally deferred
 - verified/persisted shared-person identity across trainer and driver roles
