@@ -1,7 +1,6 @@
 export const DRIVER_LONGSHOT_PERCENT_MAX = 5;
 export const DRIVER_MARKET_DEFINITION_VERSION = 'market-at-stop-v1';
-export const DRIVER_POSITION_CHECKPOINTS_M = Object.freeze([500, 1000]);
-export const DRIVER_POSITION_DEFINITION_VERSION = 'verified-position-checkpoints-v1';
+export const DRIVER_POSITION_DEFINITION_VERSION = 'verified-position-flags-v1';
 
 function canonicalMethod(value) {
   const method = String(value || '').trim().toLowerCase();
@@ -32,9 +31,4 @@ export function isDriverLongshotPercent(value) {
   if (value == null || value === '') return false;
   const percent = Number(value);
   return Number.isFinite(percent) && percent >= 0 && percent <= DRIVER_LONGSHOT_PERCENT_MAX;
-}
-
-export function isDriverPositionCheckpoint(value) {
-  const meters = Number(value);
-  return Number.isInteger(meters) && DRIVER_POSITION_CHECKPOINTS_M.includes(meters);
 }
