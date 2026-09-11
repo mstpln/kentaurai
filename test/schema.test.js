@@ -9,7 +9,9 @@ const migration3 = readFileSync(new URL('../migrations/0003_nullable_reference_p
 const migration4 = readFileSync(new URL('../migrations/0004_official_live_observations.sql', import.meta.url), 'utf8');
 const migration5 = readFileSync(new URL('../migrations/0005_historical_backfill.sql', import.meta.url), 'utf8');
 const migration6 = readFileSync(new URL('../migrations/0006_xlabs_backfill.sql', import.meta.url), 'utf8');
-const sql = `${migration1}\n${migration2}\n${migration3}\n${migration4}\n${migration5}\n${migration6}`;
+const migration7 = readFileSync(new URL('../migrations/0007_official_first_prize.sql', import.meta.url), 'utf8');
+const migration8 = readFileSync(new URL('../migrations/0008_track_contact_metadata.sql', import.meta.url), 'utf8');
+const sql = `${migration1}\n${migration2}\n${migration3}\n${migration4}\n${migration5}\n${migration6}\n${migration7}\n${migration8}`;
 
 test('core migrations apply cleanly and create required tables', () => {
   const db = new DatabaseSync(':memory:');
@@ -21,7 +23,8 @@ test('core migrations apply cleanly and create required tables', () => {
     'ai_race_analyses', 'ai_horse_predictions', 'systems', 'post_race_reviews', 'import_runs',
     'learning_hypotheses', 'learning_observations', 'model_change_log',
     'reference_round_exports', 'reference_observations', 'normalized_observations',
-    'historical_backfill_jobs', 'xlabs_backfill_jobs'
+    'historical_backfill_jobs', 'xlabs_backfill_jobs',
+    'race_stl_classifications', 'race_type_classifications'
   ]) {
     assert.ok(names.has(required), `missing ${required}`);
   }
@@ -54,6 +57,29 @@ test('reference migration adds captured factual fields without changing raw/anal
   assert.ok(analysisColumns.has('method_note'));
   assert.ok(editorialColumns.has('race_id'));
   assert.ok(editorialColumns.has('game_round_id'));
+});
+
+test('track migration keeps contact facts separate from calculated race classifications', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(sql);
+  const trackColumns = new Set(db.prepare('PRAGMA table_info(tracks)').all().map((r) => r.name));
+  const raceColumns = new Set(db.prepare('PRAGMA table_info(races)').all().map((r) => r.name));
+  for (const required of ['street_address', 'postal_code', 'website_url']) assert.ok(trackColumns.has(required));
+  assert.equal(raceColumns.has('stl_class'), false);
+  assert.equal(raceColumns.has('race_types_json'), false);
+
+  db.prepare("INSERT INTO tracks (id, canonical_name) VALUES ('t1','Testbanan')").run();
+  db.prepare(`INSERT INTO races (id, track_id, race_date, race_number, race_name, main_class, class_flags_json)
+    VALUES ('r1','t1','2026-09-11',1,'Silverdivisionen - Stolopp','Silverdivisionen','["Spårtrappa"]')`).run();
+  assert.equal(db.prepare("SELECT stl_class FROM race_stl_classifications WHERE race_id='r1'").get().stl_class, 'silver');
+  assert.deepEqual(
+    db.prepare("SELECT race_type FROM race_type_classifications WHERE race_id='r1' ORDER BY race_type").all().map((row) => row.race_type),
+    ['lane_ladder', 'mares']
+  );
+
+  db.prepare("UPDATE races SET race_name='Gulddivisionen', main_class='Gulddivisionen', class_flags_json='[]' WHERE id='r1'").run();
+  assert.equal(db.prepare("SELECT stl_class FROM race_stl_classifications WHERE race_id='r1'").get().stl_class, 'gold');
+  assert.deepEqual(db.prepare("SELECT race_type FROM race_type_classifications WHERE race_id='r1'").all(), []);
 });
 
 test('official live observation migration keeps source provenance mandatory', () => {
