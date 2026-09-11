@@ -2,13 +2,18 @@ export const XLABS_SOURCE_GAP_QUALITY = 'captured_source_gap';
 
 export function xlabsTelemetrySourceGap(error) {
   const message = String(error?.message || '');
-  const match = /^X-Labs telemetry frame (\d+) contains duplicate target (\d+)$/.exec(message);
-  if (!match) return null;
-  return {
-    code: 'duplicate_target',
-    frameIndex: Number(match[1]),
-    startNumber: Number(match[2])
-  };
+  const duplicate = /^X-Labs telemetry frame (\d+) contains duplicate target (\d+)$/.exec(message);
+  if (duplicate) {
+    return {
+      code: 'duplicate_target',
+      frameIndex: Number(duplicate[1]),
+      startNumber: Number(duplicate[2])
+    };
+  }
+  if (message === 'captured X-Labs telemetry had no official entries with verified frame coverage') {
+    return { code: 'no_verified_frame_coverage' };
+  }
+  return null;
 }
 
 export async function markXlabsSourceGap(env, sourceRecordId, gap) {
