@@ -50,15 +50,19 @@ Updated: 2026-09-11
 - Migration `0012_trainer_statistics_indexes.sql` adds only the measured trainer query index.
 
 ## Controlled AI programme
-### Build E - Controlled AI via JSON - active feature branch
-- Branch: `feat/controlled-ai-build-e` from production-release main commit `ba3759732c9afd8687a31b749b00ede8f6b047ca`.
-- Build E completes the existing provider-neutral analysis exchange rather than creating a second AI pipeline.
-- Strength is stored first in a `pre_market` artifact that excludes current market percentages/odds/turnover/jackpot; ABCD remains relative winning strength, not value.
-- A later market-aware final artifact must reference one stored pre-market parent and cannot rewrite that parent's probability/rank/ABCD assessment.
-- OpenAI/ChatGPT and Anthropic/Claude analyses remain independent submissions and must not overwrite each other.
-- Build E starts by tightening market context to source-backed snapshots at or before the verified betting stop, using the same fail-closed factual discipline as driver/trainer market statistics.
-- App presentation must keep own analysis, other AI analyses and editorial signals visibly distinct and later show stored own probability alongside factual market percentage without feeding market back into the strength assessment.
-- No production deploy, migration or backfill mutation belongs to Build E until separately reviewed and authorized.
+### Build E - Repair controlled AI export flow - active PR #87
+- Branch: `feat/controlled-ai-build-e`, based on production-release main commit `ba3759732c9afd8687a31b749b00ede8f6b047ca`.
+- The existing provider-neutral analysis exchange remains the single AI pipeline; Build E repairs and hardens its export/import contract rather than introducing autonomous model execution in the Worker.
+- Every export already carries the immutable KentaurAI context envelope in `analysis_contexts`: `round_id`, all eight stored race identities, canonical race-entry identities and the exact context fingerprint are supplied by KentaurAI rather than entered by the user.
+- `pre_market` remains market-blind. Current betting percentages, odds, turnover and jackpot are excluded until that provider has a stored pre-market analysis.
+- Final analysis remains parent-bound. Its market context is generated only for an existing pre-market parent from the same provider and the final submission cannot rewrite stored probability/rank/ABCD strength.
+- Build E now replaces the older broad market reader in the final context with `verified-market-at-stop-v1`: betting and odds rows must be source-backed, belong to the exact round/race entry and be observed no later than the verified betting stop/current stable analysis cutoff.
+- Market context timestamps are stabilized to the current minute so an unchanged exported context has a usable deterministic fingerprint while newer market evidence still invalidates stale work on refresh.
+- New analysis submissions accept only explicitly allowed canonical producer providers (`openai` or `anthropic` at this version). Aliases are accepted for UI/export selection only; stored producer attribution is canonical.
+- `producer.model` is required, retained as the actual model identity and rejects control characters. Output filename guidance now includes provider, actual-model slug and phase without treating the filename as authoritative identity.
+- Server-side validation continues to reject changed fingerprints, wrong/missing parents, wrong/missing race-entry identities, post-deadline pre-market creation, invalid spike structure and changed content under an existing submission ID. Exact retries remain idempotent no-ops.
+- Synthetic Build E regression coverage explicitly covers OpenAI, Anthropic, unknown providers, stale fingerprints, missing entry IDs, wrong parents, post-race/pre-market blocking and idempotent retries.
+- No new D1 migration is required by Build E. No production deploy or backfill mutation is part of PR #87 before final review and explicit authorization.
 
 ## Data and analysis foundation
 - GitHub contains public code, schema, tests, configuration and synthetic fixtures only.
