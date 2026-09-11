@@ -67,7 +67,7 @@ function normalizeDistanceGroup(value) {
 
 function distanceCondition(group, bindings) {
   if (group === OTHER_LONG_DISTANCE_KEY) {
-    const excluded = STANDARD_DISTANCE_GROUPS.filter((distance) => distance > 2640);
+    const excluded = STANDARD_DISTANCE_GROUPS.filter((distance) => distance >= 2640);
     let sql = 'r.distance_m > 2640';
     for (const distance of excluded) {
       sql += ' AND NOT (r.distance_m BETWEEN ? AND ?)';
