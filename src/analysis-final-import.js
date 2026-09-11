@@ -71,9 +71,10 @@ function normalizeSystems(systems, legs) {
     if (byLeg.size !== 8) throw new Error('every system must select at least one horse in all eight legs');
     for (const legSelections of byLeg.values()) {
       if (new Set(legSelections.map((selection) => selection.raceEntryId)).size !== legSelections.length) throw new Error('system cannot select the same race entry twice in a leg');
-      if (legSelections.some((selection) => selection.isSpike) && !(legSelections.length === 1 && legSelections[0].isSpike)) throw new Error('a spike leg must contain exactly one selected horse');
+      if (legSelections.length === 1 && !legSelections[0].isSpike) throw new Error('every one-horse leg is a spike and must be marked is_spike=true');
+      if (legSelections.length > 1 && legSelections.some((selection) => selection.isSpike)) throw new Error('a spike leg must contain exactly one selected horse');
     }
-    const spikeCount = [...byLeg.values()].filter((legSelections) => legSelections.length === 1 && legSelections[0].isSpike).length;
+    const spikeCount = [...byLeg.values()].filter((legSelections) => legSelections.length === 1).length;
     if (spikeCount !== 3) throw new Error('every V85/V86 system must contain exactly three spike legs');
     const rowCount = [...byLeg.values()].reduce((rows, legSelections) => rows * legSelections.length, 1);
     const budgetSek = finiteNumber(system.budget_sek ?? system.budgetSek, `systems[${systemIndex}].budget_sek`, { min: 0.01, max: 1_000_000, nullable: false });
@@ -111,7 +112,10 @@ export async function importVerifiedFinalAnalysis(env, input) {
   const parentSubmissionId = requiredText(input.parentSubmissionId, 'parent_submission_id', 100);
   const provider = requiredText(input.provider, 'producer.provider', 100);
   const model = requiredText(input.model, 'producer.model', 200);
+  const analysisVersion = optionalText(input.analysisVersion, 'analysis_version', 200);
+  const roundSummary = optionalText(input.roundSummary, 'round_summary', 12000);
   const contextFingerprint = requiredText(input.contextFingerprint, 'context_fingerprint', 80).toLowerCase();
+  if (!/^sha256:[a-f0-9]{64}$/.test(contextFingerprint)) throw new Error('context_fingerprint must be a sha256 fingerprint');
   const dataSnapshotAt = requiredText(input.dataSnapshotAt, 'data_snapshot_at', 80);
   if (!Number.isFinite(Date.parse(dataSnapshotAt))) throw new Error('data_snapshot_at must be a valid ISO date/time');
   if (!Array.isArray(input.legs) || input.legs.length !== 8) throw new Error('final analysis must contain exactly eight stored parent legs');
@@ -133,10 +137,10 @@ export async function importVerifiedFinalAnalysis(env, input) {
     parentSubmissionId,
     provider,
     model,
-    analysisVersion: input.analysisVersion ?? null,
+    analysisVersion,
     dataSnapshotAt,
     contextFingerprint,
-    roundSummary: input.roundSummary ?? null,
+    roundSummary,
     recommendations: input.recommendations ?? null,
     legs: input.legs,
     systems
@@ -151,7 +155,7 @@ export async function importVerifiedFinalAnalysis(env, input) {
       contextFingerprint,
       payloadDigest: serverPayloadDigest,
       dataSnapshotAt,
-      roundSummary: input.roundSummary ?? null,
+      roundSummary,
       recommendations: input.recommendations ?? null
     }
   };
@@ -163,7 +167,7 @@ export async function importVerifiedFinalAnalysis(env, input) {
       (id, created_at, feature_version, prompt_version, ai_provider, ai_model, config_json, notes)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
-    modelVersionId, createdAt, FEATURE_VERSION, input.analysisVersion ?? null, provider, model,
+    modelVersionId, createdAt, FEATURE_VERSION, analysisVersion, provider, model,
     JSON.stringify(metadata), 'Provider-neutral KentaurAI analysis exchange submission'
   ));
   kinds.push('model');
