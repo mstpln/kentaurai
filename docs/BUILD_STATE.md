@@ -2,7 +2,7 @@
 
 Version: 0.6.0
 Phase: verified official + X-Labs data foundation with production backfills active
-Status: v0.6.0 is deployed in production; migration 0008, Worker health, private login and the analysis-prompt route were verified by the successful production release after PR #77. PR #78 is merged and added the canonical track filters/contact infrastructure plus repository migration 0009. Migration 0009 has not been production-applied or verified as part of the post-#78 rollout, and real private track-contact enrichment is not complete. PR #79 is the current UI-integrity/completion build and is not production-live. The official multi-year historical backfill and separate multi-year X-Labs backfill remain active on their persisted cursors and were not touched by this build.
+Status: v0.6.0 is deployed in production; migration 0008, Worker health, private login and the analysis-prompt route were verified by the successful production release after PR #77. PR #78 and PR #79 are merged on main. PR #79 completed the canonical race-level/statistics/UI follow-up, including `Loppnivå = All data / Högre prissumma / Vardagstrav`, filtered entity summaries and historical V75/V85/V86 race-level evidence. Migration 0009 has not yet been production-applied or verified, and the PR #79 code is not yet production-live. The official multi-year historical backfill and separate multi-year X-Labs backfill remain active on their persisted cursors and were not reset or recreated by these builds.
 
 ## Current production state
 - Worker: `kentaurai-api`.
@@ -17,7 +17,7 @@ Status: v0.6.0 is deployed in production; migration 0008, Worker health, private
 - Daily V85/V86 X-Labs catch-up remains separate and has priority over the long historical X-Labs job.
 - A rolling three-day official ordinary-race catch-up is created at the existing 04:30 UTC scheduling point so recent historical coverage remains current and short scheduler gaps can self-heal.
 - The private `kentaurai-reference-v1` round is stored in production with archived source provenance and independently verified structural invariants.
-- Existing official and X-Labs backfill jobs are persistent and must continue from their stored cursors across deployments; this completion build does not recreate, reset or restart them.
+- Existing official and X-Labs backfill jobs are persistent and must continue from their stored cursors across deployments; the merged completion work does not recreate, reset or restart them.
 - The Worker entrypoint is `src/worker-v064.js` and includes the scoped PWA wrapper; public PWA metadata/assets are separate from authenticated app/API responses.
 - The minute Worker schedule also attempts at most one eligible deterministic post-race review pass; rounds without eight unambiguous factual winners remain untouched.
 
@@ -107,7 +107,8 @@ Status: v0.6.0 is deployed in production; migration 0008, Worker health, private
 - Missing facts and unsupported derived values remain null/unknown.
 - Bana has list/detail views with **Översikt -> Spårstatistik -> Hemmatränare**. Stored track profile facts are shown only when verified; address/website fields are nullable and hidden when unavailable.
 - Bana spårstatistik supports period, startmetod, loppnivå and canonical distance together with independent optional **STL-klass** and **Lopptyp** filters. These filters combine in the backend query. STL/race-type classifications are deterministic calculated data stored separately from raw race facts.
-- PR #79 moves all essential Bana filter state/query wiring and address formatting into the canonical track renderer rather than exact generated-source replacement. It also makes the Settings analysis CTA and V85/V86 round-count label canonical Settings output rather than MutationObserver-created UI. `All data` remains literal and `SE` is presented as `Sverige` without altering stored country codes.
+- Loppnivå is `All data / Högre prissumma / Vardagstrav`. `Högre prissumma` qualifies through stored V75/V85/V86 game identity, source-backed historical V75/V85/V86 calendar membership, verified STL evidence, or `first_prize_sek >= 100000`; GS75 identity alone does not qualify. `Vardagstrav` is the null-safe complement, so unknown first prize remains unknown without dropping the race from both groups.
+- PR #79 is merged and owns the essential Bana filter state/query wiring, address formatting, Settings analysis CTA and V85/V86 round-count label in the canonical render path. `All data` remains literal and `SE` is presented as `Sverige` without altering stored country codes.
 - The completion build adds an `ADMIN_TOKEN`-protected exact-ID track-contact target/enrichment path. Researched real values stay private; conflicts are recorded and do not overwrite an existing different fact.
 
 ## Navigation and visual direction
@@ -154,15 +155,14 @@ Status: v0.6.0 is deployed in production; migration 0008, Worker health, private
 
 ## Current verification/operations gate
 1. Keep the official and X-Labs multi-year backfills running independently through their persisted checkpoints; do not reset or recreate them.
-2. Review PR #79, require exact-head QA/CI, and merge only after explicit user approval.
-3. After merge authorization, apply pending migration 0009 if still needed and deploy the exact reviewed main head through the authorized production path.
-4. Verify health and private authentication, then verify the actual authenticated application shows the Settings AI CTA, V85/V86 count label, Swedish presentation and combined statistics/Bana filters.
-5. Confirm the existing official and X-Labs backfill state remains intact.
+2. PR #79 is merged on main at merge commit `43fa58139f0bb3886f6444fe5c99a8c8e9319200`; do not repeat the completed review/merge gate.
+3. Apply pending migration 0009 if still needed and deploy the exact reviewed main head through the authorized production path.
+4. Verify `/health` and private authentication, then verify the actual authenticated application shows the Settings AI CTA, V85/V86 count label, Swedish presentation, filtered entity summaries and combined statistics/Bana filters including Loppnivå.
+5. Confirm the existing official and X-Labs backfill state remains intact after deployment.
 6. Perform real track-contact research/enrichment separately through the private exact-ID path without committing the dataset.
-7. Confirm the official and X-Labs backfill rows/cursors still exist and have not been recreated or reset.
 
 ## Next build sequence
-1. Complete the track-contact enrichment and production verification gate above.
+1. Complete the pending migration/deployment and production verification gate above.
 2. Let official + historical X-Labs population continue in the background and verify the natural rolling-history executions.
 3. Use the provider-neutral analysis exchange on an upcoming live V85/V86 round and verify the first private read -> external AI analysis -> stored submission round trip.
 4. Assess accumulated verified history against the Trend readiness contract and build deterministic Trend metrics/leaderboards once production history is sufficient.
