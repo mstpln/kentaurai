@@ -128,6 +128,10 @@ function seedMarket(db) {
       `).run(`bet_${leg}_${start}`, ROUND_ID, leg, entryId, start === 1 ? 40 : 60, start === 1 ? 2 : 1);
     }
   }
+  db.prepare(`
+    INSERT INTO betting_snapshots (id, game_round_id, leg_number, race_entry_id, captured_at, bet_percent, market_rank)
+    VALUES ('bet_unprovenanced_newer', ?, 1, 'analysis_entry_1_1', '2026-09-02T12:00:00Z', 90, 1)
+  `).run(ROUND_ID);
 }
 
 test('pre-market context is market-blind and can be stored independently by Claude and ChatGPT', async () => {
@@ -178,6 +182,7 @@ test('market context requires a stored pre-market parent and final submission co
   assert.equal(marketContext.market.cutoff, marketContext.market.asOf);
   assert.ok(Date.parse(marketContext.market.cutoff) < Date.parse(marketContext.market.betStopAt));
   assert.equal(marketContext.market.betting.length, 16);
+  assert.equal(marketContext.market.betting.find((row) => row.raceEntryId === 'analysis_entry_1_1').betPercent, 40);
 
   const final = await submitAnalysis(env, {
     contract_version: ANALYSIS_SUBMISSION_VERSION,
@@ -209,6 +214,7 @@ test('market context requires a stored pre-market parent and final submission co
   assert.equal(storedFinal.systems[0].selections.find((selection) => selection.raceEntryId === 'analysis_entry_1_1').ownProbability, 0.6);
   assert.equal(storedFinal.systems[0].selections.find((selection) => selection.raceEntryId === 'analysis_entry_1_1').marketPercent, 40);
   assert.ok(storedFinal.legs[0].predictions[0].valueRatio > 1);
+  assert.ok(storedFinal.legs[0].predictions[0].valueRatio < 2);
 });
 
 test('analysis exchange fails closed for stale contexts and invalid spike structures', async () => {
