@@ -28,15 +28,17 @@ function optionalText(value, field, max = 8000) {
 
 function finiteNumber(value, field, { min = -Infinity, max = Infinity, nullable = true } = {}) {
   if (value == null && nullable) return null;
-  const number = Number(value);
-  if (!Number.isFinite(number) || number < min || number > max) throw new Error(`${field} must be a number between ${min} and ${max}`);
-  return number;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max) {
+    throw new Error(`${field} must be a JSON number between ${min} and ${max}`);
+  }
+  return value;
 }
 
 function integer(value, field, { min = -Infinity, max = Infinity } = {}) {
-  const number = Number(value);
-  if (!Number.isInteger(number) || number < min || number > max) throw new Error(`${field} must be an integer between ${min} and ${max}`);
-  return number;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
+    throw new Error(`${field} must be a JSON integer between ${min} and ${max}`);
+  }
+  return value;
 }
 
 function normalizeProvider(value) {
@@ -208,7 +210,13 @@ async function buildGuardPolicy(env, exportedAt) {
       JOIN game_legs gl ON gl.race_id = ara.race_id
       JOIN game_rounds gr ON gr.id = gl.game_round_id
       WHERE gr.game_type IN ('V85','V86')
-        AND datetime(COALESCE(gr.bet_stop_at, gr.scheduled_start_at)) > datetime(?)
+        AND datetime(COALESCE(
+          gr.bet_stop_at,
+          gr.scheduled_start_at,
+          (SELECT MIN(r2.scheduled_start_at)
+           FROM game_legs gl2 JOIN races r2 ON r2.id = gl2.race_id
+           WHERE gl2.game_round_id = gr.id)
+        )) > datetime(?)
     `).bind(exportedAt).all();
     for (const row of analyses || []) guardedAnalysisIds.add(row.id);
     const { results: systems } = await env.DB.prepare(`
@@ -216,7 +224,13 @@ async function buildGuardPolicy(env, exportedAt) {
       FROM systems s
       JOIN game_rounds gr ON gr.id = s.game_round_id
       WHERE gr.game_type IN ('V85','V86')
-        AND datetime(COALESCE(gr.bet_stop_at, gr.scheduled_start_at)) > datetime(?)
+        AND datetime(COALESCE(
+          gr.bet_stop_at,
+          gr.scheduled_start_at,
+          (SELECT MIN(r2.scheduled_start_at)
+           FROM game_legs gl2 JOIN races r2 ON r2.id = gl2.race_id
+           WHERE gl2.game_round_id = gr.id)
+        )) > datetime(?)
     `).bind(exportedAt).all();
     for (const row of systems || []) guardedSystemIds.add(row.id);
   }
@@ -365,7 +379,7 @@ function activeEntryIndex(context) {
 function marketBlindText(value, field) {
   if (value == null) return;
   const text = typeof value === 'string' ? value : JSON.stringify(value);
-  if (/streck|odds|spelvär|värdekvot|break[- ]?even|marknad|överstreck|understreck|överspel|underspel/i.test(text)) {
+  if (/streck|odds|spelvär|värdekvot|break[- ]?even|marknad|överstreck|understreck|överspel|underspel|favorit|spelad|\bmarket\b|\bbetting\b|\bfavou?rite\b|\boverbet|\bunderbet|\bownership\b|\bvalue\s+(?:bet|ratio|play)/i.test(text)) {
     throw new Error(`${field} contains market language; combined legs must reproduce step 1 without market contamination`);
   }
 }
@@ -447,10 +461,12 @@ function normalizeSystems(payload, context) {
       const raceEntryId = requiredText(selection.race_entry_id ?? selection.raceEntryId, `systems[${index}].selections[${sIndex}].race_entry_id`, 200);
       const indexed = byId.get(raceEntryId);
       if (!indexed || indexed.legNumber !== legNumber) throw new Error(`system selection ${raceEntryId} does not belong to active leg ${legNumber}`);
+      const rawIsSpike = selection.is_spike ?? selection.isSpike;
+      if (typeof rawIsSpike !== 'boolean') throw new Error(`systems[${index}].selections[${sIndex}].is_spike must be a JSON boolean`);
       const normalized = {
         legNumber,
         raceEntryId,
-        isSpike: selection.is_spike === true || selection.isSpike === true || Number(selection.is_spike ?? selection.isSpike ?? 0) === 1,
+        isSpike: rawIsSpike,
         selectionReason: optionalText(selection.selection_reason ?? selection.selectionReason, `systems[${index}].selections[${sIndex}].selection_reason`, 2000)
       };
       if (!byLeg.has(legNumber)) byLeg.set(legNumber, []);
@@ -550,6 +566,7 @@ export async function importCombinedAnalysis(env, payload) {
   const legs = normalizeLegs(payload, context);
   const systems = normalizeSystems(payload, context);
   const roundSummary = optionalText(payload.round_summary ?? payload.roundSummary, 'round_summary', 12000);
+  marketBlindText(roundSummary, 'round_summary');
   const recommendations = payload.recommendations ?? null;
   const analysisVersion = optionalText(payload.analysis_version ?? payload.analysisVersion, 'analysis_version', 200);
   const normalized = {
