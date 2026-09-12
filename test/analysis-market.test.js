@@ -22,6 +22,7 @@ test('Build E market context uses latest source-backed snapshot no later than be
   const result = await getVerifiedAnalysisMarket(env, 'round-e', '2099-05-01T14:00:00Z');
   assert.equal(result.cutoff, '2099-05-01T13:55:00Z');
   assert.equal(result.deadlineSource, 'bet_stop_at');
+  assert.equal(result.definitionVersion, 'verified-market-at-stop-v1');
   assert.equal(result.betting.length, 1);
   assert.equal(result.betting[0].betPercent, 35);
   assert.equal(result.betting[0].capturedAt, '2099-05-01T13:54:00Z');
@@ -50,14 +51,15 @@ test('Build E market context falls back to verified round start when betting sto
   assert.equal(result.betStopAt, null);
   assert.equal(result.marketDeadlineAt, '2099-05-01T14:00:00Z');
   assert.equal(result.deadlineSource, 'round_scheduled_start_at');
+  assert.equal(result.definitionVersion, 'verified-market-at-round-start-v1');
   assert.equal(result.cutoff, '2099-05-01T14:00:00Z');
   assert.equal(result.betting.length, 1);
   assert.equal(result.betting[0].betPercent, 44);
 });
 
-test('Build E market context fails closed without any verified deadline', async () => {
+test('Build E market context fails closed without betting stop or verified round start', async () => {
   const { db, env } = createTestEnv();
   seed(db);
   db.prepare("UPDATE game_rounds SET bet_stop_at=NULL, scheduled_start_at=NULL WHERE id='round-e'").run();
-  await assert.rejects(getVerifiedAnalysisMarket(env, 'round-e', '2099-05-01T13:50:00Z'), /verified betting or race-start deadline/);
+  await assert.rejects(getVerifiedAnalysisMarket(env, 'round-e', '2099-05-01T13:50:00Z'), /verified betting stop or round start/);
 });
