@@ -72,8 +72,8 @@ Only these statuses are allowed:
 | official_game | races[].starts[].horse.sire | sire identity/name family | object/text | yes | horse pedigree name fields | stored_unused | profile | source record | Stable pedigree IDs are a later candidate. |
 | official_game | races[].starts[].horse.dam | dam identity/name family | object/text | yes | horse pedigree name fields | stored_unused | profile | source record | No loose name-based pedigree relation. |
 | official_game | races[].starts[].horse.damsire | damsire identity/name family | object/text | yes | horse pedigree name fields | stored_unused | profile | source record | Metadata at current version. |
-| official_game | races[].starts[].horse.breeder | breeder | text/object | yes | horses.breeder_name | stored_unused | profile | Not a model factor now. |
-| official_game | races[].starts[].horse.owner | owner | text/object | yes | horses.owner_name | stored_unused | profile | Not a model factor now. |
+| official_game | races[].starts[].horse.breeder | breeder | text/object | yes | horses.breeder_name | stored_unused | profile | source record | Not a model factor now. |
+| official_game | races[].starts[].horse.owner | owner | text/object | yes | horses.owner_name | stored_unused | profile | source record | Not a model factor now. |
 | official_game | races[].starts[].horse.trainer | current trainer | object | yes | race_entries.trainer_id / trainers | used | stats / analysis | source record + exact identity | Race-entry relation is authoritative for that start. |
 | official_game | races[].starts[].horse.homeTrack | horse home track | object/text | yes | horse profile/observation | stored_unused | profile | source record | Do not infer track identity from name when exact ID is unavailable. |
 | official_game | races[].starts[].horse.money | career earnings | number | yes | horses.earnings_sek | used | profile / analysis | source record | Stored directly using verified source semantics. |
