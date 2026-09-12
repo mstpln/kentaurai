@@ -35,7 +35,7 @@ async function authenticatedAppHtml() {
   return response.text();
 }
 
-test('canonical Settings script from the actual Wrangler worker renders and executes the analysis CTA', async () => {
+test('canonical Settings script from the actual Wrangler worker renders and executes the three-step analysis workflow', async () => {
   const html = await authenticatedAppHtml();
   const script = extractScript(html, 'kentaurai-settings-script');
 
@@ -45,11 +45,14 @@ test('canonical Settings script from the actual Wrangler worker renders and exec
   const elements = new Map([
     ['settingsButton', { classList: classList(), onclick: null }],
     ['exportProvider', { value: 'openai' }],
-    ['exportAllData', { onclick: null }],
+    ['exportStep1', { onclick: null }],
+    ['copyStep1Prompt', { onclick: null, disabled: false, textContent: 'Kopiera analysinstruktion' }],
+    ['exportStep2', { onclick: null }],
+    ['copyStep2Prompt', { onclick: null, disabled: false, textContent: 'Kopiera systeminstruktion' }],
     ['analysisFile', { files: [] }],
     ['importAnalysis', { onclick: null, disabled: false }],
     ['analysisImportResult', { className: '', textContent: '' }],
-    ['copyAnalysisPrompt', { onclick: null, disabled: false, textContent: 'Kopiera instruktioner till AI' }]
+    ['copyAnalysisPrompt', { onclick: null, disabled: false, textContent: 'Kopiera exportinstruktion' }]
   ]);
 
   const context = vm.createContext({
@@ -68,7 +71,7 @@ test('canonical Settings script from the actual Wrangler worker renders and exec
       requested.push(String(url));
       return {
         ok: true,
-        async json() { return { prompt: 'synthetic provider-neutral analysis prompt' }; }
+        async json() { return { prompt: `synthetic prompt for ${url}` }; }
       };
     },
     api: async (path) => {
@@ -92,14 +95,26 @@ test('canonical Settings script from the actual Wrangler worker renders and exec
   elements.get('settingsButton').onclick();
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.match(app.innerHTML, /Skapa V85\/V86-systemanalysfil för import/);
-  assert.match(app.innerHTML, /Kopiera instruktioner till AI/);
-  assert.match(app.innerHTML, /data-canonical-analysis-prompt="true"/);
+  assert.match(app.innerHTML, /Analysera omgången utan marknad/);
+  assert.match(app.innerHTML, /Värdera marknaden och bygg system/);
+  assert.match(app.innerHTML, /Skapa importfil till KentaurAI/);
+  assert.match(app.innerHTML, /Kopiera analysinstruktion/);
+  assert.match(app.innerHTML, /Kopiera systeminstruktion/);
+  assert.match(app.innerHTML, /Kopiera exportinstruktion/);
+  assert.equal(typeof elements.get('copyStep1Prompt').onclick, 'function');
+  assert.equal(typeof elements.get('copyStep2Prompt').onclick, 'function');
   assert.equal(typeof elements.get('copyAnalysisPrompt').onclick, 'function');
 
-  await elements.get('copyAnalysisPrompt').onclick();
-  assert.deepEqual(requested, ['/app/api/settings/analysis-prompt?provider=openai']);
-  assert.deepEqual(copied, ['synthetic provider-neutral analysis prompt']);
+  await elements.get('copyStep1Prompt').onclick({ currentTarget: elements.get('copyStep1Prompt') });
+  await elements.get('copyStep2Prompt').onclick({ currentTarget: elements.get('copyStep2Prompt') });
+  await elements.get('copyAnalysisPrompt').onclick({ currentTarget: elements.get('copyAnalysisPrompt') });
+
+  assert.deepEqual(requested, [
+    '/app/api/settings/analysis-method-prompt?step=1',
+    '/app/api/settings/analysis-method-prompt?step=2',
+    '/app/api/settings/analysis-prompt?provider=openai'
+  ]);
+  assert.equal(copied.length, 3);
 });
 
 test('final composed statistics runtime replaces the loader and issues the breakdown request', async () => {
