@@ -51,6 +51,15 @@ test('Trend filter badge counts Loppnivå plus active detail filters', () => {
   assert.match(script, /trend-filter-count/);
 });
 
+test('Trend reset clears Loppnivå and every detail filter in the canonical Trend handler', () => {
+  const html = enhanceTrendHtml('<html><head></head><body></body></html>');
+  const match = html.match(/<script id="kentaurai-trend-build-a-script">([\s\S]*?)<\/script>/);
+  assert.ok(match);
+  const script = match[1];
+
+  assert.match(script, /reset\.onclick=\(\)=>\{state\.trendRaceScope='all';state\.trendDetailFilters=\{trackId:'all',raceType:'all',breedType:'all',startMethod:'all',minStarts:'all'\};renderTrendBuildA\(\)\}/);
+});
+
 test('Trend ranking rows remove repeated win label and preserve full prize-money space', () => {
   const html = enhanceTrendHtml('<html><head></head><body></body></html>');
   assert.doesNotMatch(html, /trend-win-label/);
