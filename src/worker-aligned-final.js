@@ -1,5 +1,6 @@
 import worker from './worker-settings.js';
 import { finalizeStatisticsHtml } from './statistics-ui-finalize.js';
+import { enhanceAnalysisExportDownloads } from './analysis-export-ui-fix.js';
 
 const finalHeaderCss = `
 <style id="kentaurai-aligned-header-final">
@@ -73,7 +74,7 @@ async function withFinalAlignment(request, response) {
     .replace(compactLegacyTrackRestoreHook, finalTrackRestoreHook)
     .replace(legacyInitialTrendBoot, '')
     .replace('</head>', `${finalHeaderCss}</head>`);
-  return new Response(finalizeStatisticsHtml(alignedBody), {
+  return new Response(enhanceAnalysisExportDownloads(finalizeStatisticsHtml(alignedBody)), {
     status: response.status,
     statusText: response.statusText,
     headers
