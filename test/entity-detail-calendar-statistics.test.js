@@ -8,6 +8,7 @@ import {
   getHorseCalendarYearDetailStatistics,
   getTrainerCalendarYearDetailStatistics
 } from '../src/entity-detail-calendar-statistics.js';
+import { getTrainerCalendarHomeTrackResults } from '../src/trainer-calendar-home-statistics.js';
 import worker from '../src/worker-v065.js';
 
 test('shared calendar statistics exports one implementation for all supported detail entities', () => {
@@ -15,6 +16,7 @@ test('shared calendar statistics exports one implementation for all supported de
   assert.equal(typeof getTrainerCalendarYearDetailStatistics, 'function');
   assert.equal(typeof getDriverCalendarYearDetailStatistics, 'function');
   assert.equal(typeof getHorseCalendarYearDetailStatistics, 'function');
+  assert.equal(typeof getTrainerCalendarHomeTrackResults, 'function');
 });
 
 test('entity calendar configuration preserves entity-specific form and specialist behavior', async () => {
@@ -29,6 +31,25 @@ test('calendar filtering uses YTD for the current year and closed full-year wind
   const source = await readFile(new URL('../src/entity-detail-calendar-statistics.js', import.meta.url), 'utf8');
   assert.match(source, /if\(filters\.year===currentYear\)\{conditions\.push\(`\$\{raceAlias\}\.race_date <= \?`\);bindings\.push\(filters\.asOfDate\);\}/);
   assert.match(source, /bindings\.push\(`\$\{filters\.year\+1\}-01-01`\)/);
+});
+
+test('trainer calendar detail preserves verified home-track and other-track summaries with active filters', async () => {
+  const source = await readFile(new URL('../src/trainer-calendar-home-statistics.js', import.meta.url), 'utf8');
+  assert.match(source, /normalized_observations/);
+  assert.match(source, /source_type='official_provider'/);
+  assert.match(source, /homeTrackExternalId/);
+  assert.match(source, /addFilters\(conditions, bindings, filters\)/);
+  assert.match(source, /homeTrackResults/);
+  assert.match(source, /otherTrackResults/);
+  assert.match(source, /filters\.year === currentYear/);
+  assert.match(source, /re\.actual_lane IN \(1,6,7\)/);
+});
+
+test('worker enriches only trainer calendar detail with verified home-track summaries', async () => {
+  const source = await readFile(new URL('../src/worker-v065.js', import.meta.url), 'utf8');
+  assert.match(source, /getTrainerCalendarHomeTrackResults/);
+  assert.match(source, /entityType !== 'trainers'/);
+  assert.match(source, /return \{ \.\.\.data, \.\.\.home \}/);
 });
 
 test('new calendar detail routes remain private before touching D1', async () => {
