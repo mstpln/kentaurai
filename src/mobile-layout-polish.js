@@ -1,5 +1,5 @@
 const mobileLayoutPolishCss = `
-<style id="kentaurai-mobile-layout-polish-v101">
+<style id="kentaurai-mobile-layout-polish-v102">
 /* Presentation-only mobile polish. Do not alter data or business behaviour here. */
 .trend-panel-head{padding-left:16px!important;padding-right:16px!important}
 .trend-result-row{padding-left:16px!important;padding-right:16px!important}
@@ -109,7 +109,7 @@ const mobileLayoutPolishCss = `
 </style>`;
 
 const mobileLayoutPolishScript = `
-<script id="kentaurai-mobile-layout-polish-v101-script">
+<script id="kentaurai-mobile-layout-polish-v102-script">
 (function(){
   let alignQueued=false;
 
@@ -143,10 +143,10 @@ const mobileLayoutPolishScript = `
     if(!scopeBlock)return;
 
     if(panel){
-      scopeBlock.style.display='';
-      scopeBlock.classList.add('trend-scope-filter-block');
+      if(scopeBlock.style.display==='none')scopeBlock.style.display='';
+      if(!scopeBlock.classList.contains('trend-scope-filter-block'))scopeBlock.classList.add('trend-scope-filter-block');
       if(scopeBlock.parentElement!==panel)panel.insertBefore(scopeBlock,panel.firstChild);
-    }else{
+    }else if(scopeBlock.style.display!=='none'){
       scopeBlock.style.display='none';
     }
     syncTrendFilterCount(scopeBlock,panel,trigger);
@@ -172,6 +172,12 @@ const mobileLayoutPolishScript = `
     if(target?.closest('#app'))queueAlign();
   },true);
 
+  const app=document.getElementById('app');
+  if(app){
+    const observer=new MutationObserver(()=>queueAlign());
+    observer.observe(app,{childList:true,subtree:true});
+  }
+
   queueAlign();
 })();
 </script>`;
@@ -184,7 +190,7 @@ function ensureViewport(source) {
 
 export function enhanceMobileLayoutPolish(html) {
   let source = ensureViewport(String(html));
-  if (source.includes('kentaurai-mobile-layout-polish-v101')) return source;
+  if (source.includes('kentaurai-mobile-layout-polish-v102')) return source;
   source = source.replace('</head>', `${mobileLayoutPolishCss}</head>`);
   return source.replace('</body>', `${mobileLayoutPolishScript}</body>`);
 }
