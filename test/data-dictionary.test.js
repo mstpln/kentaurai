@@ -17,8 +17,7 @@ const allowedStatuses = new Set([
 const noCurrentConsumerStatuses = new Set([
   'raw_only',
   'unclear',
-  'ignore',
-  'build_candidate'
+  'ignore'
 ]);
 
 function dictionaryRows() {
