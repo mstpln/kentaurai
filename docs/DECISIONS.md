@@ -53,6 +53,7 @@
 24. Bana uses **Översikt -> Spårstatistik -> Hemmatränare**. User-facing country codes are localized (for example `SE` -> `Sverige`) while storage/API identities remain unchanged.
 25. Spårstatistik owns Period, Startmetod, Distans, STL-klass and Lopptyp in the canonical lane-statistics flow. Optional filters combine with AND semantics; the literal all-period label is `All data`.
 26. Verified track address/website facts remain nullable. Real enrichment values live only in private D1 with fact-level source URL/type and verification timestamps; conflicts are preserved rather than silently overwriting a previously verified fact.
+27. User-facing statistics and factual pattern labels use short, natural Swedish. Internal field names, source-family names, status enums and provenance terms are technical contracts and must not leak into normal UI copy when an understandable Swedish label exists.
 
 ## Historical data and X-Labs
 1. Historical starter/result data is imported once, stored permanently and updated incrementally. The planned backfill remains approximately 2-3 years of Swedish racing, with older starts fetched selectively when useful for active horse profiles.
@@ -98,6 +99,18 @@
 11. Automatic live acquisition uses only the verified V85/V86 calendar/day and game endpoints. The morning run includes same-day and upcoming rounds; the evening run excludes same-day rounds so race-day morning remains the final automatic pre-race refresh. Manual admin refresh remains available for late changes.
 12. Automatic live normalization advances only from successful contiguous source-backed entry checkpoints and fails closed on gaps or partial work.
 13. The official-provider vertical slice is accepted only after raw-vs-normalized production verification passes without mismatches for the verified subset.
+
+## Build F data inventory and promotion rules
+1. The public field-level inventory is versioned in `docs/DATA_DICTIONARY.md`. Its canonical columns are source family, generic raw path/field identifier, semantic name, data type, nullability, normalized target, status, consumer, provenance rule and generic notes.
+2. Field status uses the closed set `used`, `stored_unused`, `raw_only`, `derived`, `unclear`, `ignore`, `build_candidate`. New synonyms must not be introduced casually because the dictionary is intended to be machine/test readable as well as human readable.
+3. A D1 column existing in the schema does **not** prove that a source currently supplies that fact. Schema-present but unpopulated fields remain unavailable/null until source semantics and provenance are verified.
+4. `build_candidate` means “worth a separately scoped future build”; it is not permission to normalize, expose or weight a field automatically. Build F inventories and prioritizes first.
+5. `unclear` fields fail closed. Exact semantics, units, identity and time meaning must be verified before mapping or feature use.
+6. Future promotion of source data must preserve the same gates used by Start Points: exact source semantics, stable identity, effective/observed time, leakage-safe historical use, null safety, conflict behavior, idempotency and fact/feature/AI separation.
+7. Market/odds/trend/public-expectation data remains outside the market-blind `pre_market` strength context even when the inventory identifies it as useful. Verified market candidates belong only to final/post-race layers.
+8. Start Points remains a timestamped external factual rating signal, not a hidden KentaurAI model truth. Current cache may be denormalized for convenience, but historical observations remain immutable/source-backed and as-of selection is required.
+9. X-Labs interval/trajectory candidates are not assigned tactical labels such as lead, death seat or wide trip until geometry/coordinate semantics are separately validated. Direct measured pace/distance facts may be promoted earlier when their units and identity are already verified.
+10. User-facing presentation of promoted facts must use natural Swedish labels and group related facts clearly. Internal dictionary/source/status vocabulary remains a backend/documentation contract unless technically necessary in the UI.
 
 ## Manual editorial flow
 1. Editorial content is reviewed outside KentaurAI using an authorized user workflow.

@@ -1,7 +1,7 @@
 # Build state
 
 Version: 0.6.0
-Updated: 2026-09-11
+Updated: 2026-09-12
 
 ## Current production state
 - Production Worker: `kentaurai-api`.
@@ -13,6 +13,7 @@ Updated: 2026-09-11
 - Worker deployment, `/health`, `/app/login` and the private analysis-prompt authorization check all passed.
 - Deployed Worker version ID from that release: `465768c5-3106-4164-a27c-69ae34d9e6ec`.
 - Production D1 reported `No migrations to apply` during that release. Repository migration tracking remains current through `0012_trainer_statistics_indexes.sql`.
+- Build F is merged to source `main` but has not yet been included in a separately authorized production release.
 - Official and X-Labs historical backfills use persisted jobs/cursors. Deployments and analysis work must never recreate, reset or silently restart them.
 
 ## Statistics programme
@@ -31,6 +32,7 @@ Updated: 2026-09-11
 - X-Labs pace is presented as kilometre pace (`min/km`), not elapsed section seconds.
 - Verified official life-statistics Start Points are stored as timestamped source-backed observations with nullable current cache fields. Missing values remain null.
 - Start-point history links to a race entry only when exact official race/horse identity proves the relation.
+- Archived normalized official source records are reused from private R2 to populate Start Points history; older verified observations remain history and cannot overwrite a newer current cache value.
 - Migration `0010_horse_start_points.sql` is part of the production schema.
 
 ### Build C - Driver statistics - merged and production-live
@@ -66,9 +68,11 @@ Updated: 2026-09-11
 - No new D1 migration was required by Build E and the release did not reset or recreate historical backfills.
 
 ## Data inventory and relevant-pattern programme
-### Build F - Received-versus-used inventory plus first relevant horse patterns - active PR #88
-- Branch: `feat/data-inventory-build-f`, based on the post-Build-E production-release main commit `5ba8cb154b65da14bc7c71845549236198f0bfb0`.
+### Build F - Received-versus-used inventory plus first relevant horse patterns - merged to source main
+- PR #88 is merged; merge commit `f7d069f4010e36349fc5743b80a4a9170cc2c38d`.
+- Final reviewed Build F branch head was `2a2455f0760a10b550e8174d86f904eaaa5e159c`; its CI passed with 446 tests and zero failures before merge.
 - `docs/DATA_INVENTORY.md` traces current official calendar/game/historical-race data, Start Points, X-Labs telemetry, normalized D1 storage, deterministic features and AI exposure.
+- `docs/DATA_DICTIONARY.md` is the public field-level companion required by the detailed build plan. It classifies generic fields by source family/path, semantics, type/nullability, normalized target, use status, consumer and provenance rule without real private payload values.
 - The inventory distinguishes actual available source facts from schema columns that merely exist but are not reliably populated.
 - Build F promotes only already verified facts with clear analytical value: current Start Points plus latest verified change, recent verified X-Labs first-200 pace, last-400 pace and extra travelled distance.
 - Horse detail statistics expose these as a compact Swedish `Utveckling & löpstyrka` section with natural labels `Startpoäng`, `Starttempo`, `Avslutning` and `Extra distans`. The section explicitly identifies the values as factual patterns rather than AI judgement and states that its latest-observation summary is independent of the statistics filters above.
@@ -78,6 +82,14 @@ Updated: 2026-09-11
 - Higher-risk or not-yet-verified inventory candidates remain deferred: raw 100 m interval/trajectory interpretation, official aggregate snapshots beyond Start Points, structured race-term parsing, equipment-response logic and market `trend` semantics.
 - Current official age is not converted into a guessed birth year, and unsupported schema fields remain null rather than inferred.
 - Build F changes no model weights, adds no external source, requires no schema migration and does not mutate or reset historical backfills.
+- Source completion is separate from production release: Build F is not yet recorded as production-live.
+
+### Build-plan completion audit - active follow-up
+- Branch: `feat/build-plan-completion-audit`, based on the merged Build F `main` commit `f7d069f4010e36349fc5743b80a4a9170cc2c38d`.
+- `docs/BUILD_PLAN_AUDIT.md` maps the detailed A-F plan and Definition of Done to current implementation and explicitly separates source completion from runtime/release verification and future Build F candidates.
+- The audit found no missing A-E functional domain. The material Build F gap was the required field-by-field public data dictionary; that artifact and its contract test are added in this follow-up.
+- Exact-width 320/375/430 visual geometry is retained as runtime/browser QA because the repository currently has no real-browser layout engine; CI structural tests are not presented as screenshot/geometry proof.
+- This follow-up requires no migration and does not authorize a production deployment or backfill mutation.
 
 ## Data and analysis foundation
 - GitHub contains public code, schema, tests, configuration and synthetic fixtures only.
@@ -97,6 +109,7 @@ Updated: 2026-09-11
 - Bottom navigation remains **Trend -> Tränare -> Hästar -> Kuskar -> Bana -> Spel**.
 - Entity histories are paginated and private.
 - Missing/unsupported fields stay unknown rather than being inferred for display.
+- User-facing statistic and pattern labels remain natural Swedish; internal field/provenance names are not exposed as raw UI vocabulary unless technically necessary.
 
 ## Production safety
 - Never commit real racing payloads, real reference exports, database dumps, secrets or private paid editorial provenance/content.
