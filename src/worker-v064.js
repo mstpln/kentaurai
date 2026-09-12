@@ -10,7 +10,8 @@ import {
   ANALYSIS_COMBINED_VERSION,
   createWorkflowDataExportResponse,
   getAnalysisMethodPrompt,
-  getCombinedPromptContext
+  getCombinedPromptContext,
+  listAnalysisRounds
 } from './analysis-workflow-v2.js';
 import { importStrictCombinedAnalysisUpload } from './analysis-workflow-v2-strict.js';
 import { getTrackDetailV064, getTrackLaneStatsV064 } from './routes/tracks-v064.js';
@@ -81,13 +82,20 @@ export default {
       catch (error) { console.error(error); return json({ error: 'request_failed', message: error.message }, 400); }
     }
 
+    if (request.method === 'GET' && path === '/app/api/settings/analysis-rounds') {
+      const denied = await requireSession(request, env); if (denied) return denied;
+      try { return json({ rounds: await listAnalysisRounds(env) }); }
+      catch (error) { console.error(error); return json({ error: 'request_failed', message: error.message }, 400); }
+    }
+
     if (request.method === 'GET' && path === '/app/api/settings/export') {
       const denied = await requireSession(request, env); if (denied) return denied;
       try {
         return await createWorkflowDataExportResponse(
           env,
           url.searchParams.get('provider') || 'openai',
-          url.searchParams.get('stage') || 'pre_market'
+          url.searchParams.get('stage') || 'pre_market',
+          url.searchParams.get('round_id')
         );
       } catch (error) {
         console.error(error);
@@ -110,12 +118,14 @@ export default {
       const denied = await requireSession(request, env); if (denied) return denied;
       try {
         const provider = url.searchParams.get('provider') || 'openai';
-        const promptContext = await getCombinedPromptContext(env, provider);
-        if (!promptContext) return json({ error: 'no_analyzable_round', message: 'Ingen kommande V85/V86-omgång med komplett analyscontext hittades.' }, 404);
+        const promptContext = await getCombinedPromptContext(env, provider, url.searchParams.get('round_id'));
+        if (!promptContext) return json({ error: 'no_analyzable_round', message: 'Ingen V85/V86-omgång med komplett analyscontext hittades.' }, 404);
         return json({
           contractVersion: ANALYSIS_COMBINED_VERSION,
           stage: 'combined',
           roundId: promptContext.round_id,
+          importTiming: promptContext.import_timing,
+          learningEligibility: promptContext.learning_eligibility,
           recommendedFilename: recommendedCombinedFilename(provider),
           prompt: buildCombinedAnalysisImportPrompt(provider, promptContext)
         });
