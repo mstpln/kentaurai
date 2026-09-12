@@ -26,6 +26,19 @@ async function requireSession(request, env) {
   return null;
 }
 
+function canonicalAppRedirect(request, url) {
+  if (request.method !== 'GET' || url.pathname !== '/app') return null;
+  const target = new URL(url.toString());
+  target.pathname = '/app/';
+  return new Response(null, {
+    status: 302,
+    headers: {
+      location: target.toString(),
+      'cache-control': 'no-store'
+    }
+  });
+}
+
 function calendarOptions(url) {
   return {
     year: url.searchParams.get('year'),
@@ -44,7 +57,7 @@ function calendarOptions(url) {
 
 async function enhancedAppResponse(request, response) {
   const path = new URL(request.url).pathname;
-  if (request.method !== 'GET' || (path !== '/app' && path !== '/app/')) return response;
+  if (request.method !== 'GET' || path !== '/app/') return response;
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('text/html')) return response;
   const body = enhanceEntityDetailStatisticsHtml(await response.text());
@@ -70,6 +83,8 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
+    const canonical = canonicalAppRedirect(request, url);
+    if (canonical) return canonical;
 
     if (request.method === 'GET' && path === '/app/api/horses/statistics/filter-options') {
       const denied = await requireSession(request, env);
