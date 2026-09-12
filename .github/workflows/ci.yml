@@ -30,52 +30,40 @@ jobs:
           files=(test/[b-d]*.test.js)
           if ((${#files[@]})); then node --test "${files[@]}"; fi
 
-      - name: Tests e
+      - name: Tests e-g
         run: |
           shopt -s nullglob
-          files=(test/e*.test.js)
+          files=(test/[e-g]*.test.js)
           if ((${#files[@]})); then node --test "${files[@]}"; fi
 
-      - name: Tests f
+      - name: Tests h-r
         run: |
           shopt -s nullglob
-          files=(test/f*.test.js)
+          files=(test/[h-r]*.test.js)
           if ((${#files[@]})); then node --test "${files[@]}"; fi
 
-      - name: Tests g
+      - name: Tests sa-f
         run: |
           shopt -s nullglob
-          files=(test/g*.test.js)
+          files=(test/s[a-f]*.test.js)
           if ((${#files[@]})); then node --test "${files[@]}"; fi
 
-      - name: Tests h-m
+      - name: Tests sg-l
         run: |
           shopt -s nullglob
-          files=(test/[h-m]*.test.js)
+          files=(test/s[g-l]*.test.js)
           if ((${#files[@]})); then node --test "${files[@]}"; fi
 
-      - name: Tests n
+      - name: Tests sm-r
         run: |
           shopt -s nullglob
-          files=(test/n*.test.js)
+          files=(test/s[m-r]*.test.js)
           if ((${#files[@]})); then node --test "${files[@]}"; fi
 
-      - name: Tests o-p
+      - name: Tests ss-z
         run: |
           shopt -s nullglob
-          files=(test/[o-p]*.test.js)
-          if ((${#files[@]})); then node --test "${files[@]}"; fi
-
-      - name: Tests q-r
-        run: |
-          shopt -s nullglob
-          files=(test/[q-r]*.test.js)
-          if ((${#files[@]})); then node --test "${files[@]}"; fi
-
-      - name: Tests s
-        run: |
-          shopt -s nullglob
-          files=(test/s*.test.js)
+          files=(test/s[s-z]*.test.js)
           if ((${#files[@]})); then node --test "${files[@]}"; fi
 
       - name: Tests t-z
