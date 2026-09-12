@@ -39,8 +39,9 @@ const TREND_BREEDS=[['all','Alla'],['warmblood','Varmblod'],['coldblood','Kallbl
 const TREND_METHODS=[['all','Alla'],['auto','Autostart'],['volt','Voltstart']];
 const TREND_MIN_STARTS=[['all','Alla'],['3','Minst 3'],['5','Minst 5'],['10','Minst 10'],['20','Minst 20']];
 const SLIDERS_ICON='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M14 4v6M4 17h2M10 17h10M10 14v6"/></svg>';
-state.trendRaceScope=state.trendRaceScope||'all';
-state.trendDetailFilters={trackId:'all',raceType:'all',breedType:'all',startMethod:'all',minStarts:'all',...(state.trendDetailFilters||{})};
+state.trendRange='2w';
+state.trendRaceScope=state.trendRaceScope||'high_prize';
+state.trendDetailFilters={trackId:'all',raceType:'all',breedType:'all',startMethod:'all',minStarts:'10',...(state.trendDetailFilters||{})};
 state.trendFilterOpen=Boolean(state.trendFilterOpen);
 state.trendFilterOptions=state.trendFilterOptions||null;
 let trendRequestToken=0;
