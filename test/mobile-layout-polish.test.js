@@ -62,15 +62,16 @@ test('Trend filter alignment observes renders safely through a queued idempotent
   assert.match(html, /requestAnimationFrame\(\(\)=>\{/);
   assert.match(html, /new MutationObserver\(\(\)=>queueAlign\(\)\)/);
   assert.match(html, /observer\.observe\(app,\{childList:true,subtree:true\}\)/);
-  assert.match(html, /if\(badge\.textContent!==String\(count\)\)badge\.textContent=String\(count\)/);
+  assert.doesNotMatch(html, /trend-filter-count/);
+  assert.doesNotMatch(html, /appendChild\(badge\)/);
+  assert.doesNotMatch(html, /badge\?\.remove\(\)/);
 });
 
-test('mobile filter badge count includes hidden Loppnivå and detail state while panel is closed', () => {
+test('mobile reset hook clears hidden Loppnivå while leaving badge rendering to Trend UI', () => {
   const html = enhanceMobileLayoutPolish('<html><head></head><body><div id="app"></div></body></html>');
-  assert.match(html, /const scopeCount=state\.trendRaceScope&&state\.trendRaceScope!=='all'\?1:0/);
-  assert.match(html, /const f=state\.trendDetailFilters\|\|\{\}/);
-  assert.match(html, /\[f\.trackId,f\.raceType,f\.breedType,f\.startMethod,f\.minStarts\]/);
-  assert.match(html, /return scopeCount\+detailCount/);
+  assert.match(html, /target\?\.closest\('#trendReset'\)[\s\S]*state\.trendRaceScope='all'/);
+  assert.doesNotMatch(html, /stateFilterCount/);
+  assert.doesNotMatch(html, /syncTrendFilterCount/);
 });
 
 test('embedded mobile browser script is syntactically valid', () => {
