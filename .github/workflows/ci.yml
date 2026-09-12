@@ -54,10 +54,28 @@ jobs:
           files=(test/[h-m]*.test.js)
           if ((${#files[@]})); then node --test "${files[@]}"; fi
 
-      - name: Tests n-s
+      - name: Tests n
         run: |
           shopt -s nullglob
-          files=(test/[n-s]*.test.js)
+          files=(test/n*.test.js)
+          if ((${#files[@]})); then node --test "${files[@]}"; fi
+
+      - name: Tests o-p
+        run: |
+          shopt -s nullglob
+          files=(test/[o-p]*.test.js)
+          if ((${#files[@]})); then node --test "${files[@]}"; fi
+
+      - name: Tests q-r
+        run: |
+          shopt -s nullglob
+          files=(test/[q-r]*.test.js)
+          if ((${#files[@]})); then node --test "${files[@]}"; fi
+
+      - name: Tests s
+        run: |
+          shopt -s nullglob
+          files=(test/s*.test.js)
           if ((${#files[@]})); then node --test "${files[@]}"; fi
 
       - name: Tests t-z
