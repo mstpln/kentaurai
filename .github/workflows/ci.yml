@@ -42,11 +42,11 @@ jobs:
           files=(test/[h-r]*.test.js)
           if ((${#files[@]})); then node --test "${files[@]}"; fi
 
-      - name: Tests sa-f
-        run: |
-          shopt -s nullglob
-          files=(test/s[a-f]*.test.js)
-          if ((${#files[@]})); then node --test "${files[@]}"; fi
+      - name: Schema test
+        run: node --test test/schema.test.js
+
+      - name: Settings data test
+        run: node --test test/settings-data.integration.test.js
 
       - name: Tests sg-l
         run: |
