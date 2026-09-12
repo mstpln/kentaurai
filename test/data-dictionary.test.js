@@ -15,7 +15,6 @@ const allowedStatuses = new Set([
 ]);
 
 const noCurrentConsumerStatuses = new Set([
-  'raw_only',
   'unclear',
   'ignore'
 ]);
