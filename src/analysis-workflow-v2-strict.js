@@ -19,9 +19,35 @@ export function validateCombinedSystemShape(payload) {
   return payload;
 }
 
+function bufferedWriteDb(realDb) {
+  const pending = [];
+  const prepare = (sql) => {
+    let args = [];
+    return {
+      bind(...values) { args = values; return this; },
+      async first() { return realDb.prepare(sql).bind(...args).first(); },
+      async all() { return realDb.prepare(sql).bind(...args).all(); },
+      async run() {
+        pending.push(realDb.prepare(sql).bind(...args));
+        return { success: true, meta: { changes: 1 } };
+      }
+    };
+  };
+  return {
+    db: { prepare },
+    async flush() {
+      if (pending.length) await realDb.batch(pending);
+    }
+  };
+}
+
 export async function importStrictCombinedAnalysis(env, payload) {
   validateCombinedSystemShape(payload);
-  return importCombinedAnalysis(env, payload);
+  if (!env?.DB?.batch) throw new Error('DB batch support is required for atomic combined analysis import');
+  const buffered = bufferedWriteDb(env.DB);
+  const result = await importCombinedAnalysis({ ...env, DB: buffered.db }, payload);
+  await buffered.flush();
+  return result;
 }
 
 export async function importStrictCombinedAnalysisUpload(env, request) {
