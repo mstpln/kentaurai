@@ -30,8 +30,8 @@ jobs:
         run: |
           set -euo pipefail
           grep -Fxq 'release=kentaurai-v0.6.0' .github/production-release-v060.trigger
-          grep -Fxq 'source_main=27ab3a1ed0032691eb0a4cb4223d498b4f23cd15' .github/production-release-v060.trigger
-          git merge-base --is-ancestor 27ab3a1ed0032691eb0a4cb4223d498b4f23cd15 HEAD
+          grep -Fxq 'source_main=4c9016f2f287e4db01623bde28a73ff33632ee27' .github/production-release-v060.trigger
+          git merge-base --is-ancestor 4c9016f2f287e4db01623bde28a73ff33632ee27 HEAD
 
       - name: Use Node.js 22
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
@@ -57,17 +57,18 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: npm run db:migrate:remote
 
-      - name: Verify migration 0008 schema without exposing production data
+      - name: Verify required production schema without exposing production data
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT street_address, postal_code, website_url FROM tracks LIMIT 0; SELECT name FROM sqlite_master WHERE type='table' AND name IN ('race_stl_classifications','race_type_classifications') ORDER BY name; SELECT name FROM d1_migrations WHERE name='0008_track_contact_metadata.sql';" > /tmp/migration-check.txt
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT street_address, postal_code, website_url FROM tracks LIMIT 0; SELECT metrics_json, notes, spike_count FROM systems LIMIT 0; SELECT name FROM sqlite_master WHERE type='table' AND name IN ('race_stl_classifications','race_type_classifications') ORDER BY name; SELECT name FROM d1_migrations WHERE name IN ('0008_track_contact_metadata.sql','0013_combined_analysis_systems.sql') ORDER BY name;" > /tmp/migration-check.txt
           grep -q 'race_stl_classifications' /tmp/migration-check.txt
           grep -q 'race_type_classifications' /tmp/migration-check.txt
           grep -q '0008_track_contact_metadata.sql' /tmp/migration-check.txt
+          grep -q '0013_combined_analysis_systems.sql' /tmp/migration-check.txt
 
       - name: Deploy Worker
         id: deploy
@@ -101,15 +102,20 @@ jobs:
           test "$status" = '200' || { echo "Expected /app/login 200, got $status"; exit 1; }
           test -s /tmp/login.html
 
-      - name: Verify new analysis-prompt route is deployed and private
+      - name: Verify combined analysis routes are deployed and private
         shell: bash
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
         run: |
           set -euo pipefail
-          status="$(curl --silent --show-error --output /tmp/prompt-response.json --write-out '%{http_code}' "$WORKER_URL/app/api/settings/analysis-prompt?provider=anthropic")"
-          test "$status" = '401' || { echo "Expected private analysis-prompt route to return 401 without session, got $status"; cat /tmp/prompt-response.json; exit 1; }
-          grep -q 'unauthorized' /tmp/prompt-response.json
+          for path in \
+            '/app/api/settings/analysis-prompt?provider=anthropic' \
+            '/app/api/settings/analysis-method-prompt?step=1' \
+            '/app/api/settings/export?provider=anthropic&stage=pre_market'; do
+            status="$(curl --silent --show-error --output /tmp/private-response.json --write-out '%{http_code}' "$WORKER_URL$path")"
+            test "$status" = '401' || { echo "Expected $path to return 401 without session, got $status"; cat /tmp/private-response.json; exit 1; }
+            grep -q 'unauthorized' /tmp/private-response.json
+          done
 
       - name: Release summary
         shell: bash
@@ -118,4 +124,4 @@ jobs:
         run: |
           echo 'KentaurAI v0.6.0 production release completed.'
           echo "Worker: $WORKER_URL"
-          echo 'Migration 0008 schema, exact app version, health, login and private analysis-prompt route checks passed.'
+          echo 'Migration 0013 schema, exact app version, health, login and private combined-analysis route checks passed.'
