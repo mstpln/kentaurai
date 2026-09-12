@@ -1,5 +1,29 @@
 import { importCombinedAnalysis, readCombinedAnalysisUpload } from './analysis-workflow-v2.js';
 
+const RISK_PROFILE_MAX_CHARS = 100;
+
+function normalizeRiskProfile(value) {
+  if (value == null || value === '') return value;
+  const text = String(value);
+  if (text.length <= RISK_PROFILE_MAX_CHARS) return text;
+  return `${text.slice(0, RISK_PROFILE_MAX_CHARS - 1).trimEnd()}…`;
+}
+
+export function normalizeCombinedImportPayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !Array.isArray(payload.systems)) return payload;
+  let changed = false;
+  const systems = payload.systems.map((system) => {
+    if (!system || typeof system !== 'object' || Array.isArray(system)) return system;
+    const normalized = normalizeRiskProfile(system.risk_profile ?? system.riskProfile);
+    const current = system.risk_profile ?? system.riskProfile;
+    if (normalized === current) return system;
+    changed = true;
+    if ('risk_profile' in system || !('riskProfile' in system)) return { ...system, risk_profile: normalized };
+    return { ...system, riskProfile: normalized };
+  });
+  return changed ? { ...payload, systems } : payload;
+}
+
 // Keep this boundary intentionally context-free. Game-type-specific spike-count
 // validation belongs in analysis-workflow-v2.js where the authoritative round
 // context is loaded from KentaurAI rather than trusted from client JSON.
@@ -43,9 +67,10 @@ function bufferedWriteDb(realDb) {
 
 export async function importStrictCombinedAnalysis(env, payload) {
   validateCombinedSystemShape(payload);
+  const normalizedPayload = normalizeCombinedImportPayload(payload);
   if (!env?.DB?.batch) throw new Error('DB batch support is required for atomic combined analysis import');
   const buffered = bufferedWriteDb(env.DB);
-  const result = await importCombinedAnalysis({ ...env, DB: buffered.db }, payload);
+  const result = await importCombinedAnalysis({ ...env, DB: buffered.db }, normalizedPayload);
   await buffered.flush();
   return result;
 }
