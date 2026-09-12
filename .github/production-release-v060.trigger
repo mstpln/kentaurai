@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=d08a913ab90c2468295e31e1ca05aadd772740b6
-release_nonce=2026-09-12-post-pr104-trend-compact-release1
+source_main=118a25536f2634428efe19323bb29402a27e051f
+release_nonce=2026-09-12-post-pr105-detail-statistics-release1
