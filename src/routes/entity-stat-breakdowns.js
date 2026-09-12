@@ -36,11 +36,6 @@ function addPeriodFilter(conditions, bindings, year) {
   bindings.push(`${year}-01-01`, `${year + 1}-01-01`);
 }
 
-function addMethodFilter(conditions, method) {
-  if (!method) return;
-  conditions.push(`${canonicalStartMethodSql('r')} = '${method}'`);
-}
-
 function addRaceScopeFilter(conditions, scope) {
   const condition = raceScopeCondition(scope);
   if (condition) conditions.push(condition);
@@ -55,26 +50,78 @@ function mapRows(rows) {
   return rows.map((row) => ({ label: row.label, ...mapCoreMetricRow(row) }));
 }
 
-async function groupedRows(env, { relationColumn, id, year, raceScope, method, groupExpression, orderBy, limit = null }) {
+function sortStartMethods(rows) {
+  return rows.sort((a, b) => b.starts - a.starts || String(a.label).localeCompare(String(b.label)));
+}
+
+function sortDistances(rows) {
+  return rows.sort((a, b) => {
+    if (b.starts !== a.starts) return b.starts - a.starts;
+    const left = Number(a.label);
+    const right = Number(b.label);
+    if (Number.isFinite(left) && Number.isFinite(right)) return left - right;
+    if (Number.isFinite(left)) return -1;
+    if (Number.isFinite(right)) return 1;
+    return String(a.label).localeCompare(String(b.label));
+  });
+}
+
+function sortTracks(rows) {
+  return rows.sort((a, b) => b.starts - a.starts || String(a.label).localeCompare(String(b.label), 'sv', { sensitivity: 'base' })).slice(0, 50);
+}
+
+async function loadBreakdownRows(env, { relationColumn, id, year, raceScope, distanceStartMethod, trackStartMethod }) {
   const conditions = [`re.${relationColumn} = ?`, 're.scratched = 0'];
   const bindings = [id];
   addPeriodFilter(conditions, bindings, year);
   addRaceScopeFilter(conditions, raceScope);
-  addMethodFilter(conditions, method);
+
+  const canonicalMethod = canonicalStartMethodSql('r');
+  const metricSql = coreMetricSelectSql('f');
   const sql = `
-    SELECT ${groupExpression} AS label,
-      ${coreMetricSelectSql('rr')}
-    FROM race_entries re
-    JOIN races r ON r.id = re.race_id
-    LEFT JOIN tracks t ON t.id = r.track_id
-    JOIN race_results rr ON rr.race_entry_id = re.id
-    WHERE ${conditions.join(' AND ')}
-    GROUP BY ${groupExpression}
-    ORDER BY ${orderBy}
-    ${limit == null ? '' : `LIMIT ${Number(limit)}`}
+    WITH filtered AS MATERIALIZED (
+      SELECT
+        rr.race_entry_id,
+        rr.placing,
+        rr.gallop,
+        rr.disqualified,
+        rr.prize_sek,
+        r.distance_m,
+        ${canonicalMethod} AS start_method_group,
+        COALESCE(t.canonical_name, 'Okänd bana') AS track_label
+      FROM race_entries re
+      JOIN races r ON r.id = re.race_id
+      LEFT JOIN tracks t ON t.id = r.track_id
+      JOIN race_results rr ON rr.race_entry_id = re.id
+      WHERE ${conditions.join(' AND ')}
+    )
+    SELECT 'summary' AS section, 'all' AS label, ${metricSql}
+    FROM filtered f
+    UNION ALL
+    SELECT 'method' AS section, f.start_method_group AS label, ${metricSql}
+    FROM filtered f
+    GROUP BY f.start_method_group
+    UNION ALL
+    SELECT 'distance' AS section, COALESCE(CAST(f.distance_m AS TEXT), 'unknown') AS label, ${metricSql}
+    FROM filtered f
+    WHERE (? = 'all' OR f.start_method_group = ?)
+    GROUP BY f.distance_m
+    UNION ALL
+    SELECT 'track' AS section, f.track_label AS label, ${metricSql}
+    FROM filtered f
+    WHERE (? = 'all' OR f.start_method_group = ?)
+    GROUP BY f.track_label
   `;
-  const { results } = await env.DB.prepare(sql).bind(...bindings).all();
-  return mapRows(results);
+  const distanceMethod = distanceStartMethod || 'all';
+  const trackMethod = trackStartMethod || 'all';
+  const { results } = await env.DB.prepare(sql).bind(
+    ...bindings,
+    distanceMethod,
+    distanceMethod,
+    trackMethod,
+    trackMethod
+  ).all();
+  return results || [];
 }
 
 function emptySummary() {
@@ -108,50 +155,20 @@ export async function getFilteredEntityStatBreakdowns(env, type, id, options = {
   const raceScope = normalizeRaceScope(options.raceScope);
   const distanceStartMethod = normalizeStartMethod(options.distanceStartMethod);
   const trackStartMethod = normalizeStartMethod(options.trackStartMethod);
-  const canonicalMethod = canonicalStartMethodSql('r');
+  const rows = await loadBreakdownRows(env, {
+    relationColumn: config.relationColumn,
+    id: normalizedId,
+    year,
+    raceScope,
+    distanceStartMethod,
+    trackStartMethod
+  });
 
-  const [summaryRows, startMethods, distances, tracks] = await Promise.all([
-    groupedRows(env, {
-      relationColumn: config.relationColumn,
-      id: normalizedId,
-      year,
-      raceScope,
-      method: null,
-      groupExpression: `'all'`,
-      orderBy: 'label'
-    }),
-    groupedRows(env, {
-      relationColumn: config.relationColumn,
-      id: normalizedId,
-      year,
-      raceScope,
-      method: null,
-      groupExpression: canonicalMethod,
-      orderBy: 'starts DESC, label ASC'
-    }),
-    groupedRows(env, {
-      relationColumn: config.relationColumn,
-      id: normalizedId,
-      year,
-      raceScope,
-      method: distanceStartMethod,
-      groupExpression: `COALESCE(CAST(r.distance_m AS TEXT), 'unknown')`,
-      orderBy: 'starts DESC, r.distance_m ASC'
-    }),
-    groupedRows(env, {
-      relationColumn: config.relationColumn,
-      id: normalizedId,
-      year,
-      raceScope,
-      method: trackStartMethod,
-      groupExpression: `COALESCE(t.canonical_name, 'Okänd bana')`,
-      orderBy: 'starts DESC, label COLLATE NOCASE ASC',
-      limit: 50
-    })
-  ]);
-
-  const summary = summaryRows[0] ? { ...summaryRows[0] } : emptySummary();
-  delete summary.label;
+  const summaryRow = rows.find((row) => row.section === 'summary');
+  const summary = summaryRow ? mapCoreMetricRow(summaryRow) : emptySummary();
+  const startMethods = sortStartMethods(mapRows(rows.filter((row) => row.section === 'method')));
+  const distances = sortDistances(mapRows(rows.filter((row) => row.section === 'distance')));
+  const tracks = sortTracks(mapRows(rows.filter((row) => row.section === 'track')));
 
   return {
     filters: {
