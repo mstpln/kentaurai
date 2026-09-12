@@ -9,7 +9,7 @@ function stableAsOf(asOf) {
 }
 
 function effectiveCutoff(asOf, deadlineAt) {
-  if (!validIso(deadlineAt)) throw new Error('analysis market context requires a verified betting or race-start deadline');
+  if (!validIso(deadlineAt)) throw new Error('analysis market context requires a verified betting stop or round start');
   const stable = stableAsOf(asOf);
   return Date.parse(stable) <= Date.parse(deadlineAt) ? stable : deadlineAt;
 }
@@ -20,14 +20,7 @@ export async function getVerifiedAnalysisMarket(env, roundId, asOf) {
     SELECT gr.id,
            gr.bet_stop_at,
            gr.scheduled_start_at,
-           COALESCE(
-             gr.bet_stop_at,
-             gr.scheduled_start_at,
-             (SELECT MIN(r.scheduled_start_at)
-              FROM game_legs gl
-              JOIN races r ON r.id = gl.race_id
-              WHERE gl.game_round_id = gr.id)
-           ) AS market_deadline_at
+           COALESCE(gr.bet_stop_at, gr.scheduled_start_at) AS market_deadline_at
     FROM game_rounds gr
     WHERE gr.id = ? AND gr.game_type IN ('V85','V86')
     LIMIT 1
@@ -36,11 +29,7 @@ export async function getVerifiedAnalysisMarket(env, roundId, asOf) {
 
   const marketAsOf = stableAsOf(asOf);
   const cutoff = effectiveCutoff(marketAsOf, round.market_deadline_at);
-  const deadlineSource = validIso(round.bet_stop_at)
-    ? 'bet_stop_at'
-    : validIso(round.scheduled_start_at)
-      ? 'round_scheduled_start_at'
-      : 'first_race_scheduled_start_at';
+  const deadlineSource = validIso(round.bet_stop_at) ? 'bet_stop_at' : 'round_scheduled_start_at';
 
   const { results: betting } = await env.DB.prepare(`
     WITH candidates AS (
@@ -96,7 +85,9 @@ export async function getVerifiedAnalysisMarket(env, roundId, asOf) {
   `).bind(roundId, cutoff).all();
 
   return {
-    definitionVersion: 'verified-market-at-stop-v1',
+    definitionVersion: deadlineSource === 'bet_stop_at'
+      ? 'verified-market-at-stop-v1'
+      : 'verified-market-at-round-start-v1',
     roundId,
     betStopAt: round.bet_stop_at || null,
     marketDeadlineAt: round.market_deadline_at,
