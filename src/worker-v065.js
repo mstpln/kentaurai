@@ -6,6 +6,7 @@ import {
   getHorseCalendarYearDetailStatistics,
   getTrainerCalendarYearDetailStatistics
 } from './entity-detail-calendar-statistics.js';
+import { getTrainerCalendarHomeTrackResults } from './trainer-calendar-home-statistics.js';
 import { enhanceEntityDetailStatisticsHtml } from './entity-detail-statistics-ui.js';
 
 function json(data, status = 200) {
@@ -57,6 +58,13 @@ const calendarHandlers = {
   horses: getHorseCalendarYearDetailStatistics
 };
 
+async function calendarDetail(env, entityType, entityId, options) {
+  const data = await calendarHandlers[entityType](env, entityId, options);
+  if (!data || entityType !== 'trainers') return data;
+  const home = await getTrainerCalendarHomeTrackResults(env, entityId, data.filters);
+  return { ...data, ...home };
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -75,7 +83,7 @@ export default {
       if (denied) return denied;
       try {
         const entityType = calendarMatch[1];
-        const data = await calendarHandlers[entityType](env, decodeURIComponent(calendarMatch[2]), calendarOptions(url));
+        const data = await calendarDetail(env, entityType, decodeURIComponent(calendarMatch[2]), calendarOptions(url));
         return data ? json(data) : json({ error: 'not_found' }, 404);
       } catch (error) {
         console.error(error);
