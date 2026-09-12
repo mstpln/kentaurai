@@ -43,7 +43,8 @@ function calendarOptions(url) {
 }
 
 async function enhancedAppResponse(request, response) {
-  if (request.method !== 'GET' || new URL(request.url).pathname !== '/app/') return response;
+  const path = new URL(request.url).pathname;
+  if (request.method !== 'GET' || (path !== '/app' && path !== '/app/')) return response;
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('text/html')) return response;
   const body = enhanceEntityDetailStatisticsHtml(await response.text());
