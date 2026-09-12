@@ -4,6 +4,7 @@ import { requireAdmin } from './auth.js';
 import { enhanceAppHtmlV064 } from './app-v064-overlay.js';
 import { enhanceDriverStatisticsHtml } from './driver-statistics-ui.js';
 import { enhanceTrainerStatisticsHtml } from './trainer-statistics-ui.js';
+import { enhanceTrainerDetailStatisticsHtml } from './trainer-detail-statistics-ui.js';
 import { enhanceHorsePatternsHtml } from './horse-patterns-ui.js';
 import { enhanceMobileLayoutPolish } from './mobile-layout-polish.js';
 import { buildCombinedAnalysisImportPrompt, recommendedCombinedFilename } from './analysis-import-prompt-v2.js';
@@ -21,6 +22,7 @@ import { syncOnePendingHorseStartPointSource } from './import/official-start-poi
 import { getHorseDetailStatistics, getHorseRankings } from './statistics/horses-complete.js';
 import { getDriverDetailStatistics, getDriverFilterOptions, getDriverRankings } from './statistics/drivers.js';
 import { getTrainerDetailStatistics, getTrainerFilterOptions, getTrainerRankings } from './statistics/trainers.js';
+import { getTrainerCalendarYearDetailStatistics } from './trainer-detail-statistics.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -44,10 +46,12 @@ async function enhancedAppResponse(request, response) {
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('text/html')) return response;
   const body = enhanceMobileLayoutPolish(
-    enhanceHorsePatternsHtml(
-      enhanceTrainerStatisticsHtml(
-        enhanceDriverStatisticsHtml(
-          enhanceAppHtmlV064(await response.text())
+    enhanceTrainerDetailStatisticsHtml(
+      enhanceHorsePatternsHtml(
+        enhanceTrainerStatisticsHtml(
+          enhanceDriverStatisticsHtml(
+            enhanceAppHtmlV064(await response.text())
+          )
         )
       )
     )
@@ -71,6 +75,15 @@ function personStatsOptions(url) {
     raceType: url.searchParams.get('race_type'), breedType: url.searchParams.get('breed_type'), startMethod: url.searchParams.get('start_method'),
     distanceGroup: url.searchParams.get('distance_group'), sex: url.searchParams.get('sex'), age: url.searchParams.get('age'),
     voltLane: url.searchParams.get('volt_lane'), handicapM: url.searchParams.get('handicap_m'), minStarts: url.searchParams.get('min_starts')
+  };
+}
+
+function trainerCalendarStatsOptions(url) {
+  return {
+    year: url.searchParams.get('year'), raceScope: url.searchParams.get('race_scope'), trackId: url.searchParams.get('track_id'),
+    raceType: url.searchParams.get('race_type'), breedType: url.searchParams.get('breed_type'), startMethod: url.searchParams.get('start_method'),
+    distanceGroup: url.searchParams.get('distance_group'), sex: url.searchParams.get('sex'), age: url.searchParams.get('age'),
+    voltLane: url.searchParams.get('volt_lane'), handicapM: url.searchParams.get('handicap_m')
   };
 }
 
@@ -188,6 +201,14 @@ export default {
       const denied = await requireSession(request, env); if (denied) return denied;
       try { return json(await getTrainerRankings(env, personStatsOptions(url))); }
       catch (error) { console.error(error); return json({ error: 'request_failed', message: error.message }, 400); }
+    }
+    const trainerCalendarStatisticsMatch = path.match(/^\/app\/api\/trainers\/([^/]+)\/calendar-statistics$/);
+    if (request.method === 'GET' && trainerCalendarStatisticsMatch) {
+      const denied = await requireSession(request, env); if (denied) return denied;
+      try {
+        const data = await getTrainerCalendarYearDetailStatistics(env, decodeURIComponent(trainerCalendarStatisticsMatch[1]), trainerCalendarStatsOptions(url));
+        return data ? json(data) : json({ error: 'not_found' }, 404);
+      } catch (error) { console.error(error); return json({ error: 'request_failed', message: error.message }, 400); }
     }
     const trainerStatisticsMatch = path.match(/^\/app\/api\/trainers\/([^/]+)\/statistics$/);
     if (request.method === 'GET' && trainerStatisticsMatch) {
