@@ -47,6 +47,12 @@ test('detail filters preserve canonical choices and reset is rendered last', () 
   assert.match(script, /k!=='year'/);
 });
 
+test('horse age options follow the selected calendar year rather than the device current year', () => {
+  const script = scriptFrom(enhanced());
+  assert.match(script, /const y=Number\(s\.filters\.year\)\|\|new Date\(\)\.getFullYear\(\)/);
+  assert.match(script, /s\.options\.birthYears\.map\(v=>y-Number\(v\)\)/);
+});
+
 test('filter controls are placed directly below the scorecard before detail tables', () => {
   const script = scriptFrom(enhanced());
   assert.match(script, /const scoreNode=host\.querySelector\('\.entity-detail-score'\)/);
