@@ -67,11 +67,12 @@ test('Trend filter alignment observes renders safely through a queued idempotent
   assert.doesNotMatch(html, /badge\?\.remove\(\)/);
 });
 
-test('mobile reset hook clears hidden Loppnivå while leaving badge rendering to Trend UI', () => {
+test('mobile polish does not own Trend filter state or badge calculation', () => {
   const html = enhanceMobileLayoutPolish('<html><head></head><body><div id="app"></div></body></html>');
-  assert.match(html, /target\?\.closest\('#trendReset'\)[\s\S]*state\.trendRaceScope='all'/);
   assert.doesNotMatch(html, /stateFilterCount/);
   assert.doesNotMatch(html, /syncTrendFilterCount/);
+  assert.doesNotMatch(html, /state\.trendRaceScope=/);
+  assert.doesNotMatch(html, /state\.trendDetailFilters=/);
 });
 
 test('embedded mobile browser script is syntactically valid', () => {
