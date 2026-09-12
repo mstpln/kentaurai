@@ -76,6 +76,13 @@ test('horse-specific verified start-point and pattern sections are preserved whi
   assert.match(script, /s\.horseExtra/);
 });
 
+test('trainer-specific verified home-track summaries remain visible after shared redesign', () => {
+  const script = scriptFrom(enhanced());
+  assert.match(script, /if\(s\.page==='trainers'\)/);
+  assert.match(script, /special\('Hemmabana',data\.homeTrackResults,'Senaste verifierade officiella hemmabana'\)/);
+  assert.match(script, /special\('Övriga banor',data\.otherTrackResults,'Endast tränare med verifierad hemmabana'\)/);
+});
+
 test('shared scorecard keeps entity-specific specialized sections', () => {
   const script = scriptFrom(enhanced());
   assert.match(script, /Scorecard/);
