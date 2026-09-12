@@ -100,38 +100,10 @@ const mobileLayoutPolishScript = `
     return document.querySelector('.trend-scope-line > .filter-block') || document.querySelector('.trend-detail-panel > .trend-scope-filter-block');
   }
 
-  function stateFilterCount(scopeBlock,panel){
-    if(typeof state!=='undefined' && state){
-      const scopeCount=state.trendRaceScope&&state.trendRaceScope!=='all'?1:0;
-      const f=state.trendDetailFilters||{};
-      const detailCount=[f.trackId,f.raceType,f.breedType,f.startMethod,f.minStarts].filter(value=>value&&value!=='all').length;
-      return scopeCount+detailCount;
-    }
-    const scopeActive=scopeBlock?.querySelector('[data-trend-scope].active');
-    const scopeCount=scopeActive&&scopeActive.dataset.trendScope!=='all'?1:0;
-    const detailCount=panel?[...panel.querySelectorAll('.trend-detail-field select.active')].length:0;
-    return scopeCount+detailCount;
-  }
-
-  function syncTrendFilterCount(scopeBlock,panel,trigger){
-    if(!trigger)return;
-    const count=stateFilterCount(scopeBlock,panel);
-    let badge=trigger.querySelector('.trend-filter-count');
-    if(count){
-      if(!badge){badge=document.createElement('span');badge.className='trend-filter-count';trigger.appendChild(badge)}
-      if(badge.textContent!==String(count))badge.textContent=String(count);
-      trigger.classList.add('active');
-    }else{
-      badge?.remove();
-      trigger.classList.remove('active');
-    }
-  }
-
   function alignTrendFilters(){
     const scopeLine=document.querySelector('.trend-scope-line');
     if(!scopeLine)return;
     const panel=document.querySelector('.trend-detail-panel');
-    const trigger=scopeLine.querySelector('#trendFilterToggle');
     const scopeBlock=currentScopeBlock();
     if(!scopeBlock)return;
 
@@ -142,7 +114,6 @@ const mobileLayoutPolishScript = `
     }else if(scopeBlock.style.display!=='none'){
       scopeBlock.style.display='none';
     }
-    syncTrendFilterCount(scopeBlock,panel,trigger);
   }
 
   function queueAlign(){
