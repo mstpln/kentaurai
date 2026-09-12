@@ -32,14 +32,18 @@ export async function getAnalysisPromptContext(env, providerValue) {
     };
   }
 
-  const context = await prepareAnalysisContext(env, round.id, 'market', {
-    preMarketSubmissionId: parent.submissionId
-  });
+  const [context, identityContext] = await Promise.all([
+    prepareAnalysisContext(env, round.id, 'market', {
+      preMarketSubmissionId: parent.submissionId
+    }),
+    prepareAnalysisContext(env, round.id, 'pre_market')
+  ]);
   return {
     export_stage: 'final',
     provider,
     round_id: round.id,
     parent_submission_id: parent.submissionId,
-    context
+    context,
+    identity_context: identityContext
   };
 }
