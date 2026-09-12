@@ -5,6 +5,7 @@ import { enhanceAppHtmlV064 } from './app-v064-overlay.js';
 import { enhanceDriverStatisticsHtml } from './driver-statistics-ui.js';
 import { enhanceTrainerStatisticsHtml } from './trainer-statistics-ui.js';
 import { enhanceHorsePatternsHtml } from './horse-patterns-ui.js';
+import { enhanceMobileLayoutPolish } from './mobile-layout-polish.js';
 import { buildCombinedAnalysisImportPrompt, recommendedCombinedFilename } from './analysis-import-prompt-v2.js';
 import {
   ANALYSIS_COMBINED_VERSION,
@@ -42,7 +43,15 @@ async function enhancedAppResponse(request, response) {
   if (request.method !== 'GET' || new URL(request.url).pathname !== '/app/') return response;
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('text/html')) return response;
-  const body = enhanceHorsePatternsHtml(enhanceTrainerStatisticsHtml(enhanceDriverStatisticsHtml(enhanceAppHtmlV064(await response.text()))));
+  const body = enhanceMobileLayoutPolish(
+    enhanceHorsePatternsHtml(
+      enhanceTrainerStatisticsHtml(
+        enhanceDriverStatisticsHtml(
+          enhanceAppHtmlV064(await response.text())
+        )
+      )
+    )
+  );
   const headers = new Headers(response.headers);
   headers.delete('content-length');
   return new Response(body, { status: response.status, statusText: response.statusText, headers });
