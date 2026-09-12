@@ -8,24 +8,40 @@ function stableAsOf(asOf) {
   return new Date(minute).toISOString();
 }
 
-function effectiveCutoff(asOf, betStopAt) {
-  if (!validIso(betStopAt)) throw new Error('analysis market context requires a verified betting stop');
+function effectiveCutoff(asOf, deadlineAt) {
+  if (!validIso(deadlineAt)) throw new Error('analysis market context requires a verified betting or race-start deadline');
   const stable = stableAsOf(asOf);
-  return Date.parse(stable) <= Date.parse(betStopAt) ? stable : betStopAt;
+  return Date.parse(stable) <= Date.parse(deadlineAt) ? stable : deadlineAt;
 }
 
 export async function getVerifiedAnalysisMarket(env, roundId, asOf) {
   if (!env?.DB) throw new Error('DB is not configured');
   const round = await env.DB.prepare(`
-    SELECT id, bet_stop_at
-    FROM game_rounds
-    WHERE id = ? AND game_type IN ('V85','V86')
+    SELECT gr.id,
+           gr.bet_stop_at,
+           gr.scheduled_start_at,
+           COALESCE(
+             gr.bet_stop_at,
+             gr.scheduled_start_at,
+             (SELECT MIN(r.scheduled_start_at)
+              FROM game_legs gl
+              JOIN races r ON r.id = gl.race_id
+              WHERE gl.game_round_id = gr.id)
+           ) AS market_deadline_at
+    FROM game_rounds gr
+    WHERE gr.id = ? AND gr.game_type IN ('V85','V86')
     LIMIT 1
   `).bind(roundId).first();
   if (!round) throw new Error('V85/V86 round was not found');
 
   const marketAsOf = stableAsOf(asOf);
-  const cutoff = effectiveCutoff(marketAsOf, round.bet_stop_at);
+  const cutoff = effectiveCutoff(marketAsOf, round.market_deadline_at);
+  const deadlineSource = validIso(round.bet_stop_at)
+    ? 'bet_stop_at'
+    : validIso(round.scheduled_start_at)
+      ? 'round_scheduled_start_at'
+      : 'first_race_scheduled_start_at';
+
   const { results: betting } = await env.DB.prepare(`
     WITH candidates AS (
       SELECT bs.race_entry_id,
@@ -82,7 +98,9 @@ export async function getVerifiedAnalysisMarket(env, roundId, asOf) {
   return {
     definitionVersion: 'verified-market-at-stop-v1',
     roundId,
-    betStopAt: round.bet_stop_at,
+    betStopAt: round.bet_stop_at || null,
+    marketDeadlineAt: round.market_deadline_at,
+    deadlineSource,
     asOf: marketAsOf,
     cutoff,
     betting: (betting || []).map((row) => ({
