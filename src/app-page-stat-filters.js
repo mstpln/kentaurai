@@ -106,7 +106,7 @@ async function renderStatFilters(){
   const key=entityStatKey();
   const filters=filtersForCurrentEntity();
   const global=document.querySelector('[data-global-stat-filters]');
-  if(global)global.innerHTML=globalFilters(filters).replace(/^<div data-global-stat-filters="true">|<\/div>$/g,'');
+  if(global)global.innerHTML=globalFilters(filters).replace(/^<div data-global-stat-filters="true">|<\\/div>$/g,'');
   const target=document.getElementById('entityStatTables');
   if(!target)return;
   target.innerHTML='<div class="card stat-filter-loading">Läser statistik…</div>';
