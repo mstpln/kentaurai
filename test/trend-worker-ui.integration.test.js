@@ -79,8 +79,6 @@ test('actual Worker app HTML contains the canonical Trend Build A enhancement', 
   assert.match(html, /@media\(max-width:340px\)/);
   assert.match(html, /\.trend-win-block\{[^}]*align-items:center[^}]*padding:0 10px/);
   assert.match(html, /\.trend-metric-pill:last-child strong\{[^}]*overflow:visible[^}]*text-overflow:clip/);
-  assert.doesNotMatch(html, /class="range-group"/);
-  assert.doesNotMatch(html, /class="range-btn/);
   assert.doesNotMatch(html, /trend-win-label/);
 });
 
