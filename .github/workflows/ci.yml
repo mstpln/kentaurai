@@ -18,17 +18,41 @@ jobs:
         with:
           node-version: 22
 
-      - name: Tests a-g
-        run: node --test test/[a-g]*.test.js
+      - name: Aligned tests
+        run: node --test test/aligned*.test.js
+
+      - name: Analysis tests
+        run: node --test test/analysis*.test.js
+
+      - name: Tests b-d
+        run: |
+          shopt -s nullglob
+          files=(test/[b-d]*.test.js)
+          if ((${#files[@]})); then node --test "${files[@]}"; fi
+
+      - name: Tests e-g
+        run: |
+          shopt -s nullglob
+          files=(test/[e-g]*.test.js)
+          if ((${#files[@]})); then node --test "${files[@]}"; fi
 
       - name: Tests h-m
-        run: node --test test/[h-m]*.test.js
+        run: |
+          shopt -s nullglob
+          files=(test/[h-m]*.test.js)
+          if ((${#files[@]})); then node --test "${files[@]}"; fi
 
       - name: Tests n-s
-        run: node --test test/[n-s]*.test.js
+        run: |
+          shopt -s nullglob
+          files=(test/[n-s]*.test.js)
+          if ((${#files[@]})); then node --test "${files[@]}"; fi
 
       - name: Tests t-z
-        run: node --test test/[t-z]*.test.js
+        run: |
+          shopt -s nullglob
+          files=(test/[t-z]*.test.js)
+          if ((${#files[@]})); then node --test "${files[@]}"; fi
 
       - name: Syntax - index
         run: node --check src/index.js
