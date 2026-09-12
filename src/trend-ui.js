@@ -87,7 +87,7 @@ function bindTrendBuildA(){
   document.querySelectorAll('[data-trend-scope]').forEach(button=>button.onclick=()=>{state.trendRaceScope=button.dataset.trendScope;renderTrendBuildA()});
   const toggle=document.getElementById('trendFilterToggle');if(toggle)toggle.onclick=()=>{state.trendFilterOpen=!state.trendFilterOpen;renderTrendBuildA()};
   document.querySelectorAll('[data-trend-detail]').forEach(select=>select.onchange=()=>{state.trendDetailFilters[select.dataset.trendDetail]=select.value;renderTrendBuildA()});
-  const reset=document.getElementById('trendReset');if(reset)reset.onclick=()=>{state.trendDetailFilters={trackId:'all',raceType:'all',breedType:'all',startMethod:'all',minStarts:'all'};renderTrendBuildA()};
+  const reset=document.getElementById('trendReset');if(reset)reset.onclick=()=>{state.trendRaceScope='all';state.trendDetailFilters={trackId:'all',raceType:'all',breedType:'all',startMethod:'all',minStarts:'all'};renderTrendBuildA()};
   document.querySelectorAll('[data-trend-id]').forEach(button=>button.onclick=()=>openDetail(state.trendCategory,button.dataset.trendId));
 }
 async function loadTrendFilterOptions(){if(state.trendFilterOptions)return;try{state.trendFilterOptions=await api('/trend/filter-options')}catch{state.trendFilterOptions={tracks:[]}}}
