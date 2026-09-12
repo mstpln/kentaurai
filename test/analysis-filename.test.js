@@ -17,6 +17,6 @@ test('Build E import prompt requires actual model and provider-neutral staged fi
   const prompt = buildAnalysisImportPrompt('openai');
   assert.match(prompt, /ACTUAL-MODEL/);
   assert.match(prompt, /STAGE/);
-  assert.match(prompt, /faktiska producer\.model/);
-  assert.match(prompt, /producer\.provider måste vara exakt "openai"/);
+  assert.match(prompt, /producer\.model ska vara den mest specifika modellbeteckning som faktiskt är känd/);
+  assert.match(prompt, /producer\.provider ska därför vara exakt "openai"/);
 });
