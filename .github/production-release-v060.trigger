@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=5c04756c25cacab714cbda5746fcf6d337bad05f
-release_nonce=2026-09-12-post-pr100-mobile-scroll-fix1
+source_main=75958c2db9576e0d4e1a2f48dc63e82a48c7b5b0
+release_nonce=2026-09-12-post-pr101-mobile-filter-freeze-fix1
