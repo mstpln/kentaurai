@@ -1,5 +1,5 @@
 const mobileLayoutPolishCss = `
-<style id="kentaurai-mobile-layout-polish-v102">
+<style id="kentaurai-mobile-layout-polish-v104">
 /* Presentation-only mobile polish. Do not alter data or business behaviour here. */
 .trend-panel-head{padding-left:16px!important;padding-right:16px!important}
 .trend-result-row{padding-left:16px!important;padding-right:16px!important}
@@ -34,17 +34,6 @@ const mobileLayoutPolishCss = `
   .nav-item{min-width:0!important;font-size:10px!important;padding:7px 0 6px!important;line-height:1.1!important;overflow:hidden}
   .nav-icon{width:21px!important;height:21px!important;margin-bottom:4px!important}
 
-  /* Time period must always remain on one row. */
-  .range-group{
-    width:100%!important;max-width:100%!important;display:grid!important;
-    grid-template-columns:repeat(5,minmax(0,1fr))!important;gap:5px!important;
-    flex-wrap:nowrap!important;overflow:visible!important
-  }
-  .range-btn{
-    min-width:0!important;width:100%!important;max-width:100%!important;padding:9px 3px!important;
-    font-size:clamp(9px,2.7vw,12px)!important;white-space:nowrap!important;text-align:center!important
-  }
-
   /* Other pills and tabs may wrap rather than widening the page. */
   .tabs,.segment-group,.system-switcher,.stat-pills,.trip-chips{
     max-width:100%!important;flex-wrap:wrap!important;overflow:visible!important
@@ -65,16 +54,13 @@ const mobileLayoutPolishCss = `
   .table th,.table td,.starts-table th,.starts-table td,.game-table th,.game-table td{white-space:normal;overflow-wrap:anywhere}
 
   /* Preserve all information inside compact statistic rows/cards. */
-  .trend-result-row{grid-template-columns:72px minmax(0,1fr)!important;gap:10px!important;padding:14px!important}
   .trend-panel-head{padding:12px 14px 10px!important}
   .trend-result-main,.trend-result-pills,.trend-metric-pill,.trainer-ranking-row,.trainer-special-metric{min-width:0!important}
-  .trend-result-pills{grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:5px!important}
-  .trend-metric-pill{padding:6px 5px!important}
-  .trend-metric-pill span{font-size:7px!important;letter-spacing:.02em!important;overflow:hidden;text-overflow:ellipsis}
-  .trend-metric-pill strong{font-size:9px!important;overflow:hidden;text-overflow:ellipsis}
+  .trend-metric-pill span{overflow:hidden;text-overflow:ellipsis}
+  .trend-metric-pill:last-child strong{overflow:visible!important;text-overflow:clip!important}
 
   /* The opened Trend filter keeps Loppnivå with the detailed filters. */
-  .trend-scope-line{justify-content:flex-end!important;align-items:center!important;min-width:0}
+  .trend-scope-line{align-items:center!important;min-width:0}
   .trend-detail-panel{max-width:100%;grid-template-columns:minmax(0,1fr) minmax(0,1fr)!important;gap:8px!important}
   .trend-detail-panel>.trend-scope-filter-block{grid-column:1/-1!important;padding-bottom:2px}
   .trend-detail-panel>.trend-scope-filter-block .segment-group{display:flex!important;flex-wrap:wrap!important;overflow:visible!important}
@@ -102,14 +88,11 @@ const mobileLayoutPolishCss = `
 @media(max-width:360px){
   .nav-item{font-size:9px!important;padding-left:0!important;padding-right:0!important}
   .nav-icon{width:20px!important;height:20px!important}
-  .range-group{gap:3px!important}
-  .range-btn{padding-left:1px!important;padding-right:1px!important;font-size:9px!important}
-  .trend-result-row{grid-template-columns:64px minmax(0,1fr)!important;gap:8px!important;padding-left:12px!important;padding-right:12px!important}
 }
 </style>`;
 
 const mobileLayoutPolishScript = `
-<script id="kentaurai-mobile-layout-polish-v102-script">
+<script id="kentaurai-mobile-layout-polish-v104-script">
 (function(){
   let alignQueued=false;
 
@@ -117,12 +100,22 @@ const mobileLayoutPolishScript = `
     return document.querySelector('.trend-scope-line > .filter-block') || document.querySelector('.trend-detail-panel > .trend-scope-filter-block');
   }
 
-  function syncTrendFilterCount(scopeBlock,panel,trigger){
-    if(!trigger)return;
+  function stateFilterCount(scopeBlock,panel){
+    if(typeof state!=='undefined' && state){
+      const scopeCount=state.trendRaceScope&&state.trendRaceScope!=='all'?1:0;
+      const f=state.trendDetailFilters||{};
+      const detailCount=[f.trackId,f.raceType,f.breedType,f.startMethod,f.minStarts].filter(value=>value&&value!=='all').length;
+      return scopeCount+detailCount;
+    }
     const scopeActive=scopeBlock?.querySelector('[data-trend-scope].active');
     const scopeCount=scopeActive&&scopeActive.dataset.trendScope!=='all'?1:0;
     const detailCount=panel?[...panel.querySelectorAll('.trend-detail-field select.active')].length:0;
-    const count=scopeCount+detailCount;
+    return scopeCount+detailCount;
+  }
+
+  function syncTrendFilterCount(scopeBlock,panel,trigger){
+    if(!trigger)return;
+    const count=stateFilterCount(scopeBlock,panel);
     let badge=trigger.querySelector('.trend-filter-count');
     if(count){
       if(!badge){badge=document.createElement('span');badge.className='trend-filter-count';trigger.appendChild(badge)}
@@ -190,7 +183,7 @@ function ensureViewport(source) {
 
 export function enhanceMobileLayoutPolish(html) {
   let source = ensureViewport(String(html));
-  if (source.includes('kentaurai-mobile-layout-polish-v102')) return source;
+  if (source.includes('kentaurai-mobile-layout-polish-v104')) return source;
   source = source.replace('</head>', `${mobileLayoutPolishCss}</head>`);
   return source.replace('</body>', `${mobileLayoutPolishScript}</body>`);
 }
