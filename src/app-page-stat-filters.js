@@ -66,8 +66,16 @@ function summaryStatsFrom(s){
   const gallopRate=stats.gallopRate!=null?stats.gallopRate:(stats.resultStarts?Number(stats.gallops||0)/Number(stats.resultStarts):null);
   return dataSection('Resultat',[['Starter med resultat',stats.resultStarts],['Vinster',stats.wins],['Andraplatser',stats.seconds],['Tredjeplatser',stats.thirds],['Topp 3',stats.top3],['Vinstprocent',pct(stats.winRate)],['Topp 3-procent',pct(stats.top3Rate)],['Prispengar',money(stats.prizeSek)]])+dataSection('Galopp & diskvalifikation',[['Galopper',stats.gallops],['Galopp %',pct(gallopRate)],['Diskvalifikationer',stats.disqualifications]]);
 }
+function scheduleStatFilters(){
+  const key=entityStatKey();
+  queueMicrotask(()=>{
+    if(key!==entityStatKey()||state.tab!=='stats'||!document.getElementById('entityStatTables'))return;
+    void renderStatFilters();
+  });
+}
 statsView=function(detail){
   const filters=filtersForCurrentEntity();
+  scheduleStatFilters();
   return '<div class="data-groups"><div id="entityStatSummary">'+summaryStatsFrom(detail.stats||{})+'</div><div class="entity-stat-filter-shell">'+globalFilters(filters)+'<div id="entityStatTables" class="breakdown-grid entity-filter-grid"><div class="card stat-filter-loading">Läser statistik…</div></div></div></div>';
 };
 function formatRate(value){return value==null?'—':pct(value)}
@@ -119,11 +127,6 @@ async function renderStatFilters(){
     bindFilterButtons();
   }
 }
-const priorRenderDetail=renderDetail;
-renderDetail=async function(){
-  await priorRenderDetail();
-  if(state.tab==='stats'&&state.detail){bindFilterButtons();void renderStatFilters()}
-};
 })();
 </script>`;
 
