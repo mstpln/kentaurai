@@ -60,6 +60,16 @@ test('filter controls are placed directly below the scorecard before detail tabl
   assert.match(script, /scoreNode\.after\(controlsNode\)/);
 });
 
+test('legacy base detail statistics are removed before the shared scorecard is appended', () => {
+  const script = scriptFrom(enhanced());
+  const cleanup = "app.querySelector(':scope > .data-groups')?.remove()";
+  assert.ok(script.includes(cleanup));
+  const cleanupIndex = script.indexOf(cleanup);
+  const appendIndex = script.indexOf('app.appendChild(host)');
+  assert.ok(cleanupIndex >= 0);
+  assert.ok(appendIndex > cleanupIndex);
+});
+
 test('detail layout explicitly supports narrow mobile widths and scrollable tables', () => {
   const html = enhanced();
   assert.match(html, /@media\(max-width:430px\)/);
