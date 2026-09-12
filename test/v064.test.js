@@ -184,11 +184,12 @@ test('actual Wrangler worker serves the canonical completion UI after browser lo
   assert.equal(response.status, 200);
   const html = await response.text();
   for (const label of ['Trend', 'Tränare', 'Hästar', 'Kuskar', 'Bana', 'Spel', 'AI', 'Data',
-    'Skapa V85/V86-systemanalysfil för import', 'Kopiera instruktioner till AI', 'V85/V86-omgångar',
+    'Analysera omgången utan marknad', 'Exportera marknadsblind data', 'Värdera marknaden och bygg system',
+    'Exportera marknadsdata', 'Skapa importfil till KentaurAI', 'Kopiera exportinstruktion', 'V85/V86-omgångar',
     'All data', 'Loppnivå', 'Högre prissumma', 'Vardagstrav', 'Översikt', 'Spårstatistik', 'Hemmatränare',
     'Startmetod', 'STL-klass', 'Lopptyp', 'Sverige']) assert.match(html, new RegExp(label.replace('/', '\\/')));
   assert.doesNotMatch(html, /STL-lopp/);
-  assert.match(html, /data-canonical-analysis-prompt="true"/);
+  assert.match(html, /kentaurai-analysis-v2/);
   assert.match(html, /startMethod:'all',raceScope:'all'/);
   assert.match(html, /selected===false\?'Fel':'Ej rättad'/);
   assert.doesNotMatch(html, /selected===false\?'Miss':'Ej rättad'/);
@@ -232,7 +233,7 @@ test('analysis import prompt mirrors the aligned export-only contract', () => {
   assert.equal(recommendedAnalysisFilename('claude'), 'kentaurai-analysis_anthropic_ACTUAL-MODEL_STAGE_ÅÅÅÅ-MM-DD.json');
 });
 
-test('analysis-prompt app endpoint requires session and copies a complete live pre-market context', async () => {
+test('analysis-prompt app endpoint requires session and copies a complete live combined context', async () => {
   const { env, db } = createTestEnv();
   env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
   seedAnalysisPromptRound(db);
@@ -242,11 +243,10 @@ test('analysis-prompt app endpoint requires session and copies a complete live p
   response = await worker.fetch(new Request('https://example.test/app/api/settings/analysis-prompt?provider=openai', { headers: { cookie } }), env);
   assert.equal(response.status, 200);
   const payload = await response.json();
-  assert.equal(payload.contractVersion, 'kentaurai-analysis-v1');
-  assert.equal(payload.stage, 'pre_market');
+  assert.equal(payload.contractVersion, 'kentaurai-analysis-v2');
+  assert.equal(payload.stage, 'combined');
   assert.equal(payload.roundId, 'prompt-round');
-  assert.equal(payload.parentSubmissionId, null);
-  assert.equal(payload.recommendedFilename, 'kentaurai-analysis_openai_ACTUAL-MODEL_pre-market_ÅÅÅÅ-MM-DD.json');
+  assert.equal(payload.recommendedFilename, 'kentaurai-analysis_openai_ACTUAL-MODEL_combined_ÅÅÅÅ-MM-DD.json');
   assert.match(payload.prompt, /# KENTAURAI-UNDERLAG/);
   assert.match(payload.prompt, /"round_id": "prompt-round"/);
   assert.match(payload.prompt, /"raceEntryId": "prompt-entry-1"/);
@@ -256,7 +256,7 @@ test('analysis-prompt app endpoint requires session and copies a complete live p
   response = await worker.fetch(new Request('https://example.test/app/api/settings/analysis-prompt?provider=anthropic', { headers: { cookie } }), env);
   assert.equal(response.status, 200);
   const anthropic = await response.json();
-  assert.equal(anthropic.stage, 'pre_market');
-  assert.equal(anthropic.recommendedFilename, 'kentaurai-analysis_anthropic_ACTUAL-MODEL_pre-market_ÅÅÅÅ-MM-DD.json');
-  assert.match(anthropic.prompt, /producer.provider ska därför vara exakt "anthropic"/);
+  assert.equal(anthropic.stage, 'combined');
+  assert.equal(anthropic.recommendedFilename, 'kentaurai-analysis_anthropic_ACTUAL-MODEL_combined_ÅÅÅÅ-MM-DD.json');
+  assert.match(anthropic.prompt, /producer.provider ska vara exakt "anthropic"/);
 });

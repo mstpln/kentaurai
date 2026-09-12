@@ -12,8 +12,9 @@ Updated: 2026-09-12
 - Release QA passed with 441 tests and zero failures before production changes.
 - Worker deployment, `/health`, `/app/login` and the private analysis-prompt authorization check all passed.
 - Deployed Worker version ID from that release: `465768c5-3106-4164-a27c-69ae34d9e6ec`.
-- Production D1 reported `No migrations to apply` during that release. Repository migration tracking remains current through `0012_trainer_statistics_indexes.sql`.
+- Production D1 reported `No migrations to apply` during that release. Production migration tracking remains current through `0012_trainer_statistics_indexes.sql`; migration `0013_combined_analysis_systems.sql` exists only on open PR #95 and has not been applied to production.
 - Build F is merged to source `main` but has not yet been included in a separately authorized production release.
+- PR #95 is open and not production-live. It changes the controlled AI workflow to the one-import combined flow described below and must not be merged/deployed without explicit user authorization.
 - Official and X-Labs historical backfills use persisted jobs/cursors. Deployments and analysis work must never recreate, reset or silently restart them.
 
 ## Statistics programme
@@ -56,16 +57,27 @@ Updated: 2026-09-12
 - PR #87 is merged; merge commit `42901f281eb8405f6aa72cbce104baf77199c6df`.
 - Final reviewed branch head was `532d698fbe30e6f8fae6fce2efb606b62f71877e`; CI #551 passed with 441 tests and zero failures before merge.
 - Production release run `34642352908` passed the same 441-test QA suite, reported no pending D1 migrations and deployed Worker version `465768c5-3106-4164-a27c-69ae34d9e6ec`.
-- The existing provider-neutral analysis exchange remains the single AI pipeline; Build E hardens its export/import contract rather than introducing autonomous model execution in the Worker.
-- Every export carries the immutable KentaurAI context envelope in `analysis_contexts`: canonical round/race/race-entry identities and exact context fingerprint are supplied by KentaurAI rather than entered by the user.
-- `pre_market` is market-blind. Current betting percentages, odds, turnover and jackpot remain excluded until that provider has a stored pre-market analysis.
-- Final analysis is parent-bound and cannot rewrite stored probability/rank/ABCD strength.
+- The production workflow is still the older parent-bound `pre_market` -> `final` exchange until PR #95 is explicitly merged and deployed.
+- Every production export carries the immutable KentaurAI context envelope in `analysis_contexts`: canonical round/race/race-entry identities and exact context fingerprint are supplied by KentaurAI rather than entered by the user.
+- Production `pre_market` is market-blind and final analysis is parent-bound. This remains historical/current-production truth only; it is superseded in source by PR #95 when/if that PR is merged.
 - Final market context uses `verified-market-at-stop-v1`: betting and odds rows must be source-backed, belong to the exact round/race entry and be observed no later than the verified betting stop/current stable analysis cutoff.
-- Supported final submissions write analysis, predictions, systems and selections through the dedicated verified final importer using the already verified market object as the sole market input.
-- New analysis submissions accept only canonical `openai` or `anthropic` producer identities at this version; `producer.model` stores the actual model identity.
-- Output filename guidance includes provider, actual-model slug and phase, while JSON producer fields remain authoritative.
-- Server-side validation rejects stale fingerprints, wrong/missing parents, wrong/missing race-entry identities, post-deadline pre-market creation, invalid spike structure and changed content under an existing submission ID. Exact retries remain idempotent no-ops.
-- No new D1 migration was required by Build E and the release did not reset or recreate historical backfills.
+- New analysis submissions accept only canonical `openai` or `anthropic` producer identities; `producer.model` stores the actual model identity.
+- No new D1 migration was required by Build E and its production release did not reset or recreate historical backfills.
+
+### Combined AI workflow v2 - open PR #95, reviewed but not merged/deployed
+- Branch: `fix/analysis-export-sql-and-combined-flow`.
+- Workflow: Step 1 exports market-blind data and runs the canonical strength-analysis prompt; Step 2 exports verified current market into the same AI conversation and runs the value/system prompt; Step 3 creates one final `kentaurai-analysis-v2` `combined` JSON import.
+- There is no mandatory intermediate pre-market import. Consequently Step-1 blindness is process-declared rather than independently sealed; KentaurAI stamps `analysisBlindness = declared_unsealed` server-side and the AI is forbidden from supplying that field.
+- Combined `legs` must preserve the Step-1 assessment and are checked for canonical identities, complete active-entry coverage, probability sums, ranking/ABCD consistency and market-free text. KentaurAI cannot prove byte identity against an unseen Step-1 response.
+- Market-aware information belongs in recommendations/system fields. Verified market observations remain source-backed and cutoff-bound.
+- V85 `main` accepts two or three singleton spike legs. A two-spike main requires non-empty `notes` preserving the rationale. Every other V85/V86 system requires exactly three singleton spike legs. The rule is based on authoritative game type plus `system_type`, never budget.
+- Migration `0013_combined_analysis_systems.sql` relaxes the storage check to 2/3 spikes and adds `metrics_json`/`notes` while preserving existing systems, selections and post-race reviews.
+- Combined persistence is atomic through one D1 batch so a failed import cannot leave a partial reusable submission.
+- Context fingerprints ignore time-only market metadata but change when canonical identity or actual market observations change.
+- Client numeric fields and `is_spike` use strict JSON types rather than coercive strings/numbers.
+- Market-blind validation covers Step-1 leg text, reasoning and `round_summary`, including common Swedish and English market terminology.
+- The D1 `too many SQL variables` failure in large horse-pattern context generation is addressed by batching IDs.
+- No production migration or deployment is authorized by the PR itself.
 
 ## Data inventory and relevant-pattern programme
 ### Build F - Received-versus-used inventory plus first relevant horse patterns - merged to source main
@@ -76,7 +88,7 @@ Updated: 2026-09-12
 - The inventory distinguishes actual available source facts from schema columns that merely exist but are not reliably populated.
 - Build F promotes only already verified facts with clear analytical value: current Start Points plus latest verified change, recent verified X-Labs first-200 pace, last-400 pace and extra travelled distance.
 - Horse detail statistics expose these as a compact Swedish `Utveckling & löpstyrka` section with natural labels `Startpoäng`, `Starttempo`, `Avslutning` and `Extra distans`. The section explicitly identifies the values as factual patterns rather than AI judgement and states that its latest-observation summary is independent of the statistics filters above.
-- Pre-market AI context receives the same factual pattern family. X-Labs history is restricted to races strictly before the target round date, preventing same-day result leakage.
+- The market-blind Step-1 AI context receives the same factual pattern family. X-Labs history is restricted to races strictly before the target round date, preventing same-day result leakage.
 - Start Points are ranked only against non-scratched horses with verified observations in the same current race leg; missing observations remain missing and do not distort the denominator.
 - Start Points pattern inputs require a normalized official-provider source record. X-Labs pattern inputs require the verified telemetry quality marker plus the captured race-json source family.
 - Higher-risk or not-yet-verified inventory candidates remain deferred: raw 100 m interval/trajectory interpretation, official aggregate snapshots beyond Start Points, structured race-term parsing, equipment-response logic and market `trend` semantics.
@@ -99,8 +111,9 @@ Updated: 2026-09-12
 - Official calendar/game/ordinary-race capture and verified normalization are deployed.
 - X-Labs remains complementary direct measurement data; missing X-Labs is neutral.
 - Current/live official acquisition and recent rolling history jobs continue alongside the persistent multi-year backfills.
-- External AI analysis exchange remains pre-race, provider-neutral and split into market-blind and market-aware stages.
-- Every saved V85/V86 system must contain exactly three one-horse spikar in three different legs; row count is the product of selections across all eight legs.
+- The source workflow proposed by PR #95 is pre-race and provider-neutral: market-blind Step 1, market-aware Step 2 in the same AI conversation, then one final combined import. Production remains on the older workflow until explicit merge/deploy authorization.
+- Spike validation in the proposed v2 workflow is game-type/system-type based: V85 `main` may use two or three one-horse spikes, with notes required for two; all other V85/V86 systems require exactly three.
+- System row count is the product of selections across all eight legs.
 - Post-race learning remains No change / Candidate learning / Confirmed learning; one race never changes model weights automatically.
 
 ## Private interface

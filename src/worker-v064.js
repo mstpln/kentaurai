@@ -5,9 +5,14 @@ import { enhanceAppHtmlV064 } from './app-v064-overlay.js';
 import { enhanceDriverStatisticsHtml } from './driver-statistics-ui.js';
 import { enhanceTrainerStatisticsHtml } from './trainer-statistics-ui.js';
 import { enhanceHorsePatternsHtml } from './horse-patterns-ui.js';
-import { buildAnalysisImportPrompt, recommendedAnalysisFilename } from './analysis-import-prompt.js';
-import { getAnalysisPromptContext } from './analysis-prompt-context.js';
-import { ANALYSIS_SUBMISSION_VERSION } from './analysis-exchange.js';
+import { buildCombinedAnalysisImportPrompt, recommendedCombinedFilename } from './analysis-import-prompt-v2.js';
+import {
+  ANALYSIS_COMBINED_VERSION,
+  createWorkflowDataExportResponse,
+  getAnalysisMethodPrompt,
+  getCombinedPromptContext
+} from './analysis-workflow-v2.js';
+import { importStrictCombinedAnalysisUpload } from './analysis-workflow-v2-strict.js';
 import { getTrackDetailV064, getTrackLaneStatsV064 } from './routes/tracks-v064.js';
 import { applyTrackContactEnrichment, listTrackContactTargets } from './track-contact-enrichment.js';
 import { syncOnePendingHorseStartPointSource } from './import/official-start-points.js';
@@ -76,24 +81,54 @@ export default {
       catch (error) { console.error(error); return json({ error: 'request_failed', message: error.message }, 400); }
     }
 
+    if (request.method === 'GET' && path === '/app/api/settings/export') {
+      const denied = await requireSession(request, env); if (denied) return denied;
+      try {
+        return await createWorkflowDataExportResponse(
+          env,
+          url.searchParams.get('provider') || 'openai',
+          url.searchParams.get('stage') || 'pre_market'
+        );
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    if (request.method === 'GET' && path === '/app/api/settings/analysis-method-prompt') {
+      const denied = await requireSession(request, env); if (denied) return denied;
+      try {
+        const step = url.searchParams.get('step');
+        return json({ step, prompt: getAnalysisMethodPrompt(step) });
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
     if (request.method === 'GET' && path === '/app/api/settings/analysis-prompt') {
       const denied = await requireSession(request, env); if (denied) return denied;
       try {
-        const provider = url.searchParams.get('provider') || 'ai';
-        const promptContext = await getAnalysisPromptContext(env, provider);
+        const provider = url.searchParams.get('provider') || 'openai';
+        const promptContext = await getCombinedPromptContext(env, provider);
         if (!promptContext) return json({ error: 'no_analyzable_round', message: 'Ingen kommande V85/V86-omgång med komplett analyscontext hittades.' }, 404);
         return json({
-          contractVersion: ANALYSIS_SUBMISSION_VERSION,
-          stage: promptContext.export_stage,
+          contractVersion: ANALYSIS_COMBINED_VERSION,
+          stage: 'combined',
           roundId: promptContext.round_id,
-          parentSubmissionId: promptContext.parent_submission_id,
-          recommendedFilename: recommendedAnalysisFilename(provider, null, promptContext.export_stage),
-          prompt: buildAnalysisImportPrompt(provider, promptContext)
+          recommendedFilename: recommendedCombinedFilename(provider),
+          prompt: buildCombinedAnalysisImportPrompt(provider, promptContext)
         });
       } catch (error) {
         console.error(error);
         return json({ error: 'request_failed', message: error.message }, 400);
       }
+    }
+
+    if (request.method === 'POST' && path === '/app/api/settings/import-analysis') {
+      const denied = await requireSession(request, env); if (denied) return denied;
+      try { return json(await importStrictCombinedAnalysisUpload(env, request), 201); }
+      catch (error) { console.error(error); return json({ error: 'request_failed', message: error.message }, 400); }
     }
 
     if (request.method === 'GET' && path === '/app/api/horses/statistics') {

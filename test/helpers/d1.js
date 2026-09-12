@@ -47,7 +47,8 @@ export function createTestEnv() {
     '../../migrations/0009_track_contact_provenance.sql',
     '../../migrations/0010_horse_start_points.sql',
     '../../migrations/0011_driver_statistics_indexes.sql',
-    '../../migrations/0012_trainer_statistics_indexes.sql'
+    '../../migrations/0012_trainer_statistics_indexes.sql',
+    '../../migrations/0013_combined_analysis_systems.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }

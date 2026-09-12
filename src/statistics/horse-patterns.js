@@ -14,6 +14,14 @@ function placeholders(values) {
   return values.map(() => '?').join(',');
 }
 
+const HORSE_PATTERN_QUERY_CHUNK_SIZE = 40;
+
+function chunks(values, size = HORSE_PATTERN_QUERY_CHUNK_SIZE) {
+  const result = [];
+  for (let index = 0; index < values.length; index += size) result.push(values.slice(index, index + size));
+  return result;
+}
+
 function paceSeconds(value) {
   if (value == null || value === '') return null;
   const text = String(value).trim();
@@ -84,8 +92,7 @@ function xlabsPattern(rows) {
   };
 }
 
-async function loadPatternRows(env, horseIds, cutoff, historicalOnly) {
-  if (!horseIds.length) return { pointsByHorse: new Map(), xlabsByHorse: new Map() };
+async function loadPatternRowsChunk(env, horseIds, cutoff, historicalOnly) {
   const slots = placeholders(horseIds);
   const historyDateCondition = historicalOnly ? 'r.race_date < ?' : 'r.race_date <= ?';
   const [{ results: pointRows }, { results: xlabsRows }] = await Promise.all([
@@ -140,11 +147,21 @@ async function loadPatternRows(env, horseIds, cutoff, historicalOnly) {
       ORDER BY horse_id, recent_rank
     `).bind(...horseIds, cutoff).all()
   ]);
+  return { pointRows: pointRows || [], xlabsRows: xlabsRows || [] };
+}
+
+async function loadPatternRows(env, horseIds, cutoff, historicalOnly) {
+  if (!horseIds.length) return { pointsByHorse: new Map(), xlabsByHorse: new Map() };
 
   const pointsByHorse = new Map(horseIds.map((id) => [id, []]));
-  for (const row of pointRows || []) pointsByHorse.get(row.horse_id)?.push(row);
   const xlabsByHorse = new Map(horseIds.map((id) => [id, []]));
-  for (const row of xlabsRows || []) xlabsByHorse.get(row.horse_id)?.push(row);
+
+  for (const horseIdChunk of chunks(horseIds)) {
+    const { pointRows, xlabsRows } = await loadPatternRowsChunk(env, horseIdChunk, cutoff, historicalOnly);
+    for (const row of pointRows) pointsByHorse.get(row.horse_id)?.push(row);
+    for (const row of xlabsRows) xlabsByHorse.get(row.horse_id)?.push(row);
+  }
+
   return { pointsByHorse, xlabsByHorse };
 }
 

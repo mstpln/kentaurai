@@ -6,7 +6,8 @@ import { DatabaseSync } from 'node:sqlite';
 const migrations = [
   '0001_core.sql','0002_reference_round.sql','0003_nullable_reference_prediction.sql','0004_official_live_observations.sql',
   '0005_historical_backfill.sql','0006_xlabs_backfill.sql','0007_official_first_prize.sql','0008_track_contact_metadata.sql',
-  '0009_track_contact_provenance.sql','0010_horse_start_points.sql','0011_driver_statistics_indexes.sql','0012_trainer_statistics_indexes.sql'
+  '0009_track_contact_provenance.sql','0010_horse_start_points.sql','0011_driver_statistics_indexes.sql','0012_trainer_statistics_indexes.sql',
+  '0013_combined_analysis_systems.sql'
 ];
 const sql = migrations.map((name) => readFileSync(new URL(`../migrations/${name}`, import.meta.url), 'utf8')).join('\n');
 
@@ -30,4 +31,13 @@ test('driver and trainer statistics migrations add only query indexes', () => {c
 
 test('reference prediction schema allows a null probability for entries without a pre-race probability', () => {const db=new DatabaseSync(':memory:');db.exec(sql);const c=db.prepare('PRAGMA table_info(ai_horse_predictions)').all().find(column=>column.name==='win_probability');assert.equal(c.notnull,0);});
 
-test('systems schema enforces exactly three spikar', () => {const db=new DatabaseSync(':memory:');db.exec(sql);db.prepare(`INSERT INTO game_rounds (id, game_type, round_date) VALUES ('round-1', 'V85', '2026-09-06')`).run();assert.throws(()=>db.prepare(`INSERT INTO systems (id, game_round_id, system_type, budget_sek, row_count, spike_count, created_at) VALUES ('s1', 'round-1', 'main', 200, 400, 2, '2026-09-06T00:00:00Z')`).run(),/CHECK constraint failed/);assert.doesNotThrow(()=>db.prepare(`INSERT INTO systems (id, game_round_id, system_type, budget_sek, row_count, spike_count, created_at) VALUES ('s2', 'round-1', 'main', 200, 400, 3, '2026-09-06T00:00:00Z')`).run());});
+test('systems schema stores combined-workflow audit fields and permits backend-validated two or three spikes', () => {
+  const db=new DatabaseSync(':memory:');db.exec(sql);
+  db.prepare(`INSERT INTO game_rounds (id, game_type, round_date) VALUES ('round-1', 'V85', '2026-09-06')`).run();
+  const columns=new Set(db.prepare('PRAGMA table_info(systems)').all().map(row=>row.name));
+  assert.ok(columns.has('metrics_json'));
+  assert.ok(columns.has('notes'));
+  assert.doesNotThrow(()=>db.prepare(`INSERT INTO systems (id, game_round_id, system_type, budget_sek, row_count, spike_count, created_at, notes) VALUES ('s1', 'round-1', 'main', 200, 400, 2, '2026-09-06T00:00:00Z', 'synthetic reason')`).run());
+  assert.doesNotThrow(()=>db.prepare(`INSERT INTO systems (id, game_round_id, system_type, budget_sek, row_count, spike_count, created_at) VALUES ('s2', 'round-1', 'main', 200, 400, 3, '2026-09-06T00:00:00Z')`).run());
+  assert.throws(()=>db.prepare(`INSERT INTO systems (id, game_round_id, system_type, budget_sek, row_count, spike_count, created_at) VALUES ('s3', 'round-1', 'main', 200, 400, 1, '2026-09-06T00:00:00Z')`).run(),/CHECK constraint failed/);
+});
