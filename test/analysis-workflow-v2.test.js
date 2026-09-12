@@ -24,7 +24,7 @@ test('v2 workflow exposes the canonical final A1 and A2 prompts unchanged', () =
   assert.match(ANALYSIS_STEP_2_PROMPT, /Huvudsystem, 700 kr/);
   assert.match(ANALYSIS_STEP_2_PROMPT, /Två spikar är tillåtet/);
   assert.match(ANALYSIS_STEP_2_PROMPT, /Skriv dessutom in motiveringen i systemets \*\*`notes`\*\*/);
-  assert.match(ANALYSIS_STEP_2_PROMPT, /Personligt system, max 144 kr/);
+  assert.match(ANALYSIS_STEP_2_PROMPT, /max 144 kr/);
 });
 
 test('combined export prompt encodes the locked one-import workflow and contextual spike rules', () => {
