@@ -74,6 +74,16 @@ export function stableWorkflowFingerprintInput(context) {
   return { ...context, market: stableMarket };
 }
 
+function roundDeadline(round) {
+  const value = round?.betStopAt || round?.scheduledStartAt || null;
+  return value && Number.isFinite(Date.parse(value)) ? value : null;
+}
+
+function roundIsOpen(round, now = Date.now()) {
+  const deadline = roundDeadline(round);
+  return deadline != null && Date.parse(deadline) > now;
+}
+
 async function nextAnalyzableRound(env) {
   const row = await env.DB.prepare(`
     SELECT gr.id, gr.game_type, gr.round_date, gr.scheduled_start_at, gr.bet_stop_at, gr.status
@@ -94,6 +104,42 @@ async function nextAnalyzableRound(env) {
     LIMIT 1
   `).first();
   return row || null;
+}
+
+export async function listAnalysisRounds(env, { pastDays = 14, futureDays = 30 } = {}) {
+  if (!env?.DB) throw new Error('DB is not configured');
+  const { results } = await env.DB.prepare(`
+    SELECT gr.id, gr.game_type, gr.round_date, gr.scheduled_start_at, gr.bet_stop_at, gr.status,
+           MIN(r.scheduled_start_at) AS first_race_start_at,
+           GROUP_CONCAT(DISTINCT t.canonical_name) AS track_names,
+           COUNT(DISTINCT gl.leg_number) AS leg_count
+    FROM game_rounds gr
+    JOIN game_legs gl ON gl.game_round_id = gr.id
+    JOIN races r ON r.id = gl.race_id
+    LEFT JOIN tracks t ON t.id = r.track_id
+    WHERE gr.game_type IN ('V85','V86')
+      AND date(gr.round_date) BETWEEN date('now', ?) AND date('now', ?)
+    GROUP BY gr.id
+    HAVING COUNT(DISTINCT gl.leg_number) = 8
+    ORDER BY gr.round_date DESC, COALESCE(gr.scheduled_start_at, MIN(r.scheduled_start_at)) DESC, gr.id DESC
+  `).bind(`-${Math.max(0, Number(pastDays) || 0)} days`, `+${Math.max(0, Number(futureDays) || 0)} days`).all();
+  const now = Date.now();
+  return (results || []).map((row) => {
+    const scheduledStartAt = row.scheduled_start_at || row.first_race_start_at || null;
+    const betStopAt = row.bet_stop_at || null;
+    const deadline = betStopAt || scheduledStartAt;
+    const phase = deadline && Number.isFinite(Date.parse(deadline)) && Date.parse(deadline) > now ? 'upcoming' : 'past';
+    return {
+      id: row.id,
+      gameType: row.game_type,
+      roundDate: row.round_date,
+      scheduledStartAt,
+      betStopAt,
+      status: row.status || null,
+      tracks: String(row.track_names || '').split(',').map((value) => value.trim()).filter(Boolean),
+      phase
+    };
+  });
 }
 
 async function loadRoundIdentity(env, roundId) {
@@ -151,7 +197,7 @@ async function loadRoundIdentity(env, roundId) {
       id: round.id,
       gameType: round.game_type,
       roundDate: round.round_date,
-      scheduledStartAt: round.scheduled_start_at || null,
+      scheduledStartAt: round.scheduled_start_at || orderedLegs[0]?.scheduledStartAt || null,
       betStopAt: round.bet_stop_at || null,
       status: round.status || null
     },
@@ -271,18 +317,20 @@ function exportFilename(provider, stage, exportedAt) {
   return `kentaurai-analysis-input_${provider}_${stage}_${stamp}.json`;
 }
 
-export async function createWorkflowDataExportResponse(env, providerValue, stageValue) {
+export async function createWorkflowDataExportResponse(env, providerValue, stageValue, roundIdValue = null) {
   if (!env.DB) throw new Error('DB is not configured');
   const provider = normalizeProvider(providerValue);
   const stage = String(stageValue || 'pre_market').trim().toLowerCase();
   if (!['pre_market', 'market'].includes(stage)) throw new Error('stage must be pre_market or market');
+  const roundId = roundIdValue == null || roundIdValue === '' ? null : requiredText(roundIdValue, 'round_id', 200);
   const exportedAt = new Date().toISOString();
   const [context, tableNames, policy] = await Promise.all([
-    workflowContext(env, null, stage === 'market'),
+    workflowContext(env, roundId, stage === 'market'),
     exportTableNames(env),
     stage === 'pre_market' ? buildGuardPolicy(env, exportedAt) : Promise.resolve(null)
   ]);
   if (!context) throw new Error('Ingen kommande V85/V86-omgång med åtta avdelningar hittades.');
+  if (!roundIsOpen(context.round)) throw new Error('Steg 1 och steg 2 kan bara exporteras före omgångens verifierade starttid. Välj en kommande omgång.');
   const metadata = {
     contract_version: ANALYSIS_INPUT_VERSION,
     exported_at: exportedAt,
@@ -352,15 +400,19 @@ export function getAnalysisMethodPrompt(step) {
   throw new Error('step must be 1 or 2');
 }
 
-export async function getCombinedPromptContext(env, providerValue) {
+export async function getCombinedPromptContext(env, providerValue, roundIdValue = null) {
   const provider = normalizeProvider(providerValue);
-  const context = await workflowContext(env, null, true);
+  const roundId = roundIdValue == null || roundIdValue === '' ? null : requiredText(roundIdValue, 'round_id', 200);
+  const context = await workflowContext(env, roundId, true);
   if (!context) return null;
+  const importTiming = roundIsOpen(context.round) ? 'pre_race' : 'post_race_recovery';
   return {
     export_stage: 'combined',
     provider,
     round_id: context.round.id,
     context_fingerprint: context.contextFingerprint,
+    import_timing: importTiming,
+    learning_eligibility: importTiming === 'post_race_recovery' ? 'manual_review_required' : 'eligible_by_timing',
     context
   };
 }
@@ -560,7 +612,10 @@ export async function importCombinedAnalysis(env, payload) {
   const model = requiredText(payload.producer?.model, 'producer.model', 200);
   const context = await workflowContext(env, roundId, true);
   if (!context) throw new Error('round was not found');
-  if (Date.parse(context.round.betStopAt || context.round.scheduledStartAt || 0) <= Date.now()) throw new Error('analysis import is pre-race only');
+  const deadlineAt = roundDeadline(context.round);
+  if (!deadlineAt) throw new Error('analysis import requires a verified betting stop or round start');
+  const importTiming = Date.parse(deadlineAt) > Date.now() ? 'pre_race' : 'post_race_recovery';
+  const learningEligibility = importTiming === 'post_race_recovery' ? 'manual_review_required' : 'eligible_by_timing';
   const providedFingerprint = requiredText(payload.context_fingerprint ?? payload.contextFingerprint, 'context_fingerprint', 80).toLowerCase();
   if (providedFingerprint !== context.contextFingerprint) throw new Error('context_fingerprint is stale; copy a fresh import prompt before creating the file');
   const legs = normalizeLegs(payload, context);
@@ -596,6 +651,8 @@ export async function importCombinedAnalysis(env, payload) {
       provider,
       model,
       analysisBlindness: existing.meta.analysisBlindness,
+      importTiming: existing.meta.importTiming || null,
+      learningEligibility: existing.meta.learningEligibility || null,
       reused: true,
       writes: { analyses: 0, predictions: 0, systems: 0, selections: 0 }
     };
@@ -605,7 +662,7 @@ export async function importCombinedAnalysis(env, payload) {
   const marketByEntry = new Map((market?.betting || []).map((row) => [row.raceEntryId, row]));
   const createdAt = new Date().toISOString();
   const dataSnapshotAt = market?.cutoff || createdAt;
-  const analysisBlindness = 'declared_unsealed';
+  const analysisBlindness = importTiming === 'post_race_recovery' ? 'declared_unsealed_post_race_import' : 'declared_unsealed';
   const metadata = {
     analysisExchange: {
       contractVersion: ANALYSIS_COMBINED_VERSION,
@@ -618,31 +675,37 @@ export async function importCombinedAnalysis(env, payload) {
       dataSnapshotAt,
       roundSummary,
       recommendations,
-      analysisBlindness
+      analysisBlindness,
+      importTiming,
+      learningEligibility
     }
   };
+  const modelNote = importTiming === 'post_race_recovery'
+    ? 'Combined KentaurAI analysis submission imported after round start; declared unsealed and excluded from automatic learning pending manual review'
+    : 'Combined KentaurAI analysis submission; step-1 blindness declared but not separately sealed';
   await env.DB.prepare(`
     INSERT INTO model_versions
       (id, created_at, feature_version, prompt_version, ai_provider, ai_model, config_json, notes)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(modelVersionId, createdAt, FEATURE_VERSION, analysisVersion, provider, model, JSON.stringify(metadata), 'Combined KentaurAI analysis submission; step-1 blindness declared but not separately sealed').run();
+  `).bind(modelVersionId, createdAt, FEATURE_VERSION, analysisVersion, provider, model, JSON.stringify(metadata), modelNote).run();
 
   let analysesWritten = 0;
   let predictionsWritten = 0;
   let systemsWritten = 0;
   let selectionsWritten = 0;
   const predictions = predictionMap(legs);
+  const methodNote = importTiming === 'post_race_recovery' ? 'combined:declared_unsealed_post_race_import' : 'combined:declared_unsealed';
   for (const leg of legs) {
     const analysisId = stableId('race-analysis', modelVersionId, leg.raceId);
     const write = await env.DB.prepare(`
       INSERT INTO ai_race_analyses
         (id, race_id, model_version_id, data_snapshot_at, market_blind, scenarios_json,
          race_shape_summary, conclusion, data_quality, created_at, analysis_origin, method_note)
-      VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 'analysis_exchange', 'combined:declared_unsealed')
+      VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 'analysis_exchange', ?)
     `).bind(
       analysisId, leg.raceId, modelVersionId, dataSnapshotAt,
       leg.scenarios == null ? null : JSON.stringify(leg.scenarios), leg.raceShapeSummary,
-      leg.conclusion, leg.dataQuality, createdAt
+      leg.conclusion, leg.dataQuality, createdAt, methodNote
     ).run();
     analysesWritten += Number(write.meta?.changes ?? 0);
     for (const prediction of leg.predictions) {
@@ -676,7 +739,7 @@ export async function importCombinedAnalysis(env, payload) {
     `).bind(
       systemId, roundId, modelVersionId, system.systemType, system.budgetSek, system.rowCount,
       system.linePriceSek, system.spikeCount, hitProbability, system.riskProfile, createdAt,
-      JSON.stringify({ calculation: FEATURE_VERSION, rowCountDerived: true, spikeCountDerived: true, analysisBlindness }),
+      JSON.stringify({ calculation: FEATURE_VERSION, rowCountDerived: true, spikeCountDerived: true, analysisBlindness, importTiming, learningEligibility }),
       system.notes
     ).run();
     systemsWritten += Number(sWrite.meta?.changes ?? 0);
@@ -704,6 +767,8 @@ export async function importCombinedAnalysis(env, payload) {
     provider,
     model,
     analysisBlindness,
+    importTiming,
+    learningEligibility,
     reused: false,
     writes: { analyses: analysesWritten, predictions: predictionsWritten, systems: systemsWritten, selections: selectionsWritten }
   };
