@@ -558,7 +558,7 @@ function normalizeSystems(payload, context) {
       linePriceSek,
       rowCount,
       spikeCount,
-      riskProfile: optionalText(value.risk_profile ?? value.riskProfile, `systems[${index}].risk_profile`, 100),
+      riskProfile: optionalText(value.risk_profile ?? value.riskProfile, `systems[${index}].risk_profile`, 2000),
       notes,
       selections
     };
