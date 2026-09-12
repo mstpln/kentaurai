@@ -21,8 +21,9 @@ test('v2 workflow exposes canonical A1 and A2 prompts without rewriting them', (
   assert.equal(getAnalysisMethodPrompt(1), ANALYSIS_STEP_1_PROMPT);
   assert.equal(getAnalysisMethodPrompt(2), ANALYSIS_STEP_2_PROMPT);
   assert.match(ANALYSIS_STEP_1_PROMPT, /Importfilen till KentaurAI skapas först när både analysen och systemet är färdiga — inte nu\./);
-  assert.match(ANALYSIS_STEP_2_PROMPT, /### Huvudsystemsprincipen — balans/);
-  assert.match(ANALYSIS_STEP_2_PROMPT, /Skriv dessutom in motiveringen i systemets \*\*`notes`\*\*/);
+  assert.match(ANALYSIS_STEP_2_PROMPT, /EXAKT TRE SPIKAR/);
+  assert.match(ANALYSIS_STEP_2_PROMPT, /varje system har exakt tre singleton-spikar/i);
+  assert.doesNotMatch(ANALYSIS_STEP_2_PROMPT, /två spikar är tillåtet/i);
 });
 
 test('combined export prompt encodes the locked one-import workflow', () => {
@@ -32,8 +33,9 @@ test('combined export prompt encodes the locked one-import workflow', () => {
   assert.match(prompt, /stage måste vara exakt "combined"/);
   assert.match(prompt, /parent_submission_id får INTE finnas/);
   assert.match(prompt, /analysis_blindness får INTE finnas/);
-  assert.match(prompt, /V85 \+ system_type "main": 2 eller 3 spikar tillåtet/);
-  assert.match(prompt, /Om V85 main har 2 spikar måste systemets notes innehålla/);
+  assert.match(prompt, /exakt 3 singleton-spikar i varje V85\/V86-system/);
+  assert.match(prompt, /INTE strategiskt kontrollera, ändra eller reparera spikantalet/);
+  assert.doesNotMatch(prompt, /2 eller 3 spikar/);
   assert.match(prompt, /steg 1 oförändrat/i);
   assert.match(prompt, /normalisera de kvarvarande steg-1-sannolikheterna proportionellt/);
   assert.match(prompt, /komprimera raw_rank till obruten 1\.\.N/);
