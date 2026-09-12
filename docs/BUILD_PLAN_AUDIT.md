@@ -266,7 +266,7 @@ The repository includes unit/integration/runtime tests for:
 - Build F market-blind patterns and same-day leakage protection;
 - public repository privacy safeguards.
 
-This completion branch adds a test for the public field-dictionary contract. Full QA must be green on its exact final head before the PR is made ready.
+This completion branch adds a test for the public field-dictionary contract. CI and exact-head review are release-gate evidence and are tracked on the pull request for the final immutable branch head rather than hard-coded into this source document.
 
 ## 12. Production/release status
 
@@ -280,12 +280,14 @@ Source completion and production release are deliberately separate.
 
 ## 13. Completion fixes in this branch
 
-- [x] add canonical public `docs/DATA_DICTIONARY.md`;
-- [x] add automated dictionary schema/status/privacy contract test;
-- [ ] update BUILD_STATE from “active PR #88” to actual merged source state;
-- [ ] record Build F inventory/dictionary decisions in DECISIONS;
-- [ ] run full CI on exact branch head;
-- [ ] exact-head review including public/private scan and PR threads;
-- [ ] make PR ready for the user's explicit merge decision.
+Source-level completion work in this follow-up is complete:
+
+- canonical public `docs/DATA_DICTIONARY.md` added and reconciled against the actual live/historical mapper field names and targets;
+- automated dictionary schema/status/privacy contract test added;
+- BUILD_STATE corrected from the stale “Build F active PR” state to the actual merged source state;
+- DECISIONS updated with the Build F inventory, promotion, leakage and natural-Swedish presentation rules;
+- this audit document added to make the A-F completion boundary explicit.
+
+Final CI, exact-head review and pull-request readiness are performed after the last source commit and are intentionally represented by GitHub PR/check metadata rather than mutable checkboxes in this file.
 
 No production deployment, migration or backfill mutation belongs to this source-completion PR.
