@@ -30,8 +30,12 @@ jobs:
         run: |
           set -euo pipefail
           grep -Fxq 'release=kentaurai-v0.6.0' .github/production-release-v060.trigger
-          grep -Fxq 'source_main=f478369a73adbdfcd4383ab73df69da8fe719fdf' .github/production-release-v060.trigger
-          git merge-base --is-ancestor f478369a73adbdfcd4383ab73df69da8fe719fdf HEAD
+          source_main="$(sed -n 's/^source_main=//p' .github/production-release-v060.trigger)"
+          test -n "$source_main" || { echo 'source_main is missing from release marker'; exit 1; }
+          test "$(printf '%s' "$source_main" | tr -cd '0-9a-f' | wc -c)" -eq 40 || { echo 'source_main must be a full 40-character lowercase commit SHA'; exit 1; }
+          test "$(printf '%s' "$source_main" | wc -c)" -eq 40 || { echo 'source_main must be a full 40-character lowercase commit SHA'; exit 1; }
+          git cat-file -e "$source_main^{commit}"
+          git merge-base --is-ancestor "$source_main" HEAD
 
       - name: Use Node.js 22
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
