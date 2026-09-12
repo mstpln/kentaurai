@@ -14,6 +14,13 @@ const allowedStatuses = new Set([
   'build_candidate'
 ]);
 
+const noCurrentConsumerStatuses = new Set([
+  'raw_only',
+  'unclear',
+  'ignore',
+  'build_candidate'
+]);
+
 function dictionaryRows() {
   return dictionary
     .split('\n')
@@ -31,8 +38,15 @@ test('public data dictionary exposes the build-plan field inventory contract', (
   }
   for (const row of rows) {
     assert.equal(row.length, 10, `dictionary row must have 10 columns: ${row.join(' | ')}`);
+    assert.ok(row[0] && row[1] && row[2] && row[3], `dictionary identity/type fields are required: ${row.join(' | ')}`);
+    assert.ok(['yes', 'no'].includes(row[4]), `nullable must be yes or no for ${row[0]} ${row[1]}`);
+    assert.ok(row[5], `normalized target is required for ${row[0]} ${row[1]}`);
     assert.ok(allowedStatuses.has(row[6]), `unsupported dictionary status ${row[6]}`);
+    assert.ok(row[7], `consumer is required for ${row[0]} ${row[1]}`);
     assert.ok(row[8], `provenance rule is required for ${row[0]} ${row[1]}`);
+    if (noCurrentConsumerStatuses.has(row[6])) {
+      assert.equal(row[7], 'none', `${row[6]} rows cannot claim a current consumer: ${row[0]} ${row[1]}`);
+    }
   }
 });
 
