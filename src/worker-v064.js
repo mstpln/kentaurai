@@ -10,9 +10,9 @@ import {
   ANALYSIS_COMBINED_VERSION,
   createWorkflowDataExportResponse,
   getAnalysisMethodPrompt,
-  getCombinedPromptContext,
-  importCombinedAnalysisUpload
+  getCombinedPromptContext
 } from './analysis-workflow-v2.js';
+import { importStrictCombinedAnalysisUpload } from './analysis-workflow-v2-strict.js';
 import { getTrackDetailV064, getTrackLaneStatsV064 } from './routes/tracks-v064.js';
 import { applyTrackContactEnrichment, listTrackContactTargets } from './track-contact-enrichment.js';
 import { syncOnePendingHorseStartPointSource } from './import/official-start-points.js';
@@ -127,7 +127,7 @@ export default {
 
     if (request.method === 'POST' && path === '/app/api/settings/import-analysis') {
       const denied = await requireSession(request, env); if (denied) return denied;
-      try { return json(await importCombinedAnalysisUpload(env, request), 201); }
+      try { return json(await importStrictCombinedAnalysisUpload(env, request), 201); }
       catch (error) { console.error(error); return json({ error: 'request_failed', message: error.message }, 400); }
     }
 
