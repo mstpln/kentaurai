@@ -18,19 +18,17 @@ jobs:
         with:
           node-version: 22
 
-      - name: Analysis tests
-        run: node --test test/analysis*.test.js
+      - name: Tests a-g
+        run: node --test test/[a-g]*.test.js
 
-      - name: Non-analysis tests
-        run: |
-          set -e
-          for f in test/*.test.js; do
-            case "$f" in
-              test/analysis*.test.js) continue ;;
-            esac
-            echo "Running $f"
-            node --test "$f"
-          done
+      - name: Tests h-m
+        run: node --test test/[h-m]*.test.js
+
+      - name: Tests n-s
+        run: node --test test/[n-s]*.test.js
+
+      - name: Tests t-z
+        run: node --test test/[t-z]*.test.js
 
       - name: Syntax - index
         run: node --check src/index.js
