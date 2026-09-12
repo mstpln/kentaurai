@@ -47,6 +47,7 @@ localStartMethod=function(value){
 
 const entityStatState=new Map();
 let statRequestToken=0;
+const STAT_READ_TIMEOUT_MS=8000;
 function entityStatKey(){return state.detail?state.detail.page+':'+state.detail.id:null}
 function filtersForCurrentEntity(){
   const key=entityStatKey();
@@ -87,6 +88,11 @@ function bindFilterButtons(){
   document.querySelectorAll('[data-distance-method]').forEach(button=>button.onclick=()=>{filters.distanceMethod=button.dataset.distanceMethod;renderStatFilters()});
   document.querySelectorAll('[data-track-method]').forEach(button=>button.onclick=()=>{filters.trackMethod=button.dataset.trackMethod;renderStatFilters()});
 }
+function readWithTimeout(promise){
+  let timeoutId;
+  const timeout=new Promise((_,reject)=>{timeoutId=setTimeout(()=>reject(new Error('Statistiken tog för lång tid att läsa. Försök igen.')),STAT_READ_TIMEOUT_MS)});
+  return Promise.race([promise,timeout]).finally(()=>clearTimeout(timeoutId));
+}
 async function renderStatFilters(){
   if(state.tab!=='stats'||!state.detail)return;
   const key=entityStatKey();
@@ -100,7 +106,7 @@ async function renderStatFilters(){
   const token=++statRequestToken;
   try{
     const query=new URLSearchParams({year:filters.year,race_scope:filters.raceScope,distance_start_method:filters.distanceMethod,track_start_method:filters.trackMethod});
-    const data=await api('/entities/'+encodeURIComponent(state.detail.page)+'/'+encodeURIComponent(state.detail.id)+'/stat-breakdowns?'+query.toString());
+    const data=await readWithTimeout(api('/entities/'+encodeURIComponent(state.detail.page)+'/'+encodeURIComponent(state.detail.id)+'/stat-breakdowns?'+query.toString()));
     if(token!==statRequestToken||key!==entityStatKey()||state.tab!=='stats')return;
     const summary=document.getElementById('entityStatSummary');
     if(summary)summary.innerHTML=summaryStatsFrom(data.summary||{});
@@ -108,7 +114,7 @@ async function renderStatFilters(){
     target.innerHTML=statTable('Startmetod','method',data.startMethods||[],'all')+statTable('Distans','distance',groupedDistances,filters.distanceMethod)+statTable('Bana','track',data.tracks||[],filters.trackMethod);
     bindFilterButtons();
   }catch(err){
-    if(token!==statRequestToken||key!==entityStatKey())return;
+    if(token!==statRequestToken||key!==entityStatKey()||state.tab!=='stats')return;
     target.innerHTML='<div class="notice">Kunde inte läsa filtrerad statistik: '+esc(err.message)+'</div>';
     bindFilterButtons();
   }
@@ -116,7 +122,7 @@ async function renderStatFilters(){
 const priorRenderDetail=renderDetail;
 renderDetail=async function(){
   await priorRenderDetail();
-  if(state.tab==='stats'&&state.detail){bindFilterButtons();await renderStatFilters()}
+  if(state.tab==='stats'&&state.detail){bindFilterButtons();void renderStatFilters()}
 };
 })();
 </script>`;
