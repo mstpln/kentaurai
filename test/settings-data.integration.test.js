@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import worker from '../src/worker-settings.js';
+import worker from '../src/worker-v064.js';
 import { createAppSessionCookie } from '../src/app-auth.js';
 import { createTestEnv } from './helpers/d1.js';
 
@@ -37,45 +37,11 @@ function seedFutureRound(db) {
   }
 }
 
-function preMarketSubmission(context) {
-  return {
-    contract_version: 'kentaurai-analysis-v1',
-    submission_id: 'openai-settings-pre-1',
-    round_id: ROUND_ID,
-    stage: 'pre_market',
-    context_fingerprint: context.contextFingerprint,
-    producer: { provider: 'openai', model: 'synthetic-model' },
-    analysis_version: 'synthetic-v1',
-    round_summary: 'Synthetic pre-market analysis.',
-    legs: Array.from({ length: 8 }, (_, index) => {
-      const leg = index + 1;
-      return {
-        leg_number: leg,
-        race_id: `settings_race_${leg}`,
-        scenarios: { expected: 'synthetic' },
-        race_shape_summary: 'Synthetic race shape.',
-        conclusion: 'Synthetic conclusion.',
-        data_quality: 'sufficient',
-        predictions: [{
-          race_entry_id: `settings_entry_${leg}`,
-          win_probability: 1,
-          uncertainty_low: 1,
-          uncertainty_high: 1,
-          raw_rank: 1,
-          abcd_group: 'A',
-          scenario_robustness: 1,
-          reasoning: { summary: 'Synthetic only runner.' }
-        }]
-      };
-    })
-  };
-}
-
 async function sessionCookie(env) {
   return (await createAppSessionCookie(env)).split(';')[0];
 }
 
-test('settings routes are private and settings UI includes the shared gear and Swedish tabs', async () => {
+test('settings routes are private and settings UI includes the three-step AI workflow', async () => {
   const { env } = createTestEnv();
   env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
 
@@ -92,8 +58,9 @@ test('settings routes are private and settings UI includes the shared gear and S
   const html = await response.text();
   assert.match(html, /id="settingsButton"/);
   assert.match(html, /Inställningar/);
-  assert.match(html, /Exportera all data/);
-  assert.match(html, /Importera AI-analys/);
+  assert.match(html, /Analysera omgången utan marknad/);
+  assert.match(html, /Värdera marknaden och bygg system/);
+  assert.match(html, /Skapa importfil till KentaurAI/);
   assert.match(html, /Datamängd/);
   assert.match(html, /Senaste körningar/);
   assert.match(html, /Datakällor/);
@@ -125,51 +92,34 @@ test('settings status reports useful data counts, workflow output and source hea
   assert.equal(data.sources.find((source) => source.id === 'official').status, 'working');
 });
 
-test('full export contains accumulated data but guards current market until that provider stores pre-market analysis', async () => {
+test('workflow exports keep step 1 market-blind and expose market only in step 2', async () => {
   const { env, db } = createTestEnv();
   env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
   seedFutureRound(db);
   const cookie = await sessionCookie(env);
 
-  let response = await worker.fetch(new Request('https://example.test/app/api/settings/export?provider=openai', { headers: { cookie } }), env);
+  let response = await worker.fetch(new Request('https://example.test/app/api/settings/export?provider=openai&stage=pre_market', { headers: { cookie } }), env);
   assert.equal(response.status, 200);
-  assert.match(response.headers.get('content-disposition'), /kentaurai-full-export_openai_/);
+  assert.match(response.headers.get('content-disposition'), /kentaurai-analysis-input_openai_pre_market_/);
   let exported = await response.json();
-  assert.equal(exported.metadata.contract_version, 'kentaurai-full-export-v1');
+  assert.equal(exported.metadata.contract_version, 'kentaurai-analysis-input-v2');
+  assert.equal(exported.metadata.workflow_stage, 'pre_market');
   assert.equal(exported.metadata.target_provider, 'openai');
+  assert.equal(exported.metadata.round_id, ROUND_ID);
   assert.equal(exported.tables.horses.length, 8);
   assert.equal(exported.tables.betting_snapshots.length, 0);
-  assert.deepEqual(exported.metadata.market_blind_rule.guarded_open_round_ids, [ROUND_ID]);
-  assert.equal(exported.analysis_contexts.length, 1);
-  assert.equal(exported.analysis_contexts[0].market.length, 0);
-  assert.equal(JSON.stringify(exported.analysis_contexts[0].preMarket).includes('betPercent'), false);
+  assert.equal(exported.metadata.analysis_context.market, null);
+  assert.equal(JSON.stringify(exported.metadata.analysis_context).includes('betPercent'), false);
 
-  const payload = preMarketSubmission(exported.analysis_contexts[0].preMarket);
-  const form = new FormData();
-  form.append('analysis_file', new Blob([JSON.stringify(payload)], { type: 'application/json' }), 'kentaurai-analysis_openai_2099-06-01.json');
-  response = await worker.fetch(new Request('https://example.test/app/api/settings/import-analysis', {
-    method: 'POST',
-    headers: { cookie },
-    body: form
-  }), env);
-  assert.equal(response.status, 201);
-  const imported = await response.json();
-  assert.equal(imported.ok, true);
-  assert.equal(imported.stage, 'pre_market');
-  assert.equal(imported.provider, 'openai');
-  assert.equal(imported.writes.analyses, 8);
-  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM ai_race_analyses WHERE market_blind = 1`).get().n, 8);
-  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM model_versions WHERE feature_version = 'analysis-exchange-v1' AND ai_provider = 'openai'`).get().n, 1);
-
-  response = await worker.fetch(new Request('https://example.test/app/api/settings/export?provider=openai', { headers: { cookie } }), env);
+  response = await worker.fetch(new Request('https://example.test/app/api/settings/export?provider=openai&stage=market', { headers: { cookie } }), env);
   assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-disposition'), /kentaurai-analysis-input_openai_market_/);
   exported = await response.json();
-  assert.deepEqual(exported.metadata.market_blind_rule.guarded_open_round_ids, []);
+  assert.equal(exported.metadata.contract_version, 'kentaurai-analysis-input-v2');
+  assert.equal(exported.metadata.workflow_stage, 'market');
   assert.equal(exported.tables.betting_snapshots.length, 8);
-  assert.equal(exported.analysis_contexts[0].market.length, 1);
-  assert.equal(exported.analysis_contexts[0].market[0].parentSubmissionId, 'openai-settings-pre-1');
-  assert.equal(exported.analysis_contexts[0].market[0].context.market.betting.length, 8);
-  assert.equal(exported.analysis_contexts[0].market[0].context.market.definitionVersion, 'verified-market-at-stop-v1');
+  assert.equal(exported.metadata.analysis_context.market.betting.length, 8);
+  assert.equal(exported.metadata.analysis_context.market.definitionVersion, 'verified-market-at-stop-v1');
 });
 
 test('analysis upload rejects non-JSON files and logout clears the private session', async () => {
