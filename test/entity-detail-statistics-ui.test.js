@@ -2,10 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 
-import { enhanceEntityDetailStatisticsHtmlV2 } from '../src/entity-detail-statistics-ui-v2.js';
+import { enhanceEntityDetailStatisticsHtml } from '../src/entity-detail-statistics-ui.js';
 
 function enhanced() {
-  return enhanceEntityDetailStatisticsHtmlV2('<html><head></head><body></body></html>');
+  return enhanceEntityDetailStatisticsHtml('<html><head></head><body></body></html>');
 }
 
 function scriptFrom(html) {
@@ -47,6 +47,13 @@ test('detail filters preserve canonical choices and reset is rendered last', () 
   assert.match(script, /k!=='year'/);
 });
 
+test('filter controls are placed directly below the scorecard before detail tables', () => {
+  const script = scriptFrom(enhanced());
+  assert.match(script, /const scoreNode=host\.querySelector\('\.entity-detail-score'\)/);
+  assert.match(script, /const controlsNode=host\.querySelector\('\.entity-detail-controls'\)/);
+  assert.match(script, /scoreNode\.after\(controlsNode\)/);
+});
+
 test('detail layout explicitly supports narrow mobile widths and scrollable tables', () => {
   const html = enhanced();
   assert.match(html, /@media\(max-width:430px\)/);
@@ -69,9 +76,8 @@ test('horse-specific verified start-point and pattern sections are preserved whi
   assert.match(script, /s\.horseExtra/);
 });
 
-test('shared scorecard removes repeated summary blocks and keeps entity-specific specialized sections', () => {
-  const html = enhanced();
-  const script = scriptFrom(html);
+test('shared scorecard keeps entity-specific specialized sections', () => {
+  const script = scriptFrom(enhanced());
   assert.match(script, /Scorecard/);
   assert.match(script, /Segerprocent/);
   assert.match(script, /Form '\+c\.form/);
