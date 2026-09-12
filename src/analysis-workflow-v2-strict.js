@@ -1,6 +1,9 @@
 import { importCombinedAnalysis, readCombinedAnalysisUpload } from './analysis-workflow-v2.js';
 
-export function validateCombinedSystemSpikeContract(payload) {
+// Keep this boundary intentionally context-free. Game-type-specific spike-count
+// validation belongs in analysis-workflow-v2.js where the authoritative round
+// context is loaded from KentaurAI rather than trusted from client JSON.
+export function validateCombinedSystemShape(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('analysis submission must be an object');
   }
@@ -12,23 +15,12 @@ export function validateCombinedSystemSpikeContract(payload) {
     if (!system || typeof system !== 'object' || Array.isArray(system) || !Array.isArray(system.selections)) {
       throw new Error(`systems[${systemIndex}].selections must be an array`);
     }
-    const counts = new Map();
-    for (const selection of system.selections) {
-      const legNumber = Number(selection?.leg_number ?? selection?.legNumber);
-      if (Number.isInteger(legNumber) && legNumber >= 1 && legNumber <= 8) {
-        counts.set(legNumber, (counts.get(legNumber) || 0) + 1);
-      }
-    }
-    const singletonSpikes = [...counts.values()].filter((count) => count === 1).length;
-    if (singletonSpikes !== 3) {
-      throw new Error('every V85/V86 system must contain exactly three spike legs');
-    }
   }
   return payload;
 }
 
 export async function importStrictCombinedAnalysis(env, payload) {
-  validateCombinedSystemSpikeContract(payload);
+  validateCombinedSystemShape(payload);
   return importCombinedAnalysis(env, payload);
 }
 
