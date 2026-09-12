@@ -18,17 +18,17 @@ jobs:
         with:
           node-version: 22
 
-      - name: Changed test - analysis workflow
-        run: node --test test/analysis-workflow-v2.test.js
+      - name: Full test suite
+        run: npm test
 
-      - name: Changed test - strict boundary
-        run: node --test test/analysis-workflow-v2-strict.test.js
+      - name: Syntax - index
+        run: node --check src/index.js
 
-      - name: Changed test - horse patterns
-        run: node --test test/horse-patterns-batch.test.js
+      - name: Syntax - worker settings
+        run: node --check src/worker-settings.js
 
-      - name: Changed test - v064
-        run: node --test test/v064.test.js
+      - name: Syntax - settings data
+        run: node --check src/settings-data.js
 
-      - name: Run QA
-        run: npm run qa
+      - name: Syntax - app page settings
+        run: node --check src/app-page-settings.js
