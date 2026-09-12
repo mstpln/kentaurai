@@ -12,7 +12,7 @@ test('mobile layout polish adds viewport, CSS and script exactly once', () => {
   const twice = enhanceMobileLayoutPolish(once);
 
   assert.match(once, /<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">/);
-  assert.equal((twice.match(/kentaurai-mobile-layout-polish-v100/g) || []).length, 2);
+  assert.equal((twice.match(/kentaurai-mobile-layout-polish-v101/g) || []).length, 2);
   assert.equal((twice.match(/name="viewport"/g) || []).length, 1);
   assert.equal(twice, once);
 });
@@ -48,6 +48,16 @@ test('mobile polish covers settings controls and narrow Trend filters', () => {
   assert.match(html, /\.settings-actions\{display:grid!important;grid-template-columns:1fr!important/);
 });
 
+test('Trend filter alignment is event driven and does not observe its own DOM mutations', () => {
+  const html = enhanceMobileLayoutPolish('<html><head></head><body><div id="app"></div></body></html>');
+  assert.doesNotMatch(html, /new MutationObserver/);
+  assert.match(html, /function queueAlign\(\)/);
+  assert.match(html, /requestAnimationFrame\(\(\)=>\{/);
+  assert.match(html, /document\.addEventListener\('click'/);
+  assert.match(html, /document\.addEventListener\('change'/);
+  assert.match(html, /if\(badge\.textContent!==String\(count\)\)badge\.textContent=String\(count\)/);
+});
+
 test('embedded mobile browser script is syntactically valid', () => {
   const html = enhanceMobileLayoutPolish('<html><head></head><body><div id="app"></div></body></html>');
   const scripts = [...html.matchAll(/<script(?: [^>]*)?>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
@@ -68,7 +78,7 @@ test('actual Wrangler worker serves the mobile polish layer after authenticated 
   const response = await worker.fetch(new Request('https://example.test/app/', { headers: { cookie } }), env);
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.equal((html.match(/id="kentaurai-mobile-layout-polish-v100"/g) || []).length, 1);
-  assert.equal((html.match(/id="kentaurai-mobile-layout-polish-v100-script"/g) || []).length, 1);
+  assert.equal((html.match(/id="kentaurai-mobile-layout-polish-v101"/g) || []).length, 1);
+  assert.equal((html.match(/id="kentaurai-mobile-layout-polish-v101-script"/g) || []).length, 1);
   assert.equal((html.match(/name="viewport"/g) || []).length, 1);
 });
