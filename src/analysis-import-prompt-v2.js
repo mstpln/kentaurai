@@ -202,12 +202,9 @@ is_spike är helt mekaniskt:
 - exakt en vald häst i avdelningen -> true
 - två eller fler valda hästar -> false
 
-Du får INTE strategiskt ändra spikantalet i exportsteget.
+Du får INTE strategiskt kontrollera, ändra eller reparera spikantalet i exportsteget. Systemkonstruktionen är redan beslutad i steg 2. Om den befintliga systemkonstruktionen inte kan serialiseras giltigt ska du stoppa exporten, inte bygga om den.
 
-Spikregeln som det redan beslutade systemet ska uppfylla:
-- V85 + system_type "main": 2 eller 3 spikar tillåtet.
-- Alla andra system: exakt 3 spikar.
-- Om V85 main har 2 spikar måste systemets notes innehålla den uttryckliga motivering som gavs i steg 2. Om den saknas: stoppa exporten i stället för att hitta på en motivering.
+KentaurAI:s systemkontrakt kräver exakt 3 singleton-spikar i varje V85/V86-system. Detta är en valideringsregel för den redan beslutade systemkonstruktionen, inte en instruktion att optimera om systemet här.
 
 Alla åtta avdelningar måste ha minst ett val. Ingen häst som är scratched i KentaurAI-underlaget får finnas i systems.
 
@@ -241,14 +238,12 @@ Innan filen skapas, kontrollera ALLT:
 21. ingen struken häst finns i systems.
 22. singleton-leg är is_spike=true.
 23. multi-leg är is_spike=false.
-24. V85 main har 2 eller 3 spikar.
-25. V85 main med 2 spikar har uttrycklig notes-motivering.
-26. alla andra system har exakt 3 spikar.
-27. alla system täcker åtta avdelningar.
-28. budget och radpris är numeriska.
-29. radantal × radpris = budget.
-30. inga klientskapade market_percent/value_ratio/own_probability finns.
-31. filen är ren giltig JSON.
+24. varje V85/V86-system har exakt 3 singleton-spikar.
+25. alla system täcker åtta avdelningar.
+26. budget och radpris är numeriska.
+27. radantal × radpris = budget.
+28. inga klientskapade market_percent/value_ratio/own_probability finns.
+29. filen är ren giltig JSON.
 
 Skapa nu importfilen endast om samtliga obligatoriska kontroller passerar.` + contextBlock(promptContext);
 }
