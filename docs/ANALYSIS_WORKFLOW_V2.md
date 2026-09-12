@@ -8,6 +8,6 @@ KentaurAI uses one AI conversation per V85/V86 round and three user-facing steps
 
 There is no required intermediate AI submission between steps 1 and 2. The server stamps analysis-blindness provenance; the AI must not supply that field.
 
-Every V85/V86 system must contain exactly three singleton spike legs. `is_spike` is descriptive in the export: a singleton leg is `true`, while every selection in a multi-horse leg is `false`. The export step never changes the already-decided system to satisfy this rule; backend validation rejects an invalid system instead.
+`is_spike` is descriptive in the export: a singleton leg is `true`, while every selection in a multi-horse leg is `false`. Spike-count validation uses the authoritative round game type plus `system_type`, never budget. V85 `main` may contain two or three singleton spike legs; a two-spike V85 main requires a non-empty `notes` explanation. Every other V85/V86 system requires exactly three singleton spike legs. The export step never rebuilds an already-decided system to satisfy these rules; backend validation accepts or rejects it.
 
 The combined import contains the locked step-1 `legs` plus the final step-2 `systems`. Market-aware information belongs in `recommendations`/system fields, never in the step-1 leg text.
