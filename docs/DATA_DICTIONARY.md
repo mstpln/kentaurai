@@ -70,8 +70,8 @@ Only these statuses are allowed:
 | official_game | races[].starts[].horse.nationality | horse nationality | text | yes | horses.country_code | stored_unused | profile | source record | Metadata only at current version. |
 | official_game | races[].starts[].horse.age | age at capture | integer | yes | normalized_observations | build_candidate | future age-at-as-of context | source record + fetched time | Never converted into guessed birth year. |
 | official_game | races[].starts[].horse.sire | sire identity/name family | object/text | yes | horse pedigree name fields | stored_unused | profile | source record | Stable pedigree IDs are a later candidate. |
-| official_game | races[].starts[].horse.dam | dam identity/name family | object/text | yes | horse pedigree name fields | stored_unused | profile | No loose name-based pedigree relation. |
-| official_game | races[].starts[].horse.damsire | damsire identity/name family | object/text | yes | horse pedigree name fields | stored_unused | profile | Metadata at current version. |
+| official_game | races[].starts[].horse.dam | dam identity/name family | object/text | yes | horse pedigree name fields | stored_unused | profile | source record | No loose name-based pedigree relation. |
+| official_game | races[].starts[].horse.damsire | damsire identity/name family | object/text | yes | horse pedigree name fields | stored_unused | profile | source record | Metadata at current version. |
 | official_game | races[].starts[].horse.breeder | breeder | text/object | yes | horses.breeder_name | stored_unused | profile | Not a model factor now. |
 | official_game | races[].starts[].horse.owner | owner | text/object | yes | horses.owner_name | stored_unused | profile | Not a model factor now. |
 | official_game | races[].starts[].horse.trainer | current trainer | object | yes | race_entries.trainer_id / trainers | used | stats / analysis | source record + exact identity | Race-entry relation is authoritative for that start. |
