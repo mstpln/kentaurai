@@ -40,6 +40,25 @@ function seedClassifiedTrack(db) {
   }
 }
 
+function seedAnalysisPromptRound(db) {
+  db.prepare("INSERT INTO tracks (id, canonical_name, country_code) VALUES ('prompt-track','Promptbanan','SE')").run();
+  db.prepare(`INSERT INTO game_rounds (
+    id, game_type, round_date, scheduled_start_at, bet_stop_at, status
+  ) VALUES ('prompt-round','V85','2099-09-12','2099-09-12T15:00:00Z','2099-09-12T14:55:00Z','upcoming')`).run();
+  for (let leg = 1; leg <= 8; leg += 1) {
+    const raceId = `prompt-race-${leg}`;
+    const horseId = `prompt-horse-${leg}`;
+    const entryId = `prompt-entry-${leg}`;
+    db.prepare(`INSERT INTO races (
+      id, track_id, race_date, race_number, scheduled_start_at, distance_m, start_method, status
+    ) VALUES (?, 'prompt-track', '2099-09-12', ?, '2099-09-12T15:00:00Z', 2140, 'auto', 'upcoming')`).run(raceId, leg);
+    db.prepare('INSERT INTO game_legs (game_round_id, leg_number, race_id) VALUES (?, ?, ?)').run('prompt-round', leg, raceId);
+    db.prepare('INSERT INTO horses (id, canonical_name) VALUES (?, ?)').run(horseId, `Prompthäst ${leg}`);
+    db.prepare(`INSERT INTO race_entries (id, race_id, horse_id, start_number, scratched)
+      VALUES (?, ?, ?, 1, 0)`).run(entryId, raceId, horseId);
+  }
+}
+
 test('race classification separates Loppklass, STL-klass and Lopptyp', () => {
   const race = classifyRace({ mainClass: 'Silverdivisionen', classFlags: ['Stolopp', 'Spårtrappa', 'Gr I'] });
   assert.equal(race.raceClass, 'Silverdivisionen');
@@ -187,22 +206,36 @@ test('private track contact operations require admin auth', async () => {
   assert.equal((await response.json()).total, 1);
 });
 
-test('analysis import prompt mirrors strict pre-market and final API rules', () => {
-  const prompt = buildAnalysisImportPrompt('anthropic');
+test('analysis import prompt mirrors the aligned export-only contract', () => {
+  const prompt = buildAnalysisImportPrompt('anthropic', {
+    export_stage: 'pre_market',
+    provider: 'anthropic',
+    round_id: 'synthetic-round',
+    parent_submission_id: null,
+    context_fingerprint: `sha256:${'a'.repeat(64)}`,
+    context: { stage: 'pre_market', contextFingerprint: `sha256:${'a'.repeat(64)}`, legs: [] }
+  });
   assert.match(prompt, /kentaurai-analysis-v1/);
-  assert.match(prompt, /EXAKT 3 spikavdelningar/);
+  assert.match(prompt, /KENTAURAI-UNDERLAG/);
+  assert.match(prompt, /synthetic-round/);
+  assert.match(prompt, /is_spike är rent beskrivande/);
+  assert.match(prompt, /INTE kontrollera om systemet borde ha fler eller färre spikar/);
+  assert.doesNotMatch(prompt, /EXAKT 3 spikavdelningar/);
+  assert.match(prompt, /UTTRYCKLIGEN angiven rankingsekvens/);
+  assert.match(prompt, /Deterministisk komplettering/);
+  assert.match(prompt, /pre_market-fritext/);
   assert.match(prompt, /context_fingerprint/);
   assert.match(prompt, /parent_submission_id/);
   assert.match(prompt, /market_percent/);
   assert.match(prompt, /value_ratio/);
   assert.match(prompt, /own_probability/);
-  assert.match(prompt, /Returnera endast giltig JSON/);
   assert.equal(recommendedAnalysisFilename('claude'), 'kentaurai-analysis_anthropic_ACTUAL-MODEL_STAGE_ÅÅÅÅ-MM-DD.json');
 });
 
-test('analysis-prompt app endpoint requires session and returns the copyable contract prompt', async () => {
-  const { env } = createTestEnv();
+test('analysis-prompt app endpoint requires session and copies a complete live pre-market context', async () => {
+  const { env, db } = createTestEnv();
   env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
+  seedAnalysisPromptRound(db);
   let response = await worker.fetch(new Request('https://example.test/app/api/settings/analysis-prompt?provider=openai'), env);
   assert.equal(response.status, 401);
   const cookie = (await createAppSessionCookie(env)).split(';')[0];
@@ -210,8 +243,20 @@ test('analysis-prompt app endpoint requires session and returns the copyable con
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.equal(payload.contractVersion, 'kentaurai-analysis-v1');
-  assert.equal(payload.recommendedFilename, 'kentaurai-analysis_openai_ACTUAL-MODEL_STAGE_ÅÅÅÅ-MM-DD.json');
+  assert.equal(payload.stage, 'pre_market');
+  assert.equal(payload.roundId, 'prompt-round');
+  assert.equal(payload.parentSubmissionId, null);
+  assert.equal(payload.recommendedFilename, 'kentaurai-analysis_openai_ACTUAL-MODEL_pre-market_ÅÅÅÅ-MM-DD.json');
+  assert.match(payload.prompt, /# KENTAURAI-UNDERLAG/);
+  assert.match(payload.prompt, /"round_id": "prompt-round"/);
+  assert.match(payload.prompt, /"raceEntryId": "prompt-entry-1"/);
+  assert.match(payload.prompt, /"horseName": "Prompthäst 1"/);
+  assert.match(payload.prompt, /"context_fingerprint": "sha256:[a-f0-9]{64}"/);
+
   response = await worker.fetch(new Request('https://example.test/app/api/settings/analysis-prompt?provider=anthropic', { headers: { cookie } }), env);
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).recommendedFilename, 'kentaurai-analysis_anthropic_ACTUAL-MODEL_STAGE_ÅÅÅÅ-MM-DD.json');
+  const anthropic = await response.json();
+  assert.equal(anthropic.stage, 'pre_market');
+  assert.equal(anthropic.recommendedFilename, 'kentaurai-analysis_anthropic_ACTUAL-MODEL_pre-market_ÅÅÅÅ-MM-DD.json');
+  assert.match(anthropic.prompt, /producer.provider ska därför vara exakt "anthropic"/);
 });
