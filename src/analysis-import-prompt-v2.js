@@ -58,7 +58,7 @@ Fältet legs ska representera steg 1, inte steg 2.
 
 Skriv inte om eller "förbättra" formuleringarna efter att marknaden har blivit synlig. Om steg 2 konstaterade att något i steg 1 verkar fel ska detta INTE korrigeras i legs. Eventuell sådan kommentar hör hemma i recommendations, aldrig i steg-1-fälten.
 
-Endast mekanisk strukturering är tillåten: procent till decimal, säker identitetsmappning och JSON-format.
+Endast mekanisk strukturering är tillåten: procent till decimal, säker identitetsmappning och JSON-format. Det enda ytterligare mekaniska undantaget är en häst som KentaurAI nu markerar som struken efter steg 1; den hanteras enligt strykningsregeln nedan utan att någon kvarvarande hästs analytiska bedömning ändras.
 
 # OUTPUT
 
@@ -159,7 +159,14 @@ abcd_group ska vara exakt A/B/C/D från steg 1. Ändra inte grupper efter markna
 uncertainty_low/high och scenario_robustness ska återanvändas från steg 1 när de finns, annars null.
 reasoning ska återge den befintliga steg-1-motiveringen, annars null.
 
-Om en häst har strukits EFTER steg 1 men fanns med i den faktiskt genomförda steg-1-analysen, behåll den i legs så att den blinda analysen inte skrivs om i efterhand. Den får däremot aldrig förekomma i systems.
+Om KentaurAI-underlaget nu markerar en häst som scratched och den fanns med i steg 1:
+- exportera inte den hästen i predictions,
+- normalisera de kvarvarande steg-1-sannolikheterna proportionellt så att summan åter blir 1.0,
+- behåll exakt samma inbördes rankingordning för kvarvarande hästar och komprimera raw_rank till obruten 1..N,
+- behåll kvarvarande hästars ABCD, osäkerhet, scenariorobusthet och reasoning oförändrade,
+- ändra inte fritexten för att efterhandsförklara strykningen.
+
+Detta är ett rent mekaniskt strykningsundantag, inte en ny analys. En struken häst får aldrig förekomma i systems.
 
 # ROUND_SUMMARY OCH RECOMMENDATIONS
 
@@ -223,10 +230,10 @@ Innan filen skapas, kontrollera ALLT:
 10. leg_number 1-8 kommer från contexten.
 11. race_id matchar rätt leg.
 12. varje prediction är säkert mappad på startnummer + namn.
-13. steg-1-sannolikheter är oförändrade förutom procent->decimal.
+13. steg-1-sannolikheter är oförändrade förutom procent->decimal och proportionell renormalisering om en häst nu är struken.
 14. varje legs sannolikheter summerar till 1.
-15. ranking är steg-1-rankingen och unik/obruten.
-16. ABCD är steg-1-grupperna.
+15. ranking följer exakt steg-1-ordningen och är unik/obruten, med endast mekanisk komprimering efter en senare strykning.
+16. ABCD är steg-1-grupperna för kvarvarande hästar.
 17. legs-fritext är marknadsblind.
 18. loppbilder/slutsatser/motiveringar har inte skrivits om efter marknadsexponering.
 19. minst ett system finns.
