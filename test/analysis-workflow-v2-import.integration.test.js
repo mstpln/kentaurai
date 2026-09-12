@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getCombinedPromptContext } from '../src/analysis-workflow-v2.js';
+import { createWorkflowDataExportResponse, getCombinedPromptContext } from '../src/analysis-workflow-v2.js';
 import { importStrictCombinedAnalysis } from '../src/analysis-workflow-v2-strict.js';
 import { createTestEnv } from './helpers/d1.js';
 
@@ -139,4 +139,70 @@ test('combined import leaves no partial rows when the atomic D1 batch fails', as
   await assert.rejects(() => importStrictCombinedAnalysis({ ...env, DB: failingDb }, payload), /synthetic batch failure/);
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM model_versions WHERE feature_version = 'analysis-exchange-v2'`).get().n, 0);
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM systems WHERE game_round_id = ?`).get(ROUND_ID).n, 0);
+});
+
+test('combined import rejects numeric strings instead of silently coercing JSON types', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  const payload = await validPayload(env);
+  payload.legs[0].predictions[0].win_probability = '0.6';
+  await assert.rejects(() => importStrictCombinedAnalysis(env, payload), /win_probability must be a JSON number/);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM model_versions WHERE feature_version = 'analysis-exchange-v2'`).get().n, 0);
+});
+
+test('combined import requires is_spike to be a real JSON boolean', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  const payload = await validPayload(env);
+  payload.systems[0].selections[0].is_spike = 1;
+  await assert.rejects(() => importStrictCombinedAnalysis(env, payload), /is_spike must be a JSON boolean/);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM model_versions WHERE feature_version = 'analysis-exchange-v2'`).get().n, 0);
+});
+
+test('combined import rejects market contamination in round summary and English leg reasoning', async () => {
+  const { env } = createTestEnv();
+  seedRound(env.DB.db);
+  let payload = await validPayload(env);
+  payload.round_summary = 'The market makes this leg attractive.';
+  await assert.rejects(() => importStrictCombinedAnalysis(env, payload), /round_summary contains market language/);
+
+  payload = await validPayload(env);
+  payload.legs[0].predictions[0].reasoning = { summary: 'The favourite looks overbet.' };
+  await assert.rejects(() => importStrictCombinedAnalysis(env, payload), /reasoning contains market language/);
+});
+
+test('pre-market export guard follows race-start fallback when round-level deadlines are null', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  db.prepare(`UPDATE game_rounds SET scheduled_start_at = NULL, bet_stop_at = NULL WHERE id = ?`).run(ROUND_ID);
+  db.prepare(`
+    INSERT INTO model_versions (id, created_at, feature_version, ai_provider, ai_model)
+    VALUES ('guard-model','2026-09-12T10:00:00Z','synthetic','openai','synthetic-model')
+  `).run();
+  db.prepare(`
+    INSERT INTO ai_race_analyses
+      (id, race_id, model_version_id, data_snapshot_at, market_blind, created_at)
+    VALUES ('guard-analysis','combined-race-1','guard-model','2026-09-12T10:00:00Z',1,'2026-09-12T10:00:00Z')
+  `).run();
+  db.prepare(`
+    INSERT INTO ai_horse_predictions
+      (id, ai_race_analysis_id, race_entry_id, win_probability, raw_rank, abcd_group)
+    VALUES ('guard-prediction','guard-analysis','combined-entry-1-1',0.6,1,'A')
+  `).run();
+  db.prepare(`
+    INSERT INTO systems
+      (id, game_round_id, model_version_id, system_type, budget_sek, row_count, line_price_sek, spike_count, created_at)
+    VALUES ('guard-system',?,'guard-model','main',1.5,3,0.5,3,'2026-09-12T10:00:00Z')
+  `).run(ROUND_ID);
+  db.prepare(`
+    INSERT INTO system_selections (system_id, leg_number, race_entry_id, is_spike)
+    VALUES ('guard-system',1,'combined-entry-1-1',1)
+  `).run();
+
+  const response = await createWorkflowDataExportResponse(env, 'openai', 'pre_market');
+  const exported = await response.json();
+  assert.equal(exported.tables.ai_race_analyses.some((row) => row.id === 'guard-analysis'), false);
+  assert.equal(exported.tables.ai_horse_predictions.some((row) => row.id === 'guard-prediction'), false);
+  assert.equal(exported.tables.systems.some((row) => row.id === 'guard-system'), false);
+  assert.equal(exported.tables.system_selections.some((row) => row.system_id === 'guard-system'), false);
 });
