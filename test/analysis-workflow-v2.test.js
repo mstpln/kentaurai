@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import { ANALYSIS_STEP_1_PROMPT } from '../src/analysis-step-1-prompt.js';
 import { ANALYSIS_STEP_2_PROMPT } from '../src/analysis-step-2-prompt.js';
 import { buildCombinedAnalysisImportPrompt } from '../src/analysis-import-prompt-v2.js';
-import { ANALYSIS_COMBINED_VERSION, ANALYSIS_INPUT_VERSION, getAnalysisMethodPrompt } from '../src/analysis-workflow-v2.js';
+import {
+  ANALYSIS_COMBINED_VERSION,
+  ANALYSIS_INPUT_VERSION,
+  getAnalysisMethodPrompt,
+  stableWorkflowFingerprintInput
+} from '../src/analysis-workflow-v2.js';
 
 const promptContext = {
   export_stage: 'combined',
@@ -44,4 +49,33 @@ test('combined export prompt encodes the locked one-import workflow and contextu
   assert.match(prompt, /komprimera raw_rank till obruten 1\.\.N/);
   assert.match(prompt, /round-synthetic-v85/);
   assert.match(prompt, new RegExp(`sha256:${'a'.repeat(64)}`));
+});
+
+test('combined context fingerprint input ignores time-only market metadata but keeps authoritative market observations', () => {
+  const base = {
+    contractVersion: ANALYSIS_INPUT_VERSION,
+    round: { id: 'round-synthetic-v85', gameType: 'V85', betStopAt: '2026-09-12T15:00:00Z' },
+    legs: [{ legNumber: 1, raceId: 'race-1', entries: [{ raceEntryId: 'entry-1' }] }],
+    market: {
+      definitionVersion: 'verified-market-at-stop-v1',
+      roundId: 'round-synthetic-v85',
+      betStopAt: '2026-09-12T15:00:00Z',
+      asOf: '2026-09-12T12:00:00Z',
+      cutoff: '2026-09-12T12:00:00Z',
+      betting: [{ raceEntryId: 'entry-1', betPercent: 42, capturedAt: '2026-09-12T11:59:00Z' }],
+      odds: []
+    }
+  };
+  const later = structuredClone(base);
+  later.market.asOf = '2026-09-12T12:05:00Z';
+  later.market.cutoff = '2026-09-12T12:05:00Z';
+
+  assert.deepEqual(stableWorkflowFingerprintInput(later), stableWorkflowFingerprintInput(base));
+  assert.equal(stableWorkflowFingerprintInput(base).market.asOf, undefined);
+  assert.equal(stableWorkflowFingerprintInput(base).market.cutoff, undefined);
+  assert.equal(stableWorkflowFingerprintInput(base).market.betting[0].betPercent, 42);
+
+  const changedMarket = structuredClone(base);
+  changedMarket.market.betting[0].betPercent = 43;
+  assert.notDeepEqual(stableWorkflowFingerprintInput(changedMarket), stableWorkflowFingerprintInput(base));
 });
