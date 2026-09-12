@@ -6,7 +6,7 @@ import {
   getHorseCalendarYearDetailStatistics,
   getTrainerCalendarYearDetailStatistics
 } from './entity-detail-calendar-statistics.js';
-import { enhanceEntityDetailStatisticsHtml } from './entity-detail-statistics-ui.js';
+import { enhanceEntityDetailStatisticsHtmlV2 } from './entity-detail-statistics-ui-v2.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -45,7 +45,7 @@ async function enhancedAppResponse(request, response) {
   if (request.method !== 'GET' || new URL(request.url).pathname !== '/app/') return response;
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('text/html')) return response;
-  const body = enhanceEntityDetailStatisticsHtml(await response.text());
+  const body = enhanceEntityDetailStatisticsHtmlV2(await response.text());
   const headers = new Headers(response.headers);
   headers.delete('content-length');
   return new Response(body, { status: response.status, statusText: response.statusText, headers });
