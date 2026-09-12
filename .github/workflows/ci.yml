@@ -30,10 +30,22 @@ jobs:
           files=(test/[b-d]*.test.js)
           if ((${#files[@]})); then node --test "${files[@]}"; fi
 
-      - name: Tests e-g
+      - name: Tests e
         run: |
           shopt -s nullglob
-          files=(test/[e-g]*.test.js)
+          files=(test/e*.test.js)
+          if ((${#files[@]})); then node --test "${files[@]}"; fi
+
+      - name: Tests f
+        run: |
+          shopt -s nullglob
+          files=(test/f*.test.js)
+          if ((${#files[@]})); then node --test "${files[@]}"; fi
+
+      - name: Tests g
+        run: |
+          shopt -s nullglob
+          files=(test/g*.test.js)
           if ((${#files[@]})); then node --test "${files[@]}"; fi
 
       - name: Tests h-m
