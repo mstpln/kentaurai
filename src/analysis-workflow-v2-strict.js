@@ -1,6 +1,7 @@
 import { importCombinedAnalysis, readCombinedAnalysisUpload } from './analysis-workflow-v2.js';
 
 const RISK_PROFILE_MAX_CHARS = 100;
+const NOTES_MAX_CHARS = 8000;
 
 function normalizeRiskProfile(value) {
   if (value == null || value === '') return value;
@@ -9,17 +10,32 @@ function normalizeRiskProfile(value) {
   return `${text.slice(0, RISK_PROFILE_MAX_CHARS - 1).trimEnd()}…`;
 }
 
+function preserveFullRiskProfile(notes, fullRiskProfile) {
+  const prefix = 'Full risk_profile from import: ';
+  const existing = notes == null || notes === '' ? '' : String(notes);
+  const separator = existing ? '\n\n' : '';
+  const available = NOTES_MAX_CHARS - existing.length - separator.length - prefix.length;
+  if (available <= 0) return existing.slice(0, NOTES_MAX_CHARS);
+  const preserved = String(fullRiskProfile).slice(0, available);
+  return `${existing}${separator}${prefix}${preserved}`;
+}
+
 export function normalizeCombinedImportPayload(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload) || !Array.isArray(payload.systems)) return payload;
   let changed = false;
   const systems = payload.systems.map((system) => {
     if (!system || typeof system !== 'object' || Array.isArray(system)) return system;
-    const normalized = normalizeRiskProfile(system.risk_profile ?? system.riskProfile);
-    const current = system.risk_profile ?? system.riskProfile;
+    const riskKey = 'risk_profile' in system || !('riskProfile' in system) ? 'risk_profile' : 'riskProfile';
+    const current = system[riskKey];
+    const normalized = normalizeRiskProfile(current);
     if (normalized === current) return system;
     changed = true;
-    if ('risk_profile' in system || !('riskProfile' in system)) return { ...system, risk_profile: normalized };
-    return { ...system, riskProfile: normalized };
+    const notesKey = 'notes';
+    return {
+      ...system,
+      [riskKey]: normalized,
+      [notesKey]: preserveFullRiskProfile(system[notesKey], current)
+    };
   });
   return changed ? { ...payload, systems } : payload;
 }
