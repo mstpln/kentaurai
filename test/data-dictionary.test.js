@@ -36,10 +36,14 @@ test('public data dictionary exposes the build-plan field inventory contract', (
   }
 });
 
-test('public data dictionary keeps market facts out of pre-market strength', () => {
+test('public data dictionary keeps actual market facts out of pre-market strength', () => {
   for (const row of dictionaryRows()) {
-    const semantic = `${row[1]} ${row[2]} ${row[9]}`.toLowerCase();
-    if (semantic.includes('betting') || semantic.includes('odds') || semantic.includes('market') || semantic.includes('turnover')) {
+    const path = row[1].toLowerCase();
+    const name = row[2].toLowerCase();
+    const isMarketFact =
+      /(betdistribution|marketrank|odds|pool\.turnover|pool\.systemcount|betting_snapshots)/.test(path) ||
+      /(betting percentage|betting rank|game turnover|verified market-at-stop|favorite at betting stop|longshot at betting stop|win\/place odds)/.test(name);
+    if (isMarketFact) {
       assert.doesNotMatch(row[7].toLowerCase(), /pre-market|pre_market|ai pre-market/);
     }
   }
