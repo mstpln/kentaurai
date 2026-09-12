@@ -6,6 +6,7 @@ import { enhanceDriverStatisticsHtml } from './driver-statistics-ui.js';
 import { enhanceTrainerStatisticsHtml } from './trainer-statistics-ui.js';
 import { enhanceHorsePatternsHtml } from './horse-patterns-ui.js';
 import { buildAnalysisImportPrompt, recommendedAnalysisFilename } from './analysis-import-prompt.js';
+import { getAnalysisPromptContext } from './analysis-prompt-context.js';
 import { ANALYSIS_SUBMISSION_VERSION } from './analysis-exchange.js';
 import { getTrackDetailV064, getTrackLaneStatsV064 } from './routes/tracks-v064.js';
 import { applyTrackContactEnrichment, listTrackContactTargets } from './track-contact-enrichment.js';
@@ -77,8 +78,22 @@ export default {
 
     if (request.method === 'GET' && path === '/app/api/settings/analysis-prompt') {
       const denied = await requireSession(request, env); if (denied) return denied;
-      const provider = url.searchParams.get('provider') || 'ai';
-      return json({ contractVersion: ANALYSIS_SUBMISSION_VERSION, recommendedFilename: recommendedAnalysisFilename(provider), prompt: buildAnalysisImportPrompt(provider) });
+      try {
+        const provider = url.searchParams.get('provider') || 'ai';
+        const promptContext = await getAnalysisPromptContext(env, provider);
+        if (!promptContext) return json({ error: 'no_analyzable_round', message: 'Ingen kommande V85/V86-omgång med komplett analyscontext hittades.' }, 404);
+        return json({
+          contractVersion: ANALYSIS_SUBMISSION_VERSION,
+          stage: promptContext.export_stage,
+          roundId: promptContext.round_id,
+          parentSubmissionId: promptContext.parent_submission_id,
+          recommendedFilename: recommendedAnalysisFilename(provider, null, promptContext.export_stage),
+          prompt: buildAnalysisImportPrompt(provider, promptContext)
+        });
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
     }
 
     if (request.method === 'GET' && path === '/app/api/horses/statistics') {
