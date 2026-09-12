@@ -33,7 +33,7 @@ test('combined export prompt encodes the locked one-import workflow', () => {
   assert.match(prompt, /parent_submission_id får INTE finnas/);
   assert.match(prompt, /analysis_blindness får INTE finnas/);
   assert.match(prompt, /V85 \+ system_type "main": 2 eller 3 spikar tillåtet/);
-  assert.match(prompt, /V85 main med 2 spikar måste systemets notes innehålla/);
+  assert.match(prompt, /Om V85 main har 2 spikar måste systemets notes innehålla/);
   assert.match(prompt, /steg 1 oförändrat/i);
   assert.match(prompt, /normalisera de kvarvarande steg-1-sannolikheterna proportionellt/);
   assert.match(prompt, /komprimera raw_rank till obruten 1\.\.N/);
