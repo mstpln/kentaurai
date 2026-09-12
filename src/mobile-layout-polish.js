@@ -1,5 +1,5 @@
 const mobileLayoutPolishCss = `
-<style id="kentaurai-mobile-layout-polish-v100">
+<style id="kentaurai-mobile-layout-polish-v101">
 /* Presentation-only mobile polish. Do not alter data or business behaviour here. */
 .trend-panel-head{padding-left:16px!important;padding-right:16px!important}
 .trend-result-row{padding-left:16px!important;padding-right:16px!important}
@@ -109,8 +109,10 @@ const mobileLayoutPolishCss = `
 </style>`;
 
 const mobileLayoutPolishScript = `
-<script id="kentaurai-mobile-layout-polish-v100-script">
+<script id="kentaurai-mobile-layout-polish-v101-script">
 (function(){
+  let alignQueued=false;
+
   function currentScopeBlock(){
     return document.querySelector('.trend-scope-line > .filter-block') || document.querySelector('.trend-detail-panel > .trend-scope-filter-block');
   }
@@ -124,7 +126,7 @@ const mobileLayoutPolishScript = `
     let badge=trigger.querySelector('.trend-filter-count');
     if(count){
       if(!badge){badge=document.createElement('span');badge.className='trend-filter-count';trigger.appendChild(badge)}
-      badge.textContent=String(count);
+      if(badge.textContent!==String(count))badge.textContent=String(count);
       trigger.classList.add('active');
     }else{
       badge?.remove();
@@ -150,16 +152,27 @@ const mobileLayoutPolishScript = `
     syncTrendFilterCount(scopeBlock,panel,trigger);
   }
 
+  function queueAlign(){
+    if(alignQueued)return;
+    alignQueued=true;
+    requestAnimationFrame(()=>{
+      alignQueued=false;
+      alignTrendFilters();
+    });
+  }
+
   document.addEventListener('click',(event)=>{
-    if(event.target.closest('#trendReset') && typeof state!=='undefined')state.trendRaceScope='all';
+    const target=event.target instanceof Element?event.target:null;
+    if(target?.closest('#trendReset') && typeof state!=='undefined')state.trendRaceScope='all';
+    if(target?.closest('#app'))queueAlign();
   },true);
 
-  const app=document.getElementById('app');
-  if(app){
-    const observer=new MutationObserver(()=>alignTrendFilters());
-    observer.observe(app,{childList:true,subtree:true});
-  }
-  alignTrendFilters();
+  document.addEventListener('change',(event)=>{
+    const target=event.target instanceof Element?event.target:null;
+    if(target?.closest('#app'))queueAlign();
+  },true);
+
+  queueAlign();
 })();
 </script>`;
 
@@ -171,7 +184,7 @@ function ensureViewport(source) {
 
 export function enhanceMobileLayoutPolish(html) {
   let source = ensureViewport(String(html));
-  if (source.includes('kentaurai-mobile-layout-polish-v100')) return source;
+  if (source.includes('kentaurai-mobile-layout-polish-v101')) return source;
   source = source.replace('</head>', `${mobileLayoutPolishCss}</head>`);
   return source.replace('</body>', `${mobileLayoutPolishScript}</body>`);
 }
