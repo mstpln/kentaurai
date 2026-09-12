@@ -127,7 +127,6 @@ const mobileLayoutPolishScript = `
 
   document.addEventListener('click',(event)=>{
     const target=event.target instanceof Element?event.target:null;
-    if(target?.closest('#trendReset') && typeof state!=='undefined')state.trendRaceScope='all';
     if(target?.closest('#app'))queueAlign();
   },true);
 
