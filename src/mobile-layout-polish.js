@@ -1,5 +1,5 @@
 const mobileLayoutPolishCss = `
-<style id="kentaurai-mobile-layout-polish-v099">
+<style id="kentaurai-mobile-layout-polish-v100">
 /* Presentation-only mobile polish. Do not alter data or business behaviour here. */
 .trend-panel-head{padding-left:16px!important;padding-right:16px!important}
 .trend-result-row{padding-left:16px!important;padding-right:16px!important}
@@ -7,33 +7,49 @@ const mobileLayoutPolishCss = `
 .trend-detail-panel>.trend-scope-filter-block .segment-group{max-width:100%}
 
 @media(max-width:760px){
-  html,body{height:100%;height:100dvh;max-width:100%;overflow:hidden!important}
-  body{min-height:100vh;min-height:100dvh;overscroll-behavior:none}
-  .shell{
-    width:100%;max-width:100vw;height:100vh;height:100dvh;min-height:0!important;
-    padding-bottom:0!important;display:grid!important;grid-template-rows:auto minmax(0,1fr) auto;
-    overflow:hidden!important
+  html{max-width:100%;overflow-x:hidden!important;background:var(--bg)}
+  body{
+    min-height:100vh;min-height:100dvh;max-width:100%;overflow-x:hidden!important;overflow-y:auto!important;
+    -webkit-overflow-scrolling:touch;overscroll-behavior-y:auto
   }
-  .topbar{position:relative!important;top:auto!important;z-index:40;min-width:0;max-width:100%}
+  .shell{
+    width:100%;max-width:100vw;min-height:100vh;min-height:100dvh;height:auto!important;
+    padding-bottom:calc(84px + env(safe-area-inset-bottom))!important;display:block!important;overflow:visible!important
+  }
+  .topbar{
+    position:sticky!important;top:0!important;z-index:60;min-width:0;max-width:100%;
+    padding-top:env(safe-area-inset-top)
+  }
   .top-inner,.main,.main>*{min-width:0;max-width:100%}
   .main{
-    width:100%;min-height:0;overflow-y:auto!important;overflow-x:hidden!important;
-    -webkit-overflow-scrolling:touch;overscroll-behavior-y:contain;padding-bottom:23px!important
+    width:100%;min-height:0;overflow:visible!important;padding-bottom:24px!important
   }
   .bottom-nav{
-    position:relative!important;left:auto!important;right:auto!important;bottom:auto!important;width:100%;
-    min-height:88px;padding-top:8px!important;padding-bottom:calc(8px + env(safe-area-inset-bottom))!important;
-    z-index:45;flex:none
+    position:fixed!important;left:0!important;right:0!important;bottom:0!important;width:100%;
+    min-height:74px;padding-top:7px!important;padding-bottom:calc(7px + env(safe-area-inset-bottom))!important;
+    padding-left:max(6px,env(safe-area-inset-left))!important;padding-right:max(6px,env(safe-area-inset-right))!important;
+    z-index:70;flex:none
   }
-  .bottom-inner{width:100%!important;max-width:820px!important;grid-template-columns:repeat(6,minmax(0,1fr))!important;gap:2px!important}
-  .nav-item{min-width:0!important;font-size:11px!important;padding:9px 1px 7px!important;line-height:1.15!important}
-  .nav-icon{width:23px!important;height:23px!important;margin-bottom:6px!important}
+  .bottom-inner{width:100%!important;max-width:820px!important;grid-template-columns:repeat(6,minmax(0,1fr))!important;gap:1px!important}
+  .nav-item{min-width:0!important;font-size:10px!important;padding:7px 0 6px!important;line-height:1.1!important;overflow:hidden}
+  .nav-icon{width:21px!important;height:21px!important;margin-bottom:4px!important}
 
-  /* Pills and tabs wrap instead of widening the page. */
-  .tabs,.segment-group,.range-group,.system-switcher,.stat-pills,.trip-chips{
+  /* Time period must always remain on one row. */
+  .range-group{
+    width:100%!important;max-width:100%!important;display:grid!important;
+    grid-template-columns:repeat(5,minmax(0,1fr))!important;gap:5px!important;
+    flex-wrap:nowrap!important;overflow:visible!important
+  }
+  .range-btn{
+    min-width:0!important;width:100%!important;max-width:100%!important;padding:9px 3px!important;
+    font-size:clamp(9px,2.7vw,12px)!important;white-space:nowrap!important;text-align:center!important
+  }
+
+  /* Other pills and tabs may wrap rather than widening the page. */
+  .tabs,.segment-group,.system-switcher,.stat-pills,.trip-chips{
     max-width:100%!important;flex-wrap:wrap!important;overflow:visible!important
   }
-  .segment-btn,.range-btn,.tab-btn,.system-switcher button,.stat-pill{min-width:0!important;max-width:100%}
+  .segment-btn,.tab-btn,.system-switcher button,.stat-pill{min-width:0!important;max-width:100%}
 
   /* Generic containment for cards, grids and nested detail content. */
   .card,.trend-panel,.trainer-ranking-card,.trainer-special,.detail-grid,.stats-grid,.game-grid,.system-card,
@@ -84,14 +100,16 @@ const mobileLayoutPolishCss = `
 }
 
 @media(max-width:360px){
-  .nav-item{font-size:10px!important;padding-left:0!important;padding-right:0!important}
-  .nav-icon{width:22px!important;height:22px!important}
+  .nav-item{font-size:9px!important;padding-left:0!important;padding-right:0!important}
+  .nav-icon{width:20px!important;height:20px!important}
+  .range-group{gap:3px!important}
+  .range-btn{padding-left:1px!important;padding-right:1px!important;font-size:9px!important}
   .trend-result-row{grid-template-columns:64px minmax(0,1fr)!important;gap:8px!important;padding-left:12px!important;padding-right:12px!important}
 }
 </style>`;
 
 const mobileLayoutPolishScript = `
-<script id="kentaurai-mobile-layout-polish-v099-script">
+<script id="kentaurai-mobile-layout-polish-v100-script">
 (function(){
   function currentScopeBlock(){
     return document.querySelector('.trend-scope-line > .filter-block') || document.querySelector('.trend-detail-panel > .trend-scope-filter-block');
@@ -153,7 +171,7 @@ function ensureViewport(source) {
 
 export function enhanceMobileLayoutPolish(html) {
   let source = ensureViewport(String(html));
-  if (source.includes('kentaurai-mobile-layout-polish-v099')) return source;
+  if (source.includes('kentaurai-mobile-layout-polish-v100')) return source;
   source = source.replace('</head>', `${mobileLayoutPolishCss}</head>`);
   return source.replace('</body>', `${mobileLayoutPolishScript}</body>`);
 }
