@@ -1,0 +1,158 @@
+import {
+  addCanonicalRaceScopeCondition,
+  canonicalStartMethodSql,
+  coreMetricSelectSql,
+  mapCoreMetricRow,
+  monteRaceCondition,
+  normalizeTrackId,
+  normalizeTrendBreed,
+  normalizeTrendRaceScope,
+  normalizeTrendRaceType,
+  normalizeTrendStartMethod,
+  swedenDateKey
+} from './statistics/core.js';
+import { DRIVER_LONGSHOT_PERCENT_MAX, DRIVER_MARKET_DEFINITION_VERSION } from './statistics/driver-features.js';
+
+const DISTANCES = new Set(['all','640','1640','2140','2640','3140','3640','4140','other-long']);
+const DISTANCE_STANDARDS = [640,1640,2140,2640,3140,3640,4140];
+const VOLT_LANES = new Set(['all','good','other']);
+const SEX_VALUES = new Set(['all','mare','stallion','gelding']);
+const DISTANCE_TOLERANCE_M = 100;
+const REST_DAYS = 60;
+
+const ENTITY_CONFIG = Object.freeze({
+  trainers:{table:'trainers',entryColumn:'trainer_id',resultKey:'trainer',formLimit:30,market:true,rest:true,volt:true},
+  drivers:{table:'drivers',entryColumn:'driver_id',resultKey:'driver',formLimit:30,market:true,rest:false,volt:true},
+  horses:{table:'horses',entryColumn:'horse_id',resultKey:'horse',formLimit:10,market:false,rest:true,volt:false}
+});
+
+function configFor(entityType){
+  const config=ENTITY_CONFIG[entityType];
+  if(!config) throw new Error('unsupported detail entity type');
+  return config;
+}
+
+function normalizeYear(value,asOfDate){
+  const fallback=Number(String(asOfDate).slice(0,4));
+  if(value==null||value==='') return fallback;
+  const text=String(value).trim();
+  if(!/^\d{4}$/.test(text)) throw new Error('year must be a four-digit year');
+  const year=Number(text);
+  if(year<1900||year>2200) throw new Error('year is outside the supported range');
+  return year;
+}
+function normalizeDistance(value){const v=String(value||'all').trim().toLowerCase();if(!DISTANCES.has(v)) throw new Error('distance_group is unsupported');return v;}
+function normalizeSex(value){const v=String(value||'all').trim().toLowerCase();if(!SEX_VALUES.has(v)) throw new Error('sex is unsupported');return v;}
+function normalizeAge(value){if(value==null||value===''||value==='all')return null;const n=Number(value);if(!Number.isInteger(n)||n<2||n>30)throw new Error('age is unsupported');return n;}
+function normalizeVoltLane(value){const v=String(value||'all').trim().toLowerCase();if(!VOLT_LANES.has(v))throw new Error('volt_lane is unsupported');return v;}
+function normalizeHandicap(value){if(value==null||value===''||value==='all')return null;const n=Number(value);if(!Number.isInteger(n)||n<0||n>500||n%20!==0)throw new Error('handicap_m is unsupported');return n;}
+
+function normalizeFilters(options={}){
+  const asOfDate=options.asOfDate||swedenDateKey();
+  return{
+    asOfDate,year:normalizeYear(options.year,asOfDate),raceScope:normalizeTrendRaceScope(options.raceScope),trackId:normalizeTrackId(options.trackId),
+    raceType:normalizeTrendRaceType(options.raceType),breedType:normalizeTrendBreed(options.breedType),sex:normalizeSex(options.sex),age:normalizeAge(options.age),
+    startMethod:normalizeTrendStartMethod(options.startMethod),distanceGroup:normalizeDistance(options.distanceGroup),voltLane:normalizeVoltLane(options.voltLane),handicapM:normalizeHandicap(options.handicapM)
+  };
+}
+
+function addYearCondition(conditions,bindings,filters,raceAlias='r'){
+  const currentYear=Number(filters.asOfDate.slice(0,4));
+  conditions.push(`${raceAlias}.race_date >= ?`);
+  bindings.push(`${filters.year}-01-01`);
+  if(filters.year===currentYear){conditions.push(`${raceAlias}.race_date <= ?`);bindings.push(filters.asOfDate);}
+  else {conditions.push(`${raceAlias}.race_date < ?`);bindings.push(`${filters.year+1}-01-01`);}
+}
+function addDistanceCondition(conditions,bindings,distance,raceAlias='r'){
+  if(distance==='all')return;
+  if(distance==='other-long'){
+    const standards=DISTANCE_STANDARDS.filter(v=>v>=2640);
+    conditions.push(`${raceAlias}.distance_m > 2640 AND ${standards.map(()=>`NOT (${raceAlias}.distance_m BETWEEN ? AND ?)`).join(' AND ')}`);
+    for(const standard of standards)bindings.push(standard-DISTANCE_TOLERANCE_M,standard+DISTANCE_TOLERANCE_M);
+    return;
+  }
+  const meters=Number(distance);conditions.push(`${raceAlias}.distance_m BETWEEN ? AND ?`);bindings.push(meters-DISTANCE_TOLERANCE_M,meters+DISTANCE_TOLERANCE_M);
+}
+function addCommonFilters(conditions,bindings,filters,{raceAlias='r',entryAlias='re',horseAlias='h',includeVolt=true}={}){
+  addYearCondition(conditions,bindings,filters,raceAlias);
+  if(filters.trackId){conditions.push(`${raceAlias}.track_id = ?`);bindings.push(filters.trackId);}
+  if(filters.startMethod!=='all')conditions.push(`${canonicalStartMethodSql(raceAlias)} = '${filters.startMethod}'`);
+  if(filters.raceType==='monte')conditions.push(monteRaceCondition(raceAlias));
+  if(filters.raceType==='sulky')conditions.push(`NOT ${monteRaceCondition(raceAlias)}`);
+  if(filters.breedType==='warmblood')conditions.push(`(LOWER(COALESCE(${horseAlias}.breed,'')) LIKE '%varmblod%' OR LOWER(COALESCE(${horseAlias}.breed,'')) LIKE '%warmblood%')`);
+  if(filters.breedType==='coldblood')conditions.push(`(LOWER(COALESCE(${horseAlias}.breed,'')) LIKE '%kallblod%' OR LOWER(COALESCE(${horseAlias}.breed,'')) LIKE '%coldblood%')`);
+  if(filters.sex==='mare')conditions.push(`LOWER(COALESCE(${horseAlias}.sex,'')) IN ('sto','mare','female','f')`);
+  if(filters.sex==='stallion')conditions.push(`LOWER(COALESCE(${horseAlias}.sex,'')) IN ('hingst','stallion','male','m')`);
+  if(filters.sex==='gelding')conditions.push(`LOWER(COALESCE(${horseAlias}.sex,'')) IN ('valack','gelding')`);
+  if(filters.age!=null){conditions.push(`CAST(substr(?,1,4) AS INTEGER)-${horseAlias}.birth_year=?`);bindings.push(filters.asOfDate,filters.age);}
+  addDistanceCondition(conditions,bindings,filters.distanceGroup,raceAlias);
+  addCanonicalRaceScopeCondition(conditions,filters.raceScope,raceAlias);
+  if(includeVolt&&filters.voltLane!=='all'){
+    conditions.push(`${canonicalStartMethodSql(raceAlias)}='volt'`);
+    conditions.push(filters.voltLane==='good'?`${entryAlias}.actual_lane IN (1,6,7)`:`${entryAlias}.actual_lane IS NOT NULL AND ${entryAlias}.actual_lane NOT IN (1,6,7)`);
+  }
+  if(includeVolt&&filters.handicapM!=null){
+    conditions.push(`${canonicalStartMethodSql(raceAlias)}='volt'`,`${entryAlias}.handicap_m=?`,`${entryAlias}.actual_start_distance_m IS NOT NULL`,`${raceAlias}.distance_m IS NOT NULL`,`${entryAlias}.actual_start_distance_m-${raceAlias}.distance_m=${entryAlias}.handicap_m`);
+    bindings.push(filters.handicapM);
+  }
+}
+async function validateTrack(env,id){if(!id)return;const row=await env.DB.prepare('SELECT 1 AS ok FROM tracks WHERE id=? LIMIT 1').bind(id).first();if(!row?.ok)throw new Error('track_id does not identify a stored track');}
+function mapRows(rows,section){return rows.filter(r=>r.section===section).map(r=>({label:r.label,...mapCoreMetricRow(r)}));}
+function sortMethods(rows){return rows.sort((a,b)=>b.starts-a.starts||String(a.label).localeCompare(String(b.label)));}
+function sortDistances(rows){return rows.sort((a,b)=>{const x=Number(a.label),y=Number(b.label);if(Number.isFinite(x)&&Number.isFinite(y))return x-y;if(Number.isFinite(x))return-1;if(Number.isFinite(y))return 1;return String(a.label).localeCompare(String(b.label));});}
+function sortTracks(rows){return rows.sort((a,b)=>b.starts-a.starts||String(a.label).localeCompare(String(b.label),'sv',{sensitivity:'base'}));}
+
+async function loadCore(env,entityId,filters,config){
+  const conditions=['re.scratched=0',`re.${config.entryColumn}=?`],bindings=[entityId];
+  addCommonFilters(conditions,bindings,filters,{includeVolt:config.volt});
+  const methodSql=canonicalStartMethodSql('r'),metrics=coreMetricSelectSql('f');
+  const {results}=await env.DB.prepare(`WITH filtered AS MATERIALIZED (
+    SELECT rr.race_entry_id,rr.placing,rr.gallop,rr.disqualified,rr.prize_sek,r.distance_m,${methodSql} AS start_method_group,COALESCE(tr.canonical_name,'Okänd bana') AS track_label
+    FROM races r INDEXED BY idx_races_date JOIN race_entries re ON re.race_id=r.id JOIN race_results rr ON rr.race_entry_id=re.id JOIN horses h ON h.id=re.horse_id LEFT JOIN tracks tr ON tr.id=r.track_id
+    WHERE ${conditions.join(' AND ')}
+  )
+  SELECT 'summary' section,'all' label,${metrics} FROM filtered f
+  UNION ALL SELECT 'method',f.start_method_group,${metrics} FROM filtered f GROUP BY f.start_method_group
+  UNION ALL SELECT 'distance',COALESCE(CAST(f.distance_m AS TEXT),'unknown'),${metrics} FROM filtered f GROUP BY f.distance_m
+  UNION ALL SELECT 'track',f.track_label,${metrics} FROM filtered f GROUP BY f.track_label`).bind(...bindings).all();
+  const rows=results||[],summaryRow=rows.find(r=>r.section==='summary');
+  return{summary:mapCoreMetricRow(summaryRow||{}),startMethods:sortMethods(mapRows(rows,'method')),distances:sortDistances(mapRows(rows,'distance')),tracks:sortTracks(mapRows(rows,'track'))};
+}
+async function loadForm(env,entityId,filters,config){
+  const conditions=['re.scratched=0',`re.${config.entryColumn}=?`,'rr.placing IS NOT NULL','rr.placing>0'],bindings=[entityId];
+  addCommonFilters(conditions,bindings,filters,{includeVolt:config.volt});
+  const row=await env.DB.prepare(`SELECT COUNT(*) used_starts,AVG(placing) avg_placing FROM (
+    SELECT rr.placing FROM races r INDEXED BY idx_races_date JOIN race_entries re ON re.race_id=r.id JOIN race_results rr ON rr.race_entry_id=re.id JOIN horses h ON h.id=re.horse_id
+    WHERE ${conditions.join(' AND ')} ORDER BY r.race_date DESC,r.race_number DESC,re.id DESC LIMIT ${config.formLimit}
+  )`).bind(...bindings).first();
+  const used=Number(row?.used_starts||0);return used?{usedStarts:used,averagePlacing:Number(row.avg_placing),limit:config.formLimit}:null;
+}
+function marketCte(){return`market_candidates AS (SELECT bs.race_entry_id,bs.bet_percent,bs.market_rank,bs.captured_at,bs.id,ROW_NUMBER() OVER(PARTITION BY bs.race_entry_id ORDER BY julianday(bs.captured_at) DESC,bs.id DESC) rn FROM betting_snapshots bs JOIN game_rounds gr ON gr.id=bs.game_round_id JOIN game_legs gl ON gl.game_round_id=gr.id AND gl.leg_number=bs.leg_number JOIN race_entries mre ON mre.id=bs.race_entry_id AND mre.race_id=gl.race_id WHERE gr.bet_stop_at IS NOT NULL AND bs.source_record_id IS NOT NULL AND julianday(bs.captured_at)<=julianday(gr.bet_stop_at)),market_at_stop AS (SELECT race_entry_id,bet_percent,market_rank,captured_at FROM market_candidates WHERE rn=1)`;}
+async function loadMarket(env,entityId,filters,config,kind){
+  if(!config.market)return null;
+  const conditions=['re.scratched=0',`re.${config.entryColumn}=?`],bindings=[entityId];addCommonFilters(conditions,bindings,filters,{includeVolt:config.volt});
+  if(kind==='favorite')conditions.push('m.market_rank=1');else{conditions.push('m.bet_percent IS NOT NULL','m.bet_percent>=0','m.bet_percent<=?');bindings.push(DRIVER_LONGSHOT_PERCENT_MAX);}
+  const row=await env.DB.prepare(`WITH ${marketCte()} SELECT ${coreMetricSelectSql('rr')} FROM races r INDEXED BY idx_races_date JOIN race_entries re ON re.race_id=r.id JOIN race_results rr ON rr.race_entry_id=re.id JOIN horses h ON h.id=re.horse_id JOIN market_at_stop m ON m.race_entry_id=re.id WHERE ${conditions.join(' AND ')}`).bind(...bindings).first();
+  return mapCoreMetricRow(row||{});
+}
+function restCte(){return`actual AS (SELECT h.id horse_id,h.sex,h.birth_year,h.breed,re.trainer_id,re.driver_id,r.id,r.track_id,r.race_date,r.race_number,r.distance_m,r.start_method,r.first_prize_sek,r.race_name,r.main_class,r.class_flags_json,re.id race_entry_id,re.actual_lane,re.handicap_m,re.actual_start_distance_m,rr.placing,rr.prize_sek,rr.gallop,rr.disqualified,CAST(julianday(r.race_date)-julianday(LAG(r.race_date) OVER(PARTITION BY h.id ORDER BY r.race_date,r.race_number,re.id)) AS INTEGER) days_since_previous FROM races r JOIN race_entries re ON re.race_id=r.id JOIN race_results rr ON rr.race_entry_id=re.id JOIN horses h ON h.id=re.horse_id WHERE re.scratched=0),staged AS (SELECT *,LAG(days_since_previous) OVER(PARTITION BY horse_id ORDER BY race_date,race_number,race_entry_id) previous_gap FROM actual)`;}
+function addStagedFilters(conditions,bindings,filters,config){
+  addYearCondition(conditions,bindings,filters,'s');if(filters.trackId){conditions.push('s.track_id=?');bindings.push(filters.trackId);}if(filters.startMethod!=='all')conditions.push(`${canonicalStartMethodSql('s')}='${filters.startMethod}'`);if(filters.raceType==='monte')conditions.push(monteRaceCondition('s'));if(filters.raceType==='sulky')conditions.push(`NOT ${monteRaceCondition('s')}`);if(filters.breedType==='warmblood')conditions.push("(LOWER(COALESCE(s.breed,'')) LIKE '%varmblod%' OR LOWER(COALESCE(s.breed,'')) LIKE '%warmblood%')");if(filters.breedType==='coldblood')conditions.push("(LOWER(COALESCE(s.breed,'')) LIKE '%kallblod%' OR LOWER(COALESCE(s.breed,'')) LIKE '%coldblood%')");if(filters.sex==='mare')conditions.push("LOWER(COALESCE(s.sex,'')) IN ('sto','mare','female','f')");if(filters.sex==='stallion')conditions.push("LOWER(COALESCE(s.sex,'')) IN ('hingst','stallion','male','m')");if(filters.sex==='gelding')conditions.push("LOWER(COALESCE(s.sex,'')) IN ('valack','gelding')");if(filters.age!=null){conditions.push('CAST(substr(?,1,4) AS INTEGER)-s.birth_year=?');bindings.push(filters.asOfDate,filters.age);}addDistanceCondition(conditions,bindings,filters.distanceGroup,'s');addCanonicalRaceScopeCondition(conditions,filters.raceScope,'s');if(config.volt&&filters.voltLane!=='all'){conditions.push(`${canonicalStartMethodSql('s')}='volt'`);conditions.push(filters.voltLane==='good'?'s.actual_lane IN (1,6,7)':'s.actual_lane IS NOT NULL AND s.actual_lane NOT IN (1,6,7)');}if(config.volt&&filters.handicapM!=null){conditions.push(`${canonicalStartMethodSql('s')}='volt'`,'s.handicap_m=?','s.actual_start_distance_m IS NOT NULL','s.distance_m IS NOT NULL','s.actual_start_distance_m-s.distance_m=s.handicap_m');bindings.push(filters.handicapM);}
+}
+async function loadRest(env,entityId,filters,config,kind){
+  if(!config.rest)return null;const column=config.entryColumn==='horse_id'?'horse_id':config.entryColumn;const conditions=[`s.${column}=?`],bindings=[entityId];addStagedFilters(conditions,bindings,filters,config);conditions.push(kind==='first'?`s.days_since_previous>=${REST_DAYS}`:`s.previous_gap>=${REST_DAYS} AND s.days_since_previous<${REST_DAYS}`);
+  const row=await env.DB.prepare(`WITH ${restCte()} SELECT COUNT(*) starts,SUM(CASE WHEN s.placing=1 THEN 1 ELSE 0 END) wins,SUM(CASE WHEN s.placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) top3 FROM staged s WHERE ${conditions.join(' AND ')}`).bind(...bindings).first();
+  const starts=Number(row?.starts||0),wins=Number(row?.wins||0),top3=Number(row?.top3||0);return{starts,wins,top3,winRate:starts?wins/starts:null,top3Rate:starts?top3/starts:null};
+}
+
+export async function getCalendarYearDetailStatistics(env,entityType,entityId,options={}){
+  if(!env.DB)throw new Error('DB is not configured');const config=configFor(entityType),id=String(entityId||'').trim();if(!id)return null;
+  const entity=await env.DB.prepare(`SELECT id,canonical_name AS name FROM ${config.table} WHERE id=? LIMIT 1`).bind(id).first();if(!entity)return null;
+  const filters=normalizeFilters(options);await validateTrack(env,filters.trackId);
+  const [core,form,favorite,longshot,firstAfterRest,secondAfterRest]=await Promise.all([loadCore(env,id,filters,config),loadForm(env,id,filters,config),loadMarket(env,id,filters,config,'favorite'),loadMarket(env,id,filters,config,'longshot'),loadRest(env,id,filters,config,'first'),loadRest(env,id,filters,config,'second')]);
+  return{entityType,[config.resultKey]:entity,filters,...core,formLast:form,favoriteResults:favorite,longshotResults:longshot,firstAfterRest,secondAfterRest,definitions:{longshotPercentMax:DRIVER_LONGSHOT_PERCENT_MAX,market:DRIVER_MARKET_DEFINITION_VERSION,voltLaneGood:[1,6,7],restDays:REST_DAYS}};
+}
+
+export const getTrainerCalendarYearDetailStatistics=(env,id,options)=>getCalendarYearDetailStatistics(env,'trainers',id,options);
+export const getDriverCalendarYearDetailStatistics=(env,id,options)=>getCalendarYearDetailStatistics(env,'drivers',id,options);
+export const getHorseCalendarYearDetailStatistics=(env,id,options)=>getCalendarYearDetailStatistics(env,'horses',id,options);
