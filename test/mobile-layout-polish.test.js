@@ -12,7 +12,7 @@ test('mobile layout polish adds viewport, CSS and script exactly once', () => {
   const twice = enhanceMobileLayoutPolish(once);
 
   assert.match(once, /<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">/);
-  assert.equal((twice.match(/kentaurai-mobile-layout-polish-v102/g) || []).length, 2);
+  assert.equal((twice.match(/kentaurai-mobile-layout-polish-v104/g) || []).length, 2);
   assert.equal((twice.match(/name="viewport"/g) || []).length, 1);
   assert.equal(twice, once);
 });
@@ -33,12 +33,12 @@ test('mobile polish keeps wide tables locally scrollable', () => {
   assert.doesNotMatch(html, /\.table-wrap\{max-width:100%!important;overflow-x:hidden!important/);
 });
 
-test('mobile polish keeps all five time periods on one row and six nav items in viewport', () => {
+test('mobile polish keeps six navigation items in viewport without overriding compact Trend period control', () => {
   const html = enhanceMobileLayoutPolish('<html><head></head><body><div id="app"></div></body></html>');
-  assert.match(html, /\.range-group\{[\s\S]*grid-template-columns:repeat\(5,minmax\(0,1fr\)\)!important/);
-  assert.match(html, /\.range-btn\{[\s\S]*white-space:nowrap!important/);
   assert.match(html, /grid-template-columns:repeat\(6,minmax\(0,1fr\)\)!important/);
   assert.match(html, /padding-bottom:calc\(7px \+ env\(safe-area-inset-bottom\)\)!important/);
+  assert.doesNotMatch(html, /\.range-group\{/);
+  assert.doesNotMatch(html, /\.range-btn\{/);
 });
 
 test('mobile polish covers settings controls and narrow Trend filters', () => {
@@ -65,6 +65,14 @@ test('Trend filter alignment observes renders safely through a queued idempotent
   assert.match(html, /if\(badge\.textContent!==String\(count\)\)badge\.textContent=String\(count\)/);
 });
 
+test('mobile filter badge count includes hidden Loppnivå and detail state while panel is closed', () => {
+  const html = enhanceMobileLayoutPolish('<html><head></head><body><div id="app"></div></body></html>');
+  assert.match(html, /const scopeCount=state\.trendRaceScope&&state\.trendRaceScope!=='all'\?1:0/);
+  assert.match(html, /const f=state\.trendDetailFilters\|\|\{\}/);
+  assert.match(html, /\[f\.trackId,f\.raceType,f\.breedType,f\.startMethod,f\.minStarts\]/);
+  assert.match(html, /return scopeCount\+detailCount/);
+});
+
 test('embedded mobile browser script is syntactically valid', () => {
   const html = enhanceMobileLayoutPolish('<html><head></head><body><div id="app"></div></body></html>');
   const scripts = [...html.matchAll(/<script(?: [^>]*)?>([\s\S]*?)<\/script>/g)].map((match) => match[1]);
@@ -85,7 +93,7 @@ test('actual Wrangler worker serves the mobile polish layer after authenticated 
   const response = await worker.fetch(new Request('https://example.test/app/', { headers: { cookie } }), env);
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.equal((html.match(/id="kentaurai-mobile-layout-polish-v102"/g) || []).length, 1);
-  assert.equal((html.match(/id="kentaurai-mobile-layout-polish-v102-script"/g) || []).length, 1);
+  assert.equal((html.match(/id="kentaurai-mobile-layout-polish-v104"/g) || []).length, 1);
+  assert.equal((html.match(/id="kentaurai-mobile-layout-polish-v104-script"/g) || []).length, 1);
   assert.equal((html.match(/name="viewport"/g) || []).length, 1);
 });
