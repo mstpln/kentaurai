@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { ANALYSIS_STEP_1_PROMPT } from '../src/analysis-step-1-prompt.js';
 import { ANALYSIS_STEP_2_PROMPT } from '../src/analysis-step-2-prompt.js';
 import { buildCombinedAnalysisImportPrompt } from '../src/analysis-import-prompt-v2.js';
@@ -49,6 +50,18 @@ test('combined export prompt encodes the locked one-import workflow and contextu
   assert.match(prompt, /komprimera raw_rank till obruten 1\.\.N/);
   assert.match(prompt, /round-synthetic-v85/);
   assert.match(prompt, new RegExp(`sha256:${'a'.repeat(64)}`));
+});
+
+test('combined import keeps risk_profile descriptive instead of imposing a 100-character presentation cap', () => {
+  const source = readFileSync(new URL('../src/analysis-workflow-v2.js', import.meta.url), 'utf8');
+  assert.match(
+    source,
+    /riskProfile: optionalText\(value\.risk_profile \?\? value\.riskProfile, `systems\[\$\{index\}\]\.risk_profile`, 2000\)/
+  );
+  assert.doesNotMatch(
+    source,
+    /riskProfile: optionalText\(value\.risk_profile \?\? value\.riskProfile, `systems\[\$\{index\}\]\.risk_profile`, 100\)/
+  );
 });
 
 test('combined context fingerprint input ignores time-only market metadata but keeps authoritative market observations', () => {
