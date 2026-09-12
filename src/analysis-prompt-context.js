@@ -28,6 +28,7 @@ export async function getAnalysisPromptContext(env, providerValue) {
       provider,
       round_id: round.id,
       parent_submission_id: null,
+      context_fingerprint: context.contextFingerprint,
       context
     };
   }
@@ -43,6 +44,7 @@ export async function getAnalysisPromptContext(env, providerValue) {
     provider,
     round_id: round.id,
     parent_submission_id: parent.submissionId,
+    context_fingerprint: context.contextFingerprint,
     context,
     identity_context: identityContext
   };
