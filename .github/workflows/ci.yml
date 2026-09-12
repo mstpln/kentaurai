@@ -18,8 +18,19 @@ jobs:
         with:
           node-version: 22
 
-      - name: Full test suite
-        run: npm test
+      - name: Analysis tests
+        run: node --test test/analysis*.test.js
+
+      - name: Non-analysis tests
+        run: |
+          set -e
+          for f in test/*.test.js; do
+            case "$f" in
+              test/analysis*.test.js) continue ;;
+            esac
+            echo "Running $f"
+            node --test "$f"
+          done
 
       - name: Syntax - index
         run: node --check src/index.js
