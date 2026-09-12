@@ -66,6 +66,12 @@ function quoteIdentifier(value) {
   return `"${String(value).replaceAll('"', '""')}"`;
 }
 
+export function stableWorkflowFingerprintInput(context) {
+  if (!context?.market) return context;
+  const { asOf: _asOf, cutoff: _cutoff, ...stableMarket } = context.market;
+  return { ...context, market: stableMarket };
+}
+
 async function nextAnalyzableRound(env) {
   const row = await env.DB.prepare(`
     SELECT gr.id, gr.game_type, gr.round_date, gr.scheduled_start_at, gr.bet_stop_at, gr.status
@@ -166,7 +172,7 @@ async function workflowContext(env, roundId = null, includeMarket = true) {
   return {
     ...stable,
     generatedAt,
-    contextFingerprint: await sha256(stable)
+    contextFingerprint: await sha256(stableWorkflowFingerprintInput(stable))
   };
 }
 
