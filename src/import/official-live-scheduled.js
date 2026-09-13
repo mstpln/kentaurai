@@ -198,6 +198,16 @@ export async function selectPendingOfficialGameSource(env) {
     FROM source_records sr
     WHERE sr.source_type = ? AND sr.quality_status = ?
       AND (sr.external_id LIKE 'game:V85\\_%' ESCAPE '\\' OR sr.external_id LIKE 'game:V86\\_%' ESCAPE '\\')
+      AND NOT EXISTS (
+        SELECT 1
+        FROM source_records newer
+        WHERE newer.source_type = sr.source_type
+          AND newer.external_id = sr.external_id
+          AND (
+            newer.fetched_at > sr.fetched_at
+            OR (newer.fetched_at = sr.fetched_at AND newer.id > sr.id)
+          )
+      )
       AND (
         SELECT COUNT(*)
         FROM import_runs ir
@@ -205,7 +215,15 @@ export async function selectPendingOfficialGameSource(env) {
           AND ir.status = 'failed'
           AND json_extract(ir.metadata_json, '$.sourceRecordId') = sr.id
       ) < ?
-    ORDER BY sr.fetched_at, sr.id
+    ORDER BY
+      CASE WHEN substr(sr.external_id, 10, 10) >= date('now') THEN 0 ELSE 1 END,
+      CASE WHEN EXISTS (
+        SELECT 1 FROM game_rounds gr WHERE gr.id = substr(sr.external_id, 6)
+      ) THEN 1 ELSE 0 END,
+      CASE WHEN substr(sr.external_id, 10, 10) >= date('now') THEN substr(sr.external_id, 10, 10) END ASC,
+      CASE WHEN substr(sr.external_id, 10, 10) < date('now') THEN substr(sr.external_id, 10, 10) END DESC,
+      sr.fetched_at DESC,
+      sr.id DESC
     LIMIT 1
   `).bind(SOURCE_TYPE, PENDING_QUALITY, AUTO_NORMALIZE_SOURCE_TYPE, MAX_AUTO_NORMALIZE_FAILURES).first();
   return pending || selectExhaustedKnownSourceGap(env);
