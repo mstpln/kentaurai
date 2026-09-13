@@ -48,6 +48,7 @@ async function raceMetrics(env) {
     'distance_m',
     'start_method',
     'field_size',
+    'starters_declared',
     'first_prize_sek',
     'race_name',
     'main_class',
@@ -56,16 +57,45 @@ async function raceMetrics(env) {
   ]);
 }
 
+async function roundMetrics(env) {
+  return aggregateFieldMetrics(env, 'game_rounds', [
+    'primary_track_id',
+    'scheduled_start_at',
+    'bet_stop_at',
+    'jackpot_sek',
+    'turnover_sek',
+    'payout_json',
+    'status'
+  ], "game_type IN ('V85','V86')");
+}
+
 async function horseMetrics(env) {
   return aggregateFieldMetrics(env, 'horses', [
     'sex',
     'birth_year',
     'breed',
+    'career_earnings_sek',
+    'record_text',
     'current_trainer_id',
     'home_track_id',
     'country_code',
     'current_start_points',
     'current_start_points_observed_at'
+  ]);
+}
+
+async function driverMetrics(env) {
+  return aggregateFieldMetrics(env, 'drivers', [
+    'country_code',
+    'home_track_id',
+    'active'
+  ]);
+}
+
+async function trainerMetrics(env) {
+  return aggregateFieldMetrics(env, 'trainers', [
+    'country_code',
+    'active'
   ]);
 }
 
@@ -277,22 +307,37 @@ async function observationMetrics(env) {
   `).all();
   const byEntityType = {};
   for (const row of results || []) byEntityType[String(row.entity_type)] = finiteNumber(row.n);
-  const validJson = await count(env, 'SELECT COUNT(*) AS n FROM normalized_observations WHERE json_valid(fields_json)');
-  const prizeText = await count(env, `
-    SELECT COUNT(*) AS n
+
+  const paths = await env.DB.prepare(`
+    SELECT
+      COUNT(*) AS valid_json,
+      SUM(CASE WHEN entity_type = 'race' AND json_type(fields_json, '$.prizeText') = 'text' THEN 1 ELSE 0 END) AS race_prize_text,
+      SUM(CASE WHEN entity_type = 'race' AND json_type(fields_json, '$.terms') = 'array' THEN 1 ELSE 0 END) AS race_terms,
+      SUM(CASE WHEN entity_type = 'horse' AND json_type(fields_json, '$.ageYears') IN ('integer','real') THEN 1 ELSE 0 END) AS horse_age_years,
+      SUM(CASE WHEN entity_type = 'horse' AND json_type(fields_json, '$.careerEarningsSek') IN ('integer','real') THEN 1 ELSE 0 END) AS horse_career_earnings,
+      SUM(CASE WHEN entity_type = 'horse' AND json_type(fields_json, '$.homeTrackExternalId') = 'text' THEN 1 ELSE 0 END) AS horse_home_track,
+      SUM(CASE WHEN entity_type = 'driver' AND json_type(fields_json, '$.homeTrackExternalId') = 'text' THEN 1 ELSE 0 END) AS driver_home_track,
+      SUM(CASE WHEN entity_type = 'trainer' AND json_type(fields_json, '$.homeTrackExternalId') = 'text' THEN 1 ELSE 0 END) AS trainer_home_track,
+      SUM(CASE WHEN entity_type = 'race_entry' AND json_type(fields_json, '$.scratchSemanticsVerified') IN ('true','false') THEN 1 ELSE 0 END) AS entry_scratch_semantics
     FROM (
-      SELECT fields_json
+      SELECT entity_type, fields_json
       FROM normalized_observations
-      WHERE entity_type = 'race' AND json_valid(fields_json)
+      WHERE json_valid(fields_json)
     )
-    WHERE json_type(fields_json, '$.prizeText') = 'text'
-  `);
-  const raceObservations = finiteNumber(byEntityType.race);
+  `).first();
+
   return {
     total,
     by_entity_type: byEntityType,
-    valid_fields_json: metric(validJson, total),
-    race_prize_text: metric(prizeText, raceObservations)
+    valid_fields_json: metric(paths?.valid_json, total),
+    race_prize_text: metric(paths?.race_prize_text, byEntityType.race),
+    race_terms: metric(paths?.race_terms, byEntityType.race),
+    horse_age_years: metric(paths?.horse_age_years, byEntityType.horse),
+    horse_career_earnings: metric(paths?.horse_career_earnings, byEntityType.horse),
+    horse_home_track: metric(paths?.horse_home_track, byEntityType.horse),
+    driver_home_track: metric(paths?.driver_home_track, byEntityType.driver),
+    trainer_home_track: metric(paths?.trainer_home_track, byEntityType.trainer),
+    race_entry_scratch_semantics: metric(paths?.entry_scratch_semantics, byEntityType.race_entry)
   };
 }
 
@@ -309,16 +354,26 @@ async function marketMetrics(env) {
     SELECT COUNT(*) AS rows, COUNT(DISTINCT bs.race_entry_id) AS covered_entries
     FROM betting_snapshots bs
     JOIN game_rounds gr ON gr.id = bs.game_round_id
+    JOIN race_entries re ON re.id = bs.race_entry_id
+    JOIN game_legs gl
+      ON gl.game_round_id = bs.game_round_id
+     AND gl.leg_number = bs.leg_number
+     AND gl.race_id = re.race_id
     WHERE gr.game_type IN ('V85','V86')
+      AND COALESCE(re.scratched, 0) = 0
   `).first();
   const oddsRow = await env.DB.prepare(`
     SELECT COUNT(*) AS rows, COUNT(DISTINCT os.race_entry_id) AS covered_entries
     FROM odds_snapshots os
     JOIN race_entries re ON re.id = os.race_entry_id
-    JOIN game_legs gl ON gl.race_id = re.race_id
-    JOIN game_rounds gr ON gr.id = gl.game_round_id
-    WHERE gr.game_type IN ('V85','V86')
-      AND COALESCE(re.scratched, 0) = 0
+    WHERE COALESCE(re.scratched, 0) = 0
+      AND EXISTS (
+        SELECT 1
+        FROM game_legs gl
+        JOIN game_rounds gr ON gr.id = gl.game_round_id
+        WHERE gl.race_id = re.race_id
+          AND gr.game_type IN ('V85','V86')
+      )
   `).first();
   return {
     eligible_v85_v86_entries: eligibleGameEntries,
@@ -412,7 +467,10 @@ export async function buildDataCoverageReport(env, generatedAt = new Date().toIS
 
   const [
     races,
+    rounds,
     horses,
+    drivers,
+    trainers,
     entries,
     results,
     equipment,
@@ -428,7 +486,10 @@ export async function buildDataCoverageReport(env, generatedAt = new Date().toIS
     backfills
   ] = await Promise.all([
     raceMetrics(env),
+    roundMetrics(env),
     horseMetrics(env),
+    driverMetrics(env),
+    trainerMetrics(env),
     entryMetrics(env),
     resultMetrics(env),
     equipmentMetrics(env),
@@ -456,7 +517,10 @@ export async function buildDataCoverageReport(env, generatedAt = new Date().toIS
     population: Object.fromEntries(Object.entries(population || {}).map(([key, value]) => [key, finiteNumber(value)])),
     coverage: {
       races: races.fields,
+      game_rounds: rounds.fields,
       horses: horses.fields,
+      drivers: drivers.fields,
+      trainers: trainers.fields,
       race_entries: entries.fields,
       race_results: results.fields,
       equipment,
