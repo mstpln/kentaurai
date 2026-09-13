@@ -10,6 +10,40 @@ import {
 import { getTrainerCalendarHomeTrackResults } from './trainer-calendar-home-statistics.js';
 import { enhanceEntityDetailStatisticsHtml } from './entity-detail-statistics-ui.js';
 
+const dataCoverageUiStyle = `
+<style id="kentaurai-data-coverage-ui-style">
+.data-coverage-card .settings-card-body{display:grid;gap:10px}.data-coverage-card .settings-help{margin-top:0;max-width:720px}
+</style>`;
+
+const dataCoverageUiScript = `
+<script id="kentaurai-data-coverage-ui-script">
+(function(){
+function addCoverageCard(){
+  const layout=document.querySelector('.settings-layout');
+  if(!layout||document.getElementById('dataCoverageAuditCard')||document.getElementById('exportProvider'))return;
+  const headings=[...layout.querySelectorAll('.settings-card-head h2')].map(node=>node.textContent.trim());
+  if(!headings.includes('Datamängd'))return;
+  const section=document.createElement('section');
+  section.className='settings-section settings-card data-coverage-card';
+  section.id='dataCoverageAuditCard';
+  section.innerHTML='<div class="settings-card-head"><h2>Datatäckning</h2><p>Skapa en aggregerad rapport över vad KentaurAI faktiskt har lagrat i databasen.</p></div><div class="settings-card-body"><div class="settings-actions"><button class="settings-secondary" id="downloadDataCoverage" type="button">Hämta datatäckningsrapport</button></div><div class="settings-help">Rapporten innehåller endast aggregerade täckningsmått och inga radvisa namn, interna ID:n, URL:er, rådata eller redaktionell proveniens.</div></div>';
+  const footer=layout.querySelector('.settings-footer');
+  if(footer)layout.insertBefore(section,footer);else layout.appendChild(section);
+  document.getElementById('downloadDataCoverage').onclick=()=>{window.location.href='/app/api/settings/data-coverage'};
+}
+let pending=false;
+function scheduleCoverageCard(){
+  if(pending)return;
+  pending=true;
+  queueMicrotask(()=>{pending=false;addCoverageCard()});
+}
+const app=document.getElementById('app');
+if(app)new MutationObserver(scheduleCoverageCard).observe(app,{childList:true,subtree:true});
+document.addEventListener('click',event=>{if(event.target.closest('.tab[data-tab="data"],#settingsButton'))setTimeout(addCoverageCard,0)});
+addCoverageCard();
+})();
+</script>`;
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
     status,
@@ -56,12 +90,20 @@ function calendarOptions(url) {
   };
 }
 
+function enhanceDataCoverageDownloadHtml(html) {
+  if (typeof html !== 'string' || html.includes('kentaurai-data-coverage-ui-script')) return html;
+  return html
+    .replace('</head>', `${dataCoverageUiStyle}</head>`)
+    .replace('</body>', `${dataCoverageUiScript}</body>`);
+}
+
 async function enhancedAppResponse(request, response) {
   const path = new URL(request.url).pathname;
   if (request.method !== 'GET' || path !== '/app/') return response;
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('text/html')) return response;
-  const body = enhanceEntityDetailStatisticsHtml(await response.text());
+  const baseHtml = enhanceEntityDetailStatisticsHtml(await response.text());
+  const body = enhanceDataCoverageDownloadHtml(baseHtml);
   const headers = new Headers(response.headers);
   headers.delete('content-length');
   return new Response(body, { status: response.status, statusText: response.statusText, headers });
