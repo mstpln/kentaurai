@@ -1,0 +1,31 @@
+name: Apply v109 transferred patch
+
+on:
+  push:
+    branches:
+      - fix/official-nordic-identity-gaps-v109-final
+    paths:
+      - .github/workflows/apply-v109-transfer.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply reviewed transferred patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d .tmp/v109.patch.gz.b64 | gzip -d > /tmp/v109.patch
+          git apply --exclude=migrations/0014_official_participant_identity.sql /tmp/v109.patch
+          rm -f .tmp/v109.patch.gz.b64 .github/workflows/apply-v109-transfer.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Implement official Nordic participant identity handling"
+          git push origin HEAD:fix/official-nordic-identity-gaps-v109-final
