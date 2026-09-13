@@ -2,16 +2,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 
 class StatementAdapter {
-  constructor(db, sql) {
-    this.db = db;
-    this.sql = sql;
-    this.args = [];
-  }
+  constructor(db, sql) { this.db = db; this.sql = sql; this.args = []; }
   bind(...args) { this.args = args; return this; }
-  async run() {
-    const result = this.db.prepare(this.sql).run(...this.args);
-    return { success: true, meta: { changes: Number(result.changes ?? 0), last_row_id: result.lastInsertRowid == null ? null : Number(result.lastInsertRowid) } };
-  }
+  async run() { const result = this.db.prepare(this.sql).run(...this.args); return { success: true, meta: { changes: Number(result.changes ?? 0), last_row_id: result.lastInsertRowid == null ? null : Number(result.lastInsertRowid) } }; }
   async first() { return this.db.prepare(this.sql).get(...this.args) ?? null; }
   async all() { return { results: this.db.prepare(this.sql).all(...this.args) }; }
 }
@@ -19,54 +12,19 @@ class StatementAdapter {
 class D1Adapter {
   constructor(db) { this.db = db; }
   prepare(sql) { return new StatementAdapter(this.db, sql); }
-  async batch(statements) {
-    this.db.exec('BEGIN');
-    try {
-      const results = [];
-      for (const statement of statements) results.push(await statement.run());
-      this.db.exec('COMMIT');
-      return results;
-    } catch (error) {
-      this.db.exec('ROLLBACK');
-      throw error;
-    }
-  }
+  async batch(statements) { this.db.exec('BEGIN'); try { const results=[]; for (const statement of statements) results.push(await statement.run()); this.db.exec('COMMIT'); return results; } catch (error) { this.db.exec('ROLLBACK'); throw error; } }
 }
 
 export function createTestEnv() {
   const db = new DatabaseSync(':memory:');
   for (const migration of [
-    '../../migrations/0001_core.sql',
-    '../../migrations/0002_reference_round.sql',
-    '../../migrations/0003_nullable_reference_prediction.sql',
-    '../../migrations/0004_official_live_observations.sql',
-    '../../migrations/0005_historical_backfill.sql',
-    '../../migrations/0006_xlabs_backfill.sql',
-    '../../migrations/0007_official_first_prize.sql',
-    '../../migrations/0008_track_contact_metadata.sql',
-    '../../migrations/0009_track_contact_provenance.sql',
-    '../../migrations/0010_horse_start_points.sql',
-    '../../migrations/0011_driver_statistics_indexes.sql',
-    '../../migrations/0012_trainer_statistics_indexes.sql',
-    '../../migrations/0013_combined_analysis_systems.sql'
-  ]) {
-    db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
-  }
+    '../../migrations/0001_core.sql','../../migrations/0002_reference_round.sql','../../migrations/0003_nullable_reference_prediction.sql',
+    '../../migrations/0004_official_live_observations.sql','../../migrations/0005_historical_backfill.sql','../../migrations/0006_xlabs_backfill.sql',
+    '../../migrations/0007_official_first_prize.sql','../../migrations/0008_track_contact_metadata.sql','../../migrations/0009_track_contact_provenance.sql',
+    '../../migrations/0010_horse_start_points.sql','../../migrations/0011_driver_statistics_indexes.sql','../../migrations/0012_trainer_statistics_indexes.sql',
+    '../../migrations/0013_combined_analysis_systems.sql','../../migrations/0014_official_participant_identity.sql'
+  ]) db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
 
   const objects = new Map();
-  return {
-    db,
-    env: {
-      DB: new D1Adapter(db),
-      RAW_BUCKET: {
-        async put(key, body, options) { objects.set(key, { body, options }); },
-        async get(key) {
-          const stored = objects.get(key);
-          if (!stored) return null;
-          return { async text() { return stored.body; } };
-        }
-      }
-    },
-    objects
-  };
+  return { db, env: { DB: new D1Adapter(db), RAW_BUCKET: { async put(key, body, options) { objects.set(key, { body, options }); }, async get(key) { const stored=objects.get(key); if (!stored) return null; return { async text() { return stored.body; } }; } } }, objects };
 }
