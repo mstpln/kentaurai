@@ -5,6 +5,10 @@ function finiteNumber(value) {
   return Number.isFinite(number) ? number : 0;
 }
 
+function quoteIdentifier(value) {
+  return `"${String(value).replaceAll('"', '""')}"`;
+}
+
 async function count(env, sql, ...args) {
   const row = await env.DB.prepare(sql).bind(...args).first();
   return finiteNumber(row?.n);
@@ -21,31 +25,56 @@ function metric(covered, eligible, note = null) {
   };
 }
 
-async function fieldMetric(env, table, field, eligibleSql, eligibleArgs = []) {
-  const eligible = await count(env, eligibleSql, ...eligibleArgs);
-  const covered = await count(
-    env,
-    `SELECT COUNT(*) AS n FROM ${table} WHERE ${field} IS NOT NULL AND rowid IN (${eligibleSql.replace(/^SELECT COUNT\(\*\) AS n FROM [^ ]+ WHERE /, 'SELECT rowid FROM ' + table + ' WHERE ')})`,
-    ...eligibleArgs
+async function aggregateFieldMetrics(env, table, fields, where = '1=1') {
+  const projections = fields.map((field, index) =>
+    `SUM(CASE WHEN ${quoteIdentifier(field)} IS NOT NULL THEN 1 ELSE 0 END) AS c${index}`
   );
-  return metric(covered, eligible);
-}
-
-async function simpleFieldMetrics(env, table, fields, where = '1=1') {
-  const eligible = await count(env, `SELECT COUNT(*) AS n FROM ${table} WHERE ${where}`);
+  const row = await env.DB.prepare(`
+    SELECT COUNT(*) AS eligible${projections.length ? `, ${projections.join(', ')}` : ''}
+    FROM ${quoteIdentifier(table)}
+    WHERE ${where}
+  `).first();
+  const eligible = finiteNumber(row?.eligible);
   const result = {};
-  for (const field of fields) {
-    const covered = await count(env, `SELECT COUNT(*) AS n FROM ${table} WHERE ${where} AND ${field} IS NOT NULL`);
-    result[field] = metric(covered, eligible);
-  }
-  return result;
+  fields.forEach((field, index) => { result[field] = metric(row?.[`c${index}`], eligible); });
+  return { eligible, fields: result };
 }
 
-async function entryFieldMetrics(env) {
-  const where = 'scratched = 0';
-  return simpleFieldMetrics(env, 'race_entries', [
+async function raceMetrics(env) {
+  return aggregateFieldMetrics(env, 'races', [
+    'track_id',
+    'race_number',
+    'scheduled_start_at',
+    'distance_m',
+    'start_method',
+    'field_size',
+    'first_prize_sek',
+    'race_name',
+    'main_class',
+    'class_flags_json',
+    'status'
+  ]);
+}
+
+async function horseMetrics(env) {
+  return aggregateFieldMetrics(env, 'horses', [
+    'sex',
+    'birth_year',
+    'breed',
+    'current_trainer_id',
+    'home_track_id',
+    'country_code',
+    'current_start_points',
+    'current_start_points_observed_at'
+  ]);
+}
+
+async function entryMetrics(env) {
+  return aggregateFieldMetrics(env, 'race_entries', [
+    'horse_id',
     'driver_id',
     'trainer_id',
+    'source_start_id',
     'start_number',
     'actual_lane',
     'start_tier',
@@ -53,12 +82,13 @@ async function entryFieldMetrics(env) {
     'springspar',
     'inner_lane',
     'back_row'
-  ], where);
+  ], 'COALESCE(scratched, 0) = 0');
 }
 
-async function resultFieldMetrics(env) {
-  return simpleFieldMetrics(env, 'race_results', [
+async function resultMetrics(env) {
+  return aggregateFieldMetrics(env, 'race_results', [
     'placing',
+    'placing_text',
     'finish_time',
     'km_time',
     'prize_sek',
@@ -74,18 +104,17 @@ async function equipmentMetrics(env) {
   const completedEntries = await count(env, `
     SELECT COUNT(*) AS n
     FROM race_entries re
-    WHERE re.scratched = 0
+    WHERE COALESCE(re.scratched, 0) = 0
       AND EXISTS (SELECT 1 FROM race_results rr WHERE rr.race_entry_id = re.id)
   `);
   const entriesWithEquipment = await count(env, `
     SELECT COUNT(DISTINCT e.race_entry_id) AS n
     FROM equipment e
     JOIN race_entries re ON re.id = e.race_entry_id
-    WHERE re.scratched = 0
+    WHERE COALESCE(re.scratched, 0) = 0
       AND EXISTS (SELECT 1 FROM race_results rr WHERE rr.race_entry_id = re.id)
   `);
-  const rows = await count(env, 'SELECT COUNT(*) AS n FROM equipment');
-  const fields = await simpleFieldMetrics(env, 'equipment', [
+  const aggregate = await aggregateFieldMetrics(env, 'equipment', [
     'shoes_front',
     'shoes_rear',
     'barefoot_front',
@@ -99,9 +128,9 @@ async function equipmentMetrics(env) {
     'verification_status'
   ]);
   return {
-    rows,
+    rows: aggregate.eligible,
     completed_entry_coverage: metric(entriesWithEquipment, completedEntries),
-    fields
+    fields: aggregate.fields
   };
 }
 
@@ -109,18 +138,17 @@ async function xlabsMetrics(env) {
   const completedEntries = await count(env, `
     SELECT COUNT(*) AS n
     FROM race_entries re
-    WHERE re.scratched = 0
+    WHERE COALESCE(re.scratched, 0) = 0
       AND EXISTS (SELECT 1 FROM race_results rr WHERE rr.race_entry_id = re.id)
   `);
   const entriesWithXlabs = await count(env, `
     SELECT COUNT(DISTINCT x.race_entry_id) AS n
     FROM xlabs_data x
     JOIN race_entries re ON re.id = x.race_entry_id
-    WHERE re.scratched = 0
+    WHERE COALESCE(re.scratched, 0) = 0
       AND EXISTS (SELECT 1 FROM race_results rr WHERE rr.race_entry_id = re.id)
   `);
-  const rows = await count(env, 'SELECT COUNT(*) AS n FROM xlabs_data');
-  const fields = await simpleFieldMetrics(env, 'xlabs_data', [
+  const aggregate = await aggregateFieldMetrics(env, 'xlabs_data', [
     'first_200_time',
     'last_200_time',
     'last_400_time',
@@ -139,11 +167,13 @@ async function xlabsMetrics(env) {
     FROM xlabs_data
     WHERE segments_json IS NOT NULL AND json_valid(segments_json)
   `);
-  fields.segments_json_valid = metric(validSegments, rows, 'Valid JSON among all X-Labs rows.');
   return {
-    rows,
+    rows: aggregate.eligible,
     completed_entry_coverage: metric(entriesWithXlabs, completedEntries),
-    fields
+    fields: {
+      ...aggregate.fields,
+      segments_json_valid: metric(validSegments, aggregate.eligible, 'Valid JSON among all X-Labs rows.')
+    }
   };
 }
 
@@ -151,53 +181,58 @@ async function positionMetrics(env) {
   const completedEntries = await count(env, `
     SELECT COUNT(*) AS n
     FROM race_entries re
-    WHERE re.scratched = 0
+    WHERE COALESCE(re.scratched, 0) = 0
       AND EXISTS (SELECT 1 FROM race_results rr WHERE rr.race_entry_id = re.id)
   `);
   const entriesWithPositions = await count(env, `
     SELECT COUNT(DISTINCT rp.race_entry_id) AS n
     FROM race_positions rp
     JOIN race_entries re ON re.id = rp.race_entry_id
-    WHERE re.scratched = 0
+    WHERE COALESCE(re.scratched, 0) = 0
       AND EXISTS (SELECT 1 FROM race_results rr WHERE rr.race_entry_id = re.id)
   `);
-  const rows = await count(env, 'SELECT COUNT(*) AS n FROM race_positions');
+  const aggregate = await aggregateFieldMetrics(env, 'race_positions', [
+    'observed_at_m',
+    'position',
+    'lane',
+    'leader',
+    'pocket',
+    'death_seat',
+    'second_over',
+    'third_over',
+    'wide_trip',
+    'uncovered_move',
+    'traffic_event',
+    'event_json'
+  ]);
   return {
-    rows,
+    rows: aggregate.eligible,
     completed_entry_coverage: metric(entriesWithPositions, completedEntries),
-    fields: await simpleFieldMetrics(env, 'race_positions', [
-      'observed_at_m',
-      'position',
-      'lane',
-      'leader',
-      'pocket',
-      'death_seat',
-      'second_over',
-      'third_over',
-      'wide_trip',
-      'uncovered_move',
-      'traffic_event',
-      'event_json'
-    ])
+    fields: aggregate.fields
   };
 }
 
 async function startPointsMetrics(env) {
   const horses = await count(env, 'SELECT COUNT(*) AS n FROM horses');
+  const row = await env.DB.prepare(`
+    SELECT
+      COUNT(*) AS observations,
+      COUNT(DISTINCT horse_id) AS horses_with_history,
+      SUM(CASE WHEN race_entry_id IS NOT NULL THEN 1 ELSE 0 END) AS linked_observations
+    FROM horse_start_points
+  `).first();
   const current = await count(env, 'SELECT COUNT(*) AS n FROM horses WHERE current_start_points IS NOT NULL');
-  const withHistory = await count(env, 'SELECT COUNT(DISTINCT horse_id) AS n FROM horse_start_points');
-  const observations = await count(env, 'SELECT COUNT(*) AS n FROM horse_start_points');
-  const linked = await count(env, 'SELECT COUNT(*) AS n FROM horse_start_points WHERE race_entry_id IS NOT NULL');
+  const observations = finiteNumber(row?.observations);
   return {
     observations,
     horses_with_current: metric(current, horses),
-    horses_with_history: metric(withHistory, horses),
-    observations_linked_to_entry: metric(linked, observations)
+    horses_with_history: metric(row?.horses_with_history, horses),
+    observations_linked_to_entry: metric(row?.linked_observations, observations)
   };
 }
 
 async function trackMetrics(env) {
-  const fields = await simpleFieldMetrics(env, 'tracks', [
+  const aggregate = await aggregateFieldMetrics(env, 'tracks', [
     'country_code',
     'lap_length_m',
     'home_stretch_m',
@@ -210,7 +245,26 @@ async function trackMetrics(env) {
     'start_notes',
     'track_notes'
   ]);
-  return { total: await count(env, 'SELECT COUNT(*) AS n FROM tracks'), fields };
+  return { total: aggregate.eligible, fields: aggregate.fields };
+}
+
+async function raceConditionMetrics(env) {
+  const races = await count(env, 'SELECT COUNT(*) AS n FROM races');
+  const aggregate = await aggregateFieldMetrics(env, 'race_conditions', [
+    'track_status',
+    'temperature_c',
+    'wind_mps',
+    'wind_direction',
+    'precipitation_mm',
+    'weather_text',
+    'day_profile_json'
+  ]);
+  const coveredRaces = await count(env, 'SELECT COUNT(DISTINCT race_id) AS n FROM race_conditions');
+  return {
+    rows: aggregate.eligible,
+    race_coverage: metric(coveredRaces, races),
+    fields: aggregate.fields
+  };
 }
 
 async function observationMetrics(env) {
@@ -226,10 +280,12 @@ async function observationMetrics(env) {
   const validJson = await count(env, 'SELECT COUNT(*) AS n FROM normalized_observations WHERE json_valid(fields_json)');
   const prizeText = await count(env, `
     SELECT COUNT(*) AS n
-    FROM normalized_observations
-    WHERE entity_type = 'race'
-      AND json_valid(fields_json)
-      AND json_type(fields_json, '$.prizeText') = 'text'
+    FROM (
+      SELECT fields_json
+      FROM normalized_observations
+      WHERE entity_type = 'race' AND json_valid(fields_json)
+    )
+    WHERE json_type(fields_json, '$.prizeText') = 'text'
   `);
   const raceObservations = finiteNumber(byEntityType.race);
   return {
@@ -241,24 +297,74 @@ async function observationMetrics(env) {
 }
 
 async function marketMetrics(env) {
-  const allEntries = await count(env, 'SELECT COUNT(*) AS n FROM race_entries WHERE scratched = 0');
-  const bettingRows = await count(env, 'SELECT COUNT(*) AS n FROM betting_snapshots');
-  const bettingEntries = await count(env, 'SELECT COUNT(DISTINCT race_entry_id) AS n FROM betting_snapshots');
-  const oddsRows = await count(env, 'SELECT COUNT(*) AS n FROM odds_snapshots');
-  const oddsEntries = await count(env, 'SELECT COUNT(DISTINCT race_entry_id) AS n FROM odds_snapshots');
+  const eligibleGameEntries = await count(env, `
+    SELECT COUNT(DISTINCT re.id) AS n
+    FROM game_rounds gr
+    JOIN game_legs gl ON gl.game_round_id = gr.id
+    JOIN race_entries re ON re.race_id = gl.race_id
+    WHERE gr.game_type IN ('V85','V86')
+      AND COALESCE(re.scratched, 0) = 0
+  `);
+  const bettingRow = await env.DB.prepare(`
+    SELECT COUNT(*) AS rows, COUNT(DISTINCT bs.race_entry_id) AS covered_entries
+    FROM betting_snapshots bs
+    JOIN game_rounds gr ON gr.id = bs.game_round_id
+    WHERE gr.game_type IN ('V85','V86')
+  `).first();
+  const oddsRow = await env.DB.prepare(`
+    SELECT COUNT(*) AS rows, COUNT(DISTINCT os.race_entry_id) AS covered_entries
+    FROM odds_snapshots os
+    JOIN race_entries re ON re.id = os.race_entry_id
+    JOIN game_legs gl ON gl.race_id = re.race_id
+    JOIN game_rounds gr ON gr.id = gl.game_round_id
+    WHERE gr.game_type IN ('V85','V86')
+      AND COALESCE(re.scratched, 0) = 0
+  `).first();
   return {
-    betting_snapshots: { rows: bettingRows, entry_coverage: metric(bettingEntries, allEntries) },
-    odds_snapshots: { rows: oddsRows, entry_coverage: metric(oddsEntries, allEntries) }
+    eligible_v85_v86_entries: eligibleGameEntries,
+    betting_snapshots: {
+      rows: finiteNumber(bettingRow?.rows),
+      entry_coverage: metric(bettingRow?.covered_entries, eligibleGameEntries)
+    },
+    odds_snapshots: {
+      rows: finiteNumber(oddsRow?.rows),
+      entry_coverage: metric(oddsRow?.covered_entries, eligibleGameEntries)
+    }
   };
 }
 
 async function classificationMetrics(env) {
   const races = await count(env, 'SELECT COUNT(*) AS n FROM races');
-  const stl = await count(env, 'SELECT COUNT(DISTINCT race_id) AS n FROM race_stl_classifications');
-  const typed = await count(env, 'SELECT COUNT(DISTINCT race_id) AS n FROM race_type_classifications');
+  const row = await env.DB.prepare(`
+    SELECT
+      (SELECT COUNT(DISTINCT race_id) FROM race_stl_classifications) AS stl,
+      (SELECT COUNT(DISTINCT race_id) FROM race_type_classifications) AS typed
+  `).first();
   return {
-    stl_classification: metric(stl, races),
-    race_type_classification: metric(typed, races)
+    stl_classification: metric(row?.stl, races),
+    race_type_classification: metric(row?.typed, races)
+  };
+}
+
+async function analysisFeatureMetrics(env) {
+  const entries = await count(env, 'SELECT COUNT(*) AS n FROM race_entries WHERE COALESCE(scratched, 0) = 0');
+  const row = await env.DB.prepare(`
+    SELECT
+      COUNT(*) AS rows,
+      COUNT(DISTINCT race_entry_id) AS covered_entries,
+      COUNT(DISTINCT CASE WHEN feature_version = 'form-v2' THEN race_entry_id END) AS form_entries,
+      COUNT(DISTINCT CASE WHEN feature_version = 'class-exposure-v2' THEN race_entry_id END) AS class_entries,
+      COUNT(DISTINCT CASE WHEN feature_version = 'development-v2' THEN race_entry_id END) AS development_entries
+    FROM analysis_features
+  `).first();
+  return {
+    rows: finiteNumber(row?.rows),
+    any_feature_entry_coverage: metric(row?.covered_entries, entries),
+    known_versions: {
+      'form-v2': metric(row?.form_entries, entries),
+      'class-exposure-v2': metric(row?.class_entries, entries),
+      'development-v2': metric(row?.development_entries, entries)
+    }
   };
 }
 
@@ -290,51 +396,51 @@ async function backfillMetrics(env) {
 export async function buildDataCoverageReport(env, generatedAt = new Date().toISOString()) {
   if (!env.DB) throw new Error('DB is not configured');
 
+  const population = await env.DB.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM races) AS races,
+      (SELECT COUNT(DISTINCT re.race_id) FROM race_entries re JOIN race_results rr ON rr.race_entry_id = re.id) AS completed_races,
+      (SELECT COUNT(*) FROM race_entries) AS race_entries,
+      (SELECT COUNT(*) FROM race_entries WHERE COALESCE(scratched, 0) = 0) AS non_scratched_entries,
+      (SELECT COUNT(*) FROM race_results) AS race_result_rows,
+      (SELECT COUNT(*) FROM horses) AS horses,
+      (SELECT COUNT(*) FROM drivers) AS drivers,
+      (SELECT COUNT(*) FROM trainers) AS trainers,
+      (SELECT COUNT(*) FROM tracks) AS tracks,
+      (SELECT COUNT(*) FROM game_rounds WHERE game_type IN ('V85','V86')) AS v85_v86_rounds
+  `).first();
+
   const [
     races,
-    completedRaces,
-    entries,
-    activeEntries,
-    resultRows,
     horses,
-    drivers,
-    trainers,
-    tracks,
-    rounds,
-    raceFields,
-    entryFields,
-    resultFields,
+    entries,
+    results,
     equipment,
     xlabs,
     positions,
     startPoints,
-    trackCoverage,
+    tracks,
+    raceConditions,
     observations,
     market,
     classifications,
+    analysisFeatures,
     backfills
   ] = await Promise.all([
-    count(env, 'SELECT COUNT(*) AS n FROM races'),
-    count(env, 'SELECT COUNT(DISTINCT re.race_id) AS n FROM race_entries re JOIN race_results rr ON rr.race_entry_id = re.id'),
-    count(env, 'SELECT COUNT(*) AS n FROM race_entries'),
-    count(env, 'SELECT COUNT(*) AS n FROM race_entries WHERE scratched = 0'),
-    count(env, 'SELECT COUNT(*) AS n FROM race_results'),
-    count(env, 'SELECT COUNT(*) AS n FROM horses'),
-    count(env, 'SELECT COUNT(*) AS n FROM drivers'),
-    count(env, 'SELECT COUNT(*) AS n FROM trainers'),
-    count(env, 'SELECT COUNT(*) AS n FROM tracks'),
-    count(env, "SELECT COUNT(*) AS n FROM game_rounds WHERE game_type IN ('V85','V86')"),
-    simpleFieldMetrics(env, 'races', ['track_id','race_number','scheduled_start_at','distance_m','start_method','field_size','first_prize_sek','race_name','main_class','class_flags_json','status']),
-    entryFieldMetrics(env),
-    resultFieldMetrics(env),
+    raceMetrics(env),
+    horseMetrics(env),
+    entryMetrics(env),
+    resultMetrics(env),
     equipmentMetrics(env),
     xlabsMetrics(env),
     positionMetrics(env),
     startPointsMetrics(env),
     trackMetrics(env),
+    raceConditionMetrics(env),
     observationMetrics(env),
     marketMetrics(env),
     classificationMetrics(env),
+    analysisFeatureMetrics(env),
     backfillMetrics(env)
   ]);
 
@@ -344,32 +450,25 @@ export async function buildDataCoverageReport(env, generatedAt = new Date().toIS
     scope: {
       storage: 'D1 aggregate coverage only',
       privacy: 'No row-level racing data, names, IDs, URLs, raw payloads or editorial provenance are included.',
-      purpose: 'Measure what KentaurAI already stores before designing new derived analysis features.'
+      purpose: 'Measure what KentaurAI already stores before designing new derived analysis features.',
+      denominator_note: 'Field coverage uses the table population unless a more specific eligible population is named.'
     },
-    population: {
-      races,
-      completed_races: completedRaces,
-      race_entries: entries,
-      non_scratched_entries: activeEntries,
-      race_result_rows: resultRows,
-      horses,
-      drivers,
-      trainers,
-      tracks,
-      v85_v86_rounds: rounds
-    },
+    population: Object.fromEntries(Object.entries(population || {}).map(([key, value]) => [key, finiteNumber(value)])),
     coverage: {
-      races: raceFields,
-      race_entries: entryFields,
-      race_results: resultFields,
+      races: races.fields,
+      horses: horses.fields,
+      race_entries: entries.fields,
+      race_results: results.fields,
       equipment,
       xlabs,
       race_positions: positions,
       start_points: startPoints,
-      tracks: trackCoverage,
+      tracks,
+      race_conditions: raceConditions,
       normalized_observations: observations,
       market,
-      classifications
+      classifications,
+      analysis_features: analysisFeatures
     },
     backfills
   };
