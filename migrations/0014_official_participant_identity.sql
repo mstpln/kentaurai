@@ -36,12 +36,7 @@ INSERT INTO race_entries_v2 (
 SELECT
   id, race_id, horse_id, driver_id, trainer_id, start_number, actual_lane,
   start_tier, handicap_m, actual_start_distance_m, springspar, inner_lane,
-  back_row,
-  CASE
-    WHEN data_quality = 'official_declared_start_scratch_unverified' THEN NULL
-    ELSE scratched
-  END,
-  scratch_reason, data_quality, created_at, updated_at
+  back_row, scratched, scratch_reason, data_quality, created_at, updated_at
 FROM race_entries;
 
 DROP TABLE race_entries;
