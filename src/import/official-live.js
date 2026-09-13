@@ -1,5 +1,6 @@
 import { stableId } from '../ids.js';
 import { finishImportRun, startImportRun } from './common.js';
+import { markOfficialSourceNormalized, officialSourceCanNormalize } from './official-source-gap.js';
 
 const SOURCE_TYPE = 'official_provider';
 const EXTERNAL_SOURCE = 'official';
@@ -38,6 +39,15 @@ function externalId(value, label) {
   if (value == null || String(value).trim() === '') throw new Error(`${label} is required`);
   return String(value).trim();
 }
+function participantExternalId(value) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  const numeric = Number(text);
+  if (Number.isFinite(numeric) && numeric <= 0) return null;
+  return text;
+}
+
 function personName(person) {
   if (!person || typeof person !== 'object') return null;
   const full = [maybeText(person.firstName), maybeText(person.lastName)].filter(Boolean).join(' ');
@@ -123,8 +133,8 @@ async function upsertTrack(env, trackValue, ctx, { observe = false } = {}) {
 async function upsertPerson(env, kind, personValue, ctx) {
   if (!personValue || typeof personValue !== 'object') return null;
   const name = personName(personValue);
-  if (!name || personValue.id == null) return null;
-  const ext = externalId(personValue.id, `${kind}.id`);
+  const ext = participantExternalId(personValue.id);
+  if (!name || !ext) return null;
   const config = kind === 'driver'
     ? { table: 'drivers', externalTable: 'driver_external_ids', idColumn: 'driver_id' }
     : { table: 'trainers', externalTable: 'trainer_external_ids', idColumn: 'trainer_id' };
@@ -169,8 +179,9 @@ async function upsertPerson(env, kind, personValue, ctx) {
 
 async function upsertHorse(env, horseValue, trainerId, ctx) {
   const horse = requireObject(horseValue, 'horse');
-  const ext = externalId(horse.id, 'horse.id');
   const name = requireText(horse.name, 'horse.name');
+  const ext = participantExternalId(horse.id);
+  if (!ext) return null;
   let id = await resolveExternalMapping(env, 'horse_external_ids', 'horse_id', ext);
   if (!id) id = stableId('horse', EXTERNAL_SOURCE, ext);
   const priorName = await existingName(env, 'horses', id);
@@ -224,8 +235,10 @@ function validateStart(startValue, raceIndex, startIndex) {
   if (start.postPosition != null) positiveInteger(start.postPosition, `races[${raceIndex}].starts[${startIndex}].postPosition`);
   if (start.distance != null) positiveInteger(start.distance, `races[${raceIndex}].starts[${startIndex}].distance`);
   const horse = requireObject(start.horse, `races[${raceIndex}].starts[${startIndex}].horse`);
-  externalId(horse.id, `races[${raceIndex}].starts[${startIndex}].horse.id`);
   requireText(horse.name, `races[${raceIndex}].starts[${startIndex}].horse.name`);
+  if (start.scratched != null && typeof start.scratched !== 'boolean') {
+    throw new Error(`races[${raceIndex}].starts[${startIndex}].scratched must be boolean`);
+  }
   return start;
 }
 
@@ -345,6 +358,29 @@ async function insertOddsSnapshot(env, raceEntryId, marketType, rawValue, ctx) {
   const inserted = Number(result.meta?.changes ?? 0);
   ctx.counts.inserted += inserted;
   return inserted;
+}
+
+async function resolveRaceEntryId(env, raceId, start, horseId) {
+  const sourceStartId = String(start.id).trim();
+  let existing = await env.DB.prepare('SELECT id FROM race_entries WHERE race_id = ? AND source_start_id = ? LIMIT 1')
+    .bind(raceId, sourceStartId).first();
+  if (!existing && horseId) {
+    existing = await env.DB.prepare('SELECT id FROM race_entries WHERE race_id = ? AND horse_id = ? LIMIT 1')
+      .bind(raceId, horseId).first();
+  }
+  if (!existing) {
+    existing = await env.DB.prepare(`
+      SELECT re.id
+      FROM race_entries re
+      LEFT JOIN horses h ON h.id = re.horse_id
+      WHERE re.race_id = ?
+        AND re.start_number = ?
+        AND re.source_start_id IS NULL
+        AND COALESCE(re.declared_horse_name, h.canonical_name) = ?
+      LIMIT 1
+    `).bind(raceId, start.number, String(start.horse?.name || '').trim()).first();
+  }
+  return existing?.id || stableId('entry', EXTERNAL_SOURCE, raceId, sourceStartId);
 }
 
 async function mapRace(env, game, race, legNumber, ctx) {

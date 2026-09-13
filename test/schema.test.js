@@ -7,7 +7,7 @@ const migrations = [
   '0001_core.sql','0002_reference_round.sql','0003_nullable_reference_prediction.sql','0004_official_live_observations.sql',
   '0005_historical_backfill.sql','0006_xlabs_backfill.sql','0007_official_first_prize.sql','0008_track_contact_metadata.sql',
   '0009_track_contact_provenance.sql','0010_horse_start_points.sql','0011_driver_statistics_indexes.sql','0012_trainer_statistics_indexes.sql',
-  '0013_combined_analysis_systems.sql'
+  '0013_combined_analysis_systems.sql','0014_official_participant_identity.sql'
 ];
 const sql = migrations.map((name) => readFileSync(new URL(`../migrations/${name}`, import.meta.url), 'utf8')).join('\n');
 
@@ -15,6 +15,9 @@ test('core migrations apply cleanly and create required tables', () => {
   const db = new DatabaseSync(':memory:');db.exec(sql);
   const names = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name));
   for (const required of ['horses','drivers','trainers','tracks','races','race_entries','race_results','xlabs_data','game_rounds','betting_snapshots','editorial_items','analysis_features','ai_race_analyses','ai_horse_predictions','systems','post_race_reviews','import_runs','learning_hypotheses','learning_observations','model_change_log','reference_round_exports','reference_observations','normalized_observations','historical_backfill_jobs','xlabs_backfill_jobs','race_stl_classifications','race_type_classifications','horse_start_points','horse_start_point_source_sync']) assert.ok(names.has(required),`missing ${required}`);
+  const entryColumns = new Map(db.prepare('PRAGMA table_info(race_entries)').all().map(r=>[r.name,r]));
+  assert.equal(entryColumns.get('horse_id').notnull,0);
+  for (const required of ['source_start_id','declared_horse_name','declared_driver_name','declared_trainer_name']) assert.ok(entryColumns.has(required),`missing race_entries.${required}`);
 });
 
 test('X-Labs backfill migration persists scope, retry scheduling and lease checkpoints', () => {const db=new DatabaseSync(':memory:');db.exec(sql);const columns=new Set(db.prepare('PRAGMA table_info(xlabs_backfill_jobs)').all().map(r=>r.name));for(const required of ['scope','next_date','next_race_index','retry_after','lease_token','lease_until'])assert.ok(columns.has(required),`missing xlabs_backfill_jobs.${required}`);assert.throws(()=>db.prepare(`INSERT INTO xlabs_backfill_jobs (id, scope, start_date, end_date, next_date) VALUES ('bad-scope', 'unsupported', '2099-01-01', '2099-01-01', '2099-01-01')`).run(),/CHECK constraint failed/);});
@@ -31,13 +34,4 @@ test('driver and trainer statistics migrations add only query indexes', () => {c
 
 test('reference prediction schema allows a null probability for entries without a pre-race probability', () => {const db=new DatabaseSync(':memory:');db.exec(sql);const c=db.prepare('PRAGMA table_info(ai_horse_predictions)').all().find(column=>column.name==='win_probability');assert.equal(c.notnull,0);});
 
-test('systems schema stores combined-workflow audit fields and permits backend-validated two or three spikes', () => {
-  const db=new DatabaseSync(':memory:');db.exec(sql);
-  db.prepare(`INSERT INTO game_rounds (id, game_type, round_date) VALUES ('round-1', 'V85', '2026-09-06')`).run();
-  const columns=new Set(db.prepare('PRAGMA table_info(systems)').all().map(row=>row.name));
-  assert.ok(columns.has('metrics_json'));
-  assert.ok(columns.has('notes'));
-  assert.doesNotThrow(()=>db.prepare(`INSERT INTO systems (id, game_round_id, system_type, budget_sek, row_count, spike_count, created_at, notes) VALUES ('s1', 'round-1', 'main', 200, 400, 2, '2026-09-06T00:00:00Z', 'synthetic reason')`).run());
-  assert.doesNotThrow(()=>db.prepare(`INSERT INTO systems (id, game_round_id, system_type, budget_sek, row_count, spike_count, created_at) VALUES ('s2', 'round-1', 'main', 200, 400, 3, '2026-09-06T00:00:00Z')`).run());
-  assert.throws(()=>db.prepare(`INSERT INTO systems (id, game_round_id, system_type, budget_sek, row_count, spike_count, created_at) VALUES ('s3', 'round-1', 'main', 200, 400, 1, '2026-09-06T00:00:00Z')`).run(),/CHECK constraint failed/);
-});
+test('systems schema stores combined-workflow audit fields and permits backend-validated two or three spikes', () => {const db=new DatabaseSync(':memory:');db.exec(sql);db.prepare(`INSERT INTO game_rounds (id, game_type, round_date) VALUES ('round-1', 'V85', '2026-09-06')`).run();const columns=new Set(db.prepare('PRAGMA table_info(systems)').all().map(row=>row.name));assert.ok(columns.has('metrics_json'));assert.ok(columns.has('notes'));assert.doesNotThrow(()=>db.prepare(`INSERT INTO systems (id, game_round_id, system_type, budget_sek, row_count, spike_count, created_at, notes) VALUES ('s1', 'round-1', 'main', 200, 400, 2, '2026-09-06T00:00:00Z', 'synthetic reason')`).run());assert.doesNotThrow(()=>db.prepare(`INSERT INTO systems (id, game_round_id, system_type, budget_sek, row_count, spike_count, created_at) VALUES ('s2', 'round-1', 'main', 200, 400, 3, '2026-09-06T00:00:00Z')`).run());assert.throws(()=>db.prepare(`INSERT INTO systems (id, game_round_id, system_type, budget_sek, row_count, spike_count, created_at) VALUES ('s3', 'round-1', 'main', 200, 400, 1, '2026-09-06T00:00:00Z')`).run(),/CHECK constraint failed/);});

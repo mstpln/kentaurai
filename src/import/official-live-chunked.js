@@ -1,6 +1,7 @@
 import { stableId } from '../ids.js';
 import { finishImportRun, startImportRun } from './common.js';
 import { validateOfficialGamePayload } from './official-live.js';
+import { markOfficialSourceNormalized, officialSourceCanNormalize } from './official-source-gap.js';
 
 const SOURCE_TYPE = 'official_provider';
 const EXTERNAL_SOURCE = 'official';
@@ -23,6 +24,15 @@ function personName(person) {
   if (!person || typeof person !== 'object') return null;
   const full = [maybeText(person.firstName), maybeText(person.lastName)].filter(Boolean).join(' ');
   return full || maybeText(person.shortName);
+}
+
+export function participantExternalId(value) {
+  if (value == null) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+  const numeric = Number(text);
+  if (Number.isFinite(numeric) && numeric <= 0) return null;
+  return text;
 }
 
 function scaledHundredths(value, label, max = null) {
@@ -127,10 +137,10 @@ export async function upsertTrack(env, trackValue, ctx, { observe = false } = {}
 }
 
 export async function upsertPerson(env, kind, personValue, ctx) {
-  if (!personValue || typeof personValue !== 'object' || personValue.id == null) return null;
+  if (!personValue || typeof personValue !== 'object') return null;
   const name = personName(personValue);
-  if (!name) return null;
-  const ext = String(personValue.id);
+  const ext = participantExternalId(personValue.id);
+  if (!name || !ext) return null;
   const config = kind === 'driver'
     ? { table: 'drivers', externalTable: 'driver_external_ids', idColumn: 'driver_id' }
     : { table: 'trainers', externalTable: 'trainer_external_ids', idColumn: 'trainer_id' };
@@ -180,9 +190,10 @@ export async function upsertPerson(env, kind, personValue, ctx) {
 }
 
 export async function upsertHorse(env, horse, trainerId, ctx) {
-  const ext = String(horse.id);
   const name = maybeText(horse.name);
   if (!name) throw new Error('horse name is required');
+  const ext = participantExternalId(horse.id);
+  if (!ext) return null;
   const mapped = await resolveMappedEntity(env, 'horse_external_ids', 'horse_id', 'horses', ext);
   const id = mapped?.id || stableId('horse', EXTERNAL_SOURCE, ext);
   const priorName = maybeText(mapped?.canonical_name);
@@ -252,6 +263,29 @@ export async function upsertHorse(env, horse, trainerId, ctx) {
     damsireName: maybeText(pedigree.grandfather?.name)
   }, nameConflict ? 'source_conflict' : NORMALIZED_QUALITY);
   return id;
+}
+
+export async function resolveRaceEntryId(env, raceId, start, horseId) {
+  const sourceStartId = String(start.id).trim();
+  let existing = await env.DB.prepare('SELECT id FROM race_entries WHERE race_id = ? AND source_start_id = ? LIMIT 1')
+    .bind(raceId, sourceStartId).first();
+  if (!existing && horseId) {
+    existing = await env.DB.prepare('SELECT id FROM race_entries WHERE race_id = ? AND horse_id = ? LIMIT 1')
+      .bind(raceId, horseId).first();
+  }
+  if (!existing) {
+    existing = await env.DB.prepare(`
+      SELECT re.id
+      FROM race_entries re
+      LEFT JOIN horses h ON h.id = re.horse_id
+      WHERE re.race_id = ?
+        AND re.start_number = ?
+        AND re.source_start_id IS NULL
+        AND COALESCE(re.declared_horse_name, h.canonical_name) = ?
+      LIMIT 1
+    `).bind(raceId, start.number, String(start.horse?.name || '').trim()).first();
+  }
+  return existing?.id || stableId('entry', EXTERNAL_SOURCE, raceId, sourceStartId);
 }
 
 export function startPosition(race, start) {
@@ -397,53 +431,64 @@ async function insertOdds(env, raceEntryId, marketType, rawValue, ctx) {
 }
 
 async function mapOneStart(env, game, race, legNumber, start, ctx) {
+  const horseName = maybeText(start.horse?.name);
+  const driverName = personName(start.driver);
+  const trainerName = personName(start.horse?.trainer);
   const trainerId = await upsertPerson(env, 'trainer', start.horse?.trainer, ctx);
   const driverId = await upsertPerson(env, 'driver', start.driver, ctx);
   const horseId = await upsertHorse(env, start.horse, trainerId, ctx);
-  const raceEntryId = stableId('entry', race.id, horseId);
+  const raceEntryId = await resolveRaceEntryId(env, race.id, start, horseId);
   const pos = startPosition(race, start);
+  const scratched = typeof start.scratched === 'boolean' ? Number(start.scratched) : null;
+  const entryQuality = scratched == null ? ENTRY_QUALITY : 'official_declared_start_scratch_source_backed';
 
   await env.DB.prepare(`
     INSERT INTO race_entries
-      (id, race_id, horse_id, driver_id, trainer_id, start_number, actual_lane, start_tier,
+      (id, race_id, horse_id, driver_id, trainer_id, source_start_id, declared_horse_name,
+       declared_driver_name, declared_trainer_name, start_number, actual_lane, start_tier,
        handicap_m, actual_start_distance_m, scratched, scratch_reason, data_quality)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
     ON CONFLICT(id) DO UPDATE SET
-      driver_id = excluded.driver_id,
-      trainer_id = excluded.trainer_id,
+      horse_id = COALESCE(excluded.horse_id, race_entries.horse_id),
+      driver_id = COALESCE(excluded.driver_id, race_entries.driver_id),
+      trainer_id = COALESCE(excluded.trainer_id, race_entries.trainer_id),
+      source_start_id = COALESCE(excluded.source_start_id, race_entries.source_start_id),
+      declared_horse_name = COALESCE(excluded.declared_horse_name, race_entries.declared_horse_name),
+      declared_driver_name = COALESCE(excluded.declared_driver_name, race_entries.declared_driver_name),
+      declared_trainer_name = COALESCE(excluded.declared_trainer_name, race_entries.declared_trainer_name),
       start_number = excluded.start_number,
       actual_lane = excluded.actual_lane,
       start_tier = excluded.start_tier,
       handicap_m = excluded.handicap_m,
       actual_start_distance_m = excluded.actual_start_distance_m,
-      data_quality = excluded.data_quality,
+      scratched = COALESCE(excluded.scratched, race_entries.scratched),
+      data_quality = CASE
+        WHEN excluded.scratched IS NULL AND race_entries.data_quality = 'official_declared_start_scratch_source_backed'
+          THEN race_entries.data_quality
+        ELSE excluded.data_quality
+      END,
       updated_at = CURRENT_TIMESTAMP
   `).bind(
-    raceEntryId,
-    race.id,
-    horseId,
-    driverId,
-    trainerId,
-    start.number,
-    pos.lane,
-    pos.tier,
-    pos.handicapM,
-    pos.actualDistance,
-    ENTRY_QUALITY
+    raceEntryId, race.id, horseId, driverId, trainerId, start.id, horseName, driverName, trainerName,
+    start.number, pos.lane, pos.tier, pos.handicapM, pos.actualDistance, scratched, entryQuality
   ).run();
 
   await recordObservation(env, ctx.counts, 'race_entry', raceEntryId, ctx.sourceRecordId, ctx.observedAt, {
     externalStartId: start.id,
     raceExternalId: race.id,
-    horseExternalId: String(start.horse.id),
-    driverExternalId: start.driver?.id == null ? null : String(start.driver.id),
-    trainerExternalId: start.horse?.trainer?.id == null ? null : String(start.horse.trainer.id),
+    horseExternalId: participantExternalId(start.horse?.id),
+    horseName,
+    driverExternalId: participantExternalId(start.driver?.id),
+    driverName,
+    trainerExternalId: participantExternalId(start.horse?.trainer?.id),
+    trainerName,
     startNumber: start.number,
     postPosition: finiteNumber(start.postPosition),
     actualStartDistanceM: pos.actualDistance,
     handicapM: pos.handicapM,
     startTier: pos.tier,
-    scratchSemanticsVerified: false
+    scratched: scratched == null ? null : Boolean(scratched),
+    scratchSemanticsVerified: scratched != null
   });
 
   await insertEquipment(env, raceEntryId, start.horse, ctx);
@@ -454,14 +499,9 @@ async function mapOneStart(env, game, race, legNumber, start, ctx) {
         (id, game_round_id, leg_number, race_entry_id, captured_at, bet_percent, market_rank, source_record_id)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).bind(
-      stableId('bet', game.id, legNumber, raceEntryId, ctx.observedAt),
-      game.id,
-      legNumber,
-      raceEntryId,
-      ctx.observedAt,
-      scaledHundredths(distributionRaw, `${ctx.gameType} betDistribution`, 10000),
-      marketRank(race.starts, ctx.gameType, start),
-      ctx.sourceRecordId
+      stableId('bet', game.id, legNumber, raceEntryId, ctx.observedAt), game.id, legNumber, raceEntryId,
+      ctx.observedAt, scaledHundredths(distributionRaw, `${ctx.gameType} betDistribution`, 10000),
+      marketRank(race.starts, ctx.gameType, start), ctx.sourceRecordId
     ).run();
     ctx.counts.inserted += Number(result.meta?.changes ?? 0);
   }
@@ -535,8 +575,7 @@ async function finalizeNormalization(env, payload, validated, source, sourceReco
       poolPayoutsRaw: validated.pool.payouts && typeof validated.pool.payouts === 'object' ? validated.pool.payouts : null
     });
 
-    await env.DB.prepare('UPDATE source_records SET quality_status = ? WHERE id = ?')
-      .bind(NORMALIZED_QUALITY, sourceRecordId).run();
+    await markOfficialSourceNormalized(env, { ...source, id: sourceRecordId });
 
     const betting = await env.DB.prepare('SELECT COUNT(*) AS n FROM betting_snapshots WHERE game_round_id = ?')
       .bind(validated.gameId).first();
@@ -585,7 +624,7 @@ export async function normalizeCapturedOfficialGameChunk(env, sourceRecordId, cu
   if (!id) throw new Error('source_record_id is required');
 
   const source = await env.DB.prepare(`
-    SELECT source_type, external_id, fetched_at, raw_object_key, quality_status
+    SELECT source_type, external_id, fetched_at, raw_object_key, quality_status, metadata_json
     FROM source_records
     WHERE id = ? AND source_type = ?
     LIMIT 1
@@ -617,7 +656,7 @@ export async function normalizeCapturedOfficialGameChunk(env, sourceRecordId, cu
       reused: true
     };
   }
-  if (source.quality_status !== 'captured_unmapped') {
+  if (!officialSourceCanNormalize(source)) {
     throw new Error(`source record has unsupported quality status: ${source.quality_status}`);
   }
 
