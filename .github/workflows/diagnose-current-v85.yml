@@ -1,0 +1,50 @@
+name: Diagnose current V85 production
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/diagnose-current-v85.trigger'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Validate Cloudflare configuration
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Diagnose current V85 without exposing private payloads
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          DATE="$(sed -n 's/^date=//p' .github/diagnose-current-v85.trigger)"
+          test -n "$DATE"
+          SQL="
+          SELECT 'rounds' AS metric, COUNT(*) AS value FROM game_rounds WHERE game_type='V85' AND round_date='$DATE';
+          SELECT 'legs' AS metric, COUNT(*) AS value FROM game_legs gl JOIN game_rounds gr ON gr.id=gl.game_round_id WHERE gr.game_type='V85' AND gr.round_date='$DATE';
+          SELECT 'game_sources' AS metric, COUNT(*) AS value FROM source_records WHERE source_type='official_provider' AND external_id LIKE 'game:V85_' || '$DATE' || '_%';
+          SELECT 'pending_sources' AS metric, COUNT(*) AS value FROM source_records WHERE source_type='official_provider' AND external_id LIKE 'game:V85_' || '$DATE' || '_%' AND quality_status IN ('captured_unmapped','captured_source_gap');
+          SELECT 'missing_identity_gaps' AS metric, COUNT(*) AS value FROM source_records WHERE source_type='official_provider' AND external_id LIKE 'game:V85_' || '$DATE' || '_%' AND quality_status='captured_source_gap' AND json_extract(metadata_json,'$.sourceGap.code')='missing_horse_identity';
+          SELECT 'normalize_success' AS metric, COUNT(*) AS value FROM import_runs ir WHERE ir.source_type IN ('official_live_normalize_auto','official_provider_normalize') AND ir.status='success' AND EXISTS (SELECT 1 FROM source_records sr WHERE sr.id=json_extract(ir.metadata_json,'$.sourceRecordId') AND sr.source_type='official_provider' AND sr.external_id LIKE 'game:V85_' || '$DATE' || '_%');
+          SELECT 'normalize_failed' AS metric, COUNT(*) AS value FROM import_runs ir WHERE ir.source_type IN ('official_live_normalize_auto','official_provider_normalize') AND ir.status='failed' AND EXISTS (SELECT 1 FROM source_records sr WHERE sr.id=json_extract(ir.metadata_json,'$.sourceRecordId') AND sr.source_type='official_provider' AND sr.external_id LIKE 'game:V85_' || '$DATE' || '_%');
+          SELECT 'legacy_missing_id_failures' AS metric, COUNT(*) AS value FROM import_runs ir WHERE ir.source_type IN ('official_live_normalize_auto','official_provider_normalize') AND ir.status='failed' AND json_extract(ir.error_json,'$.message') LIKE '%horse.id is required%' AND EXISTS (SELECT 1 FROM source_records sr WHERE sr.id=json_extract(ir.metadata_json,'$.sourceRecordId') AND sr.source_type='official_provider' AND sr.external_id LIKE 'game:V85_' || '$DATE' || '_%');
+          SELECT 'other_recent_failures' AS metric, COUNT(*) AS value FROM import_runs ir WHERE ir.source_type IN ('official_live_normalize_auto','official_provider_normalize') AND ir.status='failed' AND COALESCE(json_extract(ir.error_json,'$.message'),'') NOT LIKE '%horse.id is required%' AND EXISTS (SELECT 1 FROM source_records sr WHERE sr.id=json_extract(ir.metadata_json,'$.sourceRecordId') AND sr.source_type='official_provider' AND sr.external_id LIKE 'game:V85_' || '$DATE' || '_%');
+          "
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "$SQL"
