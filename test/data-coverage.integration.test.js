@@ -165,3 +165,17 @@ test('data coverage export reports aggregate coverage without row-level private 
     'coverage_horse','coverage_scratched_horse','coverage_race','coverage_source'
   ]) assert.equal(text.includes(privateValue), false);
 });
+
+test('settings data view exposes a session-private data coverage download control', async () => {
+  const { env } = createTestEnv();
+  env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
+  const cookie = await sessionCookie(env);
+  const response = await worker.fetch(new Request('https://example.test/app/', { headers: { cookie } }), env);
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type'), /text\/html/);
+  const html = await response.text();
+  assert.match(html, /id="kentaurai-data-coverage-ui-script"/);
+  assert.match(html, /Hämta datatäckningsrapport/);
+  assert.match(html, /\/app\/api\/settings\/data-coverage/);
+});
