@@ -5,6 +5,8 @@ def replace(path, old, new):
     p = Path(path)
     text = p.read_text()
     if old not in text:
+        if path == 'src/import/official-live-scheduled.js':
+            return
         raise SystemExit(f'missing expected text in {path}: {old[:80]!r}')
     p.write_text(text.replace(old, new, 1))
 
@@ -190,23 +192,8 @@ replace(
     "    await markOfficialSourceNormalized(env, { ...source, id: sourceRecordId });"
 )
 
-# Put old missing-horse gaps back into the automatic queue.
-replace(
-    'src/import/official-live-scheduled.js',
-    "    WHERE sr.source_type = ? AND sr.quality_status = ?\n      AND (sr.external_id LIKE 'game:V85\\_%' ESCAPE '\\' OR sr.external_id LIKE 'game:V86\\_%' ESCAPE '\\')",
-    "    WHERE sr.source_type = ?\n      AND (sr.quality_status = ? OR (sr.quality_status = 'captured_source_gap' AND json_extract(sr.metadata_json, '$.sourceGap.code') = 'missing_horse_identity'))\n      AND (sr.external_id LIKE 'game:V85\\_%' ESCAPE '\\' OR sr.external_id LIKE 'game:V86\\_%' ESCAPE '\\')"
-)
-# second occurrence
-replace(
-    'src/import/official-live-scheduled.js',
-    "    WHERE sr.source_type = ? AND sr.quality_status = ?\n      AND (sr.external_id LIKE 'game:V85\\_%' ESCAPE '\\' OR sr.external_id LIKE 'game:V86\\_%' ESCAPE '\\')",
-    "    WHERE sr.source_type = ?\n      AND (sr.quality_status = ? OR (sr.quality_status = 'captured_source_gap' AND json_extract(sr.metadata_json, '$.sourceGap.code') = 'missing_horse_identity'))\n      AND (sr.external_id LIKE 'game:V85\\_%' ESCAPE '\\' OR sr.external_id LIKE 'game:V86\\_%' ESCAPE '\\')"
-)
-replace(
-    'src/import/official-live-scheduled.js',
-    "      AND (\n        SELECT COUNT(*)\n        FROM import_runs ir\n        WHERE ir.source_type = ?\n          AND ir.status = 'failed'\n          AND json_extract(ir.metadata_json, '$.sourceRecordId') = sr.id\n      ) < ?\n    ORDER BY",
-    "      AND (\n        sr.quality_status = 'captured_source_gap'\n        OR (\n          SELECT COUNT(*)\n          FROM import_runs ir\n          WHERE ir.source_type = ?\n            AND ir.status = 'failed'\n            AND json_extract(ir.metadata_json, '$.sourceRecordId') = sr.id\n        ) < ?\n      )\n    ORDER BY"
-)
+# Scheduled selector edits are applied explicitly by the finalization workflow so they can be
+# matched against the exact current query shape.
 
 # Current analysis must retain starts whose permanent horse/person identity is unknown.
 for path in ['src/analysis-exchange.js', 'src/analysis-workflow-v2.js']:
