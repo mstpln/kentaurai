@@ -197,6 +197,32 @@ test('combined import requires is_spike to be a real JSON boolean', async () => 
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM model_versions WHERE feature_version = 'analysis-exchange-v2'`).get().n, 0);
 });
 
+test('combined import permits market-blind methodology wording without weakening contamination checks', async () => {
+  const { env } = createTestEnv();
+  seedRound(env.DB.db);
+  const payload = await validPayload(env);
+  payload.submission_id = 'combined-openai-methodology-wording';
+  payload.round_summary = 'Omgångens tydligaste marknadsblinda iakttagelse bygger på resejusterad prestation.';
+  payload.legs[0].conclusion = 'Den marknadsblinda analysen pekar på två jämna hästar.';
+  payload.legs[0].predictions[0].reasoning = { summary: 'Market-blind strength assessment based on measured pace.' };
+
+  const result = await importStrictCombinedAnalysis(env, payload);
+  assert.equal(result.ok, true);
+  assert.equal(result.submissionId, 'combined-openai-methodology-wording');
+});
+
+test('combined import rejects market contamination even when methodology wording is also present', async () => {
+  const { env } = createTestEnv();
+  seedRound(env.DB.db);
+  let payload = await validPayload(env);
+  payload.round_summary = 'Marknadsblind analys, men marknaden gör hästen attraktiv.';
+  await assert.rejects(() => importStrictCombinedAnalysis(env, payload), /round_summary contains market language/);
+
+  payload = await validPayload(env);
+  payload.legs[0].predictions[0].reasoning = { summary: 'Market-blind assessment, but the favourite looks overbet.' };
+  await assert.rejects(() => importStrictCombinedAnalysis(env, payload), /reasoning contains market language/);
+});
+
 test('combined import rejects market contamination in round summary and English leg reasoning', async () => {
   const { env } = createTestEnv();
   seedRound(env.DB.db);

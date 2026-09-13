@@ -428,10 +428,17 @@ function activeEntryIndex(context) {
   return { byId, byLeg };
 }
 
-function marketBlindText(value, field) {
+export function marketBlindText(value, field) {
   if (value == null) return;
   const text = typeof value === 'string' ? value : JSON.stringify(value);
-  if (/streck|odds|spelvär|värdekvot|break[- ]?even|marknad|överstreck|understreck|överspel|underspel|favorit|spelad|\bmarket\b|\bbetting\b|\bfavou?rite\b|\boverbet|\bunderbet|\bownership\b|\bvalue\s+(?:bet|ratio|play)/i.test(text)) {
+  // The canonical prompts themselves use methodology labels such as
+  // "marknadsblind" / "market-blind". Those labels describe the analysis
+  // process, not market observations. Ignore only those exact labels while
+  // keeping ordinary market language fail-closed.
+  const inspectionText = text
+    .replace(/\bmarknadsblind(?:a|t|het(?:en|ens)?)?\b/gi, '')
+    .replace(/\bmarket[- ]blind(?:ness)?\b/gi, '');
+  if (/streck|odds|spelvär|värdekvot|break[- ]?even|marknad|överstreck|understreck|överspel|underspel|favorit|spelad|\bmarket\b|\bbetting\b|\bfavou?rite\b|\boverbet|\bunderbet|\bownership\b|\bvalue\s+(?:bet|ratio|play)/i.test(inspectionText)) {
     throw new Error(`${field} contains market language; combined legs must reproduce step 1 without market contamination`);
   }
 }
