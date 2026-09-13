@@ -29,3 +29,4 @@ jobs:
           git add -A
           git commit -m "Implement official Nordic participant identity handling"
           git push origin HEAD:fix/official-nordic-identity-gaps-v109-final
+# retry trigger
