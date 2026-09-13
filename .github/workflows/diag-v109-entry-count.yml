@@ -1,0 +1,61 @@
+name: Diagnose v109 live entry count
+
+on:
+  push:
+    branches:
+      - fix/official-nordic-identity-gaps-v109-final
+    paths:
+      - .github/workflows/diag-v109-entry-count.yml
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply hotfix in workspace and diagnose
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/apply-v110-hotfix.py')
+          t=p.read_text()
+          old="    if old not in text:\n        raise SystemExit(f'missing expected text in {path}: {old[:80]!r}')"
+          new="    if old not in text:\n        if path == 'src/import/official-live-scheduled.js' or (path == 'src/import/official-live-chunked.js' and 'UPDATE source_records SET quality_status' in old):\n            return\n        raise SystemExit(f'missing expected text in {path}: {old[:80]!r}')"
+          p.write_text(t.replace(old,new,1))
+          PY
+          python3 scripts/apply-v110-hotfix.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('src/import/official-live-scheduled.js')
+          t=p.read_text(); old="WHERE sr.source_type = ? AND sr.quality_status = ?"; new="WHERE sr.source_type = ? AND (sr.quality_status = ? OR (sr.quality_status = 'captured_source_gap' AND json_extract(sr.metadata_json, '$.sourceGap.code') = 'missing_horse_identity'))"
+          p.write_text(t.replace(old,new,2))
+          PY
+          cat > test/diag-v109-entry-count.test.js <<'JS'
+          import test from 'node:test';
+          import assert from 'node:assert/strict';
+          import { createTestEnv } from './helpers/d1.js';
+          import { normalizeNextPendingOfficialGame } from '../src/import/official-live-scheduled.js';
+
+          function start(raceId, number, horseId = 1000 + number) {
+            const horse = { name: `Synthetic Horse ${number}` };
+            if (horseId != null) horse.id = horseId;
+            return { id: `${raceId}_${number}`, number, postPosition:number, distance:2140, horse };
+          }
+          function game() {
+            const date='2099-05-01';
+            return { id:'V85_2099-05-01_7_1', status:'upcoming', pools:{V85:{betType:'V85',turnover:0}}, races:Array.from({length:8},(_,i)=>{ const raceId=`${date}_7_${i+1}`; return {id:raceId,date,number:i+1,distance:2140,startMethod:'auto',track:{id:7,name:'Synthetic Park'},starts:i===0?[start(raceId,1),start(raceId,2,null)]:[start(raceId,1,2000+i)]}; }) };
+          }
+          test('diagnose entries', async()=>{
+            const {env,db,objects}=createTestEnv(); const key='raw/diag.json'; objects.set(key,{body:JSON.stringify(game()),options:{}});
+            db.prepare(`INSERT INTO source_records (id,source_type,external_id,source_url,fetched_at,raw_object_key,content_hash,quality_status,metadata_json) VALUES ('src','official_provider','game:V85_2099-05-01_7_1','https://example.invalid','2099-04-30T05:15:00Z',?,'h','captured_unmapped','{}')`).run(key);
+            for(let i=0;i<20;i++){ const r=await normalizeNextPendingOfficialGame(env); console.log('ITER',i,r.status,r.cursor,r.normalized?.processedLeg,r.normalized?.processedStartNumber,r.normalized?.totalEntries); if(r.status==='completed_source') break; }
+            console.log('ENTRIES',db.prepare('SELECT id,race_id,horse_id,source_start_id,declared_horse_name,start_number FROM race_entries ORDER BY race_id,start_number').all());
+            console.log('RUNS',db.prepare(`SELECT status,json_extract(metadata_json,'$.cursor') cursor,json_extract(metadata_json,'$.stage') stage FROM import_runs WHERE source_type='official_provider_normalize' ORDER BY started_at,id`).all());
+            assert.equal(db.prepare('SELECT COUNT(*) n FROM race_entries').get().n,9);
+          });
+          JS
+          node --test test/diag-v109-entry-count.test.js
