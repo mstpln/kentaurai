@@ -6,6 +6,7 @@ import {
   completedNormalizationCursor,
   normalizeNextPendingOfficialGame,
   scheduledLiveDates,
+  selectPendingOfficialGameSource,
   v85V86GameIdsFromCalendar
 } from '../src/import/official-live-scheduled.js';
 
@@ -101,6 +102,25 @@ test('pending normalizer ignores calendar-only captures', async () => {
   db.prepare(`INSERT INTO source_records (id, source_type, external_id, fetched_at, quality_status)
     VALUES ('src_calendar_only', 'official_provider', 'calendar:2099-01-16', '2099-01-15T17:15:00.000Z', 'captured_unmapped')`).run();
   assert.deepEqual(await normalizeNextPendingOfficialGame(env), { status: 'idle', done: true });
+});
+
+test('pending live normalization uses the newest snapshot and prioritizes a not-yet-created upcoming round', async () => {
+  const { env, db } = createTestEnv();
+  const existingGame = 'V86_2099-01-15_997_1';
+  const newGame = 'V85_2099-01-16_998_1';
+
+  db.prepare(`INSERT INTO game_rounds (id, game_type, round_date) VALUES (?, 'V86', '2099-01-15')`).run(existingGame);
+  db.prepare(`
+    INSERT INTO source_records (id, source_type, external_id, fetched_at, quality_status)
+    VALUES
+      ('src_existing', 'official_provider', ?, '2099-01-15T05:15:00.000Z', 'captured_unmapped'),
+      ('src_new_old', 'official_provider', ?, '2099-01-14T17:15:00.000Z', 'captured_unmapped'),
+      ('src_new_latest', 'official_provider', ?, '2099-01-15T05:15:00.000Z', 'captured_unmapped')
+  `).run(`game:${existingGame}`, `game:${newGame}`, `game:${newGame}`);
+
+  const selected = await selectPendingOfficialGameSource(env);
+  assert.equal(selected.id, 'src_new_latest');
+  assert.equal(selected.external_id, `game:${newGame}`);
 });
 
 test('live normalization progress advances only after a successful entry run', async () => {
