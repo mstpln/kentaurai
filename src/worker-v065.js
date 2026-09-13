@@ -1,5 +1,6 @@
 import worker from './worker-v064.js';
 import { appAuthConfigured, hasValidAppSession } from './app-auth.js';
+import { createDataCoverageExportResponse } from './data-coverage.js';
 import { getHorseFilterOptions } from './statistics/horses-complete.js';
 import {
   getDriverCalendarYearDetailStatistics,
@@ -85,6 +86,13 @@ export default {
     const path = url.pathname;
     const canonical = canonicalAppRedirect(request, url);
     if (canonical) return canonical;
+
+    if (request.method === 'GET' && path === '/app/api/settings/data-coverage') {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try { return await createDataCoverageExportResponse(env); }
+      catch (error) { console.error(error); return json({ error: 'request_failed', message: error.message }, 400); }
+    }
 
     if (request.method === 'GET' && path === '/app/api/horses/statistics/filter-options') {
       const denied = await requireSession(request, env);
