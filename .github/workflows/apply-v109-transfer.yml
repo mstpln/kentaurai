@@ -59,7 +59,7 @@ jobs:
                   raise SystemExit(f'expected one source finalization update, found {n}')
           p.write_text(text)
           PY
-          npm test
+          bash -lc 'node --test test/*.test.js'
           rm -f scripts/apply-v110-hotfix.py .tmp/v109.patch.gz.b64 .github/workflows/apply-v109-transfer.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
