@@ -6,6 +6,7 @@ on:
       - fix/official-nordic-identity-gaps-v109-final
     paths:
       - scripts/apply-v110-hotfix.py
+      - .github/workflows/apply-v109-transfer.yml
 
 permissions:
   contents: write
