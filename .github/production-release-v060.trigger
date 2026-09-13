@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=068aae94a748e27d17e31ff90faa42b854fb854f
-release_nonce=2026-09-13-post-pr107-entity-detail-runtime-release1
+source_main=0bdd68290cfe64580ddb5af0057d5a3ed2147adf
+release_nonce=2026-09-13-post-pr108-live-normalization-priority-release1
