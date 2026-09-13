@@ -1,9 +1,7 @@
 PRAGMA foreign_keys = OFF;
 PRAGMA legacy_alter_table = ON;
 
-ALTER TABLE race_entries RENAME TO _0014_race_entries_legacy;
-
-CREATE TABLE race_entries (
+CREATE TABLE race_entries_v2 (
   id TEXT PRIMARY KEY,
   race_id TEXT NOT NULL REFERENCES races(id),
   horse_id TEXT REFERENCES horses(id),
@@ -30,7 +28,7 @@ CREATE TABLE race_entries (
   UNIQUE(race_id, source_start_id)
 );
 
-INSERT INTO race_entries (
+INSERT INTO race_entries_v2 (
   id, race_id, horse_id, driver_id, trainer_id, start_number, actual_lane,
   start_tier, handicap_m, actual_start_distance_m, springspar, inner_lane,
   back_row, scratched, scratch_reason, data_quality, created_at, updated_at
@@ -44,9 +42,10 @@ SELECT
     ELSE scratched
   END,
   scratch_reason, data_quality, created_at, updated_at
-FROM _0014_race_entries_legacy;
+FROM race_entries;
 
-DROP TABLE _0014_race_entries_legacy;
+DROP TABLE race_entries;
+ALTER TABLE race_entries_v2 RENAME TO race_entries;
 
 CREATE INDEX idx_entries_race ON race_entries(race_id);
 CREATE INDEX idx_entries_horse ON race_entries(horse_id);
