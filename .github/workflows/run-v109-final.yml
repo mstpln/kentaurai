@@ -24,12 +24,13 @@ jobs:
         run: |
           python3 scripts/apply-v110-hotfix.py
           python3 scripts/finalize-v109.py
+          python3 scripts/finalize-v109-historical.py
       - name: Run repository QA
         run: npm run qa
       - name: Publish review head
         run: |
           rm -f .github/workflows/apply-v109-transfer.yml .github/workflows/diag-v109-entry-count.yml .github/workflows/finalize-v109-bjerke.yml .github/workflows/finalize-v109-bjerke-2.yml .github/workflows/finalize-v109-bjerke-3.yml .github/workflows/run-v109-final.yml
-          rm -f .tmp/v109.patch.gz.b64 scripts/apply-v110-hotfix.py scripts/finalize-v109.py
+          rm -f .tmp/v109.patch.gz.b64 scripts/apply-v110-hotfix.py scripts/finalize-v109.py scripts/finalize-v109-historical.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
