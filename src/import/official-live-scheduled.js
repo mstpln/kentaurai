@@ -49,6 +49,8 @@ export function v85V86GameIdsFromCalendar(payload, expectedDate) {
     if (!Array.isArray(games)) throw new Error(`official calendar ${gameType} games must be an array`);
     for (const game of games) {
       const id = typeof game?.id === 'string' ? game.id.trim() : '';
+      const unpublishedScheduled = game?.status === 'scheduled' && !id && Array.isArray(game.races) && game.races.length === 0;
+      if (unpublishedScheduled) continue;
       if (!new RegExp(`^${gameType}_${date}_[A-Za-z0-9_-]+$`).test(id)) {
         throw new Error(`official calendar ${gameType} game id does not match the scheduled date`);
       }
@@ -168,7 +170,7 @@ async function selectExhaustedKnownSourceGap(env) {
         LIMIT 1
       ) AS last_error_json
     FROM source_records sr
-    WHERE sr.source_type = ? AND sr.quality_status = ?
+    WHERE sr.source_type = ? AND (sr.quality_status = ? OR (sr.quality_status = 'captured_source_gap' AND json_extract(sr.metadata_json, '$.sourceGap.code') = 'missing_horse_identity'))
       AND (sr.external_id LIKE 'game:V85\\_%' ESCAPE '\\' OR sr.external_id LIKE 'game:V86\\_%' ESCAPE '\\')
       AND (
         SELECT COUNT(*)
@@ -183,7 +185,7 @@ async function selectExhaustedKnownSourceGap(env) {
 
   for (const row of results) {
     const message = failedRunMessage(row.last_error_json);
-    if (message && officialGameSourceGap(new Error(message))) {
+    if (message && /^races\[\d+\]\.starts\[\d+\]\.horse\.id is required$/.test(message)) {
       const { last_error_json: _lastError, ...source } = row;
       return source;
     }
@@ -196,7 +198,7 @@ export async function selectPendingOfficialGameSource(env) {
   const pending = await env.DB.prepare(`
     SELECT sr.id, sr.external_id, sr.fetched_at
     FROM source_records sr
-    WHERE sr.source_type = ? AND sr.quality_status = ?
+    WHERE sr.source_type = ? AND (sr.quality_status = ? OR (sr.quality_status = 'captured_source_gap' AND json_extract(sr.metadata_json, '$.sourceGap.code') = 'missing_horse_identity'))
       AND (sr.external_id LIKE 'game:V85\\_%' ESCAPE '\\' OR sr.external_id LIKE 'game:V86\\_%' ESCAPE '\\')
       AND NOT EXISTS (
         SELECT 1
@@ -209,12 +211,15 @@ export async function selectPendingOfficialGameSource(env) {
           )
       )
       AND (
-        SELECT COUNT(*)
-        FROM import_runs ir
-        WHERE ir.source_type = ?
-          AND ir.status = 'failed'
-          AND json_extract(ir.metadata_json, '$.sourceRecordId') = sr.id
-      ) < ?
+        sr.quality_status = 'captured_source_gap'
+        OR (
+          SELECT COUNT(*)
+          FROM import_runs ir
+          WHERE ir.source_type = ?
+            AND ir.status = 'failed'
+            AND json_extract(ir.metadata_json, '$.sourceRecordId') = sr.id
+        ) < ?
+      )
     ORDER BY
       CASE WHEN substr(sr.external_id, 10, 10) >= date('now') THEN 0 ELSE 1 END,
       CASE WHEN EXISTS (

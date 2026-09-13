@@ -112,7 +112,7 @@ async function loadRound(env, roundId) {
       re.scratched,
       re.scratch_reason,
       re.data_quality AS entry_quality,
-      h.canonical_name AS horse_name,
+      COALESCE(h.canonical_name, re.declared_horse_name) AS horse_name,
       h.sex,
       h.birth_year,
       h.breed,
@@ -121,13 +121,13 @@ async function loadRound(env, roundId) {
       h.damsire_name,
       h.career_earnings_sek,
       h.record_text,
-      d.canonical_name AS driver_name,
-      tr.canonical_name AS trainer_name
+      COALESCE(d.canonical_name, re.declared_driver_name) AS driver_name,
+      COALESCE(tr.canonical_name, re.declared_trainer_name) AS trainer_name
     FROM game_legs gl
     JOIN races r ON r.id = gl.race_id
     LEFT JOIN tracks t ON t.id = r.track_id
     JOIN race_entries re ON re.race_id = r.id
-    JOIN horses h ON h.id = re.horse_id
+    LEFT JOIN horses h ON h.id = re.horse_id
     LEFT JOIN drivers d ON d.id = re.driver_id
     LEFT JOIN trainers tr ON tr.id = re.trainer_id
     WHERE gl.game_round_id = ?
@@ -302,8 +302,8 @@ async function addRecentStarts(env, roundDate, legs) {
         re.start_number,
         re.actual_start_distance_m,
         re.handicap_m,
-        d.canonical_name AS driver_name,
-        tr.canonical_name AS trainer_name,
+        COALESCE(d.canonical_name, re.declared_driver_name) AS driver_name,
+        COALESCE(tr.canonical_name, re.declared_trainer_name) AS trainer_name,
         rr.placing,
         rr.placing_text,
         rr.finish_time,

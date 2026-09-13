@@ -154,13 +154,13 @@ async function loadRoundIdentity(env, roundId) {
     SELECT gl.leg_number, r.id AS race_id, r.race_number, r.scheduled_start_at,
            r.distance_m, r.start_method, t.canonical_name AS track_name,
            re.id AS race_entry_id, re.start_number, re.scratched, re.scratch_reason,
-           h.id AS horse_id, h.canonical_name AS horse_name,
-           d.canonical_name AS driver_name, tr.canonical_name AS trainer_name
+           h.id AS horse_id, COALESCE(h.canonical_name, re.declared_horse_name) AS horse_name,
+           COALESCE(d.canonical_name, re.declared_driver_name) AS driver_name, COALESCE(tr.canonical_name, re.declared_trainer_name) AS trainer_name
     FROM game_legs gl
     JOIN races r ON r.id = gl.race_id
     LEFT JOIN tracks t ON t.id = r.track_id
     JOIN race_entries re ON re.race_id = r.id
-    JOIN horses h ON h.id = re.horse_id
+    LEFT JOIN horses h ON h.id = re.horse_id
     LEFT JOIN drivers d ON d.id = re.driver_id
     LEFT JOIN trainers tr ON tr.id = re.trainer_id
     WHERE gl.game_round_id = ?

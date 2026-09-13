@@ -1,4 +1,39 @@
 export const OFFICIAL_SOURCE_GAP_QUALITY = 'captured_source_gap';
+export const OFFICIAL_NORMALIZED_QUALITY = 'normalized_verified_subset';
+
+function sourceMetadata(value) {
+  try {
+    const parsed = value ? JSON.parse(value) : null;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function recoverableMissingHorseIdentitySource(source) {
+  if (source?.quality_status !== OFFICIAL_SOURCE_GAP_QUALITY) return false;
+  return sourceMetadata(source.metadata_json).sourceGap?.code === 'missing_horse_identity';
+}
+
+export function officialSourceCanNormalize(source) {
+  return source?.quality_status === 'captured_unmapped' || recoverableMissingHorseIdentitySource(source);
+}
+
+export async function markOfficialSourceNormalized(env, source) {
+  const metadata = sourceMetadata(source?.metadata_json);
+  if (recoverableMissingHorseIdentitySource(source)) {
+    metadata.normalizationStatus = 'normalized_recovered';
+    metadata.sourceGapRecovery = {
+      code: 'nullable_official_participant_identity_v1',
+      preservedSourceGap: true
+    };
+  }
+  await env.DB.prepare(`
+    UPDATE source_records
+    SET quality_status = ?, metadata_json = ?
+    WHERE id = ? AND source_type = 'official_provider'
+  `).bind(OFFICIAL_NORMALIZED_QUALITY, JSON.stringify(metadata), source.id).run();
+}
 
 export function officialRaceSourceGap(error) {
   const message = String(error?.message || '');
@@ -35,13 +70,7 @@ export async function markOfficialRaceSourceGap(env, sourceRecordId, gap) {
   `).bind(id).first();
   if (!source) throw new Error('official source record was not found');
 
-  let metadata = {};
-  try {
-    const parsed = source.metadata_json ? JSON.parse(source.metadata_json) : null;
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) metadata = parsed;
-  } catch {
-    metadata = {};
-  }
+  const metadata = sourceMetadata(source.metadata_json);
   metadata.normalizationStatus = 'source_gap';
   metadata.sourceGap = { code: gap.code };
   for (const field of ['startNumber', 'raceIndex', 'startIndex']) {
