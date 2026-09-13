@@ -9,6 +9,8 @@ const SOURCE_TYPE = 'official_provider';
 const PENDING_QUALITY = 'captured_unmapped';
 const AUTO_NORMALIZE_SOURCE_TYPE = 'official_live_normalize_auto';
 const MAX_AUTO_NORMALIZE_FAILURES = 3;
+const DEFAULT_NORMALIZE_STEPS_PER_RUN = 8;
+const MAX_NORMALIZE_STEPS_PER_RUN = 12;
 
 function dateFromInstant(value) {
   const instant = new Date(value ?? Date.now());
@@ -234,48 +236,89 @@ export async function selectPendingOfficialGameSource(env) {
   return pending || selectExhaustedKnownSourceGap(env);
 }
 
-export async function normalizeNextPendingOfficialGame(env) {
+function normalizeStepLimit(value) {
+  const limit = value == null ? DEFAULT_NORMALIZE_STEPS_PER_RUN : Number(value);
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_NORMALIZE_STEPS_PER_RUN) {
+    throw new Error(`maxSteps must be between 1 and ${MAX_NORMALIZE_STEPS_PER_RUN}`);
+  }
+  return limit;
+}
+
+export async function normalizeNextPendingOfficialGame(env, options = {}) {
   if (!env.DB) throw new Error('DB is not configured');
   const source = await selectPendingOfficialGameSource(env);
   if (!source) return { status: 'idle', done: true };
 
-  const cursor = await completedNormalizationCursor(env, source.id);
-  const run = await startImportRun(env, AUTO_NORMALIZE_SOURCE_TYPE, {
-    sourceRecordId: source.id,
-    externalId: source.external_id,
-    cursor
-  });
-  const counts = { inserted: 0, updated: 0, skipped: 0, errors: 0 };
-  try {
-    const normalized = await normalizeCapturedOfficialGameSequential(env, source.id, cursor);
-    await finishImportRun(env, run.id, counts);
-    return {
-      status: normalized.done ? 'completed_source' : 'running_source',
-      done: normalized.done === true,
+  const maxSteps = normalizeStepLimit(options.maxSteps);
+  const initialCursor = await completedNormalizationCursor(env, source.id);
+  let cursor = initialCursor;
+  let normalized = null;
+  let steps = 0;
+
+  while (steps < maxSteps) {
+    const run = await startImportRun(env, AUTO_NORMALIZE_SOURCE_TYPE, {
       sourceRecordId: source.id,
       externalId: source.external_id,
-      fetchedAt: source.fetched_at,
-      cursor,
-      normalized
-    };
-  } catch (error) {
-    const gap = officialGameSourceGap(error);
-    if (gap && cursor === 0) {
-      const sourceGap = await markOfficialRaceSourceGap(env, source.id, gap);
-      counts.skipped = 1;
+      cursor
+    });
+    const counts = { inserted: 0, updated: 0, skipped: 0, errors: 0 };
+    try {
+      normalized = await normalizeCapturedOfficialGameSequential(env, source.id, cursor);
       await finishImportRun(env, run.id, counts);
-      return {
-        status: 'source_gap',
-        done: true,
-        sourceRecordId: source.id,
-        externalId: source.external_id,
-        fetchedAt: source.fetched_at,
-        cursor,
-        sourceGap
-      };
+      steps += 1;
+
+      if (normalized.done === true) {
+        return {
+          status: 'completed_source',
+          done: true,
+          sourceRecordId: source.id,
+          externalId: source.external_id,
+          fetchedAt: source.fetched_at,
+          cursor: initialCursor,
+          nextCursor: null,
+          steps,
+          normalized
+        };
+      }
+
+      const nextCursor = Number(normalized.nextCursor);
+      if (!Number.isInteger(nextCursor) || nextCursor <= cursor) {
+        throw new Error('live normalization did not advance its cursor');
+      }
+      cursor = nextCursor;
+    } catch (error) {
+      const gap = officialGameSourceGap(error);
+      if (gap && cursor === 0) {
+        const sourceGap = await markOfficialRaceSourceGap(env, source.id, gap);
+        counts.skipped = 1;
+        await finishImportRun(env, run.id, counts);
+        return {
+          status: 'source_gap',
+          done: true,
+          sourceRecordId: source.id,
+          externalId: source.external_id,
+          fetchedAt: source.fetched_at,
+          cursor: initialCursor,
+          nextCursor: null,
+          steps,
+          sourceGap
+        };
+      }
+      counts.errors = 1;
+      await finishImportRun(env, run.id, counts, error);
+      throw error;
     }
-    counts.errors = 1;
-    await finishImportRun(env, run.id, counts, error);
-    throw error;
   }
+
+  return {
+    status: 'running_source',
+    done: false,
+    sourceRecordId: source.id,
+    externalId: source.external_id,
+    fetchedAt: source.fetched_at,
+    cursor: initialCursor,
+    nextCursor: cursor,
+    steps,
+    normalized
+  };
 }
