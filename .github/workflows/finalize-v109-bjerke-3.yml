@@ -1,0 +1,50 @@
+name: Finalize v109 exhausted source-gap recovery
+
+on:
+  push:
+    branches:
+      - fix/official-nordic-identity-gaps-v109-final
+    paths:
+      - .github/workflows/finalize-v109-bjerke-3.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Reuse reviewed finalizer with legacy recovery fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/finalize-v109-bjerke-2.yml').read_text()
+          marker = '        run: |\n'
+          if marker not in workflow:
+              raise SystemExit('reviewed finalizer run block not found')
+          block = workflow.split(marker, 1)[1]
+          script = textwrap.dedent(block)
+
+          needle = '          node --test test/*.test.js\n'
+          if needle not in block:
+              needle = 'node --test test/*.test.js\n'
+          recovery = '''python3 - <<'PY2'\nfrom pathlib import Path\np=Path('src/import/official-live-scheduled.js')\nt=p.read_text()\nold="if (message && officialGameSourceGap(new Error(message))) {"\nnew="if (message && /^races\\\\[\\\\d+\\\\]\\\\.starts\\\\[\\\\d+\\\\]\\\\.horse\\\\.id is required$/.test(message)) {"\nif old not in t:\n    raise SystemExit('legacy exhausted-source recovery predicate not found')\np.write_text(t.replace(old,new,1))\nPY2\n\nnode --test test/*.test.js\n'''
+          script = script.replace('node --test test/*.test.js\n', recovery, 1)
+          script = script.replace(
+              'git config user.name "github-actions[bot]"',
+              'rm -f .github/workflows/finalize-v109-bjerke-3.yml\ngit config user.name "github-actions[bot]"',
+              1
+          )
+          Path('/tmp/finalize-v109.sh').write_text(script)
+          PY
+          bash /tmp/finalize-v109.sh
