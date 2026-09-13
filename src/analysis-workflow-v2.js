@@ -565,8 +565,12 @@ function normalizeSystems(payload, context) {
   });
   if (new Set(systems.map((system) => system.clientId)).size !== systems.length) throw new Error('system_id values must be unique');
   if (gameType === 'V85') {
-    if (systems.length !== 2 || systems.filter((system) => system.systemType === 'main').length !== 1 || systems.filter((system) => system.systemType === 'alternative').length !== 1) {
-      throw new Error('V85 combined submission must contain one main system and one alternative personal system');
+    const mainSystems = systems.filter((system) => system.systemType === 'main');
+    const alternativeSystems = systems.filter((system) => system.systemType === 'alternative');
+    const validSingleMain = systems.length === 1 && mainSystems.length === 1 && alternativeSystems.length === 0;
+    const validMainAndAlternative = systems.length === 2 && mainSystems.length === 1 && alternativeSystems.length === 1;
+    if (!validSingleMain && !validMainAndAlternative) {
+      throw new Error('V85 combined submission must contain either one main system or one main system plus one alternative personal system');
     }
   } else if (systems.length !== 1) {
     throw new Error('V86 combined submission must contain exactly one system');
