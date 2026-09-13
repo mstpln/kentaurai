@@ -120,6 +120,44 @@ test('combined V85 import persists blind legs, systems and the audited two-spike
   assert.equal(JSON.parse(main.metrics_json).analysisBlindness, 'declared_unsealed');
 });
 
+test('combined V85 import accepts one main system when it is the only final system', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  const payload = await validPayload(env);
+  payload.submission_id = 'combined-openai-single-main';
+  payload.systems = [{
+    system_id: 'main-only',
+    system_type: 'main',
+    budget_sek: 16,
+    line_price_sek: 0.5,
+    notes: 'Synthetic single final V85 system.',
+    selections: systemSelections([1, 2, 3])
+  }];
+
+  const result = await importStrictCombinedAnalysis(env, payload);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.writes, { analyses: 8, predictions: 16, systems: 1, selections: 13 });
+  const stored = db.prepare(`SELECT system_type, spike_count, row_count, budget_sek FROM systems WHERE game_round_id = ?`).get(ROUND_ID);
+  assert.equal(stored.system_type, 'main');
+  assert.equal(stored.spike_count, 3);
+  assert.equal(stored.row_count, 32);
+  assert.equal(stored.budget_sek, 16);
+});
+
+test('combined V85 import rejects an alternative-only submission', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  const payload = await validPayload(env);
+  payload.submission_id = 'combined-openai-alternative-only';
+  payload.systems = [payload.systems[1]];
+
+  await assert.rejects(
+    () => importStrictCombinedAnalysis(env, payload),
+    /either one main system or one main system plus one alternative personal system/
+  );
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM model_versions WHERE feature_version = 'analysis-exchange-v2'`).get().n, 0);
+});
+
 test('V85 main with two spikes is rejected without notes before anything is stored', async () => {
   const { env, db } = createTestEnv();
   seedRound(db);
