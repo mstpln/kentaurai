@@ -30,12 +30,108 @@ jobs:
           from pathlib import Path
           p = Path('src/import/official-live-scheduled.js')
           text = p.read_text()
+
+          old = """      const id = typeof game?.id === 'string' ? game.id.trim() : '';
+      if (!new RegExp(`^${gameType}_${date}_[A-Za-z0-9_-]+$`).test(id)) {
+"""
+          new = """      const id = typeof game?.id === 'string' ? game.id.trim() : '';
+      const unpublishedScheduled = game?.status === 'scheduled' && !id && Array.isArray(game.races) && game.races.length === 0;
+      if (unpublishedScheduled) continue;
+      if (!new RegExp(`^${gameType}_${date}_[A-Za-z0-9_-]+$`).test(id)) {
+"""
+          if old not in text:
+              raise SystemExit('calendar publication guard insertion point not found')
+          text = text.replace(old, new, 1)
+
+          old = "WHERE sr.source_type = ? AND sr.quality_status = ?"
+          new = "WHERE sr.source_type = ? AND (sr.quality_status = ? OR (sr.quality_status = 'captured_source_gap' AND json_extract(sr.metadata_json, '$.sourceGap.code') = 'missing_horse_identity'))"
+          count = text.count(old)
+          if count != 2:
+              raise SystemExit(f'expected two source selector clauses, found {count}')
+          text = text.replace(old, new, 2)
+
+          old = """      AND (
+        SELECT COUNT(*)
+        FROM import_runs ir
+        WHERE ir.source_type = ?
+          AND ir.status = 'failed'
+          AND json_extract(ir.metadata_json, '$.sourceRecordId') = sr.id
+      ) < ?
+    ORDER BY
+"""
+          new = """      AND (
+        sr.quality_status = 'captured_source_gap'
+        OR (
+          SELECT COUNT(*)
+          FROM import_runs ir
+          WHERE ir.source_type = ?
+            AND ir.status = 'failed'
+            AND json_extract(ir.metadata_json, '$.sourceRecordId') = sr.id
+        ) < ?
+      )
+    ORDER BY
+"""
+          if old not in text:
+              raise SystemExit('pending failure-limit clause not found')
+          text = text.replace(old, new, 1)
+
           old = "if (message && officialGameSourceGap(new Error(message))) {"
           new = "if (message && /^races\\[\\d+\\]\\.starts\\[\\d+\\]\\.horse\\.id is required$/.test(message)) {"
-          if old in text:
-              text = text.replace(old, new, 1)
+          if old not in text:
+              raise SystemExit('legacy exhausted-source predicate not found')
+          text = text.replace(old, new, 1)
           p.write_text(text)
           PY
+
+          cat > test/official-live-source-gap.test.js <<'JS'
+          import test from 'node:test';
+          import assert from 'node:assert/strict';
+          import { createTestEnv } from './helpers/d1.js';
+          import { normalizeNextPendingOfficialGame } from '../src/import/official-live-scheduled.js';
+          import { officialGameSourceGap } from '../src/import/official-source-gap.js';
+
+          function start(raceId, number, horseId = 1000 + number) {
+            const horse = { name: `Synthetic Horse ${number}` };
+            if (horseId != null) horse.id = horseId;
+            return { id: `${raceId}_${number}`, number, postPosition: number, distance: 2140, horse };
+          }
+          function gameWithMissingPermanentHorseId() {
+            const date='2099-05-01';
+            return { id:'V85_2099-05-01_7_1', status:'upcoming', pools:{V85:{betType:'V85',turnover:0}}, races:Array.from({length:8},(_,i)=>{ const raceId=`${date}_7_${i+1}`; return {id:raceId,date,number:i+1,distance:2140,startMethod:'auto',track:{id:7,name:'Synthetic Park'},starts:i===0?[start(raceId,1),start(raceId,2,null)]:[start(raceId,1,2000+i)]}; }) };
+          }
+          test('official live missing-horse identity is classified narrowly for legacy errors',()=>{
+            assert.deepEqual(officialGameSourceGap(new Error('races[0].starts[1].horse.id is required')),{code:'missing_horse_identity',raceIndex:0,startIndex:1});
+            assert.equal(officialGameSourceGap(new Error('races[0].starts[1].horse.name must be a non-empty string')),null);
+          });
+          test('automatic live normalization keeps a named start when permanent horse identity is missing',async()=>{
+            const {env,db,objects}=createTestEnv(); const key='raw/official_provider/live-gap.json'; objects.set(key,{body:JSON.stringify(gameWithMissingPermanentHorseId()),options:{}});
+            db.prepare(`INSERT INTO source_records (id,source_type,external_id,source_url,fetched_at,raw_object_key,content_hash,quality_status,metadata_json) VALUES ('src_live_gap','official_provider','game:V85_2099-05-01_7_1','https://example.invalid','2099-04-30T05:15:00Z',?,'live-gap-hash','captured_unmapped',?)`).run(key,JSON.stringify({kind:'game',identity:'V85_2099-05-01_7_1'}));
+            let result; for(let i=0;i<20;i++){ result=await normalizeNextPendingOfficialGame(env); if(result.status==='completed_source') break; }
+            assert.equal(result.status,'completed_source');
+            assert.equal(db.prepare('SELECT quality_status FROM source_records WHERE id = ?').get('src_live_gap').quality_status,'normalized_verified_subset');
+            assert.equal(db.prepare('SELECT COUNT(*) n FROM race_entries').get().n,9);
+            const missing=db.prepare(`SELECT horse_id,declared_horse_name,source_start_id FROM race_entries WHERE race_id='2099-05-01_7_1' AND start_number=2`).get();
+            assert.equal(missing.horse_id,null); assert.equal(missing.declared_horse_name,'Synthetic Horse 2'); assert.equal(missing.source_start_id,'2099-05-01_7_1_2');
+            assert.deepEqual(await normalizeNextPendingOfficialGame(env),{status:'idle',done:true});
+          });
+          JS
+
+          cat > test/official-live-exhausted-source-gap.test.js <<'JS'
+          import test from 'node:test';
+          import assert from 'node:assert/strict';
+          import { createTestEnv } from './helpers/d1.js';
+          import { normalizeNextPendingOfficialGame, selectPendingOfficialGameSource, v85V86GameIdsFromCalendar } from '../src/import/official-live-scheduled.js';
+
+          function start(raceId,number,horseId=1000+number){ const horse={name:`Synthetic Horse ${number}`}; if(horseId!=null) horse.id=horseId; return {id:`${raceId}_${number}`,number,postPosition:number,distance:2140,horse}; }
+          function game(){ const date='2099-05-02'; return {id:'V85_2099-05-02_7_1',status:'upcoming',pools:{V85:{betType:'V85',turnover:0}},races:Array.from({length:8},(_,i)=>{const raceId=`${date}_7_${i+1}`;return{id:raceId,date,number:i+1,distance:2140,startMethod:'auto',track:{id:7,name:'Synthetic Park'},starts:i===0?[start(raceId,1),start(raceId,2,null)]:[start(raceId,1,2000+i)]};})}; }
+          function seedSource(db,objects,sourceId='src_exhausted_gap',quality='captured_unmapped',metadata={kind:'game',identity:'V85_2099-05-02_7_1'}){const key=`raw/official_provider/${sourceId}.json`;objects.set(key,{body:JSON.stringify(game()),options:{}});db.prepare(`INSERT INTO source_records (id,source_type,external_id,source_url,fetched_at,raw_object_key,content_hash,quality_status,metadata_json) VALUES (?,'official_provider','game:V85_2099-05-02_7_1','https://example.invalid','2099-05-01T05:15:00Z',?,'exhausted-gap-hash',?,?)`).run(sourceId,key,quality,JSON.stringify(metadata));return sourceId;}
+          function seedFailed(db,index,sourceId,message){db.prepare(`INSERT INTO import_runs (id,source_type,started_at,finished_at,status,error_count,error_json,metadata_json) VALUES (?,'official_live_normalize_auto',?,?,'failed',1,?,?)`).run(`failed_${index}_${sourceId}`,`2099-05-01T05:1${index}:00Z`,`2099-05-01T05:1${index}:01Z`,JSON.stringify({message}),JSON.stringify({sourceRecordId:sourceId,externalId:'game:V85_2099-05-02_7_1',cursor:0}));}
+          test('an exhausted pre-fix missing-horse source is recoverable and normalizes to completion',async()=>{const {env,db,objects}=createTestEnv();const sourceId=seedSource(db,objects);for(let i=0;i<3;i++)seedFailed(db,i,sourceId,'races[0].starts[1].horse.id is required');assert.equal((await selectPendingOfficialGameSource(env)).id,sourceId);let result;for(let i=0;i<20;i++){result=await normalizeNextPendingOfficialGame(env);if(result.status==='completed_source')break;}assert.equal(result.status,'completed_source');assert.equal(db.prepare('SELECT quality_status FROM source_records WHERE id=?').get(sourceId).quality_status,'normalized_verified_subset');assert.equal(db.prepare('SELECT COUNT(*) n FROM race_entries WHERE horse_id IS NULL').get().n,1);assert.equal(await selectPendingOfficialGameSource(env),null);});
+          test('a captured missing-horse source gap is selected directly for recovery',async()=>{const {env,db,objects}=createTestEnv();const sourceId=seedSource(db,objects,'src_source_gap','captured_source_gap',{kind:'game',identity:'V85_2099-05-02_7_1',normalizationStatus:'source_gap',sourceGap:{code:'missing_horse_identity',raceIndex:0,startIndex:1}});assert.equal((await selectPendingOfficialGameSource(env)).id,sourceId);let result;for(let i=0;i<20;i++){result=await normalizeNextPendingOfficialGame(env);if(result.status==='completed_source')break;}assert.equal(result.status,'completed_source');const row=db.prepare('SELECT quality_status,metadata_json FROM source_records WHERE id=?').get(sourceId);assert.equal(row.quality_status,'normalized_verified_subset');assert.equal(JSON.parse(row.metadata_json).normalizationStatus,'normalized_recovered');});
+          test('an exhausted unrelated validation failure remains suppressed',async()=>{const {env,db,objects}=createTestEnv();const sourceId=seedSource(db,objects,'src_unrelated_failure');for(let i=0;i<3;i++)seedFailed(db,i,sourceId,'official game status is unsupported');assert.equal(await selectPendingOfficialGameSource(env),null);});
+          test('scheduled unpublished game is neutral and does not suppress a published sibling',()=>{const date='2099-05-03';const races=Array.from({length:8},(_,i)=>`${date}_7_${i+1}`);const payload={date,games:{V85:[{status:'scheduled',tracks:[7],races:[]},{id:`V85_${date}_7_1`,status:'scheduled',races}]}};assert.deepEqual(v85V86GameIdsFromCalendar(payload,date),[`V85_${date}_7_1`]);});
+          test('malformed published game still fails closed',()=>{const date='2099-05-04';assert.throws(()=>v85V86GameIdsFromCalendar({date,games:{V85:[{status:'scheduled',races:['bad']}] }},date),/game id does not match/);});
+          JS
 
           npm run qa
 
