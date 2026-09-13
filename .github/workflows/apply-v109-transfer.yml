@@ -40,7 +40,6 @@ jobs:
           from pathlib import Path
           import re
 
-          # Restore automatic eligibility for prior missing-horse source gaps.
           p = Path('src/import/official-live-scheduled.js')
           text = p.read_text()
           old = "WHERE sr.source_type = ? AND sr.quality_status = ?"
@@ -50,15 +49,15 @@ jobs:
               raise SystemExit(f'expected two live selector status clauses, found {count}')
           p.write_text(text.replace(old, new, 2))
 
-          # Preserve source-gap provenance when recovered normalization finishes.
           p = Path('src/import/official-live-chunked.js')
           text = p.read_text()
-          pattern = r"\s*await env\.DB\.prepare\('UPDATE source_records SET quality_status = \? WHERE id = \?'\)\s*\.bind\(NORMALIZED_QUALITY, sourceRecordId\)\.run\(\);"
-          replacement = "\n    await markOfficialSourceNormalized(env, { ...source, id: sourceRecordId });"
-          text2, n = re.subn(pattern, replacement, text, count=1)
-          if n != 1:
-              raise SystemExit(f'expected one source finalization update, found {n}')
-          p.write_text(text2)
+          if 'await markOfficialSourceNormalized(env, { ...source, id: sourceRecordId });' not in text:
+              pattern = r"\s*await env\.DB\.prepare\('UPDATE source_records SET quality_status = \? WHERE id = \?'\)\s*\.bind\(NORMALIZED_QUALITY, sourceRecordId\)\.run\(\);"
+              replacement = "\n    await markOfficialSourceNormalized(env, { ...source, id: sourceRecordId });"
+              text, n = re.subn(pattern, replacement, text, count=1)
+              if n != 1:
+                  raise SystemExit(f'expected one source finalization update, found {n}')
+          p.write_text(text)
           PY
           npm test
           rm -f scripts/apply-v110-hotfix.py .tmp/v109.patch.gz.b64 .github/workflows/apply-v109-transfer.yml
