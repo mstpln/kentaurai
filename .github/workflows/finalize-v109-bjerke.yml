@@ -1,0 +1,320 @@
+name: Finalize Bjerke source-gap hotfix
+
+on:
+  push:
+    branches:
+      - fix/official-nordic-identity-gaps-v109-final
+    paths:
+      - .github/workflows/finalize-v109-bjerke.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply reviewed fixes and run full suite
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > migrations/0014_official_participant_identity.sql <<'SQL'
+          PRAGMA foreign_keys = OFF;
+          PRAGMA legacy_alter_table = ON;
+
+          ALTER TABLE race_entries RENAME TO _0014_race_entries_legacy;
+
+          CREATE TABLE race_entries (
+            id TEXT PRIMARY KEY,
+            race_id TEXT NOT NULL REFERENCES races(id),
+            horse_id TEXT REFERENCES horses(id),
+            driver_id TEXT REFERENCES drivers(id),
+            trainer_id TEXT REFERENCES trainers(id),
+            source_start_id TEXT,
+            declared_horse_name TEXT,
+            declared_driver_name TEXT,
+            declared_trainer_name TEXT,
+            start_number INTEGER,
+            actual_lane INTEGER,
+            start_tier INTEGER,
+            handicap_m INTEGER NOT NULL DEFAULT 0,
+            actual_start_distance_m INTEGER,
+            springspar INTEGER,
+            inner_lane INTEGER,
+            back_row INTEGER,
+            scratched INTEGER,
+            scratch_reason TEXT,
+            data_quality TEXT NOT NULL DEFAULT 'unknown',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(race_id, horse_id),
+            UNIQUE(race_id, source_start_id)
+          );
+
+          INSERT INTO race_entries (
+            id, race_id, horse_id, driver_id, trainer_id, start_number, actual_lane,
+            start_tier, handicap_m, actual_start_distance_m, springspar, inner_lane,
+            back_row, scratched, scratch_reason, data_quality, created_at, updated_at
+          )
+          SELECT
+            id, race_id, horse_id, driver_id, trainer_id, start_number, actual_lane,
+            start_tier, handicap_m, actual_start_distance_m, springspar, inner_lane,
+            back_row,
+            CASE
+              WHEN data_quality = 'official_declared_start_scratch_unverified' THEN NULL
+              ELSE scratched
+            END,
+            scratch_reason, data_quality, created_at, updated_at
+          FROM _0014_race_entries_legacy;
+
+          DROP TABLE _0014_race_entries_legacy;
+
+          CREATE INDEX idx_entries_race ON race_entries(race_id);
+          CREATE INDEX idx_entries_horse ON race_entries(horse_id);
+          CREATE INDEX idx_entries_driver ON race_entries(driver_id, race_id)
+            WHERE driver_id IS NOT NULL;
+          CREATE INDEX idx_entries_trainer ON race_entries(trainer_id, race_id)
+            WHERE trainer_id IS NOT NULL;
+          CREATE INDEX idx_entries_source_start ON race_entries(source_start_id)
+            WHERE source_start_id IS NOT NULL;
+
+          PRAGMA legacy_alter_table = OFF;
+          PRAGMA foreign_keys = ON;
+          SQL
+
+          cat > test/official-live-source-gap.test.js <<'JS'
+          import test from 'node:test';
+          import assert from 'node:assert/strict';
+          import { createTestEnv } from './helpers/d1.js';
+          import { normalizeNextPendingOfficialGame } from '../src/import/official-live-scheduled.js';
+          import { officialGameSourceGap } from '../src/import/official-source-gap.js';
+
+          function start(raceId, number, horseId = 1000 + number) {
+            return {
+              id: `${raceId}_${number}`,
+              number,
+              postPosition: number,
+              distance: 2140,
+              horse: { id: horseId, name: `Synthetic Horse ${number}` }
+            };
+          }
+
+          function gameWithMissingPermanentHorseId() {
+            const date = '2099-05-01';
+            const races = Array.from({ length: 8 }, (_, index) => {
+              const raceId = `${date}_7_${index + 1}`;
+              const starts = index === 0
+                ? [start(raceId, 1), start(raceId, 2, null)]
+                : [start(raceId, 1, 2000 + index)];
+              return {
+                id: raceId,
+                date,
+                number: index + 1,
+                distance: 2140,
+                startMethod: 'auto',
+                track: { id: 7, name: 'Synthetic Park' },
+                starts
+              };
+            });
+            return {
+              id: 'V85_2099-05-01_7_1',
+              status: 'upcoming',
+              pools: { V85: { betType: 'V85', turnover: 0 } },
+              races
+            };
+          }
+
+          test('official live missing-horse identity is classified narrowly for legacy errors', () => {
+            assert.deepEqual(
+              officialGameSourceGap(new Error('races[0].starts[1].horse.id is required')),
+              { code: 'missing_horse_identity', raceIndex: 0, startIndex: 1 }
+            );
+            assert.equal(officialGameSourceGap(new Error('races[0].starts[1].horse.name must be a non-empty string')), null);
+          });
+
+          test('automatic live normalization keeps a named start when permanent horse identity is missing', async () => {
+            const { env, db, objects } = createTestEnv();
+            const sourceId = 'src_live_gap';
+            const externalId = 'game:V85_2099-05-01_7_1';
+            const key = 'raw/official_provider/live-gap.json';
+            objects.set(key, { body: JSON.stringify(gameWithMissingPermanentHorseId()), options: {} });
+            db.prepare(`INSERT INTO source_records
+              (id, source_type, external_id, source_url, fetched_at, raw_object_key, content_hash, quality_status, metadata_json)
+              VALUES (?, 'official_provider', ?, 'https://www.atg.se/services/racinginfo/v1/api/games/V85_2099-05-01_7_1',
+                '2099-04-30T05:15:00Z', ?, 'live-gap-hash', 'captured_unmapped', ?)`)
+              .run(sourceId, externalId, key, JSON.stringify({ kind: 'game', identity: 'V85_2099-05-01_7_1' }));
+
+            let result = null;
+            for (let attempt = 0; attempt < 20; attempt += 1) {
+              result = await normalizeNextPendingOfficialGame(env);
+              if (result.status === 'completed_source') break;
+            }
+            assert.equal(result.status, 'completed_source');
+
+            const source = db.prepare('SELECT quality_status FROM source_records WHERE id = ?').get(sourceId);
+            assert.equal(source.quality_status, 'normalized_verified_subset');
+            assert.equal(db.prepare('SELECT COUNT(*) AS n FROM game_rounds').get().n, 1);
+            assert.equal(db.prepare('SELECT COUNT(*) AS n FROM race_entries').get().n, 9);
+            const missing = db.prepare(`SELECT horse_id, declared_horse_name, source_start_id FROM race_entries
+              WHERE race_id = '2099-05-01_7_1' AND start_number = 2`).get();
+            assert.equal(missing.horse_id, null);
+            assert.equal(missing.declared_horse_name, 'Synthetic Horse 2');
+            assert.equal(missing.source_start_id, '2099-05-01_7_1_2');
+
+            const next = await normalizeNextPendingOfficialGame(env);
+            assert.deepEqual(next, { status: 'idle', done: true });
+          });
+          JS
+
+          cat > test/official-live-exhausted-source-gap.test.js <<'JS'
+          import test from 'node:test';
+          import assert from 'node:assert/strict';
+          import { createTestEnv } from './helpers/d1.js';
+          import { normalizeNextPendingOfficialGame, selectPendingOfficialGameSource } from '../src/import/official-live-scheduled.js';
+
+          function start(raceId, number, horseId = 1000 + number) {
+            return {
+              id: `${raceId}_${number}`,
+              number,
+              postPosition: number,
+              distance: 2140,
+              horse: { id: horseId, name: `Synthetic Horse ${number}` }
+            };
+          }
+
+          function gameWithMissingPermanentHorseId() {
+            const date = '2099-05-02';
+            return {
+              id: 'V85_2099-05-02_7_1',
+              status: 'upcoming',
+              pools: { V85: { betType: 'V85', turnover: 0 } },
+              races: Array.from({ length: 8 }, (_, index) => {
+                const raceId = `${date}_7_${index + 1}`;
+                return {
+                  id: raceId,
+                  date,
+                  number: index + 1,
+                  distance: 2140,
+                  startMethod: 'auto',
+                  track: { id: 7, name: 'Synthetic Park' },
+                  starts: index === 0
+                    ? [start(raceId, 1), start(raceId, 2, null)]
+                    : [start(raceId, 1, 2000 + index)]
+                };
+              })
+            };
+          }
+
+          function seedSource(db, objects, sourceId = 'src_exhausted_gap') {
+            const externalId = 'game:V85_2099-05-02_7_1';
+            const key = 'raw/official_provider/exhausted-live-gap.json';
+            objects.set(key, { body: JSON.stringify(gameWithMissingPermanentHorseId()), options: {} });
+            db.prepare(`INSERT INTO source_records
+              (id, source_type, external_id, source_url, fetched_at, raw_object_key, content_hash, quality_status, metadata_json)
+              VALUES (?, 'official_provider', ?, 'https://www.atg.se/services/racinginfo/v1/api/games/V85_2099-05-02_7_1',
+                '2099-05-01T05:15:00Z', ?, 'exhausted-gap-hash', 'captured_unmapped', ?)`)
+              .run(sourceId, externalId, key, JSON.stringify({ kind: 'game', identity: 'V85_2099-05-02_7_1' }));
+            return { sourceId };
+          }
+
+          function seedFailedAutoRun(db, index, sourceId, message) {
+            db.prepare(`INSERT INTO import_runs
+              (id, source_type, started_at, finished_at, status, error_count, error_json, metadata_json)
+              VALUES (?, 'official_live_normalize_auto', ?, ?, 'failed', 1, ?, ?)`)
+              .run(
+                `failed_${index}`,
+                `2099-05-01T05:1${index}:00Z`,
+                `2099-05-01T05:1${index}:01Z`,
+                JSON.stringify({ message }),
+                JSON.stringify({ sourceRecordId: sourceId, externalId: 'game:V85_2099-05-02_7_1', cursor: 0 })
+              );
+          }
+
+          test('an exhausted pre-fix missing-horse source is recoverable and normalizes to completion', async () => {
+            const { env, db, objects } = createTestEnv();
+            const { sourceId } = seedSource(db, objects);
+            for (let index = 0; index < 3; index += 1) {
+              seedFailedAutoRun(db, index, sourceId, 'races[0].starts[1].horse.id is required');
+            }
+
+            const selected = await selectPendingOfficialGameSource(env);
+            assert.equal(selected.id, sourceId);
+
+            let result = null;
+            for (let attempt = 0; attempt < 20; attempt += 1) {
+              result = await normalizeNextPendingOfficialGame(env);
+              if (result.status === 'completed_source') break;
+            }
+            assert.equal(result.status, 'completed_source');
+            assert.equal(result.sourceRecordId, sourceId);
+            assert.equal(db.prepare('SELECT quality_status FROM source_records WHERE id = ?').get(sourceId).quality_status, 'normalized_verified_subset');
+            assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM race_entries WHERE horse_id IS NULL`).get().n, 1);
+            assert.equal(await selectPendingOfficialGameSource(env), null);
+          });
+
+          test('an exhausted unrelated validation failure remains suppressed', async () => {
+            const { env, db, objects } = createTestEnv();
+            const { sourceId } = seedSource(db, objects, 'src_unrelated_failure');
+            for (let index = 0; index < 3; index += 1) {
+              seedFailedAutoRun(db, index, sourceId, 'official game status is unsupported');
+            }
+
+            const selected = await selectPendingOfficialGameSource(env);
+            assert.equal(selected, null);
+            const source = db.prepare('SELECT quality_status FROM source_records WHERE id = ?').get(sourceId);
+            assert.equal(source.quality_status, 'captured_unmapped');
+          });
+          JS
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/apply-v110-hotfix.py')
+          text = p.read_text()
+          old = "    if old not in text:\n        raise SystemExit(f'missing expected text in {path}: {old[:80]!r}')"
+          new = "    if old not in text:\n        if path == 'src/import/official-live-scheduled.js' or (path == 'src/import/official-live-chunked.js' and 'UPDATE source_records SET quality_status' in old):\n            return\n        raise SystemExit(f'missing expected text in {path}: {old[:80]!r}')"
+          if old not in text:
+              raise SystemExit('applicator guard was not found')
+          p.write_text(text.replace(old, new, 1))
+          PY
+
+          python3 scripts/apply-v110-hotfix.py
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('src/import/official-live-scheduled.js')
+          text = p.read_text()
+          old = "WHERE sr.source_type = ? AND sr.quality_status = ?"
+          new = "WHERE sr.source_type = ? AND (sr.quality_status = ? OR (sr.quality_status = 'captured_source_gap' AND json_extract(sr.metadata_json, '$.sourceGap.code') = 'missing_horse_identity'))"
+          count = text.count(old)
+          if count < 2:
+              raise SystemExit(f'expected two live selector status clauses, found {count}')
+          p.write_text(text.replace(old, new, 2))
+
+          p = Path('src/import/official-live-chunked.js')
+          text = p.read_text()
+          if 'await markOfficialSourceNormalized(env, { ...source, id: sourceRecordId });' not in text:
+              pattern = r"\s*await env\.DB\.prepare\('UPDATE source_records SET quality_status = \? WHERE id = \?'\)\s*\.bind\(NORMALIZED_QUALITY, sourceRecordId\)\.run\(\);"
+              replacement = "\n    await markOfficialSourceNormalized(env, { ...source, id: sourceRecordId });"
+              text, n = re.subn(pattern, replacement, text, count=1)
+              if n != 1:
+                  raise SystemExit(f'expected one source finalization update, found {n}')
+          p.write_text(text)
+          PY
+
+          node --test test/*.test.js
+
+          rm -f scripts/apply-v110-hotfix.py .tmp/v109.patch.gz.b64 .github/workflows/apply-v109-transfer.yml .github/workflows/finalize-v109-bjerke.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix Nordic live participant identity gaps"
+          git push origin HEAD:fix/official-nordic-identity-gaps-v109-final
