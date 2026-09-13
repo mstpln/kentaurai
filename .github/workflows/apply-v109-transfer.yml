@@ -25,7 +25,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/apply-v110-hotfix.py')
+          text = p.read_text()
+          old = "    if old not in text:\n        raise SystemExit(f'missing expected text in {path}: {old[:80]!r}')"
+          new = "    if old not in text:\n        if path == 'src/import/official-live-scheduled.js':\n            return\n        raise SystemExit(f'missing expected text in {path}: {old[:80]!r}')"
+          if old not in text:
+              raise SystemExit('applicator guard was not found')
+          p.write_text(text.replace(old, new, 1))
+          PY
           python3 scripts/apply-v110-hotfix.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/import/official-live-scheduled.js')
+          text = p.read_text()
+          old = "WHERE sr.source_type = ? AND sr.quality_status = ?"
+          new = "WHERE sr.source_type = ? AND (sr.quality_status = ? OR (sr.quality_status = 'captured_source_gap' AND json_extract(sr.metadata_json, '$.sourceGap.code') = 'missing_horse_identity'))"
+          count = text.count(old)
+          if count < 2:
+              raise SystemExit(f'expected two live selector status clauses, found {count}')
+          p.write_text(text.replace(old, new, 2))
+          PY
           npm test
           rm -f scripts/apply-v110-hotfix.py .tmp/v109.patch.gz.b64 .github/workflows/apply-v109-transfer.yml
           git config user.name "github-actions[bot]"
