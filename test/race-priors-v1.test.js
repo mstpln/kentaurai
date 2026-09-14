@@ -146,6 +146,7 @@ test('B6 builds deterministic as-of race, lane and shape priors with explicit ev
   assert.equal(pack.priors.race_outcome.win_rate.backoff_level, 'method_distance_field');
   assert.ok(pack.priors.race_outcome.win_rate.confidence > 0);
   assert.equal(pack.priors.race_context.status, 'available');
+  assert.equal(pack.priors.race_context.win_rate.direct_level, 'race_type_proposition');
   assert.ok(pack.priors.race_context.proposition_signature);
   assert.equal(pack.priors.starting_position.lane.value, 1);
   assert.ok(pack.priors.starting_position.lane.win_rate.sample_size > 0);
@@ -213,4 +214,41 @@ test('B6 rare-track direct evidence backs off as ESS grows in broader population
   assert.equal(prior.backoff_level, 'method_distance_field');
   assert.ok(prior.backoff_effective_sample_size >= 8);
   assert.equal(prior.evidence_source, 'direct_plus_model_estimate');
+});
+
+test('B6 buckets race distance rather than a handicapped entry start distance', async () => {
+  const { db, env } = createTestEnv();
+  const target = seedTarget(db);
+  db.prepare('UPDATE race_entries SET actual_start_distance_m = 1740 WHERE race_id = ?').run(target.raceId);
+  const historicalRaceId = seedHistoricalRace(db, 1, { distance: 2140, trackId: 'track-a' });
+  db.prepare('UPDATE race_entries SET actual_start_distance_m = 1740 WHERE race_id = ?').run(historicalRaceId);
+  const pack = (await buildRacePriorsV1ForEntries(env, [target.entryId], '2026-09-20T13:00:00Z')).get(target.entryId);
+  assert.equal(pack.target.distanceBucket, 'middle');
+  assert.equal(pack.priors.race_outcome.win_rate.direct_effective_sample_size, 1);
+  assert.equal(pack.priors.race_outcome.win_rate.direct_sample_size, 3);
+});
+
+test('B6 labels a race-type-only refinement truthfully', async () => {
+  const { db, env } = createTestEnv();
+  const target = seedTarget(db, { proposition: false, raceName: 'Stolopp' });
+  seedHistoricalRace(db, 1, { proposition: false, raceName: 'Stolopp' });
+  const pack = (await buildRacePriorsV1ForEntries(env, [target.entryId], '2026-09-20T13:00:00Z')).get(target.entryId);
+  assert.equal(pack.priors.race_context.status, 'available');
+  assert.equal(pack.priors.race_context.proposition_signature, null);
+  assert.equal(pack.priors.race_context.win_rate.direct_level, 'race_type');
+  assert.equal(pack.priors.race_context.win_rate.direct_effective_sample_size, 1);
+});
+
+test('B6 marks a known but unseen race refinement sparse while broader backoff remains usable', async () => {
+  const { db, env } = createTestEnv();
+  const target = seedTarget(db, { proposition: false, raceName: 'Stolopp' });
+  for (let index = 1; index <= 8; index += 1) {
+    seedHistoricalRace(db, index, { proposition: false, raceName: 'Final' });
+  }
+  const pack = (await buildRacePriorsV1ForEntries(env, [target.entryId], '2026-09-20T13:00:00Z')).get(target.entryId);
+  assert.equal(pack.priors.race_context.status, 'sparse');
+  assert.equal(pack.priors.race_context.win_rate.direct_level, 'race_type');
+  assert.equal(pack.priors.race_context.win_rate.direct_sample_size, 0);
+  assert.equal(pack.priors.race_context.win_rate.backoff_level, 'track_method_distance_field');
+  assert.notEqual(pack.priors.race_context.win_rate.value, null);
 });
