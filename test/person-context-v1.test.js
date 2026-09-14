@@ -61,4 +61,5 @@ test('B5 keeps a stable driver layout when the target driver is unknown',async()
   assert.equal(result.driver.windows['14'].win_rate.value,null);
   assert.equal(result.driver.provider_annual_fallback.ranking.value,null);
   assert.equal(result.driverHorse.status,'unavailable');assert.equal(result.driverHorse.together_starts,0);
+  assert.equal(result.driverHorse.other_driver_starts,0);assert.equal(result.driverHorse.other_driver_top3_rate.value,null);
 });
