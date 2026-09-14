@@ -7,14 +7,14 @@ const migrations = [
   '0001_core.sql','0002_reference_round.sql','0003_nullable_reference_prediction.sql','0004_official_live_observations.sql',
   '0005_historical_backfill.sql','0006_xlabs_backfill.sql','0007_official_first_prize.sql','0008_track_contact_metadata.sql',
   '0009_track_contact_provenance.sql','0010_horse_start_points.sql','0011_driver_statistics_indexes.sql','0012_trainer_statistics_indexes.sql',
-  '0013_combined_analysis_systems.sql','0014_official_participant_identity.sql','0015_official_snapshot_promotion.sql'
+  '0013_combined_analysis_systems.sql','0014_official_participant_identity.sql','0015_official_snapshot_promotion.sql','0016_race_proposition_facts.sql'
 ];
 const sql = migrations.map((name) => readFileSync(new URL(`../migrations/${name}`, import.meta.url), 'utf8')).join('\n');
 
 test('core migrations apply cleanly and create required tables', () => {
   const db = new DatabaseSync(':memory:');db.exec(sql);
   const names = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name));
-  for (const required of ['horses','drivers','trainers','tracks','races','race_entries','race_results','xlabs_data','game_rounds','betting_snapshots','editorial_items','analysis_features','ai_race_analyses','ai_horse_predictions','systems','post_race_reviews','import_runs','learning_hypotheses','learning_observations','model_change_log','reference_round_exports','reference_observations','normalized_observations','historical_backfill_jobs','xlabs_backfill_jobs','race_stl_classifications','race_type_classifications','horse_start_points','horse_start_point_source_sync','horse_profile_snapshots','horse_stat_snapshots','horse_record_snapshots','person_stat_snapshots','official_snapshot_source_sync']) assert.ok(names.has(required),`missing ${required}`);
+  for (const required of ['horses','drivers','trainers','tracks','races','race_entries','race_results','xlabs_data','game_rounds','betting_snapshots','editorial_items','analysis_features','ai_race_analyses','ai_horse_predictions','systems','post_race_reviews','import_runs','learning_hypotheses','learning_observations','model_change_log','reference_round_exports','reference_observations','normalized_observations','historical_backfill_jobs','xlabs_backfill_jobs','race_stl_classifications','race_type_classifications','horse_start_points','horse_start_point_source_sync','horse_profile_snapshots','horse_stat_snapshots','horse_record_snapshots','person_stat_snapshots','official_snapshot_source_sync','race_proposition_facts']) assert.ok(names.has(required),`missing ${required}`);
   const entryColumns = new Map(db.prepare('PRAGMA table_info(race_entries)').all().map(r=>[r.name,r]));
   assert.equal(entryColumns.get('horse_id').notnull,0);
   for (const required of ['source_start_id','declared_horse_name','declared_driver_name','declared_trainer_name']) assert.ok(entryColumns.has(required),`missing race_entries.${required}`);
@@ -40,6 +40,14 @@ test('A4 official snapshot schema keeps facts timestamped and provenance-backed'
   const horseColumns=new Set(db.prepare('PRAGMA table_info(horses)').all().map(r=>r.name));
   assert.ok(horseColumns.has('birth_year'));
   assert.equal(horseColumns.has('age_years'),false,'age remains a timestamped observation rather than a horse master fact');
+});
+
+test('B1 race proposition schema is versioned, timestamped and source-linked', () => {
+  const db=new DatabaseSync(':memory:');db.exec(sql);
+  const columns=new Map(db.prepare('PRAGMA table_info(race_proposition_facts)').all().map(r=>[r.name,r]));
+  for(const required of ['race_id','source_observation_id','source_record_id','observed_at','parser_version','parse_status','raw_terms_json','facts_json','unparsed_fragments_json','ambiguous_fragments_json']) assert.equal(columns.get(required).notnull,1,`race_proposition_facts.${required} must be required`);
+  const indexes=new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='index'").all().map(r=>r.name));
+  assert.ok(indexes.has('idx_race_proposition_facts_asof'));
 });
 
 test('driver and trainer statistics migrations add only query indexes', () => {const db=new DatabaseSync(':memory:');db.exec(sql);const indexes=new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='index'").all().map(r=>r.name));assert.ok(indexes.has('idx_entries_driver'));assert.ok(indexes.has('idx_entries_trainer'));assert.ok(indexes.has('idx_betting_snapshots_entry_time'));});

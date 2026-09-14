@@ -50,7 +50,8 @@ export function createTestEnv() {
     '../../migrations/0012_trainer_statistics_indexes.sql',
     '../../migrations/0013_combined_analysis_systems.sql',
     '../../migrations/0014_official_participant_identity.sql',
-    '../../migrations/0015_official_snapshot_promotion.sql'
+    '../../migrations/0015_official_snapshot_promotion.sql',
+    '../../migrations/0016_race_proposition_facts.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }
