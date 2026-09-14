@@ -68,11 +68,14 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT street_address, postal_code, website_url FROM tracks LIMIT 0; SELECT metrics_json, notes, spike_count FROM systems LIMIT 0; SELECT name FROM sqlite_master WHERE type='table' AND name IN ('race_stl_classifications','race_type_classifications') ORDER BY name; SELECT name FROM d1_migrations WHERE name IN ('0008_track_contact_metadata.sql','0013_combined_analysis_systems.sql') ORDER BY name;" > /tmp/migration-check.txt
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT street_address, postal_code, website_url FROM tracks LIMIT 0; SELECT metrics_json, notes, spike_count FROM systems LIMIT 0; SELECT horse_id, observed_at, age_years, source_record_id FROM horse_official_snapshots LIMIT 0; SELECT driver_id, stat_year, observed_at, source_record_id FROM driver_official_year_snapshots LIMIT 0; SELECT trainer_id, stat_year, observed_at, source_record_id FROM trainer_official_year_snapshots LIMIT 0; SELECT name FROM sqlite_master WHERE type='table' AND name IN ('race_stl_classifications','race_type_classifications','horse_official_record_snapshots','official_participant_snapshot_source_sync') ORDER BY name; SELECT name FROM d1_migrations WHERE name IN ('0008_track_contact_metadata.sql','0013_combined_analysis_systems.sql','0015_official_participant_snapshots.sql') ORDER BY name;" > /tmp/migration-check.txt
           grep -q 'race_stl_classifications' /tmp/migration-check.txt
           grep -q 'race_type_classifications' /tmp/migration-check.txt
+          grep -q 'horse_official_record_snapshots' /tmp/migration-check.txt
+          grep -q 'official_participant_snapshot_source_sync' /tmp/migration-check.txt
           grep -q '0008_track_contact_metadata.sql' /tmp/migration-check.txt
           grep -q '0013_combined_analysis_systems.sql' /tmp/migration-check.txt
+          grep -q '0015_official_participant_snapshots.sql' /tmp/migration-check.txt
 
       - name: Deploy Worker
         id: deploy
@@ -128,4 +131,4 @@ jobs:
         run: |
           echo 'KentaurAI v0.6.0 production release completed.'
           echo "Worker: $WORKER_URL"
-          echo 'Migration 0013 schema, exact app version, health, login and private combined-analysis route checks passed.'
+          echo 'Required production schema, exact app version, health, login and private combined-analysis route checks passed.'
