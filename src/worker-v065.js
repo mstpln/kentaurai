@@ -1,6 +1,6 @@
 import worker from './worker-v064.js';
 import { appAuthConfigured, hasValidAppSession } from './app-auth.js';
-import { createDataCoverageExportResponse } from './data-coverage.js';
+import { createDataCoverageExportResponse } from './data-coverage-v2.js';
 import { getHorseFilterOptions } from './statistics/horses-complete.js';
 import {
   getDriverCalendarYearDetailStatistics,
@@ -118,49 +118,60 @@ const calendarHandlers = {
 async function calendarDetail(env, entityType, entityId, options) {
   const data = await calendarHandlers[entityType](env, entityId, options);
   if (!data || entityType !== 'trainers') return data;
-  const home = await getTrainerCalendarHomeTrackResults(env, entityId, data.filters);
-  return { ...data, ...home };
+  return {
+    ...data,
+    home_track: await getTrainerCalendarHomeTrackResults(env, entityId, options)
+  };
 }
 
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    const path = url.pathname;
-    const canonical = canonicalAppRedirect(request, url);
-    if (canonical) return canonical;
+    const redirect = canonicalAppRedirect(request, url);
+    if (redirect) return redirect;
 
-    if (request.method === 'GET' && path === '/app/api/settings/data-coverage') {
-      const denied = await requireSession(request, env);
-      if (denied) return denied;
-      try { return await createDataCoverageExportResponse(env); }
-      catch (error) { console.error(error); return json({ error: 'request_failed', message: error.message }, 400); }
-    }
-
-    if (request.method === 'GET' && path === '/app/api/horses/statistics/filter-options') {
-      const denied = await requireSession(request, env);
-      if (denied) return denied;
-      try { return json(await getHorseFilterOptions(env)); }
-      catch (error) { console.error(error); return json({ error: 'request_failed', message: error.message }, 400); }
-    }
-
-    const calendarMatch = path.match(/^\/app\/api\/(trainers|drivers|horses)\/([^/]+)\/calendar-statistics$/);
-    if (request.method === 'GET' && calendarMatch) {
+    if (request.method === 'GET' && url.pathname === '/app/api/settings/data-coverage') {
       const denied = await requireSession(request, env);
       if (denied) return denied;
       try {
-        const entityType = calendarMatch[1];
-        const data = await calendarDetail(env, entityType, decodeURIComponent(calendarMatch[2]), calendarOptions(url));
-        return data ? json(data) : json({ error: 'not_found' }, 404);
+        return await createDataCoverageExportResponse(env);
       } catch (error) {
         console.error(error);
-        return json({ error: 'request_failed', message: error.message }, 400);
+        return json({ error: 'data_coverage_failed' }, 500);
       }
     }
 
-    return enhancedAppResponse(request, await worker.fetch(request, env, ctx));
+    const detailMatch = url.pathname.match(/^\/app\/api\/(trainers|drivers|horses)\/([^/]+)\/calendar-statistics$/);
+    if (request.method === 'GET' && detailMatch) {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        const data = await calendarDetail(env, detailMatch[1], decodeURIComponent(detailMatch[2]), calendarOptions(url));
+        return data ? json(data) : json({ error: 'not_found' }, 404);
+      } catch (error) {
+        console.error(error);
+        return json({ error: String(error?.message || error) }, 400);
+      }
+    }
+
+    const horseFiltersMatch = url.pathname.match(/^\/app\/api\/horses\/([^/]+)\/calendar-filter-options$/);
+    if (request.method === 'GET' && horseFiltersMatch) {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        const data = await getHorseFilterOptions(env, decodeURIComponent(horseFiltersMatch[1]), { year: url.searchParams.get('year') });
+        return data ? json(data) : json({ error: 'not_found' }, 404);
+      } catch (error) {
+        console.error(error);
+        return json({ error: String(error?.message || error) }, 400);
+      }
+    }
+
+    const response = await worker.fetch(request, env, ctx);
+    return enhancedAppResponse(request, response);
   },
 
-  async scheduled(controller, env, ctx) {
-    return worker.scheduled(controller, env, ctx);
+  async scheduled(event, env, ctx) {
+    return worker.scheduled(event, env, ctx);
   }
 };
