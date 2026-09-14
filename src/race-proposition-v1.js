@@ -23,6 +23,7 @@ const EMPTY_FACTS = Object.freeze({
 
 const NEGATION = /\b(?:inte|ej|icke|utan|ikke|unntatt|förutom|exklusive)\b/i;
 const SUPPORTED_KEYWORD = /(?:år|final|försök|forsøk|kval|heat|spårtrappa|sportrapp|amatör|amatør|lärling|lærling|unghäst|unghest|tillägg|tillegg|ston|stolopp|hopper|hingstar|hingster|valacker|vallaker|kr|sek|nok)/i;
+const UNSUPPORTED_AGE_CONJUNCTION = /\b\d{1,2}\s*-?\s*(?:och|og)\s*\d{1,2}\s*[- ]?år(?:iga|ige)?\b/i;
 const CONNECTOR_WORDS = /\b(?:för|for|till|til|och|og|samt|av|med)\b/gi;
 
 function normalizeText(value) {
@@ -57,9 +58,30 @@ function sameGroup(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function descendingRange(group, values) {
+  if (group === 'age') {
+    const min = values.age_min_years;
+    const max = values.age_max_years;
+    return min != null && max != null && min > max;
+  }
+  if (group === 'earnings') {
+    const min = values.earnings_min_amount;
+    const max = values.earnings_max_amount;
+    return min != null && max != null && min > max;
+  }
+  return false;
+}
+
 function assignGroup({ facts, assigned, conflicted, group, keys, candidate, fragment, ambiguousFragments }) {
   if (conflicted.has(group)) return;
   const normalized = Object.fromEntries(keys.map((key) => [key, candidate[key] ?? null]));
+  if (descendingRange(group, normalized)) {
+    for (const key of keys) facts[key] = null;
+    assigned.delete(group);
+    conflicted.add(group);
+    ambiguousFragments.push(`invalid ${group} range: ${fragment}`);
+    return;
+  }
   const prior = assigned.get(group);
   if (prior && !sameGroup(prior, normalized)) {
     for (const key of keys) facts[key] = null;
@@ -203,9 +225,13 @@ export function parseRacePropositionTerms(terms) {
       ambiguousFragments.push(text);
       continue;
     }
+    if (UNSUPPORTED_AGE_CONJUNCTION.test(text)) {
+      conflicted.add('age');
+      ambiguousFragments.push(text);
+    }
 
     const state = { original: text, remaining: text, facts, matchedPatterns, ambiguousFragments, assigned, conflicted };
-    for (const rule of RULES) consumeRule(state, rule);
+    for (const rule of RULES) while (consumeRule(state, rule)) {}
     if (meaningfulResidual(state.remaining)) unparsedFragments.push(text);
   }
 
