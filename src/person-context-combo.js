@@ -1,20 +1,18 @@
 import { placingStats,binaryStats,personEvidence,shrinkDelta } from './person-context-stats.js';
-
-function parsePace(value){
-  if(typeof value!=='string')return null;
-  const match=value.trim().replace(/\s*min\/km$/i,'').match(/^(\d+)[.:](\d{2})[,.](\d)$/);
-  if(!match)return null;
-  const seconds=Number(match[2]);
-  return seconds<=59?Number(match[1])*60+seconds+Number(match[3])/10:null;
-}
+const CHUNK=80;
+function ph(values){return values.map(()=>'?').join(',');}
+function parsePace(value){if(typeof value!=='string')return null;const m=value.trim().replace(/\s*min\/km$/i,'').match(/^(\d+)[.:](\d{2})[,.](\d)$/);if(!m)return null;const s=Number(m[2]);return s<=59?Number(m[1])*60+s+Number(m[3])/10:null;}
 
 async function openingPace(env,rows,cutoffIso){
-  const values=[]; const refs=[];
-  for(const row of rows){
-    const x=await env.DB.prepare(`SELECT x.first_200_time,x.source_record_id,sr.fetched_at FROM xlabs_data x JOIN source_records sr ON sr.id=x.source_record_id WHERE x.race_entry_id=? AND x.quality_status='xlabs-telemetry-v1' AND julianday(sr.fetched_at)<=julianday(?) ORDER BY julianday(sr.fetched_at) DESC,x.id DESC LIMIT 1`).bind(row.race_entry_id,cutoffIso).first();
-    const value=parsePace(x?.first_200_time); if(value!=null){values.push(value);refs.push(x);}
+  const ids=[...new Set(rows.map((row)=>row.race_entry_id))],latest=new Map();
+  for(let i=0;i<ids.length;i+=CHUNK){
+    const group=ids.slice(i,i+CHUNK);
+    const {results}=await env.DB.prepare(`SELECT x.race_entry_id,x.first_200_time,x.source_record_id,sr.fetched_at FROM xlabs_data x JOIN source_records sr ON sr.id=x.source_record_id WHERE x.race_entry_id IN (${ph(group)}) AND x.quality_status='xlabs-telemetry-v1' AND julianday(sr.fetched_at)<=julianday(?) ORDER BY x.race_entry_id,julianday(sr.fetched_at) DESC,x.id DESC`).bind(...group,cutoffIso).all();
+    for(const row of results||[])if(!latest.has(row.race_entry_id))latest.set(row.race_entry_id,row);
   }
-  return {value:values.length?values.reduce((a,b)=>a+b,0)/values.length:null,count:values.length,refs};
+  const used=[];for(const row of latest.values())if(parsePace(row.first_200_time)!=null)used.push(row);
+  const values=used.map((row)=>parsePace(row.first_200_time));
+  return {value:values.length?values.reduce((a,b)=>a+b,0)/values.length:null,count:values.length,refs:used};
 }
 
 export async function buildDriverHorseContext(env,horseRows,driverId,cutoffIso,version){
