@@ -10,8 +10,9 @@ import {
 } from '../src/race-proposition-v1.js';
 
 function seedRaceObservation(db, { id, raceId = 'race-a', fetchedAt, terms }) {
+  const raceNumber = Number(raceId.match(/(\d+)$/)?.[1] ?? 1);
   db.prepare("INSERT OR IGNORE INTO tracks (id, canonical_name) VALUES ('track-a','Synthetic Track')").run();
-  db.prepare("INSERT OR IGNORE INTO races (id, track_id, race_date, race_number) VALUES (?, 'track-a', '2026-09-14', 1)").run(raceId);
+  db.prepare("INSERT OR IGNORE INTO races (id, track_id, race_date, race_number) VALUES (?, 'track-a', '2026-09-14', ?)").run(raceId, raceNumber);
   db.prepare("INSERT INTO source_records (id, source_type, external_id, fetched_at, quality_status) VALUES (?, 'official_provider', ?, ?, 'normalized_verified_subset')")
     .run(`source-${id}`, `race:${raceId}`, fetchedAt);
   db.prepare("INSERT INTO normalized_observations (id, entity_type, entity_id, source_record_id, observed_at, fields_json, quality_status) VALUES (?, 'race', ?, ?, ?, ?, 'normalized_verified_subset')")
