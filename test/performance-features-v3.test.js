@@ -91,8 +91,8 @@ function seedProposition(db, raceId, observedAt) {
     INSERT INTO race_proposition_facts
       (id, race_id, source_observation_id, source_record_id, observed_at, parser_version, parse_status,
        raw_terms_json, facts_json, matched_patterns_json, unparsed_fragments_json, ambiguous_fragments_json)
-    VALUES ('prop-target', ?, 'obs-prop', 'prop-source', ?, 'race-proposition-v1', 'parsed', ?, ?, '[]', '[]', '[]')
-  `).run(raceId, observedAt, JSON.stringify(['3-åriga och äldre högst 500 000 kr']), JSON.stringify({ min_age: 3, max_earnings_sek: 500000 }));
+    VALUES ('prop-target', ?, 'obs-prop', 'prop-source', ?, 'kentaurai-race-proposition-v1', 'parsed', ?, ?, '[]', '[]', '[]')
+  `).run(raceId, observedAt, JSON.stringify(['3-åriga och äldre högst 500 000 kr']), JSON.stringify({ age_min_years: 3, earnings_max_amount: 500000, earnings_currency: 'SEK' }));
 }
 
 function seedScenario(db) {
