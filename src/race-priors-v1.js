@@ -160,10 +160,10 @@ const METHOD_SQL = `CASE
 END`;
 
 const DISTANCE_SQL = `CASE
-  WHEN COALESCE(re.actual_start_distance_m,r.distance_m) IS NULL THEN 'unknown'
-  WHEN COALESCE(re.actual_start_distance_m,r.distance_m) < 1800 THEN 'short'
-  WHEN COALESCE(re.actual_start_distance_m,r.distance_m) < 2400 THEN 'middle'
-  WHEN COALESCE(re.actual_start_distance_m,r.distance_m) < 3000 THEN 'long'
+  WHEN r.distance_m IS NULL THEN 'unknown'
+  WHEN r.distance_m < 1800 THEN 'short'
+  WHEN r.distance_m < 2400 THEN 'middle'
+  WHEN r.distance_m < 3000 THEN 'long'
   ELSE 'stayer'
 END`;
 
@@ -602,7 +602,7 @@ function buildProvenance(context, targetProposition) {
 
 async function buildRaceContext(env, target, requested) {
   const cutoff = targetCutoff(target, requested.ms);
-  const targetDistance = numberOrNull(target.actual_start_distance_m) ?? numberOrNull(target.distance_m);
+  const targetDistance = numberOrNull(target.distance_m);
   const targetField = Number(target.active_field_size || target.field_size || 0) || null;
   const targetProposition = await latestProposition(env, target.race_id, cutoff);
   const context = {
@@ -629,29 +629,33 @@ function buildPack(target, requested, shared) {
   const proposition = context.propositionSignature;
   const raceTypePredicate = raceType ? (row) => row.raceTypeSignature === raceType : null;
   const propositionPredicate = proposition ? (row) => row.propositionSignature === proposition : null;
-  const bothPredicate = raceTypePredicate && propositionPredicate
+  const contextLevel = raceTypePredicate && propositionPredicate
+    ? 'race_type_proposition'
+    : raceTypePredicate ? 'race_type' : propositionPredicate ? 'proposition' : null;
+  const contextPredicate = raceTypePredicate && propositionPredicate
     ? (row) => raceTypePredicate(row) && propositionPredicate(row)
     : raceTypePredicate || propositionPredicate;
+  const contextDirectStarts = contextPredicate ? specificRows.filter(contextPredicate).length : 0;
   const positionTarget = {
     actualLane: numberOrNull(target.actual_lane),
     startTier: numberOrNull(target.start_tier),
     handicapM: numberOrNull(target.handicap_m)
   };
 
-  const contextPriors = bothPredicate ? Object.freeze({
-    status: 'available',
+  const contextPriors = contextPredicate ? Object.freeze({
+    status: contextDirectStarts ? 'available' : 'sparse',
     race_type_signature: raceType,
     proposition_signature: proposition,
-    win_rate: filteredPrior('win_rate', specificRows, bothPredicate, levels, 'race_type_proposition'),
-    top3_rate: filteredPrior('top3_rate', specificRows, bothPredicate, levels, 'race_type_proposition'),
-    gallop_rate: filteredPrior('gallop_rate', specificRows, bothPredicate, levels, 'race_type_proposition')
+    win_rate: filteredPrior('win_rate', specificRows, contextPredicate, levels, contextLevel),
+    top3_rate: filteredPrior('top3_rate', specificRows, contextPredicate, levels, contextLevel),
+    gallop_rate: filteredPrior('gallop_rate', specificRows, contextPredicate, levels, contextLevel)
   }) : Object.freeze({
     status: 'unavailable',
     race_type_signature: raceType,
     proposition_signature: proposition,
-    win_rate: unavailablePrior('win_rate', 'race_type_proposition'),
-    top3_rate: unavailablePrior('top3_rate', 'race_type_proposition'),
-    gallop_rate: unavailablePrior('gallop_rate', 'race_type_proposition')
+    win_rate: unavailablePrior('win_rate', null),
+    top3_rate: unavailablePrior('top3_rate', null),
+    gallop_rate: unavailablePrior('gallop_rate', null)
   });
 
   return Object.freeze({
