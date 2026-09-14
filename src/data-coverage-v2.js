@@ -201,7 +201,7 @@ function classifyBackfillError(value) {
   if (!text) return 'none';
   if (text.includes('429') || text.includes('rate limit') || text.includes('retry-after')) return 'source_rate_limited';
   if (text.includes('401') || text.includes('403') || text.includes('forbidden') || text.includes('access denied')) return 'source_access_denied';
-  if (text.includes('timeout') || text.includes('timed out') || text.includes('network') || text.includes('fetch failed') || text.includes('upstream')) return 'source_transport_failure';
+  if (text.includes('timeout') || text.includes('timed out') || text.includes('network') || text.includes('fetch failed') || text.includes('upstream') || /\bhttp\s+5\d{2}\b/.test(text)) return 'source_transport_failure';
   if (text.includes('404') || text.includes('not found')) return 'source_not_found';
   if (text.includes('identity') || text.includes('provenance') || text.includes('mismatch') || text.includes('another track') || text.includes('another race')) return 'identity_or_provenance_failure';
   if (text.includes('no coverage') || text.includes('source gap') || text.includes('duplicate target') || text.includes('insufficient_frame_coverage')) return 'source_coverage_gap';
@@ -262,13 +262,33 @@ async function backfillDiagnostics(env) {
 async function currentRoundCoverage(env, generatedAt) {
   const date = swedenDateKey(generatedAt);
   const round = await env.DB.prepare(`
-    SELECT id,game_type,round_date,
+    SELECT id,game_type,round_date,scheduled_start_at,
       (SELECT COUNT(*) FROM game_legs gl WHERE gl.game_round_id=gr.id) AS leg_count
     FROM game_rounds gr
-    WHERE game_type IN ('V85','V86') AND round_date>=?
-    ORDER BY round_date,game_type,id
+    WHERE game_type IN ('V85','V86')
+      AND round_date>=?
+      AND NOT (
+        round_date=?
+        AND EXISTS (
+          SELECT 1
+          FROM game_legs cgl
+          JOIN race_entries cre ON cre.race_id=cgl.race_id
+          WHERE cgl.game_round_id=gr.id AND COALESCE(cre.scratched,0)=0
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM game_legs ugl
+          JOIN race_entries ure ON ure.race_id=ugl.race_id
+          WHERE ugl.game_round_id=gr.id
+            AND COALESCE(ure.scratched,0)=0
+            AND NOT EXISTS (SELECT 1 FROM race_results urr WHERE urr.race_entry_id=ure.id)
+        )
+      )
+    ORDER BY round_date,
+      CASE WHEN scheduled_start_at IS NULL OR TRIM(scheduled_start_at)='' THEN 1 ELSE 0 END,
+      scheduled_start_at,game_type,id
     LIMIT 1
-  `).bind(date).first();
+  `).bind(date, date).first();
   if (!round) return {
     status: 'not_available',
     reason: 'no_upcoming_v85_v86_round_in_storage',
