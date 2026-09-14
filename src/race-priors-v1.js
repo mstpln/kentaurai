@@ -1,0 +1,699 @@
+import {
+  ANALYSIS_V3_FOUNDATION_CONTRACTS,
+  ANALYSIS_V3_INITIAL_BACKOFF_POLICY,
+  createFeatureProvenance,
+  estimateWithHierarchicalBackoff
+} from './analysis-v3-foundations.js';
+import { classifyRace } from './race-classification.js';
+import { RACE_PROPOSITION_PARSER_VERSION } from './race-proposition-v1.js';
+
+export const RACE_PRIOR_CONTRACT_VERSION = 'kentaurai-race-priors-v1';
+export const RACE_PRIOR_FEATURE_VERSION = 'race_priors_v1';
+
+export const RACE_PRIOR_POLICY = Object.freeze({
+  distanceBuckets: Object.freeze([
+    Object.freeze({ key: 'short', min: 0, maxExclusive: 1800 }),
+    Object.freeze({ key: 'middle', min: 1800, maxExclusive: 2400 }),
+    Object.freeze({ key: 'long', min: 2400, maxExclusive: 3000 }),
+    Object.freeze({ key: 'stayer', min: 3000, maxExclusive: null })
+  ]),
+  fieldBuckets: Object.freeze([
+    Object.freeze({ key: 'small', min: 1, max: 8 }),
+    Object.freeze({ key: 'medium', min: 9, max: 12 }),
+    Object.freeze({ key: 'large', min: 13, max: null })
+  ]),
+  minEffectiveSampleSize: ANALYSIS_V3_INITIAL_BACKOFF_POLICY.minEffectiveSampleSize,
+  priorEquivalentSampleSize: ANALYSIS_V3_INITIAL_BACKOFF_POLICY.priorEquivalentSampleSize
+});
+
+const LEVEL_ORDER = Object.freeze([
+  'track_method_distance_field',
+  'track_method_distance',
+  'track_method',
+  'method_distance_field',
+  'method_distance',
+  'method',
+  'global'
+]);
+
+function placeholders(values) { return values.map(() => '?').join(','); }
+function chunks(values, size = 80) {
+  const out = [];
+  for (let i = 0; i < values.length; i += size) out.push(values.slice(i, i + size));
+  return out;
+}
+
+function instant(value, field = 'asOf') {
+  const text = String(value ?? '').trim();
+  const ms = Date.parse(text);
+  if (!text || !Number.isFinite(ms)) throw new Error(`${field} must be a valid timestamp`);
+  return { ms, iso: new Date(ms).toISOString() };
+}
+
+function dateBoundaryMs(value, endOfDay = false) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const ms = Date.parse(`${value}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}Z`);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function targetCutoff(row, requestedMs) {
+  const scheduled = Date.parse(String(row?.scheduled_start_at ?? ''));
+  const eventMs = Number.isFinite(scheduled) ? scheduled : dateBoundaryMs(row?.race_date, false);
+  const cutoff = eventMs == null ? requestedMs : Math.min(requestedMs, eventMs);
+  return new Date(cutoff).toISOString();
+}
+
+function canonicalMethod(value) {
+  const text = String(value ?? '').trim().toLowerCase();
+  if (text === 'auto' || text === 'autostart') return 'auto';
+  if (text === 'volt' || text === 'volte' || text === 'voltstart') return 'volt';
+  return text || 'unknown';
+}
+
+function distanceBucket(value) {
+  const distance = Number(value);
+  if (!Number.isFinite(distance) || distance <= 0) return null;
+  if (distance < 1800) return 'short';
+  if (distance < 2400) return 'middle';
+  if (distance < 3000) return 'long';
+  return 'stayer';
+}
+
+function fieldBucket(value) {
+  const size = Number(value);
+  if (!Number.isInteger(size) || size < 1) return null;
+  if (size <= 8) return 'small';
+  if (size <= 12) return 'medium';
+  return 'large';
+}
+
+function numberOrNull(value) {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseJson(value, fallback = null) {
+  if (value == null || value === '') return fallback;
+  try { return JSON.parse(value); } catch { return fallback; }
+}
+
+function propositionSignature(proposition) {
+  if (!proposition || proposition.parseStatus !== 'parsed' || !proposition.facts || typeof proposition.facts !== 'object') return null;
+  const selected = Object.fromEntries(Object.entries(proposition.facts).filter(([, value]) => value != null));
+  return Object.keys(selected).length
+    ? JSON.stringify(Object.fromEntries(Object.entries(selected).sort(([a], [b]) => a.localeCompare(b))))
+    : null;
+}
+
+function raceTypeSignature(race) {
+  const types = classifyRace({
+    raceName: race?.race_name,
+    mainClass: race?.main_class,
+    classFlags: race?.class_flags_json
+  }).raceTypes;
+  return types.length ? [...types].sort().join('|') : null;
+}
+
+async function loadTargets(env, entryIds) {
+  const rows = [];
+  for (const group of chunks(entryIds)) {
+    const { results } = await env.DB.prepare(`
+      SELECT re.id AS race_entry_id, re.race_id, re.actual_lane, re.start_tier, re.handicap_m,
+             re.actual_start_distance_m, r.track_id, r.race_date, r.scheduled_start_at,
+             r.distance_m, r.start_method, r.field_size, r.race_name, r.main_class, r.class_flags_json,
+             (SELECT COUNT(*) FROM race_entries active WHERE active.race_id = r.id AND active.scratched = 0) AS active_field_size
+      FROM race_entries re
+      JOIN races r ON r.id = re.race_id
+      WHERE re.id IN (${placeholders(group)})
+    `).bind(...group).all();
+    rows.push(...results);
+  }
+  const byId = new Map(rows.map((row) => [row.race_entry_id, row]));
+  const missing = entryIds.filter((id) => !byId.has(id));
+  if (missing.length) throw new Error(`target race entries were not found: ${missing.join(', ')}`);
+  return entryIds.map((id) => byId.get(id));
+}
+
+async function latestProposition(env, raceId, cutoff) {
+  const row = await env.DB.prepare(`
+    SELECT parse_status, facts_json, observed_at, source_record_id
+    FROM race_proposition_facts
+    WHERE race_id = ? AND parser_version = ? AND observed_at <= ?
+    ORDER BY julianday(observed_at) DESC, id DESC
+    LIMIT 1
+  `).bind(raceId, RACE_PROPOSITION_PARSER_VERSION, cutoff).first();
+  if (!row) return null;
+  return {
+    parseStatus: row.parse_status,
+    facts: parseJson(row.facts_json, {}),
+    observedAt: row.observed_at,
+    sourceRecordId: row.source_record_id
+  };
+}
+
+const METHOD_SQL = `CASE
+  WHEN LOWER(COALESCE(r.start_method,'')) IN ('auto','autostart') THEN 'auto'
+  WHEN LOWER(COALESCE(r.start_method,'')) IN ('volt','volte','voltstart') THEN 'volt'
+  WHEN r.start_method IS NULL OR TRIM(r.start_method) = '' THEN 'unknown'
+  ELSE LOWER(r.start_method)
+END`;
+
+const DISTANCE_SQL = `CASE
+  WHEN COALESCE(re.actual_start_distance_m,r.distance_m) IS NULL THEN 'unknown'
+  WHEN COALESCE(re.actual_start_distance_m,r.distance_m) < 1800 THEN 'short'
+  WHEN COALESCE(re.actual_start_distance_m,r.distance_m) < 2400 THEN 'middle'
+  WHEN COALESCE(re.actual_start_distance_m,r.distance_m) < 3000 THEN 'long'
+  ELSE 'stayer'
+END`;
+
+const FIELD_SQL = `CASE
+  WHEN rf.active_field_size BETWEEN 1 AND 8 THEN 'small'
+  WHEN rf.active_field_size BETWEEN 9 AND 12 THEN 'medium'
+  WHEN rf.active_field_size >= 13 THEN 'large'
+  ELSE 'unknown'
+END`;
+
+function hhi(values) {
+  const total = values.reduce((sum, value) => sum + value, 0);
+  if (!total) return null;
+  return values.reduce((sum, value) => {
+    const p = value / total;
+    return sum + p * p;
+  }, 0);
+}
+
+function normalizedEntropy(values) {
+  const positive = values.filter((value) => value > 0);
+  const total = positive.reduce((sum, value) => sum + value, 0);
+  if (!total || positive.length <= 1) return positive.length === 1 ? 0 : null;
+  const entropy = -positive.reduce((sum, value) => {
+    const p = value / total;
+    return sum + p * Math.log(p);
+  }, 0);
+  return entropy / Math.log(positive.length);
+}
+
+function shapeSelect(level, where) {
+  return `SELECT '${level}' AS level, actual_lane,
+    COUNT(*) AS winners,
+    COUNT(DISTINCT race_id) AS races,
+    COUNT(DISTINCT source_record_id) AS source_records,
+    MIN(source_observed_at) AS first_source_observed_at,
+    MAX(source_observed_at) AS last_source_observed_at
+  FROM eligible WHERE ${where} GROUP BY actual_lane`;
+}
+
+async function loadShapeLevels(env, context) {
+  const base = `
+    WITH race_fields AS (
+      SELECT r0.id AS race_id, SUM(CASE WHEN re0.scratched = 0 THEN 1 ELSE 0 END) AS active_field_size
+      FROM races r0 JOIN race_entries re0 ON re0.race_id = r0.id
+      GROUP BY r0.id
+    ), eligible AS (
+      SELECT r.id AS race_id, r.track_id, ${METHOD_SQL} AS method_key, ${DISTANCE_SQL} AS distance_bucket,
+             ${FIELD_SQL} AS field_bucket, re.actual_lane, rr.source_record_id,
+             sr.fetched_at AS source_observed_at
+      FROM races r
+      JOIN race_fields rf ON rf.race_id = r.id
+      JOIN race_entries re ON re.race_id = r.id
+      JOIN race_results rr ON rr.race_entry_id = re.id
+      JOIN source_records sr ON sr.id = rr.source_record_id
+      WHERE re.scratched = 0 AND rr.result_status = 'official' AND rr.placing = 1
+        AND re.actual_lane IS NOT NULL
+        AND sr.fetched_at <= ?
+        AND COALESCE(r.scheduled_start_at, r.race_date || 'T23:59:59.999Z') < ?
+        AND r.id <> ?
+    )\n`;
+  const selectors = [
+    shapeSelect('track_method_distance_field', 'track_id = ? AND method_key = ? AND distance_bucket = ? AND field_bucket = ?'),
+    shapeSelect('track_method_distance', 'track_id = ? AND method_key = ? AND distance_bucket = ?'),
+    shapeSelect('track_method', 'track_id = ? AND method_key = ?'),
+    shapeSelect('method_distance_field', 'method_key = ? AND distance_bucket = ? AND field_bucket = ?'),
+    shapeSelect('method_distance', 'method_key = ? AND distance_bucket = ?'),
+    shapeSelect('method', 'method_key = ?'),
+    shapeSelect('global', '1 = 1')
+  ];
+  const bindings = [
+    context.cutoff, context.cutoff, context.raceId,
+    context.trackId, context.method, context.distanceBucket, context.fieldBucket,
+    context.trackId, context.method, context.distanceBucket,
+    context.trackId, context.method,
+    context.method, context.distanceBucket, context.fieldBucket,
+    context.method, context.distanceBucket,
+    context.method
+  ];
+  const { results } = await env.DB.prepare(`${base}${selectors.join('\nUNION ALL\n')}`).bind(...bindings).all();
+  const grouped = new Map(LEVEL_ORDER.map((level) => [level, []]));
+  for (const row of results) grouped.get(row.level)?.push(row);
+  const out = new Map();
+  for (const level of LEVEL_ORDER) {
+    const rows = grouped.get(level) || [];
+    const laneCounts = rows.map((row) => Number(row.winners ?? 0));
+    const observed = rows.flatMap((row) => [row.first_source_observed_at, row.last_source_observed_at]).filter(Boolean).sort();
+    out.set(level, {
+      level,
+      starts: laneCounts.reduce((sum, value) => sum + value, 0),
+      races: rows.reduce((sum, row) => sum + Number(row.races ?? 0), 0),
+      sourceRecords: rows.reduce((sum, row) => sum + Number(row.source_records ?? 0), 0),
+      firstSourceObservedAt: observed[0] || null,
+      lastSourceObservedAt: observed.at(-1) || null,
+      hhi: hhi(laneCounts),
+      entropy: normalizedEntropy(laneCounts)
+    });
+  }
+  return out;
+}
+
+function aggregateSelect(level, where) {
+  return `SELECT '${level}' AS level,
+    COUNT(*) AS starts,
+    COUNT(DISTINCT race_id) AS races,
+    SUM(CASE WHEN placing = 1 THEN 1 ELSE 0 END) AS wins,
+    SUM(CASE WHEN placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) AS top3,
+    SUM(CASE WHEN gallop IS NOT NULL THEN 1 ELSE 0 END) AS gallop_known,
+    SUM(CASE WHEN gallop = 1 THEN 1 ELSE 0 END) AS gallops,
+    COUNT(DISTINCT source_record_id) AS source_records,
+    MIN(source_observed_at) AS first_source_observed_at,
+    MAX(source_observed_at) AS last_source_observed_at
+  FROM eligible WHERE ${where}`;
+}
+
+async function loadAggregateLevels(env, context) {
+  const base = `
+    WITH race_fields AS (
+      SELECT r0.id AS race_id, SUM(CASE WHEN re0.scratched = 0 THEN 1 ELSE 0 END) AS active_field_size
+      FROM races r0 JOIN race_entries re0 ON re0.race_id = r0.id
+      GROUP BY r0.id
+    ), eligible AS (
+      SELECT r.id AS race_id, r.track_id, ${METHOD_SQL} AS method_key, ${DISTANCE_SQL} AS distance_bucket,
+             ${FIELD_SQL} AS field_bucket, rr.placing, rr.gallop, rr.source_record_id,
+             sr.fetched_at AS source_observed_at
+      FROM races r
+      JOIN race_fields rf ON rf.race_id = r.id
+      JOIN race_entries re ON re.race_id = r.id
+      JOIN race_results rr ON rr.race_entry_id = re.id
+      JOIN source_records sr ON sr.id = rr.source_record_id
+      WHERE re.scratched = 0
+        AND rr.result_status = 'official'
+        AND sr.fetched_at <= ?
+        AND COALESCE(r.scheduled_start_at, r.race_date || 'T23:59:59.999Z') < ?
+        AND r.id <> ?
+    )\n`;
+  const selectors = [
+    aggregateSelect('track_method_distance_field', 'track_id = ? AND method_key = ? AND distance_bucket = ? AND field_bucket = ?'),
+    aggregateSelect('track_method_distance', 'track_id = ? AND method_key = ? AND distance_bucket = ?'),
+    aggregateSelect('track_method', 'track_id = ? AND method_key = ?'),
+    aggregateSelect('method_distance_field', 'method_key = ? AND distance_bucket = ? AND field_bucket = ?'),
+    aggregateSelect('method_distance', 'method_key = ? AND distance_bucket = ?'),
+    aggregateSelect('method', 'method_key = ?'),
+    aggregateSelect('global', '1 = 1')
+  ];
+  const bindings = [
+    context.cutoff, context.cutoff, context.raceId,
+    context.trackId, context.method, context.distanceBucket, context.fieldBucket,
+    context.trackId, context.method, context.distanceBucket,
+    context.trackId, context.method,
+    context.method, context.distanceBucket, context.fieldBucket,
+    context.method, context.distanceBucket,
+    context.method
+  ];
+  const { results } = await env.DB.prepare(`${base}${selectors.join('\nUNION ALL\n')}`).bind(...bindings).all();
+  return new Map(results.map((row) => [row.level, normalizeAggregate(row)]));
+}
+
+function normalizeAggregate(row) {
+  const starts = Number(row?.starts ?? 0);
+  const races = Number(row?.races ?? 0);
+  const gallopKnown = Number(row?.gallop_known ?? 0);
+  return {
+    level: row?.level || null,
+    starts,
+    races,
+    wins: Number(row?.wins ?? 0),
+    top3: Number(row?.top3 ?? 0),
+    gallopKnown,
+    gallops: Number(row?.gallops ?? 0),
+    sourceRecords: Number(row?.source_records ?? 0),
+    firstSourceObservedAt: row?.first_source_observed_at || null,
+    lastSourceObservedAt: row?.last_source_observed_at || null,
+    winRate: starts ? Number(row?.wins ?? 0) / starts : null,
+    top3Rate: starts ? Number(row?.top3 ?? 0) / starts : null,
+    gallopRate: gallopKnown ? Number(row?.gallops ?? 0) / gallopKnown : null,
+    gallopCoverage: starts ? gallopKnown / starts : null
+  };
+}
+
+function confidence(ess, coverage = 1) {
+  if (!(ess > 0) || coverage == null) return null;
+  return Math.round(Math.min(1, ess / RACE_PRIOR_POLICY.minEffectiveSampleSize) * coverage * 1_000_000) / 1_000_000;
+}
+
+function unavailablePrior(metric, directLevel = null) {
+  return Object.freeze({
+    metric,
+    value: null,
+    evidence_source: 'unknown',
+    direct_level: directLevel,
+    direct_sample_size: 0,
+    direct_effective_sample_size: 0,
+    sample_size: 0,
+    effective_sample_size: 0,
+    backoff_level: null,
+    backoff_sample_size: 0,
+    backoff_effective_sample_size: 0,
+    confidence: null,
+    coverage: null,
+    source_record_count: 0,
+    source_observed_at_min: null,
+    source_observed_at_max: null,
+    policy_version: ANALYSIS_V3_FOUNDATION_CONTRACTS.hierarchicalBackoff
+  });
+}
+
+function buildPrior(metric, levels, { directLevel = LEVEL_ORDER[0], allowedLevels = LEVEL_ORDER } = {}) {
+  const direct = levels.get(directLevel) || null;
+  if (!direct && !allowedLevels.some((level) => levels.get(level))) return unavailablePrior(metric, directLevel);
+  const valueKey = metric === 'win_rate' ? 'winRate' : metric === 'top3_rate' ? 'top3Rate' : 'gallopRate';
+  const coverageKey = metric === 'gallop_rate' ? 'gallopCoverage' : null;
+  const directValue = direct?.[valueKey] ?? null;
+  const directEss = direct?.races ?? 0;
+  const candidates = allowedLevels
+    .filter((level) => level !== directLevel)
+    .map((level) => levels.get(level))
+    .filter(Boolean)
+    .map((item) => ({ level: item.level, value: item[valueKey], sampleSize: item.starts, effectiveSampleSize: item.races }));
+  const estimate = estimateWithHierarchicalBackoff({
+    directValue,
+    directSampleSize: directValue == null ? 0 : directEss,
+    backoffCandidates: candidates
+  });
+  const chosen = estimate.evidence_source === 'model_estimate' ? levels.get(estimate.backoff_level) : direct;
+  const coverage = chosen ? (coverageKey ? chosen[coverageKey] : chosen.starts > 0 ? 1 : null) : null;
+  const effective = estimate.evidence_source === 'model_estimate'
+    ? estimate.backoff_effective_sample_size
+    : Math.max(directEss, estimate.backoff_effective_sample_size || 0);
+  return Object.freeze({
+    metric,
+    value: estimate.value,
+    evidence_source: estimate.evidence_source,
+    direct_level: directLevel,
+    direct_sample_size: direct?.starts ?? 0,
+    direct_effective_sample_size: directEss,
+    sample_size: chosen?.starts ?? 0,
+    effective_sample_size: effective,
+    backoff_level: estimate.backoff_level,
+    backoff_sample_size: estimate.backoff_sample_size,
+    backoff_effective_sample_size: estimate.backoff_effective_sample_size,
+    confidence: estimate.value == null ? null : confidence(effective, coverage ?? 1),
+    coverage,
+    source_record_count: chosen?.sourceRecords ?? 0,
+    source_observed_at_min: chosen?.firstSourceObservedAt ?? null,
+    source_observed_at_max: chosen?.lastSourceObservedAt ?? null,
+    policy_version: estimate.policy_version
+  });
+}
+
+async function loadSpecificContextRows(env, context) {
+  const { results } = await env.DB.prepare(`
+    WITH race_fields AS (
+      SELECT r0.id AS race_id, SUM(CASE WHEN re0.scratched = 0 THEN 1 ELSE 0 END) AS active_field_size
+      FROM races r0 JOIN race_entries re0 ON re0.race_id = r0.id
+      GROUP BY r0.id
+    )
+    SELECT r.id AS race_id, r.race_name, r.main_class, r.class_flags_json,
+           re.actual_lane, re.start_tier, re.handicap_m, rr.placing, rr.gallop,
+           rr.source_record_id, sr.fetched_at AS source_observed_at,
+           (SELECT rpf.parse_status FROM race_proposition_facts rpf
+             WHERE rpf.race_id = r.id AND rpf.parser_version = ? AND rpf.observed_at <= ?
+             ORDER BY julianday(rpf.observed_at) DESC, rpf.id DESC LIMIT 1) AS proposition_status,
+           (SELECT rpf.facts_json FROM race_proposition_facts rpf
+             WHERE rpf.race_id = r.id AND rpf.parser_version = ? AND rpf.observed_at <= ?
+             ORDER BY julianday(rpf.observed_at) DESC, rpf.id DESC LIMIT 1) AS proposition_facts_json
+    FROM races r
+    JOIN race_fields rf ON rf.race_id = r.id
+    JOIN race_entries re ON re.race_id = r.id
+    JOIN race_results rr ON rr.race_entry_id = re.id
+    JOIN source_records sr ON sr.id = rr.source_record_id
+    WHERE re.scratched = 0 AND rr.result_status = 'official'
+      AND sr.fetched_at <= ?
+      AND COALESCE(r.scheduled_start_at, r.race_date || 'T23:59:59.999Z') < ?
+      AND r.id <> ?
+      AND r.track_id = ?
+      AND ${METHOD_SQL} = ?
+      AND ${DISTANCE_SQL} = ?
+      AND ${FIELD_SQL} = ?
+    ORDER BY r.race_date, r.race_number, re.start_number, re.id
+  `).bind(
+    RACE_PROPOSITION_PARSER_VERSION, context.cutoff,
+    RACE_PROPOSITION_PARSER_VERSION, context.cutoff,
+    context.cutoff, context.cutoff, context.raceId, context.trackId, context.method, context.distanceBucket, context.fieldBucket
+  ).all();
+  return results.map((row) => ({
+    raceId: row.race_id,
+    raceTypeSignature: raceTypeSignature(row),
+    propositionSignature: row.proposition_status === 'parsed'
+      ? propositionSignature({ parseStatus: 'parsed', facts: parseJson(row.proposition_facts_json, {}) })
+      : null,
+    actualLane: numberOrNull(row.actual_lane),
+    startTier: numberOrNull(row.start_tier),
+    handicapM: numberOrNull(row.handicap_m),
+    placing: numberOrNull(row.placing),
+    gallop: row.gallop == null ? null : Number(row.gallop) === 1,
+    sourceRecordId: row.source_record_id || null,
+    sourceObservedAt: row.source_observed_at || null
+  }));
+}
+
+function aggregateRows(rows, level) {
+  const starts = rows.length;
+  const races = new Set(rows.map((row) => row.raceId)).size;
+  const gallopRows = rows.filter((row) => row.gallop === true || row.gallop === false);
+  const observed = rows.map((row) => row.sourceObservedAt).filter(Boolean).sort();
+  const wins = rows.filter((row) => row.placing === 1).length;
+  const top3 = rows.filter((row) => row.placing != null && row.placing >= 1 && row.placing <= 3).length;
+  const gallops = gallopRows.filter((row) => row.gallop).length;
+  return {
+    level,
+    starts,
+    races,
+    wins,
+    top3,
+    gallopKnown: gallopRows.length,
+    gallops,
+    sourceRecords: new Set(rows.map((row) => row.sourceRecordId).filter(Boolean)).size,
+    firstSourceObservedAt: observed[0] || null,
+    lastSourceObservedAt: observed.at(-1) || null,
+    winRate: starts ? wins / starts : null,
+    top3Rate: starts ? top3 / starts : null,
+    gallopRate: gallopRows.length ? gallops / gallopRows.length : null,
+    gallopCoverage: starts ? gallopRows.length / starts : null
+  };
+}
+
+function filteredPrior(metric, rows, predicate, levels, directLevel) {
+  const direct = aggregateRows(rows.filter(predicate), directLevel);
+  const augmented = new Map(levels);
+  augmented.set(directLevel, direct);
+  return buildPrior(metric, augmented, { directLevel, allowedLevels: [directLevel, ...LEVEL_ORDER] });
+}
+
+function positionPriors(rows, levels, target) {
+  function byValue(label, value, accessor) {
+    if (value == null) return Object.freeze({
+      status: 'unavailable', value: null,
+      win_rate: unavailablePrior('win_rate', label),
+      top3_rate: unavailablePrior('top3_rate', label),
+      gallop_rate: unavailablePrior('gallop_rate', label)
+    });
+    const direct = aggregateRows(rows.filter((row) => accessor(row) === value), label);
+    const augmented = new Map(levels);
+    augmented.set(label, direct);
+    return Object.freeze({
+      status: direct.starts ? 'available' : 'sparse',
+      value,
+      win_rate: buildPrior('win_rate', augmented, { directLevel: label, allowedLevels: [label, ...LEVEL_ORDER] }),
+      top3_rate: buildPrior('top3_rate', augmented, { directLevel: label, allowedLevels: [label, ...LEVEL_ORDER] }),
+      gallop_rate: buildPrior('gallop_rate', augmented, { directLevel: label, allowedLevels: [label, ...LEVEL_ORDER] })
+    });
+  }
+  return Object.freeze({
+    lane: byValue('same_lane', target.actualLane, (row) => row.actualLane),
+    tier: byValue('same_tier', target.startTier, (row) => row.startTier),
+    handicap: byValue('same_handicap', target.handicapM, (row) => row.handicapM)
+  });
+}
+
+function buildShapePrior(metric, shapeLevels) {
+  const key = metric === 'winner_lane_hhi' ? 'hhi' : 'entropy';
+  const direct = shapeLevels.get(LEVEL_ORDER[0]);
+  const candidates = LEVEL_ORDER.slice(1).map((level) => shapeLevels.get(level)).filter(Boolean).map((item) => ({
+    level: item.level,
+    value: item[key],
+    sampleSize: item.starts,
+    effectiveSampleSize: item.races
+  }));
+  const directValue = direct?.[key] ?? null;
+  const estimate = estimateWithHierarchicalBackoff({
+    directValue,
+    directSampleSize: directValue == null ? 0 : direct.races,
+    backoffCandidates: candidates
+  });
+  const chosen = estimate.evidence_source === 'model_estimate' ? shapeLevels.get(estimate.backoff_level) : direct;
+  if (estimate.value == null) return unavailablePrior(metric, LEVEL_ORDER[0]);
+  const effective = estimate.evidence_source === 'model_estimate'
+    ? estimate.backoff_effective_sample_size
+    : Math.max(direct?.races ?? 0, estimate.backoff_effective_sample_size || 0);
+  return Object.freeze({
+    metric,
+    value: estimate.value,
+    evidence_source: estimate.evidence_source,
+    direct_level: LEVEL_ORDER[0],
+    direct_sample_size: direct?.starts ?? 0,
+    direct_effective_sample_size: direct?.races ?? 0,
+    sample_size: chosen?.starts ?? 0,
+    effective_sample_size: effective,
+    backoff_level: estimate.backoff_level,
+    backoff_sample_size: estimate.backoff_sample_size,
+    backoff_effective_sample_size: estimate.backoff_effective_sample_size,
+    confidence: confidence(effective, 1),
+    coverage: 1,
+    source_record_count: chosen?.sourceRecords ?? 0,
+    source_observed_at_min: chosen?.firstSourceObservedAt ?? null,
+    source_observed_at_max: chosen?.lastSourceObservedAt ?? null,
+    policy_version: estimate.policy_version
+  });
+}
+
+function shapePriors(shapeLevels) {
+  return Object.freeze({
+    winner_lane_hhi: buildShapePrior('winner_lane_hhi', shapeLevels),
+    winner_lane_normalized_entropy: buildShapePrior('winner_lane_normalized_entropy', shapeLevels)
+  });
+}
+
+function buildProvenance(context, targetProposition) {
+  const refs = [];
+  if (targetProposition?.sourceRecordId && targetProposition?.observedAt) refs.push({
+    source_record_id: targetProposition.sourceRecordId,
+    selected_at: targetProposition.observedAt,
+    time_basis: 'proposition_observed_at'
+  });
+  return createFeatureProvenance({
+    featureFamily: 'race_priors',
+    featureVersion: RACE_PRIOR_FEATURE_VERSION,
+    asOf: context.cutoff,
+    sourceRefs: refs,
+    inputVersions: {
+      raceProposition: RACE_PROPOSITION_PARSER_VERSION,
+      hierarchicalBackoff: ANALYSIS_V3_FOUNDATION_CONTRACTS.hierarchicalBackoff
+    },
+    parameters: {
+      distanceBucket: context.distanceBucket,
+      fieldBucket: context.fieldBucket,
+      levelOrder: LEVEL_ORDER,
+      minEffectiveSampleSize: RACE_PRIOR_POLICY.minEffectiveSampleSize,
+      priorEquivalentSampleSize: RACE_PRIOR_POLICY.priorEquivalentSampleSize,
+      resultPopulationSource: 'official_race_results_as_of',
+      positionOutcomePriors: false
+    }
+  });
+}
+
+async function buildRaceContext(env, target, requested) {
+  const cutoff = targetCutoff(target, requested.ms);
+  const targetDistance = numberOrNull(target.actual_start_distance_m) ?? numberOrNull(target.distance_m);
+  const targetField = Number(target.active_field_size || target.field_size || 0) || null;
+  const targetProposition = await latestProposition(env, target.race_id, cutoff);
+  const context = {
+    raceId: target.race_id,
+    cutoff,
+    trackId: target.track_id || null,
+    method: canonicalMethod(target.start_method),
+    distanceBucket: distanceBucket(targetDistance) || 'unknown',
+    fieldBucket: fieldBucket(targetField) || 'unknown',
+    raceTypeSignature: raceTypeSignature(target),
+    propositionSignature: propositionSignature(targetProposition)
+  };
+  const [levels, specificRows, shapeLevels] = await Promise.all([
+    loadAggregateLevels(env, context),
+    loadSpecificContextRows(env, context),
+    loadShapeLevels(env, context)
+  ]);
+  return { context, levels, specificRows, shapeLevels, targetProposition };
+}
+
+function buildPack(target, requested, shared) {
+  const { context, levels, specificRows, shapeLevels, targetProposition } = shared;
+  const raceType = context.raceTypeSignature;
+  const proposition = context.propositionSignature;
+  const raceTypePredicate = raceType ? (row) => row.raceTypeSignature === raceType : null;
+  const propositionPredicate = proposition ? (row) => row.propositionSignature === proposition : null;
+  const bothPredicate = raceTypePredicate && propositionPredicate
+    ? (row) => raceTypePredicate(row) && propositionPredicate(row)
+    : raceTypePredicate || propositionPredicate;
+  const positionTarget = {
+    actualLane: numberOrNull(target.actual_lane),
+    startTier: numberOrNull(target.start_tier),
+    handicapM: numberOrNull(target.handicap_m)
+  };
+
+  const contextPriors = bothPredicate ? Object.freeze({
+    status: 'available',
+    race_type_signature: raceType,
+    proposition_signature: proposition,
+    win_rate: filteredPrior('win_rate', specificRows, bothPredicate, levels, 'race_type_proposition'),
+    top3_rate: filteredPrior('top3_rate', specificRows, bothPredicate, levels, 'race_type_proposition'),
+    gallop_rate: filteredPrior('gallop_rate', specificRows, bothPredicate, levels, 'race_type_proposition')
+  }) : Object.freeze({
+    status: 'unavailable',
+    race_type_signature: raceType,
+    proposition_signature: proposition,
+    win_rate: unavailablePrior('win_rate', 'race_type_proposition'),
+    top3_rate: unavailablePrior('top3_rate', 'race_type_proposition'),
+    gallop_rate: unavailablePrior('gallop_rate', 'race_type_proposition')
+  });
+
+  return Object.freeze({
+    contractVersion: RACE_PRIOR_CONTRACT_VERSION,
+    featureVersion: RACE_PRIOR_FEATURE_VERSION,
+    asOf: requested.iso,
+    targetCutoff: context.cutoff,
+    target: Object.freeze({
+      raceEntryId: target.race_entry_id,
+      raceId: target.race_id,
+      trackId: context.trackId,
+      startMethod: context.method,
+      distanceBucket: context.distanceBucket,
+      fieldBucket: context.fieldBucket,
+      actualLane: positionTarget.actualLane,
+      startTier: positionTarget.startTier,
+      handicapM: positionTarget.handicapM
+    }),
+    priors: Object.freeze({
+      race_outcome: Object.freeze({
+        win_rate: buildPrior('win_rate', levels),
+        top3_rate: buildPrior('top3_rate', levels),
+        gallop_rate: buildPrior('gallop_rate', levels)
+      }),
+      race_context: contextPriors,
+      starting_position: positionPriors(specificRows, levels, positionTarget),
+      shape: shapePriors(shapeLevels)
+    }),
+    provenance: buildProvenance(context, targetProposition)
+  });
+}
+
+export async function buildRacePriorsV1ForEntries(env, raceEntryIds, asOf) {
+  if (!env?.DB) throw new Error('DB is not configured');
+  if (!Array.isArray(raceEntryIds)) throw new Error('raceEntryIds must be an array');
+  const ids = [...new Set(raceEntryIds.filter(Boolean).map(String))];
+  if (!ids.length) return new Map();
+  const requested = instant(asOf);
+  const targets = await loadTargets(env, ids);
+  const sharedByRace = new Map();
+  for (const target of targets) {
+    if (!sharedByRace.has(target.race_id)) sharedByRace.set(target.race_id, await buildRaceContext(env, target, requested));
+  }
+  return new Map(targets.map((target) => [target.race_entry_id, buildPack(target, requested, sharedByRace.get(target.race_id))]));
+}
