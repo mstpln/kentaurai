@@ -2,6 +2,7 @@ import worker from './worker-v064.js';
 import { appAuthConfigured, hasValidAppSession } from './app-auth.js';
 import { createDataCoverageExportResponse } from './data-coverage-v2.js';
 import { getHorseFilterOptions } from './statistics/horses-complete.js';
+import { syncOnePendingOfficialParticipantSnapshotSource } from './import/official-participant-snapshots.js';
 import {
   getDriverCalendarYearDetailStatistics,
   getHorseCalendarYearDetailStatistics,
@@ -161,6 +162,9 @@ export default {
   },
 
   async scheduled(controller, env, ctx) {
-    return worker.scheduled(controller, env, ctx);
+    const result = await worker.scheduled(controller, env, ctx);
+    const snapshotSync = syncOnePendingOfficialParticipantSnapshotSource(env);
+    if (ctx?.waitUntil) ctx.waitUntil(snapshotSync); else await snapshotSync;
+    return result;
   }
 };
