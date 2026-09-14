@@ -13,11 +13,11 @@ The feature families are deliberately kept separate so a strong observation in o
 ## Feature families
 
 - `capacity_v1` — official record/start-points context plus peak verified official/X-Labs observations and historical class exposure.
-- `form_v3` — relevant-result form, official km time, errors, rest and optional X-Labs pace.
+- `form_v3` — relevant-result form, official km time, errors, elapsed rest and optional X-Labs pace.
 - `class_context_v1` — target proposition/first prize, historical prize exposure and opponent Start Points when official snapshots exist.
 - `development_v3` — recent-versus-baseline factual deltas over the B2 relevant-history union.
 - `method_distance_v1` — method/distance/track evidence with explicit sparse-sample backoff.
-- `rest_readiness_v1` — target rest interval and outcomes from comparable rest situations; no readiness score is produced.
+- `rest_readiness_v1` — elapsed rest at the effective as-of cutoff plus outcomes from historically comparable elapsed-rest buckets; it does not infer planned race-day rest or produce a readiness score.
 - `gallop_risk_v1` — empirical gallop/disqualification evidence with sparse contextual backoff.
 
 ## Evidence and confidence
@@ -43,6 +43,8 @@ Each family also carries A3 `kentaurai-feature-provenance-v1` with the versions 
 B3 delegates row-level history eligibility to B2. Its effective feature cutoff is B2 `targetCutoff`, the earlier of requested as-of and target-race start.
 
 Official target/opponent snapshots are selected through A4 at the same effective cutoff. Future snapshot observations therefore cannot enter a pre-race feature package.
+
+B2's target `restDaysBeforeStart` currently means elapsed time from the latest safe prior start to that effective cutoff. B3 preserves that upstream meaning explicitly as `elapsed_rest_days_as_of` / `elapsed_rest_bucket_as_of`. It does not reinterpret the value as the horse's planned rest at target-race start. Planned race-day rest is intentionally not emitted by B3.
 
 ## Missing data
 
@@ -96,5 +98,6 @@ No new D1 migration is required. B3 creates no production replay/backfill and do
 7. Sparse contextual samples use explicit deterministic backoff, never hidden smoothing.
 8. Development deltas require samples on both sides of the comparison.
 9. B3 output is invariant to betting and odds records.
-10. Legacy v2 feature/runtime behavior remains unchanged.
-11. No schema migration, scheduler, backfill or AI-model weight change is introduced by B3.
+10. Rest-readiness labels preserve B2 elapsed-to-effective-as-of semantics and do not imply planned race-day rest.
+11. Legacy v2 feature/runtime behavior remains unchanged.
+12. No schema migration, scheduler, backfill or AI-model weight change is introduced by B3.
