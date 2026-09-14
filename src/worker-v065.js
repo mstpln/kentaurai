@@ -1,6 +1,6 @@
 import worker from './worker-v064.js';
 import { appAuthConfigured, hasValidAppSession } from './app-auth.js';
-import { createDataCoverageExportResponse } from './data-coverage.js';
+import { createDataCoverageExportResponse } from './data-coverage-v2.js';
 import { getHorseFilterOptions } from './statistics/horses-complete.js';
 import {
   getDriverCalendarYearDetailStatistics,
