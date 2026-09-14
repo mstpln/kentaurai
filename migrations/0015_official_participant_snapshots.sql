@@ -76,6 +76,8 @@ CREATE TABLE driver_official_year_snapshots (
   seconds INTEGER CHECK (seconds IS NULL OR seconds >= 0),
   thirds INTEGER CHECK (thirds IS NULL OR thirds >= 0),
   win_percentage_hundredths INTEGER CHECK (win_percentage_hundredths IS NULL OR win_percentage_hundredths >= 0),
+  place_percentage_hundredths INTEGER CHECK (place_percentage_hundredths IS NULL OR place_percentage_hundredths >= 0),
+  earnings_per_start_raw INTEGER CHECK (earnings_per_start_raw IS NULL OR earnings_per_start_raw >= 0),
   source_record_id TEXT NOT NULL REFERENCES source_records(id) ON DELETE RESTRICT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (driver_id, source_record_id, stat_year)
@@ -94,6 +96,8 @@ CREATE TABLE trainer_official_year_snapshots (
   seconds INTEGER CHECK (seconds IS NULL OR seconds >= 0),
   thirds INTEGER CHECK (thirds IS NULL OR thirds >= 0),
   win_percentage_hundredths INTEGER CHECK (win_percentage_hundredths IS NULL OR win_percentage_hundredths >= 0),
+  place_percentage_hundredths INTEGER CHECK (place_percentage_hundredths IS NULL OR place_percentage_hundredths >= 0),
+  earnings_per_start_raw INTEGER CHECK (earnings_per_start_raw IS NULL OR earnings_per_start_raw >= 0),
   source_record_id TEXT NOT NULL REFERENCES source_records(id) ON DELETE RESTRICT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE (trainer_id, source_record_id, stat_year)
