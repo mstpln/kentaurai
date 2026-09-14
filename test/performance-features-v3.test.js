@@ -144,6 +144,10 @@ test('B3 builds deterministic market-blind families with evidence and provenance
   assert.equal(result.families.classContext.metrics.proposition_parse_status.value, 'parsed');
   assert.equal(result.historyCounts.included, 9);
   assert.equal(result.families.form.metrics.xlabs_start_coverage_rate.value, 4 / 9);
+  assert.equal(result.families.restReadiness.metrics.elapsed_rest_days_as_of.value, (Date.parse('2026-09-20T13:00:00Z') - Date.parse('2026-09-12T12:00:00Z')) / 86400000);
+  assert.equal(result.families.restReadiness.metrics.elapsed_rest_bucket_as_of.value, 'short');
+  assert.equal('target_rest_days' in result.families.restReadiness.metrics, false);
+  assert.equal('target_rest_bucket' in result.families.restReadiness.metrics, false);
   assert.equal('score' in result, false);
   for (const family of Object.values(result.families)) {
     assert.equal(family.provenance.contract_version, 'kentaurai-feature-provenance-v1');
