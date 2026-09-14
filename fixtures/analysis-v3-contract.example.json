@@ -1,0 +1,65 @@
+{
+  "contracts": {
+    "analysis_pack": "kentaurai-analysis-pack-v3",
+    "step1_lock": "kentaurai-step1-lock-v1",
+    "market_pack": "kentaurai-market-pack-v3",
+    "step2_result": "kentaurai-step2-result-v1",
+    "optimizer": "kentaurai-optimizer-v1",
+    "system_policy": "kentaurai-system-policy-v1",
+    "analysis_persistence": "kentaurai-analysis-v3"
+  },
+  "target_policy": {
+    "game_types": ["V85", "V86"],
+    "exact_spike_count": 3,
+    "default_main_budget_sek": {
+      "min": 150,
+      "max": 250
+    },
+    "alternatives_required": false,
+    "optimizer_probability_field": "decision_probability",
+    "missing_optional_evidence_is_neutral": true
+  },
+  "synthetic_example": {
+    "round_id": "round_synthetic_v85_2099-01-01",
+    "pack_id": "pack_synthetic_v3_001",
+    "facts_fingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "contains_current_market": false,
+    "legs": [
+      {
+        "leg_number": 1,
+        "race_id": "race_synthetic_1",
+        "entries": [
+          {
+            "race_entry_id": "entry_synthetic_1_1",
+            "horse_id": "horse_synthetic_alpha",
+            "horse_name": "Synthetic Alpha",
+            "optional_evidence": {
+              "xlabs": null,
+              "equipment_history": null
+            }
+          },
+          {
+            "race_entry_id": "entry_synthetic_1_2",
+            "horse_id": "horse_synthetic_beta",
+            "horse_name": "Synthetic Beta",
+            "optional_evidence": {
+              "xlabs": {
+                "available": true,
+                "sample_size": 4,
+                "confidence": 0.62
+              },
+              "equipment_history": null
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "legacy_boundary": {
+    "legacy_input_contract": "kentaurai-analysis-input-v2",
+    "legacy_submission_contract": "kentaurai-analysis-v2",
+    "existing_two_spike_v85_main_readable": true,
+    "v3_writer_may_create_two_spike_system": false,
+    "rewrite_historical_systems": false
+  }
+}
