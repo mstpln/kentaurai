@@ -226,6 +226,9 @@ export function parseRacePropositionTerms(terms) {
       continue;
     }
     if (UNSUPPORTED_AGE_CONJUNCTION.test(text)) {
+      facts.age_min_years = null;
+      facts.age_max_years = null;
+      assigned.delete('age');
       conflicted.add('age');
       ambiguousFragments.push(text);
     }
