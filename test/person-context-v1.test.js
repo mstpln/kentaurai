@@ -37,7 +37,10 @@ test('B5 provider annual stats are fallback and missing remains unavailable',asy
   const result=(await buildPersonContextV1ForEntries(env,[target.entryId],'2026-09-20T11:00:00Z')).get(target.entryId);
   assert.equal(result.driver.availability,'provider_fallback');assert.equal(result.driver.provider_annual_fallback.win_rate.value,0.2);
   assert.equal(result.driver.provider_annual_fallback.win_rate.sample_size,0);assert.equal(result.driver.provider_annual_fallback.win_rate.evidence_level,'C');
+  assert.deepEqual(result.driver.provider_annual_fallback.completeness,{known_fields:4,total_fields:4,coverage:1});
+  assert.deepEqual(result.driver.provider_annual_fallback.ranking,{status:'unavailable_in_normalized_source',value:null});
   assert.equal(result.trainer.availability,'unavailable');assert.equal(result.trainer.provider_annual_fallback.win_rate.value,null);
+  assert.equal(result.trainer.provider_annual_fallback.completeness.coverage,0);
 });
 
 test('B5 suppresses sparse segment rates instead of presenting tiny-N signal',async()=>{
@@ -46,4 +49,16 @@ test('B5 suppresses sparse segment rates instead of presenting tiny-N signal',as
   const result=(await buildPersonContextV1ForEntries(env,[target.entryId],'2026-09-20T11:00:00Z')).get(target.entryId);
   assert.equal(result.driver.segments.same_track.status,'insufficient_sample');assert.equal(result.driver.segments.same_track.starts,1);assert.equal(result.driver.segments.same_track.win_rate.value,null);
   assert.equal(result.driver.segments.same_start_method.status,'insufficient_sample');assert.equal(result.driver.segments.same_start_method.top3_rate.value,null);
+});
+
+test('B5 keeps a stable driver layout when the target driver is unknown',async()=>{
+  const {db,env}=createTestEnv();
+  const target=seedPersonStart(db,{key:'target',date:'2026-09-20',driver:null,target:true});
+  seedPersonStart(db,{key:'history',date:'2026-09-10',driver:'driver-b',placing:2});
+  const result=(await buildPersonContextV1ForEntries(env,[target.entryId],'2026-09-20T11:00:00Z')).get(target.entryId);
+  assert.equal(result.driverId,null);assert.equal(result.driver.availability,'unavailable');
+  assert.deepEqual(Object.keys(result.driver.windows),['14','30','90','365']);
+  assert.equal(result.driver.windows['14'].win_rate.value,null);
+  assert.equal(result.driver.provider_annual_fallback.ranking.value,null);
+  assert.equal(result.driverHorse.status,'unavailable');assert.equal(result.driverHorse.together_starts,0);
 });
