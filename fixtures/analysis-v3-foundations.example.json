@@ -1,0 +1,12 @@
+{
+  "contract_version": "kentaurai-as-of-v1",
+  "as_of": "2026-09-10T12:00:00Z",
+  "snapshots": [
+    { "id": "snapshot_before", "observed_at": "2026-09-01T10:00:00Z", "value": 0 },
+    { "id": "snapshot_at_cutoff", "observed_at": "2026-09-10T12:00:00Z", "value": 1 },
+    { "id": "snapshot_future", "observed_at": "2026-09-10T12:00:01Z", "value": 999 },
+    { "id": "snapshot_missing_time", "observed_at": null, "value": 888 }
+  ],
+  "expected_eligible_ids": ["snapshot_before", "snapshot_at_cutoff"],
+  "expected_latest_id": "snapshot_at_cutoff"
+}
