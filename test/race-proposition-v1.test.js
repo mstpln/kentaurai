@@ -115,6 +115,36 @@ test('B1 conflicting supported facts fail closed for the affected group', () => 
   assert.match(parsed.ambiguousFragments.at(-1), /conflicting age conditions/);
 });
 
+test('B1 multiple conflicting conditions inside one fragment fail closed', () => {
+  const parsed = parseRacePropositionTerms(['3-åriga, 4-åriga']);
+  assert.equal(parsed.parseStatus, 'ambiguous');
+  assert.equal(parsed.facts.age_min_years, null);
+  assert.equal(parsed.facts.age_max_years, null);
+  assert.match(parsed.ambiguousFragments.at(-1), /conflicting age conditions/);
+});
+
+test('B1 descending ranges are ambiguous rather than promoted as facts', () => {
+  const age = parseRacePropositionTerms(['5-3-åriga']);
+  assert.equal(age.parseStatus, 'ambiguous');
+  assert.equal(age.facts.age_min_years, null);
+  assert.equal(age.facts.age_max_years, null);
+  assert.match(age.ambiguousFragments.at(-1), /invalid age range/);
+
+  const earnings = parseRacePropositionTerms(['500000-100000 SEK']);
+  assert.equal(earnings.parseStatus, 'ambiguous');
+  assert.equal(earnings.facts.earnings_min_amount, null);
+  assert.equal(earnings.facts.earnings_max_amount, null);
+  assert.match(earnings.ambiguousFragments.at(-1), /invalid earnings range/);
+});
+
+test('B1 unsupported age conjunction clears any earlier age fact', () => {
+  const parsed = parseRacePropositionTerms(['3-åriga', '3 och 4-åriga']);
+  assert.equal(parsed.parseStatus, 'ambiguous');
+  assert.equal(parsed.facts.age_min_years, null);
+  assert.equal(parsed.facts.age_max_years, null);
+  assert.ok(parsed.ambiguousFragments.includes('3 och 4-åriga'));
+});
+
 test('B1 non-string term entries stay unparsed rather than being interpreted', () => {
   const parsed = parseRacePropositionTerms([{ text: '3-åriga' }]);
   assert.equal(parsed.parseStatus, 'unparsed');
