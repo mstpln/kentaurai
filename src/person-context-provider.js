@@ -1,6 +1,7 @@
 import { getOfficialPersonAnnualSnapshotsAsOf } from './import/official-snapshots.js';
 import { personEvidence } from './person-context-stats.js';
 
+const CHUNK=80;
 const NORMALIZED_PROVIDER_FIELDS=Object.freeze(['starts','wins','seconds','thirds']);
 function completeness(snapshot){
   if(!snapshot)return {known_fields:0,total_fields:NORMALIZED_PROVIDER_FIELDS.length,coverage:0};
@@ -17,8 +18,11 @@ function summarize(type,snapshot,asOf,version){
 }
 
 export async function loadPersonProviderFallbacks(env,type,ids,asOf,version){
-  const unique=[...new Set((ids||[]).filter(Boolean))];
-  const snapshots=unique.length?await getOfficialPersonAnnualSnapshotsAsOf(env,type,unique,asOf):new Map();
+  const unique=[...new Set((ids||[]).filter(Boolean))],snapshots=new Map();
+  for(let i=0;i<unique.length;i+=CHUNK){
+    const selected=await getOfficialPersonAnnualSnapshotsAsOf(env,type,unique.slice(i,i+CHUNK),asOf);
+    for(const [id,snapshot] of selected)snapshots.set(id,snapshot);
+  }
   return new Map(unique.map((id)=>[id,summarize(type,snapshots.get(id)||null,asOf,version)]));
 }
 export function unavailablePersonProvider(type,asOf,version){return empty(type,asOf,version);}
