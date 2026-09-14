@@ -153,6 +153,19 @@ test('A4 as-of reads exclude future observations and preserve changed source sna
   assert.equal(persons.get('trainer-a').sourceRecordId, 'source-new');
 });
 
+test('A4 as-of reads compare instants correctly across timezone offsets', async () => {
+  const { db, env } = createTestEnv();
+  seedEntities(db);
+  addSource(db, 'source-offset', '2026-09-10T12:30:00+02:00', 'offset');
+  await putPayload(env, 'offset', payload({ age: 6 }));
+  await syncOfficialSnapshotsFromSource(env, 'source-offset');
+
+  let snapshots = await getOfficialHorseSnapshotsAsOf(env, ['horse-a'], '2026-09-10T10:15:00Z');
+  assert.equal(snapshots.get('horse-a').age, null);
+  snapshots = await getOfficialHorseSnapshotsAsOf(env, ['horse-a'], '2026-09-10T10:45:00Z');
+  assert.equal(snapshots.get('horse-a').age.years, 6);
+});
+
 test('A4 coverage comparison counts only granular results known by the selected as-of', async () => {
   const { db, env } = createTestEnv();
   seedEntities(db);
@@ -192,4 +205,15 @@ test('A4 conflicting duplicate facts in one source fail closed and are recorded 
   const sync = db.prepare("SELECT status, error_message FROM official_snapshot_source_sync WHERE source_record_id='source-conflict'").get();
   assert.equal(sync.status, 'failed');
   assert.match(sync.error_message, /conflicting horse age/);
+});
+
+test('A4 as-of readers ignore rows from a failed source sync', async () => {
+  const { db, env } = createTestEnv();
+  seedEntities(db);
+  addSource(db, 'source-failed', '2026-09-10T10:00:00Z', 'unused');
+  db.prepare("INSERT INTO horse_profile_snapshots (id, horse_id, observed_at, age_years, source_record_id) VALUES ('profile-failed','horse-a','2026-09-10T10:00:00Z',9,'source-failed')").run();
+  db.prepare("INSERT INTO official_snapshot_source_sync (source_record_id,status,horse_profile_count,error_message) VALUES ('source-failed','failed',1,'synthetic write failure')").run();
+
+  const snapshots = await getOfficialHorseSnapshotsAsOf(env, ['horse-a'], '2026-09-11T00:00:00Z');
+  assert.equal(snapshots.get('horse-a').age, null);
 });
