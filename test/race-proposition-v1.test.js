@@ -5,6 +5,7 @@ import {
   RACE_PROPOSITION_PARSER_VERSION,
   getRacePropositionsAsOf,
   parseRacePropositionTerms,
+  storePendingRacePropositions,
   storeRacePropositionFromObservation
 } from '../src/race-proposition-v1.js';
 
@@ -33,8 +34,9 @@ test('B1 Swedish allowlist extracts exact structured proposition facts', () => {
     age_min_years: 3,
     age_max_years: 5,
     sex_restriction: 'mares_only',
-    earnings_min_sek: null,
-    earnings_max_sek: 500000,
+    earnings_min_amount: null,
+    earnings_max_amount: 500000,
+    earnings_currency: null,
     is_final: true,
     is_qualifier: true,
     is_heat: null,
@@ -50,7 +52,7 @@ test('B1 Swedish allowlist extracts exact structured proposition facts', () => {
   assert.deepEqual(parsed.ambiguousFragments, []);
 });
 
-test('B1 Norwegian allowlist is conservative but supports verified generic forms', () => {
+test('B1 Norwegian allowlist is conservative and does not invent currency from bare kr', () => {
   const parsed = parseRacePropositionTerms([
     '4-årige og eldre hingster og vallaker',
     'maks 750 000 kr',
@@ -65,11 +67,21 @@ test('B1 Norwegian allowlist is conservative but supports verified generic forms
   assert.equal(parsed.facts.age_min_years, 4);
   assert.equal(parsed.facts.age_max_years, null);
   assert.equal(parsed.facts.sex_restriction, 'stallions_and_geldings');
-  assert.equal(parsed.facts.earnings_max_sek, 750000);
+  assert.equal(parsed.facts.earnings_max_amount, 750000);
+  assert.equal(parsed.facts.earnings_currency, null);
   assert.equal(parsed.facts.is_lane_ladder, true);
   assert.equal(parsed.facts.is_heat, true);
   assert.equal(parsed.facts.heat_number, 2);
   assert.equal(parsed.facts.has_handicap_condition, true);
+});
+
+test('B1 explicit SEK and NOK remain distinct source facts', () => {
+  const sek = parseRacePropositionTerms(['högst 500000 SEK']);
+  const nok = parseRacePropositionTerms(['maks 750000 NOK']);
+  assert.equal(sek.facts.earnings_max_amount, 500000);
+  assert.equal(sek.facts.earnings_currency, 'SEK');
+  assert.equal(nok.facts.earnings_max_amount, 750000);
+  assert.equal(nok.facts.earnings_currency, 'NOK');
 });
 
 test('B1 unknown wording stays visible and does not become a guessed fact', () => {
@@ -79,6 +91,14 @@ test('B1 unknown wording stays visible and does not become a guessed fact', () =
   assert.ok(Object.values(parsed.facts).every((value) => value == null));
 });
 
+test('B1 partially supported wording retains the whole source fragment as unparsed audit text', () => {
+  const parsed = parseRacePropositionTerms(['3-åriga ston, specialvillkor']);
+  assert.equal(parsed.parseStatus, 'partial');
+  assert.equal(parsed.facts.age_min_years, 3);
+  assert.equal(parsed.facts.sex_restriction, 'mares_only');
+  assert.deepEqual(parsed.unparsedFragments, ['3-åriga ston, specialvillkor']);
+});
+
 test('B1 negated supported wording fails closed', () => {
   const parsed = parseRacePropositionTerms(['Ej amatörlopp']);
   assert.equal(parsed.parseStatus, 'ambiguous');
@@ -86,12 +106,19 @@ test('B1 negated supported wording fails closed', () => {
   assert.deepEqual(parsed.ambiguousFragments, ['Ej amatörlopp']);
 });
 
-test('B1 conflicting supported facts fail closed for the affected field', () => {
+test('B1 conflicting supported facts fail closed for the affected group', () => {
   const parsed = parseRacePropositionTerms(['3-åriga', '4-åriga']);
   assert.equal(parsed.parseStatus, 'ambiguous');
   assert.equal(parsed.facts.age_min_years, null);
   assert.equal(parsed.facts.age_max_years, null);
-  assert.match(parsed.ambiguousFragments.at(-1), /age_max_years|age_min_years/);
+  assert.match(parsed.ambiguousFragments.at(-1), /conflicting age conditions/);
+});
+
+test('B1 non-string term entries stay unparsed rather than being interpreted', () => {
+  const parsed = parseRacePropositionTerms([{ text: '3-åriga' }]);
+  assert.equal(parsed.parseStatus, 'unparsed');
+  assert.equal(parsed.facts.age_min_years, null);
+  assert.deepEqual(parsed.unparsedFragments, ['{"text":"3-åriga"}']);
 });
 
 test('B1 stored parser replay is idempotent and retains raw/source provenance', async () => {
@@ -106,6 +133,28 @@ test('B1 stored parser replay is idempotent and retains raw/source provenance', 
   assert.equal(row.source_observation_id, 'obs-old');
   assert.equal(row.source_record_id, 'source-obs-old');
   assert.deepEqual(JSON.parse(row.raw_terms_json), ['3-åriga ston', 'Spårtrappa']);
+});
+
+test('B1 bounded pending replay advances deterministically without refetching sources', async () => {
+  const { db, env } = createTestEnv();
+  seedRaceObservation(db, { id: 'obs-1', raceId: 'race-1', fetchedAt: '2026-09-10T08:00:00Z', terms: ['3-åriga'] });
+  seedRaceObservation(db, { id: 'obs-2', raceId: 'race-2', fetchedAt: '2026-09-10T09:00:00Z', terms: ['Spårtrappa'] });
+  seedRaceObservation(db, { id: 'obs-3', raceId: 'race-3', fetchedAt: '2026-09-10T10:00:00Z', terms: ['Amatörlopp'] });
+
+  const first = await storePendingRacePropositions(env, { limit: 2 });
+  assert.deepEqual(first.processed.map((row) => row.observationId), ['obs-1', 'obs-2']);
+  assert.equal(first.inserted, 2);
+  assert.equal(first.hasMore, true);
+
+  const second = await storePendingRacePropositions(env, { limit: 2 });
+  assert.deepEqual(second.processed.map((row) => row.observationId), ['obs-3']);
+  assert.equal(second.inserted, 1);
+  assert.equal(second.hasMore, false);
+
+  const third = await storePendingRacePropositions(env, { limit: 2 });
+  assert.deepEqual(third.processed, []);
+  assert.equal(third.inserted, 0);
+  assert.equal(third.hasMore, false);
 });
 
 test('B1 as-of read excludes future proposition observations', async () => {
