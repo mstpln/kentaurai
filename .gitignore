@@ -20,6 +20,13 @@ reference-data/
 *.sqlite
 *.sqlite3
 
+# Private strategy/build artifacts and production aggregate exports stay outside GitHub.
+KentaurAI_Analys_och_Datastrategi*.pdf
+KentaurAI_Implementation_Master_Plan*.pdf
+KentaurAI_Detaljerad_Byggplan_Statistik_Analys_Data*.pdf
+V85_V86_Trav_Intelligence_Full_Build_Plan*.pdf
+kentaurai-data-coverage*.json
+
 # Expected naming patterns for manual V85/V86 reference exports.
 kentaurai_V85_*.json
 kentaurai_V86_*.json
