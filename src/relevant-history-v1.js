@@ -1,7 +1,7 @@
 import { stableFeatureJson } from './analysis-v3-foundations.js';
 import { getOfficialHorseSnapshotsAsOf } from './import/official-snapshots.js';
 import { XLABS_TELEMETRY_VERSION } from './import/xlabs-telemetry.js';
-import { getRacePropositionsAsOf, RACE_PROPOSITION_PARSER_VERSION } from './race-proposition-v1.js';
+import { RACE_PROPOSITION_PARSER_VERSION } from './race-proposition-v1.js';
 
 export const RELEVANT_HISTORY_CONTRACT_VERSION = 'kentaurai-relevant-history-v1';
 export const RELEVANT_HISTORY_SELECTION_VERSION = 'kentaurai-relevant-history-selection-v1';
@@ -43,36 +43,33 @@ function requireInstant(value, label = 'asOf') {
   return { ms, iso: new Date(ms).toISOString() };
 }
 
-function positiveInteger(value, label, { min = 1, max = 1000 } = {}) {
+function integer(value, label, { min = 1, max = 1000 } = {}) {
   const number = Number(value);
   if (!Number.isInteger(number) || number < min || number > max) throw new Error(`${label} must be an integer between ${min} and ${max}`);
   return number;
 }
 
-function nonNegativeNumber(value, label, { max = Number.MAX_SAFE_INTEGER } = {}) {
+function nonNegativeNumber(value, label, max) {
   const number = Number(value);
   if (!Number.isFinite(number) || number < 0 || number > max) throw new Error(`${label} must be a finite number between 0 and ${max}`);
   return number;
 }
 
 function normalizePolicy(options = {}) {
-  const maxRows = positiveInteger(options.maxRows ?? RELEVANT_HISTORY_DEFAULT_POLICY.maxRows, 'maxRows', { max: 100 });
-  const recentRows = positiveInteger(options.recentRows ?? RELEVANT_HISTORY_DEFAULT_POLICY.recentRows, 'recentRows', { max: 100 });
+  const maxRows = integer(options.maxRows ?? RELEVANT_HISTORY_DEFAULT_POLICY.maxRows, 'maxRows', { max: 100 });
+  const recentRows = integer(options.recentRows ?? RELEVANT_HISTORY_DEFAULT_POLICY.recentRows, 'recentRows', { max: 100 });
   if (recentRows > maxRows) throw new Error('recentRows cannot exceed maxRows');
-  const similarDistanceToleranceM = nonNegativeNumber(
-    options.similarDistanceToleranceM ?? RELEVANT_HISTORY_DEFAULT_POLICY.similarDistanceToleranceM,
-    'similarDistanceToleranceM',
-    { max: 5000 }
-  );
-  const restShortMaxDays = nonNegativeNumber(options.restShortMaxDays ?? RELEVANT_HISTORY_DEFAULT_POLICY.restShortMaxDays, 'restShortMaxDays', { max: 3650 });
-  const restNormalMaxDays = nonNegativeNumber(options.restNormalMaxDays ?? RELEVANT_HISTORY_DEFAULT_POLICY.restNormalMaxDays, 'restNormalMaxDays', { max: 3650 });
+  const similarDistanceToleranceM = nonNegativeNumber(options.similarDistanceToleranceM ?? RELEVANT_HISTORY_DEFAULT_POLICY.similarDistanceToleranceM, 'similarDistanceToleranceM', 5000);
+  const restShortMaxDays = nonNegativeNumber(options.restShortMaxDays ?? RELEVANT_HISTORY_DEFAULT_POLICY.restShortMaxDays, 'restShortMaxDays', 3650);
+  const restNormalMaxDays = nonNegativeNumber(options.restNormalMaxDays ?? RELEVANT_HISTORY_DEFAULT_POLICY.restNormalMaxDays, 'restNormalMaxDays', 3650);
   if (restNormalMaxDays < restShortMaxDays) throw new Error('restNormalMaxDays cannot be less than restShortMaxDays');
   return Object.freeze({ maxRows, recentRows, similarDistanceToleranceM, restShortMaxDays, restNormalMaxDays });
 }
 
 function dateBoundaryMs(date, endOfDay) {
   if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
-  const ms = Date.parse(`${date}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}Z`);
+  const suffix = endOfDay ? '23:59:59.999' : '00:00:00.000';
+  const ms = Date.parse(`${date}T${suffix}Z`);
   return Number.isFinite(ms) ? ms : null;
 }
 
@@ -82,23 +79,31 @@ function raceEventMs(row, { target = false } = {}) {
   return dateBoundaryMs(row?.race_date, !target);
 }
 
-function cutoffForTarget(row, asOfMs) {
-  const event = raceEventMs(row, { target: true });
-  return event == null ? asOfMs : Math.min(asOfMs, event);
+function targetCutoffMs(row, requestedAsOfMs) {
+  const eventMs = raceEventMs(row, { target: true });
+  return eventMs == null ? requestedAsOfMs : Math.min(eventMs, requestedAsOfMs);
+}
+
+function sourceObservedMs(row) {
+  const ms = Date.parse(String(row?.result_observed_at ?? ''));
+  return Number.isFinite(ms) ? ms : null;
 }
 
 function stableRowKey(row) { return `${row.race_id}|${row.race_entry_id}`; }
-
 function compareHistoryDesc(a, b) {
   const delta = b.eventMs - a.eventMs;
-  if (delta !== 0) return delta;
-  return stableRowKey(a).localeCompare(stableRowKey(b));
+  return delta || stableRowKey(a).localeCompare(stableRowKey(b));
 }
-
 function compareHistoryAsc(a, b) {
   const delta = a.eventMs - b.eventMs;
-  if (delta !== 0) return delta;
-  return stableRowKey(a).localeCompare(stableRowKey(b));
+  return delta || stableRowKey(a).localeCompare(stableRowKey(b));
+}
+
+function addReason(row, reason) {
+  if (!row.inclusionReasons.includes(reason)) row.inclusionReasons.push(reason);
+}
+function sortReasons(row) {
+  row.inclusionReasons.sort((a, b) => RELEVANT_HISTORY_REASON_ORDER.indexOf(a) - RELEVANT_HISTORY_REASON_ORDER.indexOf(b));
 }
 
 function normalizedEquipment(row) {
@@ -120,8 +125,7 @@ function equipmentMatch(target, historical) {
   if (!target || !historical) return false;
   const fields = ['shoesFront', 'shoesRear', 'barefootFront', 'barefootRear', 'sulkyType', 'exactSulky'];
   const known = fields.filter((field) => target[field] != null);
-  if (!known.length) return false;
-  return known.every((field) => historical[field] != null && historical[field] === target[field]);
+  return known.length > 0 && known.every((field) => historical[field] != null && historical[field] === target[field]);
 }
 
 function normalizedXlabs(row) {
@@ -142,23 +146,34 @@ function normalizedXlabs(row) {
   };
 }
 
-function propositionSignature(value) {
-  if (!value || value.parseStatus !== 'parsed' || !value.facts || typeof value.facts !== 'object') return null;
-  const facts = Object.fromEntries(Object.entries(value.facts).filter(([, item]) => item != null));
-  if (!Object.keys(facts).length) return null;
-  return stableFeatureJson(facts);
-}
-
 function normalizedProposition(row) {
   if (!row) return null;
+  let facts;
+  try { facts = JSON.parse(row.facts_json); } catch { return null; }
   return {
     parserVersion: row.parser_version,
     parseStatus: row.parse_status,
     observedAt: row.observed_at,
     sourceRecordId: row.source_record_id,
     sourceObservationId: row.source_observation_id,
-    facts: JSON.parse(row.facts_json)
+    facts
   };
+}
+
+function propositionSignature(value) {
+  if (!value || value.parseStatus !== 'parsed' || !value.facts || typeof value.facts !== 'object') return null;
+  const facts = Object.fromEntries(Object.entries(value.facts).filter(([, item]) => item != null));
+  return Object.keys(facts).length ? stableFeatureJson(facts) : null;
+}
+
+function latestObservedAtOrBefore(rows, cutoffMs, normalizer, timeKey = 'fetched_at') {
+  for (const row of rows || []) {
+    const observed = Date.parse(String(row?.[timeKey] ?? ''));
+    if (!Number.isFinite(observed) || observed > cutoffMs) continue;
+    const normalized = normalizer(row);
+    if (normalized) return normalized;
+  }
+  return null;
 }
 
 function restBucket(days, policy) {
@@ -167,100 +182,47 @@ function restBucket(days, policy) {
   if (days <= policy.restNormalMaxDays) return 'normal';
   return 'long';
 }
-
 function differenceDays(laterMs, earlierMs) {
   if (!Number.isFinite(laterMs) || !Number.isFinite(earlierMs) || laterMs < earlierMs) return null;
   return (laterMs - earlierMs) / 86400000;
 }
 
-function addReason(row, reason) {
-  if (!row.inclusionReasons.includes(reason)) row.inclusionReasons.push(reason);
-}
-
-function sortReasons(row) {
-  row.inclusionReasons.sort((a, b) => RELEVANT_HISTORY_REASON_ORDER.indexOf(a) - RELEVANT_HISTORY_REASON_ORDER.indexOf(b));
-}
-
-function outputResult(row) {
-  return {
-    placing: row.placing == null ? null : Number(row.placing),
-    placingText: row.placing_text || null,
-    finishTime: row.finish_time || null,
-    kmTime: row.km_time || null,
-    prizeSek: row.prize_sek == null ? null : Number(row.prize_sek),
-    gallop: row.gallop == null ? null : Number(row.gallop) === 1,
-    disqualified: row.disqualified == null ? null : Number(row.disqualified) === 1,
-    sourceRecordId: row.result_source_record_id || null
-  };
-}
-
-function outputHistoryRow(row) {
-  return {
-    raceEntryId: row.race_entry_id,
-    raceId: row.race_id,
-    raceDate: row.race_date,
-    scheduledStartAt: row.scheduled_start_at || null,
-    trackId: row.track_id || null,
-    trackName: row.track_name || null,
-    distanceM: row.distance_m == null ? null : Number(row.distance_m),
-    startMethod: row.start_method || null,
-    firstPrizeSek: row.first_prize_sek == null ? null : Number(row.first_prize_sek),
-    raceName: row.race_name || null,
-    startNumber: row.start_number == null ? null : Number(row.start_number),
-    actualLane: row.actual_lane == null ? null : Number(row.actual_lane),
-    startTier: row.start_tier == null ? null : Number(row.start_tier),
-    handicapM: row.handicap_m == null ? null : Number(row.handicap_m),
-    actualStartDistanceM: row.actual_start_distance_m == null ? null : Number(row.actual_start_distance_m),
-    driverId: row.driver_id || null,
-    driverName: row.driver_name || null,
-    trainerId: row.trainer_id || null,
-    trainerName: row.trainer_name || null,
-    restDaysBeforeStart: row.restDaysBeforeStart,
-    result: outputResult(row),
-    equipment: row.equipment || null,
-    xlabs: row.xlabs || null,
-    proposition: row.proposition || null,
-    inclusionReasons: [...row.inclusionReasons]
-  };
-}
-
 async function loadTargetEntries(env, entryIds) {
-  const out = [];
+  const rows = [];
   for (const group of chunks(entryIds)) {
     const { results } = await env.DB.prepare(`
-      SELECT
-        re.id AS race_entry_id, re.race_id, re.horse_id, re.driver_id, re.trainer_id,
-        re.start_number, re.actual_lane, re.start_tier, re.handicap_m, re.actual_start_distance_m, re.scratched,
-        r.race_date, r.race_number, r.scheduled_start_at, r.distance_m, r.start_method, r.first_prize_sek,
-        r.race_name, r.track_id, t.canonical_name AS track_name
+      SELECT re.id AS race_entry_id, re.race_id, re.horse_id, re.driver_id, re.trainer_id,
+             re.start_number, re.actual_lane, re.start_tier, re.handicap_m, re.actual_start_distance_m, re.scratched,
+             r.race_date, r.race_number, r.scheduled_start_at, r.distance_m, r.start_method, r.first_prize_sek,
+             r.race_name, r.track_id, t.canonical_name AS track_name
       FROM race_entries re
       JOIN races r ON r.id = re.race_id
       LEFT JOIN tracks t ON t.id = r.track_id
       WHERE re.id IN (${placeholders(group)})
     `).bind(...group).all();
-    out.push(...results);
+    rows.push(...results);
   }
-  const byId = new Map(out.map((row) => [row.race_entry_id, row]));
+  const byId = new Map(rows.map((row) => [row.race_entry_id, row]));
   const missing = entryIds.filter((id) => !byId.has(id));
   if (missing.length) throw new Error(`target race entries were not found: ${missing.join(', ')}`);
   return entryIds.map((id) => byId.get(id));
 }
 
 async function loadHistory(env, horseIds) {
-  const out = [];
+  const rows = [];
   for (const group of chunks(horseIds)) {
     const { results } = await env.DB.prepare(`
-      SELECT
-        re.horse_id, re.id AS race_entry_id, re.race_id, re.driver_id, re.trainer_id,
-        re.start_number, re.actual_lane, re.start_tier, re.handicap_m, re.actual_start_distance_m,
-        r.race_date, r.race_number, r.scheduled_start_at, r.distance_m, r.start_method, r.first_prize_sek,
-        r.race_name, r.track_id, t.canonical_name AS track_name,
-        d.canonical_name AS driver_name, tr.canonical_name AS trainer_name,
-        rr.placing, rr.placing_text, rr.finish_time, rr.km_time, rr.prize_sek, rr.gallop, rr.disqualified,
-        rr.source_record_id AS result_source_record_id
+      SELECT re.horse_id, re.id AS race_entry_id, re.race_id, re.driver_id, re.trainer_id,
+             re.start_number, re.actual_lane, re.start_tier, re.handicap_m, re.actual_start_distance_m,
+             r.race_date, r.race_number, r.scheduled_start_at, r.distance_m, r.start_method, r.first_prize_sek,
+             r.race_name, r.track_id, t.canonical_name AS track_name,
+             d.canonical_name AS driver_name, tr.canonical_name AS trainer_name,
+             rr.placing, rr.placing_text, rr.finish_time, rr.km_time, rr.prize_sek, rr.gallop, rr.disqualified,
+             rr.source_record_id AS result_source_record_id, sr.fetched_at AS result_observed_at
       FROM race_entries re
       JOIN races r ON r.id = re.race_id
       JOIN race_results rr ON rr.race_entry_id = re.id
+      JOIN source_records sr ON sr.id = rr.source_record_id
       LEFT JOIN tracks t ON t.id = r.track_id
       LEFT JOIN drivers d ON d.id = re.driver_id
       LEFT JOIN trainers tr ON tr.id = re.trainer_id
@@ -269,9 +231,9 @@ async function loadHistory(env, horseIds) {
         AND rr.result_status = 'official'
       ORDER BY re.horse_id, r.race_date, r.race_number, re.id
     `).bind(...group).all();
-    out.push(...results);
+    rows.push(...results);
   }
-  return out;
+  return rows;
 }
 
 async function loadEquipmentRows(env, entryIds) {
@@ -280,11 +242,11 @@ async function loadEquipmentRows(env, entryIds) {
     const { results } = await env.DB.prepare(`
       SELECT e.*, sr.fetched_at
       FROM equipment e
-      LEFT JOIN source_records sr ON sr.id = e.source_record_id
+      JOIN source_records sr ON sr.id = e.source_record_id
       WHERE e.race_entry_id IN (${placeholders(group)})
       ORDER BY e.race_entry_id, julianday(sr.fetched_at) DESC, e.id DESC
     `).bind(...group).all();
-    for (const row of results) if (out.has(row.race_entry_id)) out.get(row.race_entry_id).push(row);
+    for (const row of results) out.get(row.race_entry_id)?.push(row);
   }
   return out;
 }
@@ -295,59 +257,111 @@ async function loadXlabsRows(env, entryIds) {
     const { results } = await env.DB.prepare(`
       SELECT x.*, sr.fetched_at
       FROM xlabs_data x
-      LEFT JOIN source_records sr ON sr.id = x.source_record_id
+      JOIN source_records sr ON sr.id = x.source_record_id
       WHERE x.race_entry_id IN (${placeholders(group)})
       ORDER BY x.race_entry_id, julianday(sr.fetched_at) DESC, x.id DESC
     `).bind(...group).all();
-    for (const row of results) if (out.has(row.race_entry_id)) out.get(row.race_entry_id).push(row);
+    for (const row of results) out.get(row.race_entry_id)?.push(row);
   }
   return out;
 }
 
-function latestObservedAtOrBefore(rows, cutoffMs, normalizer) {
-  for (const row of rows || []) {
-    const observed = Date.parse(String(row.fetched_at ?? ''));
-    if (!Number.isFinite(observed) || observed > cutoffMs) continue;
-    const normalized = normalizer(row);
-    if (normalized) return normalized;
-  }
-  return null;
-}
-
-async function loadHistoricalPropositions(env, raceIds) {
-  const out = new Map(raceIds.map((id) => [id, null]));
+async function loadPropositionRows(env, raceIds) {
+  const out = new Map(raceIds.map((id) => [id, []]));
   for (const group of chunks(raceIds)) {
     const { results } = await env.DB.prepare(`
-      WITH ranked AS (
-        SELECT rpf.*, ROW_NUMBER() OVER (
-          PARTITION BY rpf.race_id
-          ORDER BY julianday(rpf.observed_at) DESC, rpf.id DESC
-        ) AS rn
-        FROM race_proposition_facts rpf
-        WHERE rpf.race_id IN (${placeholders(group)}) AND rpf.parser_version = ?
-      )
-      SELECT * FROM ranked WHERE rn = 1
+      SELECT rpf.*
+      FROM race_proposition_facts rpf
+      WHERE rpf.race_id IN (${placeholders(group)}) AND rpf.parser_version = ?
+      ORDER BY rpf.race_id, julianday(rpf.observed_at) DESC, rpf.id DESC
     `).bind(...group, RACE_PROPOSITION_PARSER_VERSION).all();
-    for (const row of results) out.set(row.race_id, normalizedProposition(row));
+    for (const row of results) out.get(row.race_id)?.push(row);
   }
   return out;
 }
 
-async function loadTargetPropositions(env, targets, cutoffByEntry) {
-  const byRace = new Map();
+async function loadOfficialReferences(env, targets, cutoffByEntry) {
+  const groups = new Map();
   for (const target of targets) {
     const cutoff = cutoffByEntry.get(target.race_entry_id);
-    const current = byRace.get(target.race_id);
-    if (current == null || cutoff < current) byRace.set(target.race_id, cutoff);
+    const key = new Date(cutoff).toISOString();
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(target);
   }
-  const out = new Map();
-  for (const [raceId, cutoff] of [...byRace.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    const result = await getRacePropositionsAsOf(env, [raceId], new Date(cutoff).toISOString());
-    out.set(raceId, result.get(raceId) || null);
+  const byEntry = new Map();
+  for (const [cutoff, group] of [...groups.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const horseIds = [...new Set(group.map((target) => target.horse_id).filter(Boolean))];
+    const snapshots = await getOfficialHorseSnapshotsAsOf(env, horseIds, cutoff);
+    for (const target of group) byEntry.set(target.race_entry_id, snapshots.get(target.horse_id) || null);
   }
-  return out;
+  return byEntry;
 }
 
+function annotateReasons(rows, target, targetEquipment, targetProposition, targetCutoff, policy) {
+  const ascending = [...rows].sort(compareHistoryAsc);
+  let previousMs = null;
+  for (const row of ascending) {
+    row.restDaysBeforeStart = previousMs == null ? null : differenceDays(row.eventMs, previousMs);
+    previousMs = row.eventMs;
+  }
+  const descending = [...rows].sort(compareHistoryDesc);
+  const targetRestDays = descending.length ? differenceDays(targetCutoff, descending[0].eventMs) : null;
+  const targetRestBucket = restBucket(targetRestDays, policy);
+  const targetDistance = target.actual_start_distance_m ?? target.distance_m;
+  const targetPropositionSignature = propositionSignature(targetProposition);
+
+  for (const row of descending) {
+    row.inclusionReasons = [];
+    if (target.start_method && row.start_method && target.start_method === row.start_method) addReason(row, 'same_start_method');
+    const historicalDistance = row.actual_start_distance_m ?? row.distance_m;
+    if (targetDistance != null && historicalDistance != null && Math.abs(Number(targetDistance) - Number(historicalDistance)) <= policy.similarDistanceToleranceM) addReason(row, 'similar_distance');
+    if (target.track_id && row.track_id && target.track_id === row.track_id) addReason(row, 'same_track_context');
+    const historicalSignature = propositionSignature(row.proposition);
+    if (targetPropositionSignature && historicalSignature && targetPropositionSignature === historicalSignature) addReason(row, 'similar_proposition');
+    if (equipmentMatch(targetEquipment, row.equipment)) addReason(row, 'same_equipment');
+    if (target.driver_id && row.driver_id && target.driver_id === row.driver_id) addReason(row, 'same_driver');
+    if (row.xlabs) addReason(row, 'xlabs_representative');
+    if (targetRestBucket && restBucket(row.restDaysBeforeStart, policy) === targetRestBucket) addReason(row, 'rest_comparable');
+    if (Number(row.gallop) === 1 || Number(row.disqualified) === 1) addReason(row, 'error_pattern');
+  }
+  for (const row of descending.slice(0, policy.recentRows)) addReason(row, 'recent');
+  return { targetRestDays, targetRestBucket };
+}
+
+function selectionCandidateCompare(a, b) {
+  const reasonDelta = b.inclusionReasons.length - a.inclusionReasons.length;
+  return reasonDelta || compareHistoryDesc(a, b);
+}
+
+function selectRelevant(rows, policy) {
+  const ordered = [...rows].sort(compareHistoryDesc);
+  const selected = new Map();
+  for (const row of ordered.filter((candidate) => candidate.inclusionReasons.includes('recent'))) {
+    if (selected.size >= policy.maxRows) break;
+    selected.set(row.race_entry_id, row);
+  }
+  for (const reason of RELEVANT_HISTORY_REASON_ORDER.slice(1)) {
+    if (selected.size >= policy.maxRows) break;
+    const candidate = ordered
+      .filter((row) => row.inclusionReasons.includes(reason) && !selected.has(row.race_entry_id))
+      .sort(selectionCandidateCompare)[0];
+    if (candidate) selected.set(candidate.race_entry_id, candidate);
+  }
+  if (selected.size < policy.maxRows) {
+    const remaining = ordered
+      .filter((row) => row.inclusionReasons.length > 0 && !selected.has(row.race_entry_id))
+      .sort(selectionCandidateCompare);
+    for (const row of remaining) {
+      if (selected.size >= policy.maxRows) break;
+      selected.set(row.race_entry_id, row);
+    }
+  }
+  const finalRows = [...selected.values()].sort(compareHistoryDesc);
+  for (const row of finalRows) sortReasons(row);
+  return finalRows;
+}
+
+function rate(numerator, denominator) { return denominator > 0 ? numerator / denominator : null; }
 function aggregateHistory(rows) {
   const methodCounts = {};
   let wins = 0;
@@ -389,12 +403,16 @@ function aggregateHistory(rows) {
     thirds,
     top3,
     placingKnown,
+    winRate: rate(wins, placingKnown),
+    top3Rate: rate(top3, placingKnown),
     prizeKnownStarts,
     prizeSekSum: prizeKnownStarts ? prizeSekSum : null,
     gallopKnownStarts,
     gallops,
+    gallopRate: rate(gallops, gallopKnownStarts),
     disqualificationKnownStarts,
     disqualified,
+    disqualificationRate: rate(disqualified, disqualificationKnownStarts),
     kmTimeKnownStarts,
     xlabsStarts,
     equipmentKnownStarts,
@@ -404,81 +422,52 @@ function aggregateHistory(rows) {
   };
 }
 
-function selectionCandidateCompare(a, b) {
-  const reasonDelta = b.inclusionReasons.length - a.inclusionReasons.length;
-  if (reasonDelta !== 0) return reasonDelta;
-  return compareHistoryDesc(a, b);
+function outputResult(row) {
+  return {
+    placing: row.placing == null ? null : Number(row.placing),
+    placingText: row.placing_text || null,
+    finishTime: row.finish_time || null,
+    kmTime: row.km_time || null,
+    prizeSek: row.prize_sek == null ? null : Number(row.prize_sek),
+    gallop: row.gallop == null ? null : Number(row.gallop) === 1,
+    disqualified: row.disqualified == null ? null : Number(row.disqualified) === 1,
+    sourceRecordId: row.result_source_record_id || null,
+    observedAt: row.result_observed_at || null
+  };
 }
 
-function selectRelevant(rows, policy) {
-  const ordered = [...rows].sort(compareHistoryDesc);
-  for (const row of ordered) row.inclusionReasons = [];
-  for (const row of ordered.slice(0, policy.recentRows)) addReason(row, 'recent');
-
-  const selected = new Map();
-  for (const row of ordered.slice(0, policy.recentRows)) {
-    if (selected.size >= policy.maxRows) break;
-    selected.set(row.race_entry_id, row);
-  }
-
-  for (const reason of RELEVANT_HISTORY_REASON_ORDER.slice(1)) {
-    if (selected.size >= policy.maxRows) break;
-    const candidate = ordered
-      .filter((row) => row.inclusionReasons.includes(reason) && !selected.has(row.race_entry_id))
-      .sort(selectionCandidateCompare)[0];
-    if (candidate) selected.set(candidate.race_entry_id, candidate);
-  }
-
-  if (selected.size < policy.maxRows) {
-    const remaining = ordered
-      .filter((row) => row.inclusionReasons.length > 0 && !selected.has(row.race_entry_id))
-      .sort(selectionCandidateCompare);
-    for (const row of remaining) {
-      if (selected.size >= policy.maxRows) break;
-      selected.set(row.race_entry_id, row);
-    }
-  }
-
-  const finalRows = [...selected.values()].sort(compareHistoryDesc);
-  for (const row of finalRows) sortReasons(row);
-  return finalRows;
-}
-
-function annotateReasons(rows, target, targetEquipment, targetProposition, targetCutoffMs, policy) {
-  const orderedAsc = [...rows].sort(compareHistoryAsc);
-  let previousMs = null;
-  for (const row of orderedAsc) {
-    row.restDaysBeforeStart = previousMs == null ? null : differenceDays(row.eventMs, previousMs);
-    previousMs = row.eventMs;
-  }
-  const orderedDesc = [...rows].sort(compareHistoryDesc);
-  const latestSafe = orderedDesc[0] || null;
-  const targetRestDays = latestSafe ? differenceDays(targetCutoffMs, latestSafe.eventMs) : null;
-  const targetRestBucket = restBucket(targetRestDays, policy);
-  const targetDistance = target.actual_start_distance_m ?? target.distance_m;
-  const targetPropSignature = propositionSignature(targetProposition);
-
-  for (const row of orderedDesc) {
-    row.inclusionReasons = [];
-    if (target.start_method && row.start_method && target.start_method === row.start_method) addReason(row, 'same_start_method');
-    const historicalDistance = row.actual_start_distance_m ?? row.distance_m;
-    if (targetDistance != null && historicalDistance != null && Math.abs(Number(targetDistance) - Number(historicalDistance)) <= policy.similarDistanceToleranceM) {
-      addReason(row, 'similar_distance');
-    }
-    if (target.track_id && row.track_id && target.track_id === row.track_id) addReason(row, 'same_track_context');
-    const historicalPropSignature = propositionSignature(row.proposition);
-    if (targetPropSignature && historicalPropSignature && targetPropSignature === historicalPropSignature) addReason(row, 'similar_proposition');
-    if (equipmentMatch(targetEquipment, row.equipment)) addReason(row, 'same_equipment');
-    if (target.driver_id && row.driver_id && target.driver_id === row.driver_id) addReason(row, 'same_driver');
-    if (row.xlabs) addReason(row, 'xlabs_representative');
-    if (targetRestBucket && restBucket(row.restDaysBeforeStart, policy) === targetRestBucket) addReason(row, 'rest_comparable');
-    if (Number(row.gallop) === 1 || Number(row.disqualified) === 1) addReason(row, 'error_pattern');
-  }
-  return { targetRestDays, targetRestBucket };
+function outputHistoryRow(row) {
+  return {
+    raceEntryId: row.race_entry_id,
+    raceId: row.race_id,
+    raceDate: row.race_date,
+    scheduledStartAt: row.scheduled_start_at || null,
+    trackId: row.track_id || null,
+    trackName: row.track_name || null,
+    distanceM: row.distance_m == null ? null : Number(row.distance_m),
+    startMethod: row.start_method || null,
+    firstPrizeSek: row.first_prize_sek == null ? null : Number(row.first_prize_sek),
+    raceName: row.race_name || null,
+    startNumber: row.start_number == null ? null : Number(row.start_number),
+    actualLane: row.actual_lane == null ? null : Number(row.actual_lane),
+    startTier: row.start_tier == null ? null : Number(row.start_tier),
+    handicapM: row.handicap_m == null ? null : Number(row.handicap_m),
+    actualStartDistanceM: row.actual_start_distance_m == null ? null : Number(row.actual_start_distance_m),
+    driverId: row.driver_id || null,
+    driverName: row.driver_name || null,
+    trainerId: row.trainer_id || null,
+    trainerName: row.trainer_name || null,
+    restDaysBeforeStart: row.restDaysBeforeStart,
+    result: outputResult(row),
+    equipment: row.equipment || null,
+    xlabs: row.xlabs || null,
+    proposition: row.proposition || null,
+    inclusionReasons: [...row.inclusionReasons]
+  };
 }
 
 function officialReference(snapshot) {
-  const coverage = snapshot?.coverage || null;
+  const coverage = snapshot?.coverage;
   if (!coverage) return null;
   return {
     officialLifeStarts: coverage.officialLifeStarts,
@@ -498,54 +487,47 @@ export async function buildRelevantHistoryForEntries(env, raceEntryIds, asOf, op
   const requestedAsOf = requireInstant(asOf);
   const policy = normalizePolicy(options);
   const targets = await loadTargetEntries(env, entryIds);
-  const cutoffByEntry = new Map(targets.map((target) => [target.race_entry_id, cutoffForTarget(target, requestedAsOf.ms)]));
-  const globalSafeCutoff = Math.min(...cutoffByEntry.values());
-
+  const cutoffByEntry = new Map(targets.map((target) => [target.race_entry_id, targetCutoffMs(target, requestedAsOf.ms)]));
   const horseIds = [...new Set(targets.map((target) => target.horse_id).filter(Boolean))];
   const historyRows = await loadHistory(env, horseIds);
   const historiesByHorse = new Map(horseIds.map((id) => [id, []]));
-  for (const row of historyRows) if (historiesByHorse.has(row.horse_id)) historiesByHorse.get(row.horse_id).push(row);
+  for (const row of historyRows) historiesByHorse.get(row.horse_id)?.push(row);
 
   const allEntryIds = [...new Set([...entryIds, ...historyRows.map((row) => row.race_entry_id)])];
-  const [equipmentRows, xlabsRows] = await Promise.all([
+  const allRaceIds = [...new Set([...targets.map((row) => row.race_id), ...historyRows.map((row) => row.race_id)])];
+  const [equipmentRows, xlabsRows, propositionRows, officialReferences] = await Promise.all([
     loadEquipmentRows(env, allEntryIds),
-    loadXlabsRows(env, allEntryIds)
-  ]);
-  const historicalRaceIds = [...new Set(historyRows.map((row) => row.race_id))];
-  const [historicalPropositions, targetPropositions, officialSnapshots] = await Promise.all([
-    loadHistoricalPropositions(env, historicalRaceIds),
-    loadTargetPropositions(env, targets, cutoffByEntry),
-    getOfficialHorseSnapshotsAsOf(env, horseIds, new Date(globalSafeCutoff).toISOString())
+    loadXlabsRows(env, allEntryIds),
+    loadPropositionRows(env, allRaceIds),
+    loadOfficialReferences(env, targets, cutoffByEntry)
   ]);
 
   const out = new Map();
   for (const target of targets) {
-    const targetCutoffMs = cutoffByEntry.get(target.race_entry_id);
-    const targetEquipment = latestObservedAtOrBefore(equipmentRows.get(target.race_entry_id), targetCutoffMs, normalizedEquipment);
-    const targetProposition = targetPropositions.get(target.race_id) || null;
+    const cutoff = cutoffByEntry.get(target.race_entry_id);
+    const targetEquipment = latestObservedAtOrBefore(equipmentRows.get(target.race_entry_id), cutoff, normalizedEquipment);
+    const targetProposition = latestObservedAtOrBefore(propositionRows.get(target.race_id), cutoff, normalizedProposition, 'observed_at');
     const safe = (historiesByHorse.get(target.horse_id) || [])
       .filter((row) => row.race_entry_id !== target.race_entry_id && row.race_id !== target.race_id)
       .map((row) => ({ ...row, eventMs: raceEventMs(row), inclusionReasons: [] }))
-      .filter((row) => Number.isFinite(row.eventMs) && row.eventMs < targetCutoffMs)
+      .filter((row) => Number.isFinite(row.eventMs) && row.eventMs < cutoff)
+      .filter((row) => sourceObservedMs(row) != null && sourceObservedMs(row) <= cutoff)
       .sort(compareHistoryDesc);
 
     for (const row of safe) {
-      row.equipment = latestObservedAtOrBefore(equipmentRows.get(row.race_entry_id), targetCutoffMs, normalizedEquipment);
-      row.xlabs = latestObservedAtOrBefore(xlabsRows.get(row.race_entry_id), targetCutoffMs, normalizedXlabs);
-      row.proposition = historicalPropositions.get(row.race_id) || null;
+      row.equipment = latestObservedAtOrBefore(equipmentRows.get(row.race_entry_id), cutoff, normalizedEquipment);
+      row.xlabs = latestObservedAtOrBefore(xlabsRows.get(row.race_entry_id), cutoff, normalizedXlabs);
+      row.proposition = latestObservedAtOrBefore(propositionRows.get(row.race_id), cutoff, normalizedProposition, 'observed_at');
     }
 
-    const rest = annotateReasons(safe, target, targetEquipment, targetProposition, targetCutoffMs, policy);
+    const rest = annotateReasons(safe, target, targetEquipment, targetProposition, cutoff, policy);
     const relevant = selectRelevant(safe, policy);
-    const aggregates = aggregateHistory(safe);
-    const snapshot = officialSnapshots.get(target.horse_id) || null;
     const included = relevant.length;
-
     out.set(target.race_entry_id, {
       contractVersion: RELEVANT_HISTORY_CONTRACT_VERSION,
       selectionVersion: RELEVANT_HISTORY_SELECTION_VERSION,
       asOf: requestedAsOf.iso,
-      targetCutoff: new Date(targetCutoffMs).toISOString(),
+      targetCutoff: new Date(cutoff).toISOString(),
       policy,
       target: {
         raceEntryId: target.race_entry_id,
@@ -564,13 +546,9 @@ export async function buildRelevantHistoryForEntries(env, raceEntryIds, asOf, op
         restDaysBeforeStart: rest.targetRestDays,
         restBucket: rest.targetRestBucket
       },
-      counts: {
-        totalSafe: safe.length,
-        included,
-        omitted: safe.length - included
-      },
-      fullHistoryAggregates: aggregates,
-      officialHistoryReference: officialReference(snapshot),
+      counts: { totalSafe: safe.length, included, omitted: safe.length - included },
+      fullHistoryAggregates: aggregateHistory(safe),
+      officialHistoryReference: officialReference(officialReferences.get(target.race_entry_id) || null),
       relevantHistoryUnion: relevant.map(outputHistoryRow)
     });
   }
