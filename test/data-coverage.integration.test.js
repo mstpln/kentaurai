@@ -67,7 +67,7 @@ function seedCoverageData(db) {
       segments_json, quality_status, source_record_id
     ) VALUES (
       'coverage_xlabs','coverage_entry','00:15.0','00:28.0',2142,2,
-      '[{"distanceM":100,"time":"00:07.5"}]','verified','coverage_source'
+      '[{"distanceM":100,"time":"00:07.5"}]','xlabs-telemetry-v1','coverage_source'
     )
   `).run();
   db.prepare(`
@@ -135,7 +135,7 @@ test('data coverage export reports aggregate coverage without row-level private 
   const text = await response.text();
   const report = JSON.parse(text);
 
-  assert.equal(report.contract_version, 'kentaurai-data-coverage-v1');
+  assert.equal(report.contract_version, 'kentaurai-data-coverage-v2');
   assert.equal(report.population.races, 1);
   assert.equal(report.population.completed_races, 1);
   assert.equal(report.population.non_scratched_entries, 1);
@@ -159,10 +159,12 @@ test('data coverage export reports aggregate coverage without row-level private 
   assert.equal(report.coverage.classifications.stl_classification.percent, 100);
   assert.equal(report.coverage.normalized_observations.race_prize_text.percent, 100);
   assert.equal(report.coverage.normalized_observations.race_terms.percent, 100);
+  assert.equal(report.coverage.contextual_eligibility.populations.active_entries, 1);
+  assert.equal(report.coverage.xlabs_selection_bias.horse_measurement_depth.at_least_1_measured_start.percent, 100);
 
   for (const privateValue of [
     'Private Synthetic Track','Private Horse','Private Scratched Horse',
-    'coverage_horse','coverage_scratched_horse','coverage_race','coverage_source'
+    'coverage_horse','coverage_scratched_horse','coverage_race','coverage_source','coverage_track'
   ]) assert.equal(text.includes(privateValue), false);
 });
 
