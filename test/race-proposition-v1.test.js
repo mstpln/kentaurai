@@ -25,7 +25,7 @@ test('B1 Swedish allowlist extracts exact structured proposition facts', () => {
     'Amatörlopp',
     'Lärlingslopp',
     'Unghästlopp',
-    '20 m tillägg'
+    'tillägg 20 m'
   ]);
   assert.equal(parsed.parserVersion, RACE_PROPOSITION_PARSER_VERSION);
   assert.equal(parsed.parseStatus, 'parsed');
