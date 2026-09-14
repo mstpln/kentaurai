@@ -43,6 +43,22 @@ test('B5 provider annual stats are fallback and missing remains unavailable',asy
   assert.equal(result.trainer.provider_annual_fallback.completeness.coverage,0);
 });
 
+test('B5 provider fallbacks remain bounded above one D1 variable chunk',async()=>{
+  const {db,env}=createTestEnv();
+  const targets=[];
+  for(let i=0;i<81;i++){
+    const driver=`driver-${i}`;
+    db.prepare('INSERT OR IGNORE INTO drivers(id,canonical_name) VALUES(?,?)').run(driver,`Driver ${i}`);
+    const target=seedPersonStart(db,{key:`target-${i}`,date:'2026-09-20',driver,target:true});
+    targets.push(target.entryId);
+  }
+  seedPersonSnapshot(db,{type:'driver',id:'driver-80',starts:10,wins:2,seconds:1,thirds:1,key:'chunk-boundary'});
+  const result=await buildPersonContextV1ForEntries(env,targets,'2026-09-20T11:00:00Z');
+  assert.equal(result.size,81);
+  assert.equal(result.get('entry-target-80').driver.availability,'provider_fallback');
+  assert.equal(result.get('entry-target-80').driver.provider_annual_fallback.win_rate.value,0.2);
+});
+
 test('B5 suppresses sparse segment rates instead of presenting tiny-N signal',async()=>{
   const {db,env}=createTestEnv();const target=seedPersonStart(db,{key:'target',date:'2026-09-20',target:true});
   seedPersonStart(db,{key:'one',date:'2026-09-10',placing:1});seedPersonStart(db,{key:'two',date:'2026-09-01',placing:2,track:'track-b'});
