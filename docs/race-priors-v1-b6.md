@@ -20,7 +20,7 @@ The base result priors use deterministic backoff in this order:
 6. start method
 7. global
 
-Distance buckets are `<1800`, `1800-2399`, `2400-2999` and `>=3000` metres. Field buckets are `1-8`, `9-12` and `>=13` active non-scratched starters. Start methods are canonically normalized to `auto`, `volt` or the source value/`unknown`.
+Distance buckets are `<1800`, `1800-2399`, `2400-2999` and `>=3000` metres. They use the race distance (`races.distance_m`), not an individual entry's handicap-adjusted start distance; handicap has its own profile. Field buckets are `1-8`, `9-12` and `>=13` active non-scratched starters. Start methods are canonically normalized to `auto`, `volt` or the source value/`unknown`.
 
 The existing A3 hierarchical-backoff contract is reused. Effective sample size is the number of distinct historical races, rather than the number of entry rows, so several starters from one race do not create false confidence. The initial A3 minimum ESS and prior-equivalent sample size remain 8.
 
@@ -35,7 +35,7 @@ The pack exposes:
 
 Every prior reports its direct sample size, effective sample size, selected backoff level, backoff sample sizes, coverage and confidence. Unknown lane/tier/handicap facts remain unavailable rather than becoming zero. A verified zero handicap remains a known zero.
 
-Race type is deterministically classified from normalized race facts. Proposition refinement is used only when B1 has a fully parsed proposition signature; partial/unparsed/ambiguous propositions are not promoted into an exact grouping key.
+Race type is deterministically classified from normalized race facts. Proposition refinement is used only when B1 has a fully parsed proposition signature; partial/unparsed/ambiguous propositions are not promoted into an exact grouping key. A known refinement with no exact historical observations is reported as `sparse` and can still use the broader deterministic backoff hierarchy; the direct level is labelled `race_type`, `proposition` or `race_type_proposition` according to the evidence actually available.
 
 No continuous-position outcome prior is produced. That remains gated on validated position data in the later X-Labs/position work.
 
