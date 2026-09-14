@@ -11,7 +11,7 @@ export async function loadDriverHorseXlabs(env,entryIds,cutoffIso){
 
 export function buildDriverHorseContext(horseRows,driverId,xlabsByEntry,cutoffIso,version){
   const together=driverId?horseRows.filter((row)=>row.driver_id===driverId):[];
-  const other=driverId?horseRows.filter((row)=>row.driver_id&&row.driver_id!==driverId):horseRows;
+  const other=driverId?horseRows.filter((row)=>row.driver_id&&row.driver_id!==driverId):[];
   const tp=placingStats(together),op=placingStats(other),tg=binaryStats(together,'gallop'),og=binaryStats(other,'gallop'),td=binaryStats(together,'disqualified');
   const top3Delta=tp.top3Rate==null||op.top3Rate==null?null:tp.top3Rate-op.top3Rate,gallopDelta=tg.rate==null||og.rate==null?null:tg.rate-og.rate;
   const used=[];for(const row of together){const x=xlabsByEntry?.get(row.race_entry_id);if(parsePace(x?.first_200_time)!=null)used.push(x);}const paceValues=used.map((row)=>parsePace(row.first_200_time)),pace=paceValues.length?paceValues.reduce((a,b)=>a+b,0)/paceValues.length:null;
