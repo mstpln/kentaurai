@@ -79,13 +79,15 @@ test('contract snapshot returns mutable copies without mutating canonical consta
   assert.deepEqual(ANALYSIS_V3_TARGET_POLICY.defaultMainBudgetSek, { min: 150, max: 250 });
 });
 
-test('tracked repository filenames reject private strategy, coverage and real reference artifacts', () => {
+test('tracked repository filenames reject private strategy, build-plan, coverage and real reference artifacts', () => {
   const tracked = execFileSync('git', ['ls-files'], { cwd: repoRoot, encoding: 'utf8' })
     .split(/\r?\n/)
     .filter(Boolean);
   const forbiddenPatterns = [
     /KentaurAI_Analys_och_Datastrategi.*\.pdf$/i,
     /KentaurAI_Implementation_Master_Plan.*\.pdf$/i,
+    /KentaurAI_Detaljerad_Byggplan_Statistik_Analys_Data.*\.pdf$/i,
+    /V85_V86_Trav_Intelligence_Full_Build_Plan.*\.pdf$/i,
     /kentaurai-data-coverage.*\.json$/i,
     /kentaurai_V8[56]_.*\.json$/i,
     /_V8[56]_.*_reference\.json$/i,
