@@ -56,7 +56,7 @@ test('coverage v2 uses contextual denominators and quantifies X-Labs selection b
 
 test('coverage v2 exposes classified failed-job diagnostics without mutating the cursor or raw error', async () => {
   const { env, db } = createTestEnv();
-  const privateError = 'fetch timeout for https://private.invalid/race/private-race-id';
+  const privateError = 'HTTP 503 from https://private.invalid/race/private-race-id';
   db.prepare(`INSERT INTO xlabs_backfill_jobs
     (id,scope,start_date,end_date,next_date,next_race_index,status,processed_dates,processed_races,reused_races,
      unavailable_dates,unavailable_races,consecutive_errors,last_error,last_run_at,retry_after)
@@ -81,4 +81,39 @@ test('coverage v2 exposes classified failed-job diagnostics without mutating the
   assert.equal(serialized.includes('private-job-id'), false);
   assert.equal(serialized.includes('private.invalid'), false);
   assert.equal(serialized.includes('private-race-id'), false);
+});
+
+test('coverage v2 skips a completed same-day round when a later round is still upcoming', async () => {
+  const { env, db } = createTestEnv();
+  seedContextualCoverage(db);
+  db.prepare(`INSERT INTO tracks (id,canonical_name,country_code)
+    VALUES ('round_track','Synthetic Round Track','SE')`).run();
+  db.prepare(`INSERT INTO horses (id,canonical_name)
+    VALUES ('round_horse_done','Synthetic Done'),('round_horse_next','Synthetic Next')`).run();
+  db.prepare(`INSERT INTO races (id,track_id,race_date,race_number,distance_m,start_method,race_name,status)
+    VALUES
+      ('round_race_done','round_track','2026-09-14',1,2140,'auto','Synthetic completed round race','completed'),
+      ('round_race_next','round_track','2026-09-14',2,2140,'auto','Synthetic upcoming round race','scheduled')`).run();
+  db.prepare(`INSERT INTO race_entries
+      (id,race_id,horse_id,start_number,actual_start_distance_m,scratched,data_quality)
+    VALUES
+      ('round_entry_done','round_race_done','round_horse_done',1,2140,0,'normalized_verified_subset'),
+      ('round_entry_next','round_race_next','round_horse_next',1,2140,0,'normalized_verified_subset')`).run();
+  db.prepare(`INSERT INTO race_results (race_entry_id,placing,result_status,source_record_id)
+    VALUES ('round_entry_done',1,'official','v2_source')`).run();
+  db.prepare(`INSERT INTO game_rounds
+      (id,game_type,round_date,primary_track_id,scheduled_start_at,status)
+    VALUES
+      ('round_done','V85','2026-09-14','round_track','2026-09-14T08:00:00Z','completed'),
+      ('round_next','V86','2026-09-14','round_track','2026-09-14T17:00:00Z','scheduled')`).run();
+  db.prepare(`INSERT INTO game_legs (game_round_id,leg_number,race_id)
+    VALUES ('round_done',1,'round_race_done'),('round_next',1,'round_race_next')`).run();
+
+  const report = await buildDataCoverageReport(env, '2026-09-14T10:00:00Z');
+  const current = report.coverage.current_round_participants;
+  assert.equal(current.status, 'available');
+  assert.equal(current.game_type, 'V86');
+  assert.equal(current.round_date, '2026-09-14');
+  assert.equal(current.leg_count, 1);
+  assert.equal(current.active_entries, 1);
 });
