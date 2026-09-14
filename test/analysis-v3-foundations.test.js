@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import {
   ANALYSIS_V3_EVIDENCE_POLICY,
   ANALYSIS_V3_FOUNDATION_CONTRACTS,
@@ -15,16 +18,16 @@ import {
   stableFeatureJson
 } from '../src/analysis-v3-foundations.js';
 
+const here = dirname(fileURLToPath(import.meta.url));
+const leakageFixture = JSON.parse(readFileSync(resolve(here, '../fixtures/analysis-v3-foundations.example.json'), 'utf8'));
+
 test('future observations never enter a past as-of view', () => {
-  const rows = [
-    { id: 'older', observed_at: '2026-09-01T10:00:00Z', value: 1 },
-    { id: 'at-cutoff', observed_at: '2026-09-10T12:00:00Z', value: 2 },
-    { id: 'future', observed_at: '2026-09-10T12:00:01Z', value: 999 },
-    { id: 'missing-time', observed_at: null, value: 888 }
-  ];
-  const safe = filterAsOf(rows, { asOf: '2026-09-10T12:00:00Z', timeAccessor: 'observed_at' });
-  assert.deepEqual(safe.map((row) => row.id), ['older', 'at-cutoff']);
-  assert.equal(selectLatestAsOf(rows, { asOf: '2026-09-10T12:00:00Z', timeAccessor: 'observed_at' }).id, 'at-cutoff');
+  const safe = filterAsOf(leakageFixture.snapshots, { asOf: leakageFixture.as_of, timeAccessor: 'observed_at' });
+  assert.deepEqual(safe.map((row) => row.id), leakageFixture.expected_eligible_ids);
+  assert.equal(
+    selectLatestAsOf(leakageFixture.snapshots, { asOf: leakageFixture.as_of, timeAccessor: 'observed_at' }).id,
+    leakageFixture.expected_latest_id
+  );
 });
 
 test('as-of tie-breaking is deterministic and does not mutate source rows', () => {
