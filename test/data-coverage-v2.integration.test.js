@@ -61,7 +61,7 @@ test('coverage v2 exposes classified failed-job diagnostics without mutating the
     (id,scope,start_date,end_date,next_date,next_race_index,status,processed_dates,processed_races,reused_races,
      unavailable_dates,unavailable_races,consecutive_errors,last_error,last_run_at,retry_after)
     VALUES ('private-job-id','historical_all','2025-01-01','2025-12-31','2025-08-03',7,'failed',150,900,12,4,31,3,?,
-      '2026-01-02T09:00:00Z','2026-01-02T10:00:00Z')`).bind(privateError).run();
+      '2026-01-02T09:00:00Z','2026-01-02T10:00:00Z')`).run(privateError);
 
   const before = db.prepare(`SELECT next_date,next_race_index,status,consecutive_errors,last_error,retry_after
     FROM xlabs_backfill_jobs WHERE id='private-job-id'`).get();
