@@ -69,7 +69,7 @@ const FEATURE_REGISTRY = createFeatureVersionRegistry([
   {
     family: 'rest_readiness',
     version: PERFORMANCE_FEATURE_VERSIONS.restReadiness,
-    semantics: 'Rest interval context and comparable historical outcomes without a readiness score.',
+    semantics: 'Elapsed-rest context at the B2 effective as-of cutoff and comparable historical outcomes; no planned-rest interval or readiness score is inferred.',
     parameters: { backoffPolicy: ANALYSIS_V3_INITIAL_BACKOFF_POLICY.version }
   },
   {
@@ -627,18 +627,18 @@ function buildMethodDistance(history, asOf) {
 function buildRestReadiness(history, asOf) {
   const rows = orderedRows(history);
   const version = PERFORMANCE_FEATURE_VERSIONS.restReadiness;
-  const bucket = history?.target?.restBucket || null;
-  const restDays = finite(history?.target?.restDaysBeforeStart);
-  const comparable = bucket ? rows.filter((row) => {
+  const elapsedRestBucket = history?.target?.restBucket || null;
+  const elapsedRestDays = finite(history?.target?.restDaysBeforeStart);
+  const comparable = elapsedRestBucket ? rows.filter((row) => {
     const days = finite(row.restDaysBeforeStart);
     if (days == null) return false;
-    if (bucket === 'short') return days <= history.policy.restShortMaxDays;
-    if (bucket === 'normal') return days > history.policy.restShortMaxDays && days <= history.policy.restNormalMaxDays;
+    if (elapsedRestBucket === 'short') return days <= history.policy.restShortMaxDays;
+    if (elapsedRestBucket === 'normal') return days > history.policy.restShortMaxDays && days <= history.policy.restNormalMaxDays;
     return days > history.policy.restNormalMaxDays;
   }) : [];
   const direct = placingRate(comparable, (placing) => placing <= 3);
   const all = placingRate(rows, (placing) => placing <= 3);
-  const nonComparable = bucket ? rows.filter((row) => !comparable.includes(row)) : rows;
+  const nonComparable = elapsedRestBucket ? rows.filter((row) => !comparable.includes(row)) : rows;
   const broadPrior = placingRate(nonComparable, (placing) => placing <= 3);
   const comparableGallop = booleanRate(comparable, (row) => row?.result?.gallop);
   const shrunk = shrunkRateMetric({
@@ -648,24 +648,26 @@ function buildRestReadiness(history, asOf) {
     ],
     asOf,
     version,
-    evidenceSource: 'rest_top3_backoff'
+    evidenceSource: 'elapsed_rest_bucket_top3_backoff'
   });
   const refs = historySourceRefs(rows);
 
   return {
     version,
     metrics: {
-      target_rest_days: metric({ value: restDays, evidenceSource: 'target_rest_interval', known: restDays == null ? 0 : 1, total: 1, asOf, featureVersion: version, factual: true }),
-      target_rest_bucket: metric({ value: bucket, evidenceSource: 'target_rest_interval_policy', known: bucket ? 1 : 0, total: 1, asOf, featureVersion: version, factual: true }),
-      comparable_rest_top3_rate: metric({ value: direct.value, evidenceSource: 'comparable_rest_results', known: direct.known, total: direct.total, asOf, featureVersion: version }),
-      comparable_rest_gallop_rate: metric({ value: comparableGallop.value, evidenceSource: 'comparable_rest_gallop_status', known: comparableGallop.known, total: comparableGallop.total, asOf, featureVersion: version }),
+      elapsed_rest_days_as_of: metric({ value: elapsedRestDays, evidenceSource: 'b2_elapsed_rest_interval_as_of', known: elapsedRestDays == null ? 0 : 1, total: 1, asOf, featureVersion: version, factual: true }),
+      elapsed_rest_bucket_as_of: metric({ value: elapsedRestBucket, evidenceSource: 'b2_elapsed_rest_interval_policy_as_of', known: elapsedRestBucket ? 1 : 0, total: 1, asOf, featureVersion: version, factual: true }),
+      elapsed_rest_bucket_comparable_top3_rate: metric({ value: direct.value, evidenceSource: 'elapsed_rest_bucket_comparable_results', known: direct.known, total: direct.total, asOf, featureVersion: version }),
+      elapsed_rest_bucket_comparable_gallop_rate: metric({ value: comparableGallop.value, evidenceSource: 'elapsed_rest_bucket_comparable_gallop_status', known: comparableGallop.known, total: comparableGallop.total, asOf, featureVersion: version }),
       relevant_history_top3_rate: metric({ value: all.value, evidenceSource: 'relevant_history_results', known: all.known, total: all.total, asOf, featureVersion: version }),
-      shrunk_comparable_rest_top3_rate: shrunk.metric
+      shrunk_elapsed_rest_bucket_top3_rate: shrunk.metric
     },
-    estimates: { shrunk_comparable_rest_top3_rate: shrunk.estimate },
+    estimates: { shrunk_elapsed_rest_bucket_top3_rate: shrunk.estimate },
     provenance: familyProvenance({
       family: 'rest_readiness', version, asOf, refs, history,
       parameters: {
+        restIntervalSemantics: 'elapsed_to_effective_as_of',
+        comparisonRestBasis: 'b2_elapsed_rest_bucket_as_of',
         restShortMaxDays: history.policy.restShortMaxDays,
         restNormalMaxDays: history.policy.restNormalMaxDays,
         backoffPolicy: ANALYSIS_V3_INITIAL_BACKOFF_POLICY.version
