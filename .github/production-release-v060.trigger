@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=9895afd0768f4b0544dc3e035a8e5c602b25cef7
-release_nonce=2026-09-14-analysis-v3-performance-features-b3
+source_main=500f17d7440d0e0ff4f8bb2dec69df1bbbb644d3
+release_nonce=2026-09-14-equipment-response-v1-b4
