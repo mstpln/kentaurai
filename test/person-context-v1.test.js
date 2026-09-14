@@ -36,7 +36,7 @@ test('B5 provider annual stats are fallback and missing remains unavailable',asy
   seedPersonSnapshot(db,{type:'driver',id:'driver-a',starts:100,wins:20,seconds:15,thirds:10});
   const result=(await buildPersonContextV1ForEntries(env,[target.entryId],'2026-09-20T11:00:00Z')).get(target.entryId);
   assert.equal(result.driver.availability,'provider_fallback');assert.equal(result.driver.provider_annual_fallback.win_rate.value,0.2);
-  assert.equal(result.driver.provider_annual_fallback.sample_size,0);assert.ok(result.driver.provider_annual_fallback.evidence_level==='C'||result.driver.provider_annual_fallback.evidence_level==='D');
+  assert.equal(result.driver.provider_annual_fallback.win_rate.sample_size,0);assert.equal(result.driver.provider_annual_fallback.win_rate.evidence_level,'C');
   assert.equal(result.trainer.availability,'unavailable');assert.equal(result.trainer.provider_annual_fallback.win_rate.value,null);
 });
 
