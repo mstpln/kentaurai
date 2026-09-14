@@ -47,9 +47,10 @@ test('B5 provider fallbacks remain bounded above one D1 variable chunk',async()=
   const {db,env}=createTestEnv();
   const targets=[];
   for(let i=0;i<81;i++){
-    const driver=`driver-${i}`;
+    const driver=`driver-${i}`,track=`track-${i}`;
     db.prepare('INSERT OR IGNORE INTO drivers(id,canonical_name) VALUES(?,?)').run(driver,`Driver ${i}`);
-    const target=seedPersonStart(db,{key:`target-${i}`,date:'2026-09-20',track:`track-${i}`,driver,target:true});
+    db.prepare('INSERT OR IGNORE INTO tracks(id,canonical_name) VALUES(?,?)').run(track,`Track ${i}`);
+    const target=seedPersonStart(db,{key:`target-${i}`,date:'2026-09-20',track,driver,target:true});
     targets.push(target.entryId);
   }
   seedPersonSnapshot(db,{type:'driver',id:'driver-80',starts:10,wins:2,seconds:1,thirds:1,key:'chunk-boundary'});
