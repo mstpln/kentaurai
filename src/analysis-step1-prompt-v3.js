@@ -33,6 +33,7 @@ PROBABILITY AND RANKING RULES
 
 OUTPUT RULES
 Return one machine-readable JSON object only, with no markdown fences and no prose outside JSON. Preserve canonical IDs exactly from the pack. Do not add market fields or system recommendations.
+Use the exact snake_case keys shown below. Do not rename keys, use camelCase aliases or add alternate wire-format keys.
 
 Required shape:
 {
