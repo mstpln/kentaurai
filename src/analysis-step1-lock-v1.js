@@ -8,6 +8,11 @@ export const ANALYSIS_STEP1_LOCK_VERSION = 'step1-lock-v1-d2';
 
 const PROBABILITY_TOLERANCE = 0.0001;
 const ABCD_ORDER = new Map([['A', 0], ['B', 1], ['C', 2], ['D', 3]]);
+const TOP_LEVEL_KEYS = new Set(['contract_version', 'lock_id', 'round_id', 'pack', 'provider', 'model', 'prompt_version', 'legs']);
+const PACK_KEYS = new Set(['pack_id', 'as_of', 'facts_fingerprint']);
+const LEG_KEYS = new Set(['leg_number', 'race_id', 'data_quality_summary', 'race_shape_summary', 'scenario_confidence', 'scenarios', 'predictions']);
+const SCENARIO_KEYS = new Set(['name', 'weight', 'assumptions', 'beneficiaries', 'disadvantaged', 'evidence_quality']);
+const PREDICTION_KEYS = new Set(['race_entry_id', 'blind_probability', 'uncertainty_low', 'uncertainty_high', 'raw_rank', 'abcd_group', 'assessment_confidence', 'reasoning']);
 const DENIED_KEY_PATTERNS = Object.freeze([
   /^(?:bet_percent|bet_percentage|bet_distribution|betting|betting_percent|betting_percentage|betting_snapshot|betting_snapshots)$/,
   /^(?:market|market_percent|market_percentage|market_rank|market_share|market_ownership|market_probability|market_win_probability|market_win_probability_proxy|ownership|ownership_percent|ownership_percentage)$/,
@@ -53,6 +58,11 @@ function integer(value, field, { min = -Infinity, max = Infinity } = {}) {
     throw new Error(`${field} must be a JSON integer between ${min} and ${max}`);
   }
   return value;
+}
+
+function assertAllowedKeys(value, allowed, field) {
+  const unknown = Object.keys(value).filter((key) => !allowed.has(key));
+  if (unknown.length) throw new Error(`${field} contains unsupported fields: ${unknown.slice(0, 10).join(', ')}`);
 }
 
 function normalizeKey(key) {
@@ -139,6 +149,7 @@ function packLegIndex(pack) {
 
 function normalizeScenario(value, field, allowedEntries) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${field} must be an object`);
+  assertAllowedKeys(value, SCENARIO_KEYS, field);
   const name = requiredText(value.name, `${field}.name`, 160);
   const weight = finiteNumber(value.weight, `${field}.weight`, { min: 0, max: 1 });
   const assumptions = Array.isArray(value.assumptions) ? value.assumptions.map((item, index) => {
@@ -169,6 +180,7 @@ function normalizeScenario(value, field, allowedEntries) {
 
 function normalizePrediction(value, field, allowedEntries) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${field} must be an object`);
+  assertAllowedKeys(value, PREDICTION_KEYS, field);
   assertStep1MarketBlind(value, field);
   const raceEntryId = requiredText(value.race_entry_id, `${field}.race_entry_id`);
   if (!allowedEntries.has(raceEntryId)) throw new Error(`${field}.race_entry_id does not belong to the active leg`);
@@ -197,6 +209,7 @@ function normalizePrediction(value, field, allowedEntries) {
 
 function normalizeLeg(value, index, expected) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`legs[${index}] must be an object`);
+  assertAllowedKeys(value, LEG_KEYS, `legs[${index}]`);
   assertStep1MarketBlind(value, `legs[${index}]`);
   const legNumber = integer(value.leg_number, `legs[${index}].leg_number`, { min: 1, max: 8 });
   if (legNumber !== index + 1) throw new Error('legs must be unique and ordered 1 through 8');
@@ -258,6 +271,7 @@ export async function validateStep1LockV1AgainstPack(payload, pack) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Step 1 lock must be a JSON object');
   assertStep1SnakeCaseContract(payload);
   assertStep1MarketBlind(payload);
+  assertAllowedKeys(payload, TOP_LEVEL_KEYS, 'Step 1 lock');
   const contractVersion = requiredText(payload.contract_version, 'contract_version', 80);
   if (contractVersion !== ANALYSIS_STEP1_LOCK_CONTRACT) throw new Error(`contract_version must be ${ANALYSIS_STEP1_LOCK_CONTRACT}`);
   const lockId = requiredText(payload.lock_id, 'lock_id', 160);
@@ -265,6 +279,7 @@ export async function validateStep1LockV1AgainstPack(payload, pack) {
   const roundId = requiredText(payload.round_id, 'round_id');
   if (roundId !== pack.manifest.round_id) throw new Error('round_id does not match the analysis pack');
   if (!payload.pack || typeof payload.pack !== 'object' || Array.isArray(payload.pack)) throw new Error('pack metadata is required');
+  assertAllowedKeys(payload.pack, PACK_KEYS, 'pack');
   const packId = requiredText(payload.pack.pack_id, 'pack.pack_id');
   const packAsOf = timestamp(payload.pack.as_of, 'pack.as_of');
   const factsFingerprint = requiredText(payload.pack.facts_fingerprint, 'pack.facts_fingerprint', 160);
