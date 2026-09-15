@@ -46,7 +46,7 @@ const CONTENT_TYPE = 'application/json; charset=utf-8';
 const SQL_CHUNK_SIZE = 80;
 const EDITORIAL_MARKET_RE = /(?:market|odds|bet|streck|rank|ranking|tip|spik|spike|pick|value|värde|probab|system|selection|recommend)/i;
 const MARKET_KEY_PATTERNS = Object.freeze([
-  /^(?:bet_percent|betting|betting_snapshot|betting_snapshots)$/,
+  /^(?:bet_percent|bet_percentage|betting|betting_percent|betting_snapshot|betting_snapshots)$/,
   /^(?:market_percent|market_rank|market_share|market_ownership|estimated_market_ownership)$/,
   /^(?:odds|official_odds|winner_odds|place_odds)$/,
   /(?:^|_)odds$/,
