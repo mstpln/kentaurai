@@ -35,7 +35,7 @@ async function readJsonBody(request) {
 }
 
 function assertUrlRound(payload, roundId) {
-  const payloadRound = String(payload?.round_id ?? payload?.roundId ?? '').trim();
+  const payloadRound = String(payload?.round_id ?? '').trim();
   if (!payloadRound || payloadRound !== roundId) throw new Error('URL round_id must match the Step 1 lock round_id');
 }
 
