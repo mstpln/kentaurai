@@ -59,6 +59,9 @@ function compareEntry(row, observation, mismatches) {
 function compareRace(row, observation, mismatches) {
   const fields = observation?.fields || {};
   const pairs = [
+    ['track_external_id', row.track_external_id || null, fields.trackExternalId == null ? null : String(fields.trackExternalId)],
+    ['race_date', row.race_date || null, fields.date || null],
+    ['race_name', row.race_name || null, fields.raceName || null],
     ['distance_m', finiteOrNull(row.distance_m), finiteOrNull(fields.distanceM)],
     ['start_method', normalizeMethod(row.start_method), normalizeMethod(fields.startMethod)],
     ['scheduled_start_at', instantOrNull(row.scheduled_start_at), instantOrNull(fields.scheduledStartAt)]
@@ -71,7 +74,8 @@ function compareRace(row, observation, mismatches) {
 
 async function targetRows(env, roundId) {
   const { results } = await env.DB.prepare(`
-    SELECT gl.leg_number,r.id AS race_id,r.distance_m,r.start_method,r.scheduled_start_at,
+    SELECT gl.leg_number,r.id AS race_id,r.race_date,r.race_name,r.distance_m,r.start_method,r.scheduled_start_at,
+      (SELECT external_id FROM track_external_ids x WHERE x.track_id=r.track_id AND x.source_type='official' ORDER BY external_id LIMIT 1) AS track_external_id,
       re.id AS race_entry_id,re.start_number,re.actual_lane,re.start_tier,re.handicap_m,re.actual_start_distance_m,re.scratched,
       (SELECT external_id FROM horse_external_ids x WHERE x.horse_id=re.horse_id AND x.source_type='official' ORDER BY external_id LIMIT 1) AS horse_external_id,
       (SELECT external_id FROM driver_external_ids x WHERE x.driver_id=re.driver_id AND x.source_type='official' ORDER BY external_id LIMIT 1) AS driver_external_id,
