@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS race_position_checkpoints (
   leader_progress_m REAL NOT NULL,
   distance_to_finish_m REAL NOT NULL,
   position_rank INTEGER CHECK(position_rank IS NULL OR position_rank >= 1),
-  meters_behind_leader REAL NOT NULL CHECK(meters_behind_leader >= 0),
+  meters_behind_leader REAL CHECK(meters_behind_leader IS NULL OR meters_behind_leader >= 0),
   relative_lateral_offset_m REAL,
   positions_gained_since_previous INTEGER,
   gap_gain_m_since_previous REAL,
