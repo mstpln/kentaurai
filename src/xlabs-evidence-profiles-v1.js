@@ -495,7 +495,7 @@ export function buildXlabsEvidenceProfiles({
         ? { status: 'available', selection_source: 'caller_supplied_market_blind_ids', ...coverageBundle(profiles, contenderIds) }
         : { status: 'not_provided', selection_source: null, ...coverageBundle(profiles, []) }
     },
-    population_shift: buildXlabsPopulationShiftDiagnostics(aggregates, target, activeEntries.length),
+    population_shift: buildXlabsPopulationShiftDiagnostics(populationAggregates, target, activeEntries.length),
     separation: {
       baseline_strength_modified: false,
       direct_data_bonus_applied: false,
