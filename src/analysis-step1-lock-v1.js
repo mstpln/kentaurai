@@ -303,15 +303,36 @@ function rowMetadata(row, { reused = false } = {}) {
   };
 }
 
+function exactRetryJson(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  try {
+    const candidate = structuredClone(payload);
+    if (candidate.pack?.as_of != null) candidate.pack.as_of = timestamp(candidate.pack.as_of, 'pack.as_of');
+    if (candidate.provider != null) candidate.provider = String(candidate.provider).trim().toLowerCase();
+    return stableFeatureJson(candidate);
+  } catch {
+    return null;
+  }
+}
+
+export function isExactStoredStep1Retry(row, payload) {
+  return Boolean(row?.lock_json) && exactRetryJson(payload) === row.lock_json;
+}
+
 export async function importStep1LockV1(env, payload, { now = new Date().toISOString() } = {}) {
-  const prepared = await prepareStep1LockV1(env, payload);
-  const existing = await env.DB.prepare(`SELECT * FROM analysis_step1_locks WHERE id=? LIMIT 1`).bind(prepared.lock.lock_id).first();
+  if (!env?.DB) throw new Error('DB is not configured');
+  const lockId = requiredText(payload?.lock_id ?? payload?.lockId, 'lock_id', 160);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(lockId)) throw new Error('lock_id contains unsupported characters');
+
+  const existing = await env.DB.prepare(`SELECT * FROM analysis_step1_locks WHERE id=? LIMIT 1`).bind(lockId).first();
   if (existing) {
-    if (existing.lock_hash !== prepared.lockHash || existing.lock_json !== prepared.lockJson) {
+    if (!isExactStoredStep1Retry(existing, payload)) {
       throw new Error('lock_id is already sealed with different content; create a new lock/revision id');
     }
     return rowMetadata(existing, { reused: true });
   }
+
+  const prepared = await prepareStep1LockV1(env, payload);
   const createdAt = timestamp(now, 'created_at');
   try {
     await env.DB.prepare(`
