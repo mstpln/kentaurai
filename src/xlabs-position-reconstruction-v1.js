@@ -48,13 +48,6 @@ function clamp01(value) {
   return Math.max(0, Math.min(1, Number(value) || 0));
 }
 
-function median(values) {
-  if (!values.length) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
-}
-
 function mean(values) {
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 }
@@ -100,7 +93,7 @@ function smoothTargetAt(frames, frameIndex, startNumber, radius) {
     number: startNumber,
     posX: mean(samples.map((sample) => sample.posX)),
     posY: mean(samples.map((sample) => sample.posY)),
-    distanceToFinish: median(samples.map((sample) => sample.distanceToFinish)),
+    distanceToFinish: current.distanceToFinish,
     localCoverage,
     sampleCount: samples.length,
     windowCount
@@ -112,16 +105,19 @@ function tangentAt(frames, frameIndex, startNumber, radius) {
   let after = null;
   for (let offset = 1; offset <= radius + 2; offset += 1) {
     const left = frameIndex - offset;
-    if (!before && left >= 0 && frames[left].targets.has(startNumber)) before = { index: left, target: frames[left].targets.get(startNumber) };
+    if (!before && left >= 0 && frames[left].targets.has(startNumber)) before = { index: left };
     const right = frameIndex + offset;
-    if (!after && right < frames.length && frames[right].targets.has(startNumber)) after = { index: right, target: frames[right].targets.get(startNumber) };
+    if (!after && right < frames.length && frames[right].targets.has(startNumber)) after = { index: right };
     if (before && after) break;
   }
   if (!before || !after) return null;
   const elapsedMs = frames[after.index].timestampMs - frames[before.index].timestampMs;
   if (!(elapsedMs > 0) || elapsedMs > XLABS_POSITION_RECONSTRUCTION_POLICY.maxTangentWindowMs) return null;
-  const dx = after.target.posX - before.target.posX;
-  const dy = after.target.posY - before.target.posY;
+  const beforeTarget = smoothTargetAt(frames, before.index, startNumber, radius);
+  const afterTarget = smoothTargetAt(frames, after.index, startNumber, radius);
+  if (!beforeTarget || !afterTarget) return null;
+  const dx = afterTarget.posX - beforeTarget.posX;
+  const dy = afterTarget.posY - beforeTarget.posY;
   const norm = Math.hypot(dx, dy);
   if (norm < XLABS_POSITION_RECONSTRUCTION_POLICY.minTangentDistanceM) return null;
   return { x: dx / norm, y: dy / norm, elapsedMs };
