@@ -108,6 +108,12 @@ test('DB wrapper is as-of safe and exposes measured field/front-contender covera
   assert.equal(result.coverage.field.features.opening_100_km_pace_ms.measured_entries, 1);
   assert.equal(result.coverage.field.features.opening_100_km_pace_ms.eligible_entries, 3);
   assert.equal(result.coverage.front_contenders.features.closing_400_km_pace_ms.measured_entries, 2);
+  assert.equal(result.population_shift.features.opening_100_km_pace_ms.overall.eligible, 5);
+  assert.equal(result.population_shift.features.opening_100_km_pace_ms.overall.measured, 3);
+  assert.equal(result.population_shift.features.closing_400_km_pace_ms.overall.eligible, 5);
+  assert.equal(result.population_shift.features.closing_400_km_pace_ms.overall.measured, 4);
+  assert.equal(result.population_shift.features.opening_100_km_pace_ms.dimensions.year.target_bucket_coverage.eligible, 5);
+  assert.equal(result.population_shift.features.opening_100_km_pace_ms.dimensions.year.target_bucket_coverage.measured, 3);
   assert.equal(result.separation.baseline_strength_modified, false);
 });
 
