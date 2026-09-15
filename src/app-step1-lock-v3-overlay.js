@@ -1,6 +1,4 @@
 function step1LockClient() {
-  let installedFor = null;
-
   function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
   }
@@ -90,8 +88,6 @@ function step1LockClient() {
     const legacyStep1 = document.getElementById('exportStep1')?.closest('.settings-section');
     if (!host || !legacyStep1) return;
     if (document.getElementById('sealedStep1V3Card')) return;
-    const marker = `${location.pathname}:${Date.now()}`;
-    installedFor = marker;
     const section = document.createElement('section');
     section.className = 'settings-section settings-card';
     section.id = 'sealedStep1V3Card';
