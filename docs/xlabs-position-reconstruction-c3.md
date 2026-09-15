@@ -13,7 +13,7 @@ C3 adds a deterministic, optional trajectory layer on top of stored X-Labs raw t
 
 Longitudinal order is based primarily on `distanceToFinish`; lower is ahead. Telemetry is synchronized by frame timestamp. A target missing from one frame or local window is omitted there only, rather than invalidating the whole horse or race.
 
-Short jitter is smoothed locally before checkpoint geometry is derived. Checkpoints are selected at deterministic 100 m leader-progress intervals, with an optional finish checkpoint when telemetry reaches the finish. Each checkpoint can contain rank, meters behind the observed leader, relative lateral offset, position/gap change, observed-field denominator and reconstruction confidence.
+Short jitter is smoothed locally before checkpoint geometry is derived. The local movement tangent is calculated from smoothed `posX`/`posY` coordinates rather than raw neighboring coordinates. Checkpoints are selected at deterministic 100 m leader-progress intervals, with an optional finish checkpoint when telemetry reaches the finish. Each checkpoint can contain rank, meters behind the observed leader, relative lateral offset, position/gap change, observed-field denominator and reconstruction confidence.
 
 Relative lateral offset is projected onto the local movement normal. Its numeric sign is deliberately **not** called inner/outer because track orientation has not passed the manual geometry gate. Absolute lateral displacement may create a `wide_offset_candidate`, but that is only a geometric candidate, not a named trip fact.
 
@@ -27,6 +27,8 @@ C3 may emit these deterministic candidate types:
 - `forward_movement_candidate`
 - `relative_loss_candidate`
 - `wide_offset_candidate`
+
+A lead-change candidate requires the new resolved leader to remain resolved at the following checkpoint. At most one unresolved checkpoint may sit between the previous resolved leader and that confirmed transition; this allows a near-tie at the actual crossing without converting the ambiguous checkpoint itself into a factual rank.
 
 These are compact geometric/movement summaries. C3 does **not** emit leader/pocket/death-seat/second-over/third-over/wide-trip facts and does not write the legacy `race_positions` table. Named trip labels belong to the separate C4 validation gate.
 
@@ -53,4 +55,4 @@ Creating or running a production reconstruction job is an explicit operational a
 
 ## Release gate
 
-C3 is high-risk geometry work. CI uses synthetic trajectories for deterministic order/gap, partial missingness, lead changes, finish ordering, ambiguity abstention and idempotent persistence. Production activation still requires the master-plan manual geometry/trajectory validation gate on private representative samples. No private telemetry or reference-round payload is committed to GitHub.
+C3 is high-risk geometry work. CI uses synthetic trajectories for deterministic order/gap, alternating lateral jitter smoothing, partial missingness, bounded ambiguity around lead changes, finish ordering, ambiguity abstention and idempotent persistence. Production activation still requires the master-plan manual geometry/trajectory validation gate on private representative samples. No private telemetry or reference-round payload is committed to GitHub.
