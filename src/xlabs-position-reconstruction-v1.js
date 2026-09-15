@@ -158,19 +158,19 @@ function checkpointFrameIndices(frames, entriesByStart, startLeaderDistance) {
     maxProgress = Math.max(maxProgress, progress);
     states.push({ index, progress, leaderDistance: state.observed[0].distanceToFinish });
   }
+  const finalState = states.at(-1);
+  const hasFinish = Boolean(finalState && finalState.leaderDistance <= XLABS_POSITION_RECONSTRUCTION_POLICY.finishToleranceM);
   const wanted = [];
   for (let checkpointM = 0; checkpointM <= maxProgress; checkpointM += XLABS_POSITION_RECONSTRUCTION_POLICY.checkpointMeters) {
     wanted.push({ key: `${checkpointM}m`, checkpointM });
   }
-  const finalState = states.at(-1);
-  if (finalState && finalState.leaderDistance <= XLABS_POSITION_RECONSTRUCTION_POLICY.finishToleranceM) {
-    wanted.push({ key: 'finish', checkpointM: null });
-  }
+  if (hasFinish) wanted.push({ key: 'finish', checkpointM: null });
   const used = new Set();
   const selected = [];
   for (const checkpoint of wanted) {
     let best = null;
     for (const state of states) {
+      if (checkpoint.key !== 'finish' && hasFinish && state.index === finalState.index) continue;
       const error = checkpoint.key === 'finish' ? state.leaderDistance : Math.abs(state.progress - checkpoint.checkpointM);
       if (!best || error < best.error || (error === best.error && state.index < best.state.index)) best = { state, error };
     }
