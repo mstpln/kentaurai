@@ -46,13 +46,14 @@ const CONTENT_TYPE = 'application/json; charset=utf-8';
 const SQL_CHUNK_SIZE = 80;
 const EDITORIAL_MARKET_RE = /(?:market|odds|bet|streck|rank|ranking|tip|spik|spike|pick|value|värde|probab|system|selection|recommend)/i;
 const MARKET_KEY_PATTERNS = Object.freeze([
-  /^(?:bet_percent|bet_percentage|betting|betting_percent|betting_snapshot|betting_snapshots)$/,
-  /^(?:market_percent|market_rank|market_share|market_ownership|estimated_market_ownership)$/,
+  /^(?:bet_percent|bet_percentage|bet_distribution|betting|betting_percent|betting_percentage|betting_snapshot|betting_snapshots)$/,
+  /^(?:market_percent|market_percentage|market_rank|market_share|market_ownership|estimated_market_ownership|ownership_percentage)$/,
+  /^(?:streck|streck_percent|streck_percentage)$/,
   /^(?:odds|official_odds|winner_odds|place_odds)$/,
   /(?:^|_)odds$/,
   /^(?:turnover|turnover_sek|jackpot|jackpot_sek)$/,
   /^(?:value_ratio|value_metric)$/,
-  /^(?:external_rank|external_ranking|tip|tips|pick|spike|recommendation|selection_reason)$/
+  /^(?:external_rank|external_ranking|tip|tips|tip_rank|tip_ranking|pick|picks|spike|recommendation|recommendations|recommended|selection_reason)$/
 ]);
 
 function chunks(values, size = SQL_CHUNK_SIZE) {
@@ -261,7 +262,8 @@ export async function buildAnalysisPackV3Files({
     evidence_contract_version: evidenceContractVersion,
     contains_current_market: false,
     warnings: [...warnings],
-    source_family_coverage: sourceFamilyCoverage
+    source_family_coverage: sourceFamilyCoverage,
+    source_freshness: sourceFreshness
   };
   const manifestContent = stableFeatureJson(manifest);
   return {
@@ -278,7 +280,7 @@ export async function buildAnalysisPackV3Files({
 async function loadRoundIdentity(env, roundId) {
   const id = requiredText(roundId, 'round_id');
   const round = await env.DB.prepare(`
-    SELECT gr.id,gr.game_type,gr.round_date,gr.scheduled_start_at,gr.bet_stop_at,gr.status,
+    SELECT gr.id,gr.game_type,gr.round_date,gr.scheduled_start_at,gr.bet_stop_at,
       (SELECT MIN(r.scheduled_start_at) FROM game_legs gl JOIN races r ON r.id=gl.race_id WHERE gl.game_round_id=gr.id) AS first_leg_start
     FROM game_rounds gr
     WHERE gr.id=? AND gr.game_type IN ('V85','V86')
@@ -349,13 +351,17 @@ async function loadFirstPrizeAsOf(env, raceIds, asOf) {
   for (const group of chunks(raceIds)) {
     const { results } = await env.DB.prepare(`
       WITH ranked AS (
-        SELECT c.*,ROW_NUMBER() OVER (PARTITION BY c.race_id ORDER BY julianday(c.observed_at) DESC,c.observation_id DESC) AS rn
+        SELECT c.*,sr.fetched_at,ROW_NUMBER() OVER (PARTITION BY c.race_id ORDER BY julianday(c.observed_at) DESC,c.observation_id DESC) AS rn
         FROM official_race_first_prize_candidates c
-        WHERE c.race_id IN (${placeholders(group)}) AND julianday(c.observed_at)<=julianday(?)
+        JOIN normalized_observations o ON o.id=c.observation_id
+        JOIN source_records sr ON sr.id=o.source_record_id
+        WHERE c.race_id IN (${placeholders(group)})
+          AND julianday(c.observed_at)<=julianday(?)
+          AND julianday(sr.fetched_at)<=julianday(?)
       ) SELECT * FROM ranked WHERE rn=1
-    `).bind(...group, asOf).all();
+    `).bind(...group, asOf, asOf).all();
     for (const row of results) out.set(row.race_id, {
-      firstPrizeSek: finiteOrNull(row.first_prize_sek), observedAt: row.observed_at, observationId: row.observation_id
+      firstPrizeSek: finiteOrNull(row.first_prize_sek), observedAt: row.observed_at, fetchedAt: row.fetched_at, observationId: row.observation_id
     });
   }
   return out;
@@ -366,11 +372,15 @@ async function loadPropositionsAsOf(env, raceIds, asOf) {
   for (const group of chunks(raceIds)) {
     const { results } = await env.DB.prepare(`
       WITH ranked AS (
-        SELECT p.*,ROW_NUMBER() OVER (PARTITION BY p.race_id ORDER BY julianday(p.observed_at) DESC,p.id DESC) AS rn
+        SELECT p.*,sr.fetched_at,ROW_NUMBER() OVER (PARTITION BY p.race_id ORDER BY julianday(p.observed_at) DESC,p.id DESC) AS rn
         FROM race_proposition_facts p
-        WHERE p.race_id IN (${placeholders(group)}) AND p.parser_version=? AND julianday(p.observed_at)<=julianday(?)
+        JOIN source_records sr ON sr.id=p.source_record_id
+        WHERE p.race_id IN (${placeholders(group)})
+          AND p.parser_version=?
+          AND julianday(p.observed_at)<=julianday(?)
+          AND julianday(sr.fetched_at)<=julianday(?)
       ) SELECT * FROM ranked WHERE rn=1
-    `).bind(...group, RACE_PROPOSITION_PARSER_VERSION, asOf).all();
+    `).bind(...group, RACE_PROPOSITION_PARSER_VERSION, asOf, asOf).all();
     for (const row of results) out.set(row.race_id, {
       parser_version: row.parser_version,
       parse_status: row.parse_status,
@@ -378,6 +388,7 @@ async function loadPropositionsAsOf(env, raceIds, asOf) {
       unparsed_fragments: parseJson(row.unparsed_fragments_json, []),
       ambiguous_fragments: parseJson(row.ambiguous_fragments_json, []),
       observed_at: row.observed_at,
+      source_fetched_at: row.fetched_at,
       source_record_id: row.source_record_id
     });
   }
@@ -404,11 +415,12 @@ async function loadEditorialSignalsAsOf(env, rows, asOf) {
              es.polarity,es.strength,es.fact_or_opinion,es.confidence,sr.fetched_at
       FROM editorial_signals es
       JOIN editorial_items ei ON ei.id=es.editorial_item_id
-      LEFT JOIN source_records sr ON sr.id=ei.source_record_id
+      JOIN source_records sr ON sr.id=ei.source_record_id
       WHERE (ei.race_entry_id IN (${placeholders(entryGroup)})${horseClause})
         AND julianday(COALESCE(ei.published_at,sr.fetched_at))<=julianday(?)
-      ORDER BY COALESCE(ei.published_at,sr.fetched_at),es.id
-    `).bind(...entryGroup, ...horseGroup, asOf).all();
+        AND julianday(sr.fetched_at)<=julianday(?)
+      ORDER BY sr.fetched_at,COALESCE(ei.published_at,sr.fetched_at),es.id
+    `).bind(...entryGroup, ...horseGroup, asOf, asOf).all();
     all.push(...results);
   }
   for (const row of all.filter(editorialAllowed)) {
@@ -416,7 +428,8 @@ async function loadEditorialSignalsAsOf(env, rows, asOf) {
       if (row.race_entry_id !== entryId && row.horse_id !== entryToHorse.get(entryId)) continue;
       out.get(entryId).push({
         source_class: 'editorial',
-        published_at: row.published_at || row.fetched_at || null,
+        published_at: row.published_at || null,
+        available_at: row.fetched_at || null,
         signal_type: row.signal_type,
         value: row.value_text || null,
         polarity: row.polarity || null,
@@ -766,7 +779,7 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
       snapshot?.age?.observedAt,snapshot?.currentRecord?.observedAt,snapshot?.officialStatistics?.year?.observedAt,snapshot?.officialStatistics?.life?.observedAt
     ])),
     xlabs:maxIso([...xlabsByRace.values()].flatMap((value)=>sourceRefTimes(value))),
-    editorial:maxIso([...editorial.values()].flatMap((signals)=>signals.map((signal)=>signal.published_at)))
+    editorial:maxIso([...editorial.values()].flatMap((signals)=>signals.map((signal)=>signal.available_at)))
   };
   const versions = manifestVersions();
   return buildAnalysisPackV3Files({
@@ -774,7 +787,6 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
       round_id:round.id,
       game_type:round.game_type,
       round_date:round.round_date,
-      status:round.status||null,
       pre_market_cutoff_at:cutoff.cutoffAt,
       pre_market_cutoff_source:cutoff.cutoffSource
     },
