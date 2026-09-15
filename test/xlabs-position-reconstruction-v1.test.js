@@ -37,7 +37,7 @@ function ovalPoint(progressM, lateralM = 0) {
 function syntheticOvalTelemetry({ missing = {}, tied = false } = {}) {
   return Array.from({ length: 51 }, (_, index) => {
     const leaderProgress = index * 20;
-    const d1 = Math.max(0, 1000 - leaderProgress);
+    const d1 = Math.max(5, 1000 - leaderProgress);
     const d2 = tied ? d1 : Math.max(0, 1040 - index * 21);
     const d3 = Math.max(0, 1030 - index * 19.5);
     const distances = [d1, d2, d3];
@@ -107,7 +107,7 @@ test('C3 reconstructs obvious longitudinal order, gaps and lateral geometry on a
   const early = result.checkpoints.filter((row) => row.checkpointKey === '200m');
   assert.equal(early.length, 3);
   const ranked = early.filter((row) => row.positionRank != null).sort((a, b) => a.positionRank - b.positionRank);
-  assert.deepEqual(ranked.map((row) => row.raceEntryId), ['entry_1', 'entry_3', 'entry_2']);
+  assert.deepEqual(ranked.map((row) => row.raceEntryId), ['entry_1', 'entry_2', 'entry_3']);
   assert.equal(ranked[0].metersBehindLeader, 0);
   assert.ok(ranked[1].metersBehindLeader > 0);
   assert.ok(early.some((row) => Number.isFinite(row.relativeLateralOffsetM)));
@@ -201,5 +201,6 @@ test('C3 selective reconstruction job is date-bounded, checkpointed and advances
   assert.equal(secondStep.done, true);
   assert.equal(secondStep.status, 'completed');
   const oldBackfill = db.prepare(`SELECT status,next_date FROM xlabs_backfill_jobs WHERE id='existing-backfill'`).get();
-  assert.deepEqual(oldBackfill, { status: 'failed', next_date: '2098-06-01' });
+  assert.equal(oldBackfill.status, 'failed');
+  assert.equal(oldBackfill.next_date, '2098-06-01');
 });
