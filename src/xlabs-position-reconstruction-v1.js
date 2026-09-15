@@ -16,6 +16,7 @@ export const XLABS_POSITION_RECONSTRUCTION_POLICY = Object.freeze({
   minLocalTargetCoverage: 0.6,
   minTangentDistanceM: 0.25,
   maxTangentWindowMs: 1500,
+  maxLeadChangeUnresolvedCheckpoints: 1,
   movementMinProgressM: 200,
   movementMinRankChange: 2,
   movementMinGapChangeM: 5,
@@ -278,11 +279,24 @@ function buildLeadChangeEpisodes(rows, raceId, sourceRecordId) {
   });
   const episodes = [];
   for (let index = 1; index + 1 < leaders.length; index += 1) {
-    const previous = leaders[index - 1];
     const current = leaders[index];
     const next = leaders[index + 1];
-    if (!previous || !current || !next) continue;
-    if (previous.raceEntryId === current.raceEntryId || current.raceEntryId !== next.raceEntryId) continue;
+    if (!current || !next || current.raceEntryId !== next.raceEntryId) continue;
+
+    let previous = null;
+    let previousIndex = -1;
+    const minPreviousIndex = Math.max(0, index - 1 - XLABS_POSITION_RECONSTRUCTION_POLICY.maxLeadChangeUnresolvedCheckpoints);
+    for (let candidateIndex = index - 1; candidateIndex >= minPreviousIndex; candidateIndex -= 1) {
+      if (leaders[candidateIndex]) {
+        previous = leaders[candidateIndex];
+        previousIndex = candidateIndex;
+        break;
+      }
+    }
+    if (!previous || previous.raceEntryId === current.raceEntryId) continue;
+
+    const unresolvedBetween = index - previousIndex - 1;
+    if (unresolvedBetween > XLABS_POSITION_RECONSTRUCTION_POLICY.maxLeadChangeUnresolvedCheckpoints) continue;
     const start = previous;
     const end = next;
     episodes.push({
@@ -300,7 +314,11 @@ function buildLeadChangeEpisodes(rows, raceId, sourceRecordId) {
       durationMs: Math.max(0, end.elapsedMs - start.elapsedMs),
       progressSpanM: Math.max(0, end.leaderProgressM - start.leaderProgressM),
       confidence: clamp01(Math.min(previous.longitudinalConfidence, current.longitudinalConfidence, next.longitudinalConfidence)),
-      details: { previous_leader_race_entry_id: previous.raceEntryId, new_leader_race_entry_id: current.raceEntryId },
+      details: {
+        previous_leader_race_entry_id: previous.raceEntryId,
+        new_leader_race_entry_id: current.raceEntryId,
+        unresolved_checkpoints_between: unresolvedBetween
+      },
       reconstructionVersion: XLABS_POSITION_RECONSTRUCTION_VERSION
     });
   }
