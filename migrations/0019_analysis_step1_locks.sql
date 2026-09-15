@@ -12,8 +12,7 @@ CREATE TABLE IF NOT EXISTS analysis_step1_locks (
   prompt_version TEXT NOT NULL,
   lock_json TEXT NOT NULL,
   lock_hash TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  UNIQUE(game_round_id, lock_hash)
+  created_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_analysis_step1_locks_round_created
