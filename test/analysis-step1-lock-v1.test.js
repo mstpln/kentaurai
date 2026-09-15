@@ -1,12 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { webcrypto } from 'node:crypto';
 import {
   ANALYSIS_STEP1_LOCK_CONTRACT,
   assertStep1MarketBlind,
+  isExactStoredStep1Retry,
   step1LockHash,
   validateStep1LockV1AgainstPack
 } from '../src/analysis-step1-lock-v1.js';
+import { stableFeatureJson } from '../src/analysis-v3-foundations.js';
 import { ANALYSIS_STEP1_PROMPT_V3_VERSION, getAnalysisStep1PromptV3 } from '../src/analysis-step1-prompt-v3.js';
+
+globalThis.crypto ??= webcrypto;
 
 function syntheticPack() {
   const files = [];
@@ -118,6 +123,18 @@ test('Step 1 lock canonical hash is stable for equivalent key ordering and chang
   const changed = structuredClone(lock);
   changed.legs[0].predictions[0].reasoning = 'Changed sealed interpretation.';
   assert.notEqual(await step1LockHash(lock), await step1LockHash(changed));
+});
+
+test('exact stored Step 1 retry is idempotent without reopening the parent pack', async () => {
+  const normalized = await validateStep1LockV1AgainstPack(syntheticLock(), syntheticPack());
+  const row = { lock_json: stableFeatureJson(normalized) };
+  const exactRetry = structuredClone(normalized);
+  exactRetry.pack.as_of = '2026-09-15T08:00:00Z';
+  assert.equal(isExactStoredStep1Retry(row, exactRetry), true);
+
+  const changed = structuredClone(exactRetry);
+  changed.legs[0].predictions[0].reasoning = 'Changed sealed interpretation.';
+  assert.equal(isExactStoredStep1Retry(row, changed), false);
 });
 
 test('Step 1 prompt v3 is provider-neutral at core and forbids outside/current-market analysis', () => {
