@@ -73,6 +73,24 @@ function inspectDeniedKeys(value, path = '$', out = []) {
   return out;
 }
 
+function inspectNonSnakeCaseKeys(value, path = '$', out = []) {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => inspectNonSnakeCaseKeys(item, `${path}[${index}]`, out));
+    return out;
+  }
+  if (!value || typeof value !== 'object') return out;
+  for (const [key, nested] of Object.entries(value)) {
+    if (!/^[a-z][a-z0-9_]*$/.test(key)) out.push(`${path}.${key}`);
+    inspectNonSnakeCaseKeys(nested, `${path}.${key}`, out);
+  }
+  return out;
+}
+
+function assertStep1SnakeCaseContract(value) {
+  const invalid = inspectNonSnakeCaseKeys(value);
+  if (invalid.length) throw new Error(`Step 1 lock keys must use strict snake_case: ${invalid.slice(0, 10).join(', ')}`);
+}
+
 export function assertStep1MarketBlind(value, field = 'step1 lock') {
   const denied = inspectDeniedKeys(value);
   if (denied.length) throw new Error(`${field} contains denied current-market fields: ${denied.slice(0, 10).join(', ')}`);
@@ -136,7 +154,7 @@ function normalizeScenario(value, field, allowedEntries) {
     for (const id of ids) if (!allowedEntries.has(id)) throw new Error(`${field}.${key} contains entry outside the active leg: ${id}`);
     return ids;
   };
-  const evidenceQuality = optionalText(value.evidence_quality ?? value.evidenceQuality, `${field}.evidence_quality`, 1000);
+  const evidenceQuality = optionalText(value.evidence_quality, `${field}.evidence_quality`, 1000);
   assertMarketBlindText(name, `${field}.name`);
   assertMarketBlindText(evidenceQuality, `${field}.evidence_quality`);
   return {
@@ -152,17 +170,17 @@ function normalizeScenario(value, field, allowedEntries) {
 function normalizePrediction(value, field, allowedEntries) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${field} must be an object`);
   assertStep1MarketBlind(value, field);
-  const raceEntryId = requiredText(value.race_entry_id ?? value.raceEntryId, `${field}.race_entry_id`);
+  const raceEntryId = requiredText(value.race_entry_id, `${field}.race_entry_id`);
   if (!allowedEntries.has(raceEntryId)) throw new Error(`${field}.race_entry_id does not belong to the active leg`);
-  const blindProbability = finiteNumber(value.blind_probability ?? value.blindProbability, `${field}.blind_probability`, { min: 0, max: 1 });
-  const low = finiteNumber(value.uncertainty_low ?? value.uncertaintyLow, `${field}.uncertainty_low`, { min: 0, max: 1, nullable: true });
-  const high = finiteNumber(value.uncertainty_high ?? value.uncertaintyHigh, `${field}.uncertainty_high`, { min: 0, max: 1, nullable: true });
+  const blindProbability = finiteNumber(value.blind_probability, `${field}.blind_probability`, { min: 0, max: 1 });
+  const low = finiteNumber(value.uncertainty_low, `${field}.uncertainty_low`, { min: 0, max: 1, nullable: true });
+  const high = finiteNumber(value.uncertainty_high, `${field}.uncertainty_high`, { min: 0, max: 1, nullable: true });
   if (low != null && low > blindProbability) throw new Error(`${field}.uncertainty_low cannot exceed blind_probability`);
   if (high != null && high < blindProbability) throw new Error(`${field}.uncertainty_high cannot be below blind_probability`);
-  const rawRank = integer(value.raw_rank ?? value.rawRank, `${field}.raw_rank`, { min: 1, max: allowedEntries.size });
-  const abcdGroup = requiredText(value.abcd_group ?? value.abcdGroup, `${field}.abcd_group`, 1).toUpperCase();
+  const rawRank = integer(value.raw_rank, `${field}.raw_rank`, { min: 1, max: allowedEntries.size });
+  const abcdGroup = requiredText(value.abcd_group, `${field}.abcd_group`, 1).toUpperCase();
   if (!ABCD_ORDER.has(abcdGroup)) throw new Error(`${field}.abcd_group must be A, B, C or D`);
-  const assessmentConfidence = finiteNumber(value.assessment_confidence ?? value.assessmentConfidence, `${field}.assessment_confidence`, { min: 0, max: 1, nullable: true });
+  const assessmentConfidence = finiteNumber(value.assessment_confidence, `${field}.assessment_confidence`, { min: 0, max: 1, nullable: true });
   const reasoning = optionalText(value.reasoning, `${field}.reasoning`, 4000);
   assertMarketBlindText(reasoning, `${field}.reasoning`);
   return {
@@ -180,10 +198,10 @@ function normalizePrediction(value, field, allowedEntries) {
 function normalizeLeg(value, index, expected) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`legs[${index}] must be an object`);
   assertStep1MarketBlind(value, `legs[${index}]`);
-  const legNumber = integer(value.leg_number ?? value.legNumber, `legs[${index}].leg_number`, { min: 1, max: 8 });
+  const legNumber = integer(value.leg_number, `legs[${index}].leg_number`, { min: 1, max: 8 });
   if (legNumber !== index + 1) throw new Error('legs must be unique and ordered 1 through 8');
   const source = expected.get(legNumber);
-  const raceId = requiredText(value.race_id ?? value.raceId, `legs[${index}].race_id`);
+  const raceId = requiredText(value.race_id, `legs[${index}].race_id`);
   if (raceId !== source.raceId) throw new Error(`leg ${legNumber} race_id does not match the analysis pack`);
   if (!Array.isArray(value.predictions) || value.predictions.length !== source.activeEntryIds.size) {
     throw new Error(`leg ${legNumber} predictions must cover every active entry exactly once`);
@@ -214,9 +232,9 @@ function normalizeLeg(value, index, expected) {
     const scenarioSum = scenarios.reduce((sum, scenario) => sum + scenario.weight, 0);
     if (Math.abs(scenarioSum - 1) > PROBABILITY_TOLERANCE) throw new Error(`leg ${legNumber} scenario weights must sum to 1`);
   }
-  const dataQualitySummary = optionalText(value.data_quality_summary ?? value.dataQualitySummary, `legs[${index}].data_quality_summary`, 3000);
-  const raceShapeSummary = optionalText(value.race_shape_summary ?? value.raceShapeSummary, `legs[${index}].race_shape_summary`, 3000);
-  const scenarioConfidence = finiteNumber(value.scenario_confidence ?? value.scenarioConfidence, `legs[${index}].scenario_confidence`, { min: 0, max: 1, nullable: true });
+  const dataQualitySummary = optionalText(value.data_quality_summary, `legs[${index}].data_quality_summary`, 3000);
+  const raceShapeSummary = optionalText(value.race_shape_summary, `legs[${index}].race_shape_summary`, 3000);
+  const scenarioConfidence = finiteNumber(value.scenario_confidence, `legs[${index}].scenario_confidence`, { min: 0, max: 1, nullable: true });
   assertMarketBlindText(dataQualitySummary, `legs[${index}].data_quality_summary`);
   assertMarketBlindText(raceShapeSummary, `legs[${index}].race_shape_summary`);
   return {
@@ -238,27 +256,28 @@ function normalizeProvider(value) {
 
 export async function validateStep1LockV1AgainstPack(payload, pack) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Step 1 lock must be a JSON object');
+  assertStep1SnakeCaseContract(payload);
   assertStep1MarketBlind(payload);
-  const contractVersion = requiredText(payload.contract_version ?? payload.contractVersion, 'contract_version', 80);
+  const contractVersion = requiredText(payload.contract_version, 'contract_version', 80);
   if (contractVersion !== ANALYSIS_STEP1_LOCK_CONTRACT) throw new Error(`contract_version must be ${ANALYSIS_STEP1_LOCK_CONTRACT}`);
-  const lockId = requiredText(payload.lock_id ?? payload.lockId, 'lock_id', 160);
+  const lockId = requiredText(payload.lock_id, 'lock_id', 160);
   if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(lockId)) throw new Error('lock_id contains unsupported characters');
-  const roundId = requiredText(payload.round_id ?? payload.roundId, 'round_id');
+  const roundId = requiredText(payload.round_id, 'round_id');
   if (roundId !== pack.manifest.round_id) throw new Error('round_id does not match the analysis pack');
   if (!payload.pack || typeof payload.pack !== 'object' || Array.isArray(payload.pack)) throw new Error('pack metadata is required');
-  const packId = requiredText(payload.pack.pack_id ?? payload.pack.packId, 'pack.pack_id');
-  const packAsOf = timestamp(payload.pack.as_of ?? payload.pack.asOf, 'pack.as_of');
-  const factsFingerprint = requiredText(payload.pack.facts_fingerprint ?? payload.pack.factsFingerprint, 'pack.facts_fingerprint', 160);
+  const packId = requiredText(payload.pack.pack_id, 'pack.pack_id');
+  const packAsOf = timestamp(payload.pack.as_of, 'pack.as_of');
+  const factsFingerprint = requiredText(payload.pack.facts_fingerprint, 'pack.facts_fingerprint', 160);
   if (packId !== pack.manifest.pack_id) throw new Error('pack.pack_id does not match the server-generated analysis pack');
   if (packAsOf !== pack.manifest.as_of) throw new Error('pack.as_of does not match the server-generated analysis pack');
   if (factsFingerprint !== pack.manifest.facts_fingerprint) throw new Error('pack.facts_fingerprint does not match the server-generated analysis pack');
   const provider = normalizeProvider(payload.provider);
   const model = requiredText(payload.model, 'model', 160);
-  const promptVersion = requiredText(payload.prompt_version ?? payload.promptVersion, 'prompt_version', 120);
+  const promptVersion = requiredText(payload.prompt_version, 'prompt_version', 120);
   if (promptVersion !== ANALYSIS_STEP1_PROMPT_V3_VERSION) throw new Error(`prompt_version must be ${ANALYSIS_STEP1_PROMPT_V3_VERSION}`);
   if (!Array.isArray(payload.legs) || payload.legs.length !== 8) throw new Error('Step 1 lock must contain exactly eight legs');
   const expected = packLegIndex(pack);
-  const sorted = [...payload.legs].sort((a, b) => Number(a?.leg_number ?? a?.legNumber) - Number(b?.leg_number ?? b?.legNumber));
+  const sorted = [...payload.legs].sort((a, b) => Number(a?.leg_number) - Number(b?.leg_number));
   const legs = sorted.map((leg, index) => normalizeLeg(leg, index, expected));
   return {
     contract_version: ANALYSIS_STEP1_LOCK_CONTRACT,
@@ -274,8 +293,8 @@ export async function validateStep1LockV1AgainstPack(payload, pack) {
 
 export async function prepareStep1LockV1(env, payload) {
   if (!env?.DB) throw new Error('DB is not configured');
-  const roundId = requiredText(payload?.round_id ?? payload?.roundId, 'round_id');
-  const asOf = timestamp(payload?.pack?.as_of ?? payload?.pack?.asOf, 'pack.as_of');
+  const roundId = requiredText(payload?.round_id, 'round_id');
+  const asOf = timestamp(payload?.pack?.as_of, 'pack.as_of');
   await assertAnalysisPackReplaySafe(env, roundId, asOf);
   const pack = await createPreMarketAnalysisPackV3(env, roundId, { asOf });
   const lock = await validateStep1LockV1AgainstPack(payload, pack);
@@ -306,6 +325,7 @@ function rowMetadata(row, { reused = false } = {}) {
 function exactRetryJson(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
   try {
+    assertStep1SnakeCaseContract(payload);
     const candidate = structuredClone(payload);
     if (candidate.pack?.as_of != null) candidate.pack.as_of = timestamp(candidate.pack.as_of, 'pack.as_of');
     if (candidate.provider != null) candidate.provider = String(candidate.provider).trim().toLowerCase();
@@ -321,7 +341,7 @@ export function isExactStoredStep1Retry(row, payload) {
 
 export async function importStep1LockV1(env, payload, { now = new Date().toISOString() } = {}) {
   if (!env?.DB) throw new Error('DB is not configured');
-  const lockId = requiredText(payload?.lock_id ?? payload?.lockId, 'lock_id', 160);
+  const lockId = requiredText(payload?.lock_id, 'lock_id', 160);
   if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(lockId)) throw new Error('lock_id contains unsupported characters');
 
   const existing = await env.DB.prepare(`SELECT * FROM analysis_step1_locks WHERE id=? LIMIT 1`).bind(lockId).first();
