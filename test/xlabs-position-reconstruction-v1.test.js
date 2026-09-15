@@ -63,6 +63,21 @@ function syntheticOvalTelemetry({ missing = {}, tied = false } = {}) {
   });
 }
 
+function syntheticJitterTelemetry() {
+  return syntheticOvalTelemetry().map((frame, frameIndex) => ({
+    ...frame,
+    targets: frame.targets.map((target) => {
+      if (target.number !== 1) return target;
+      const jitter = frameIndex % 2 === 0 ? 1 : -1;
+      return {
+        ...target,
+        posX: target.posX + jitter,
+        posY: target.posY - jitter
+      };
+    })
+  }));
+}
+
 function build(payload = syntheticOvalTelemetry()) {
   return buildXlabsPositionReconstruction(payload, {
     trackId: TRACK_ID,
@@ -115,6 +130,17 @@ test('C3 reconstructs obvious longitudinal order, gaps and lateral geometry on a
   assert.ok(result.summaries.every((summary) => summary.frameCoverage === 1));
 });
 
+test('C3 smoothed tangent keeps lateral projection stable under alternating leader jitter', () => {
+  const baseline = build();
+  const jittered = build(syntheticJitterTelemetry());
+  const baselineRow = baseline.checkpoints.find((row) => row.checkpointKey === '200m' && row.raceEntryId === 'entry_2');
+  const jitteredRow = jittered.checkpoints.find((row) => row.checkpointKey === '200m' && row.raceEntryId === 'entry_2');
+  assert.ok(Number.isFinite(baselineRow?.relativeLateralOffsetM));
+  assert.ok(Number.isFinite(jitteredRow?.relativeLateralOffsetM));
+  assert.ok(Math.abs(jitteredRow.relativeLateralOffsetM - baselineRow.relativeLateralOffsetM) < 2);
+  assert.ok(jitteredRow.lateralConfidence >= 0.9);
+});
+
 test('C3 excludes a locally missing target only from affected frame/checkpoint coverage', () => {
   const payload = syntheticOvalTelemetry({ missing: { 3: [23, 24, 25, 26, 27] } });
   const result = build(payload);
@@ -133,7 +159,9 @@ test('C3 excludes a locally missing target only from affected frame/checkpoint c
 test('C3 emits a stable lead-change candidate and finish checkpoint consistent with telemetry order', () => {
   const result = build();
   const leadChanges = result.episodes.filter((episode) => episode.episodeType === 'lead_change_candidate');
-  assert.ok(leadChanges.some((episode) => episode.raceEntryId === 'entry_2'));
+  const entry2LeadChange = leadChanges.find((episode) => episode.raceEntryId === 'entry_2');
+  assert.ok(entry2LeadChange);
+  assert.equal(entry2LeadChange.details.unresolved_checkpoints_between, 1);
 
   const finish = result.checkpoints.filter((row) => row.checkpointKey === 'finish' && row.positionRank != null);
   assert.ok(finish.length >= 2, 'finish checkpoint should retain observed finish ordering');
