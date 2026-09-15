@@ -1,6 +1,7 @@
 import worker from './worker-v066.js';
 import { requireAdmin } from './auth.js';
 import { createAnalysisPackV3Response } from './analysis-pack-v3.js';
+import { assertAnalysisPackReplaySafe } from './analysis-pack-v3-asof-guard.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -21,9 +22,12 @@ export default {
       const denied = requireAdmin(request, env);
       if (denied) return denied;
       try {
-        return await createAnalysisPackV3Response(env, decodeURIComponent(match[1]), {
+        const roundId = decodeURIComponent(match[1]);
+        const asOf = url.searchParams.get('as_of');
+        await assertAnalysisPackReplaySafe(env, roundId, asOf);
+        return await createAnalysisPackV3Response(env, roundId, {
           file: url.searchParams.get('file'),
-          asOf: url.searchParams.get('as_of')
+          asOf
         });
       } catch (error) {
         console.error(error);
