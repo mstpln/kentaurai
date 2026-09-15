@@ -118,7 +118,7 @@ jobs:
           test "$status" = '200' || { echo "Expected /app/login 200, got $status"; exit 1; }
           test -s /tmp/login.html
 
-      - name: Verify combined analysis routes are deployed and private
+      - name: Verify private analysis routes are deployed and protected
         shell: bash
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
@@ -127,9 +127,10 @@ jobs:
           for path in \
             '/app/api/settings/analysis-prompt?provider=anthropic' \
             '/app/api/settings/analysis-method-prompt?step=1' \
-            '/app/api/settings/export?provider=anthropic&stage=pre_market'; do
+            '/app/api/settings/export?provider=anthropic&stage=pre_market' \
+            '/v1/analysis-pack/private-probe'; do
             status="$(curl --silent --show-error --output /tmp/private-response.json --write-out '%{http_code}' "$WORKER_URL$path")"
-            test "$status" = '401' || { echo "Expected $path to return 401 without session, got $status"; cat /tmp/private-response.json; exit 1; }
+            test "$status" = '401' || { echo "Expected $path to return 401 without authorization, got $status"; cat /tmp/private-response.json; exit 1; }
             grep -q 'unauthorized' /tmp/private-response.json
           done
 
@@ -140,4 +141,4 @@ jobs:
         run: |
           echo 'KentaurAI v0.6.0 production release completed.'
           echo "Worker: $WORKER_URL"
-          echo 'Required production schema, exact app version, health, login and private combined-analysis route checks passed.'
+          echo 'Required production schema, exact app version, health, login and private analysis route checks passed.'
