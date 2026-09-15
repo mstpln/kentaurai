@@ -8,14 +8,14 @@ const migrations = [
   '0005_historical_backfill.sql','0006_xlabs_backfill.sql','0007_official_first_prize.sql','0008_track_contact_metadata.sql',
   '0009_track_contact_provenance.sql','0010_horse_start_points.sql','0011_driver_statistics_indexes.sql','0012_trainer_statistics_indexes.sql',
   '0013_combined_analysis_systems.sql','0014_official_participant_identity.sql','0015_official_snapshot_promotion.sql','0016_race_proposition_facts.sql',
-  '0017_xlabs_intervals_v2.sql'
+  '0017_xlabs_intervals_v2.sql','0018_xlabs_position_reconstruction_v1.sql'
 ];
 const sql = migrations.map((name) => readFileSync(new URL(`../migrations/${name}`, import.meta.url), 'utf8')).join('\n');
 
 test('core migrations apply cleanly and create required tables', () => {
   const db = new DatabaseSync(':memory:');db.exec(sql);
   const names = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name));
-  for (const required of ['horses','drivers','trainers','tracks','races','race_entries','race_results','xlabs_data','xlabs_intervals','game_rounds','betting_snapshots','editorial_items','analysis_features','ai_race_analyses','ai_horse_predictions','systems','post_race_reviews','import_runs','learning_hypotheses','learning_observations','model_change_log','reference_round_exports','reference_observations','normalized_observations','historical_backfill_jobs','xlabs_backfill_jobs','race_stl_classifications','race_type_classifications','horse_start_points','horse_start_point_source_sync','horse_profile_snapshots','horse_stat_snapshots','horse_record_snapshots','person_stat_snapshots','official_snapshot_source_sync','race_proposition_facts']) assert.ok(names.has(required),`missing ${required}`);
+  for (const required of ['horses','drivers','trainers','tracks','races','race_entries','race_results','xlabs_data','xlabs_intervals','race_position_checkpoints','race_trajectory_episodes','race_trajectory_summaries','xlabs_position_reconstruction_jobs','game_rounds','betting_snapshots','editorial_items','analysis_features','ai_race_analyses','ai_horse_predictions','systems','post_race_reviews','import_runs','learning_hypotheses','learning_observations','model_change_log','reference_round_exports','reference_observations','normalized_observations','historical_backfill_jobs','xlabs_backfill_jobs','race_stl_classifications','race_type_classifications','horse_start_points','horse_start_point_source_sync','horse_profile_snapshots','horse_stat_snapshots','horse_record_snapshots','person_stat_snapshots','official_snapshot_source_sync','race_proposition_facts']) assert.ok(names.has(required),`missing ${required}`);
   const entryColumns = new Map(db.prepare('PRAGMA table_info(race_entries)').all().map(r=>[r.name,r]));
   assert.equal(entryColumns.get('horse_id').notnull,0);
   for (const required of ['source_start_id','declared_horse_name','declared_driver_name','declared_trainer_name']) assert.ok(entryColumns.has(required),`missing race_entries.${required}`);
@@ -33,6 +33,21 @@ test('C1 X-Labs interval schema stores compact numeric local evidence without al
   assert.ok(indexes.has('idx_xlabs_intervals_source'));
   const legacyColumns=new Set(db.prepare('PRAGMA table_info(xlabs_data)').all().map(r=>r.name));
   for(const required of ['first_200_time','last_200_time','actual_distance_m','extra_distance_m','segments_json','quality_status','source_record_id']) assert.ok(legacyColumns.has(required),`trusted v1 xlabs_data.${required} missing`);
+});
+
+test('C3 trajectory schema keeps compact reconstruction separate from named legacy trip labels', () => {
+  const db=new DatabaseSync(':memory:');db.exec(sql);
+  const checkpointColumns=new Map(db.prepare('PRAGMA table_info(race_position_checkpoints)').all().map(r=>[r.name,r]));
+  for(const required of ['race_entry_id','source_record_id','checkpoint_key','frame_index','observed_at','leader_progress_m','distance_to_finish_m','position_rank','meters_behind_leader','relative_lateral_offset_m','field_coverage','local_target_coverage','longitudinal_confidence','lateral_confidence','reconstruction_version']) assert.ok(checkpointColumns.has(required),`missing race_position_checkpoints.${required}`);
+  assert.equal(checkpointColumns.get('meters_behind_leader').notnull,0,'ambiguous longitudinal gaps must be allowed to abstain');
+  const episodeColumns=new Set(db.prepare('PRAGMA table_info(race_trajectory_episodes)').all().map(r=>r.name));
+  for(const required of ['episode_type','start_checkpoint_key','end_checkpoint_key','duration_ms','progress_span_m','confidence','details_json','reconstruction_version']) assert.ok(episodeColumns.has(required),`missing race_trajectory_episodes.${required}`);
+  const summaryColumns=new Set(db.prepare('PRAGMA table_info(race_trajectory_summaries)').all().map(r=>r.name));
+  for(const required of ['frame_coverage','checkpoint_count','ranked_checkpoint_count','lateral_checkpoint_count','episode_count','longitudinal_confidence','lateral_confidence','reconstruction_status','reconstruction_version']) assert.ok(summaryColumns.has(required),`missing race_trajectory_summaries.${required}`);
+  const jobColumns=new Set(db.prepare('PRAGMA table_info(xlabs_position_reconstruction_jobs)').all().map(r=>r.name));
+  for(const required of ['start_date','end_date','cursor_external_id','cursor_fetched_at','cursor_source_record_id','processed_sources','inserted_rows','skipped_rows','consecutive_errors','reconstruction_version']) assert.ok(jobColumns.has(required),`missing xlabs_position_reconstruction_jobs.${required}`);
+  const legacyColumns=new Set(db.prepare('PRAGMA table_info(race_positions)').all().map(r=>r.name));
+  for(const named of ['leader','pocket','death_seat','second_over','third_over','wide_trip','uncovered_move']) assert.ok(legacyColumns.has(named),`legacy race_positions.${named} missing`);
 });
 
 test('reference migration adds captured factual fields without changing raw/analysis separation', () => {const db=new DatabaseSync(':memory:');db.exec(sql);const horseColumns=new Set(db.prepare('PRAGMA table_info(horses)').all().map(r=>r.name));const raceColumns=new Set(db.prepare('PRAGMA table_info(races)').all().map(r=>r.name));const analysisColumns=new Set(db.prepare('PRAGMA table_info(ai_race_analyses)').all().map(r=>r.name));const editorialColumns=new Set(db.prepare('PRAGMA table_info(editorial_items)').all().map(r=>r.name));assert.ok(horseColumns.has('career_earnings_sek'));assert.ok(horseColumns.has('record_text'));assert.ok(raceColumns.has('starters_declared'));assert.ok(analysisColumns.has('analysis_origin'));assert.ok(analysisColumns.has('method_note'));assert.ok(editorialColumns.has('race_id'));assert.ok(editorialColumns.has('game_round_id'));});
