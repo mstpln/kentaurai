@@ -86,9 +86,16 @@ test('Step 1 lock validates exact eight-leg active-entry identity and canonicali
   assert.equal(normalized.legs[0].predictions.some((item) => item.race_entry_id.includes('scratched')), false);
 });
 
+test('Step 1 lock uses one strict snake_case wire contract', async () => {
+  const camelCase = syntheticLock();
+  camelCase.legs[0].predictions[0].raceEntryId = camelCase.legs[0].predictions[0].race_entry_id;
+  delete camelCase.legs[0].predictions[0].race_entry_id;
+  await assert.rejects(() => validateStep1LockV1AgainstPack(camelCase, syntheticPack()), /strict snake_case/);
+});
+
 test('Step 1 lock rejects market contamination in structured fields and narrative text', async () => {
   const fieldLeak = syntheticLock();
-  fieldLeak.legs[0].predictions[0].marketPercent = 30;
+  fieldLeak.legs[0].predictions[0].market_percent = 30;
   await assert.rejects(() => validateStep1LockV1AgainstPack(fieldLeak, syntheticPack()), /denied current-market fields/);
 
   const textLeak = syntheticLock();
@@ -135,6 +142,11 @@ test('exact stored Step 1 retry is idempotent without reopening the parent pack'
   const changed = structuredClone(exactRetry);
   changed.legs[0].predictions[0].reasoning = 'Changed sealed interpretation.';
   assert.equal(isExactStoredStep1Retry(row, changed), false);
+
+  const aliasRetry = structuredClone(exactRetry);
+  aliasRetry.lockId = aliasRetry.lock_id;
+  delete aliasRetry.lock_id;
+  assert.equal(isExactStoredStep1Retry(row, aliasRetry), false);
 });
 
 test('Step 1 prompt v3 is provider-neutral at core and forbids outside/current-market analysis', () => {
