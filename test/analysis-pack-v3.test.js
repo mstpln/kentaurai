@@ -62,6 +62,7 @@ test('D1 pack produces exact eight-leg deterministic manifest, files, hashes and
   assert.equal(first.manifest.contains_current_market, false);
   assert.equal(first.manifest.round_id, 'V85_SYNTHETIC_D1');
   assert.equal(first.manifest.expected_files.length, 9);
+  assert.deepEqual(first.manifest.source_freshness, { official_current: AS_OF });
   assert.deepEqual(first.manifest.expected_files, second.manifest.expected_files);
   assert.equal(first.factsFingerprint, second.factsFingerprint);
   assert.equal(first.packId, second.packId);
@@ -86,10 +87,17 @@ test('D1 pack rejects missing/duplicate leg contract and denied current-market f
   duplicate[7].leg_number = 7;
   await assert.rejects(() => buildAnalysisPackV3Files(packInput(duplicate)), /numbered 1 through 8/);
 
-  const leak = { nested: { bettingPercent: 12.4 }, deeper: [{ winnerOdds: 4.2 }], turnoverSek: 1000 };
+  const leak = {
+    nested: { bettingPercent: 12.4, betDistribution: { favorite: 42 }, streckPercent: 33 },
+    deeper: [{ winnerOdds: 4.2 }, { recommended: true }],
+    turnoverSek: 1000
+  };
   const paths = findAnalysisPackMarketLeaks(leak);
   assert.ok(paths.some((path) => path.endsWith('.bettingPercent')));
+  assert.ok(paths.some((path) => path.endsWith('.betDistribution')));
+  assert.ok(paths.some((path) => path.endsWith('.streckPercent')));
   assert.ok(paths.some((path) => path.endsWith('.winnerOdds')));
+  assert.ok(paths.some((path) => path.endsWith('.recommended')));
   assert.ok(paths.some((path) => path.endsWith('.turnoverSek')));
   assert.throws(() => assertAnalysisPackMarketBlind(leak), /denied current-market fields/);
 
@@ -136,7 +144,7 @@ function seedAsOfRound(db) {
     db.prepare(`INSERT INTO races (id,track_id,race_date,race_number,scheduled_start_at,distance_m,start_method,status) VALUES (?,?, '2099-01-02', ?, ?,2140,'auto','upcoming')`).run(race, track, leg, `2099-01-02T12:${String(9 + leg).padStart(2, '0')}:00Z`);
     db.prepare(`INSERT INTO game_legs (game_round_id,leg_number,race_id) VALUES ('round_d1',?,?)`).run(leg, race);
     db.prepare(`INSERT INTO race_entries (id,race_id,horse_id,driver_id,trainer_id,start_number,actual_lane,start_tier,handicap_m,actual_start_distance_m,scratched) VALUES (?,?,?,?,?,?,?,1,0,2140,0)`).run(entry, race, horse, driver, trainer, leg, leg);
-    const raceFields = JSON.stringify({ raceNumber: leg, distanceM: 2140, startMethod: 'auto', scheduledStartAt: `2099-01-02T12:${String(9 + leg).padStart(2, '0')}:00Z`, trackExternalId: String(100 + leg), status: 'upcoming' });
+    const raceFields = JSON.stringify({ date: '2099-01-02', raceNumber: leg, distanceM: 2140, startMethod: 'auto', scheduledStartAt: `2099-01-02T12:${String(9 + leg).padStart(2, '0')}:00Z`, trackExternalId: String(100 + leg), status: 'upcoming' });
     const entryFields = JSON.stringify({ startNumber: leg, postPosition: leg, startTier: 1, handicapM: 0, actualStartDistanceM: 2140, scratched: false, scratchSemanticsVerified: true, horseExternalId: String(200 + leg), driverExternalId: String(300 + leg), trainerExternalId: String(400 + leg) });
     db.prepare(`INSERT INTO normalized_observations (id,entity_type,entity_id,source_record_id,observed_at,fields_json,quality_status) VALUES (?, 'race', ?, 'official_before','2099-01-02T11:00:00Z',?,'normalized_verified_subset')`).run(`obs_race_${leg}`, race, raceFields);
     db.prepare(`INSERT INTO normalized_observations (id,entity_type,entity_id,source_record_id,observed_at,fields_json,quality_status) VALUES (?, 'race_entry', ?, 'official_before','2099-01-02T11:00:00Z',?,'normalized_verified_subset')`).run(`obs_entry_${leg}`, entry, entryFields);
