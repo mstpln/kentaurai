@@ -30,9 +30,10 @@ test('D2 migration creates immutable Step 1 lock persistence on a fresh database
 
 test('D2 migration upgrades a legacy database without rewriting readable two-spike systems', () => {
   const names = migrationNames();
-  assert.equal(names.at(-1), '0019_analysis_step1_locks.sql');
+  const d2Index = names.indexOf('0019_analysis_step1_locks.sql');
+  assert.ok(d2Index >= 0, 'D2 migration must remain present');
   const db = new DatabaseSync(':memory:');
-  apply(db, names.slice(0, -1));
+  apply(db, names.slice(0, d2Index));
   db.prepare("INSERT INTO game_rounds (id, game_type, round_date) VALUES ('legacy-round', 'V85', '2026-09-06')").run();
   db.prepare(`INSERT INTO systems (id, game_round_id, system_type, budget_sek, row_count, spike_count, created_at, notes)
     VALUES ('legacy-system', 'legacy-round', 'main', 200, 400, 2, '2026-09-06T00:00:00Z', 'synthetic legacy reason')`).run();
