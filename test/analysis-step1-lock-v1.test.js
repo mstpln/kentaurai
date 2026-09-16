@@ -4,6 +4,7 @@ import { webcrypto } from 'node:crypto';
 import {
   ANALYSIS_STEP1_LOCK_CONTRACT,
   assertStep1MarketBlind,
+  importStep1LockV1,
   isExactStoredStep1Retry,
   step1LockHash,
   validateStep1LockV1AgainstPack
@@ -161,6 +162,41 @@ test('exact stored Step 1 retry is idempotent without reopening the parent pack'
   aliasRetry.lockId = aliasRetry.lock_id;
   delete aliasRetry.lock_id;
   assert.equal(isExactStoredStep1Retry(row, aliasRetry), false);
+});
+
+test('stored Step 1 lock reuses an exact retry and rejects changed content under the same lock id', async () => {
+  const normalized = await validateStep1LockV1AgainstPack(syntheticLock(), syntheticPack());
+  const row = {
+    id: normalized.lock_id,
+    game_round_id: normalized.round_id,
+    contract_version: normalized.contract_version,
+    pack_id: normalized.pack.pack_id,
+    pack_as_of: normalized.pack.as_of,
+    facts_fingerprint: normalized.pack.facts_fingerprint,
+    provider: normalized.provider,
+    model: normalized.model,
+    prompt_version: normalized.prompt_version,
+    lock_json: stableFeatureJson(normalized),
+    lock_hash: await step1LockHash(normalized),
+    created_at: '2026-09-15T08:05:00.000Z'
+  };
+  const env = {
+    DB: {
+      prepare() {
+        return { bind() { return { first: async () => row }; } };
+      }
+    }
+  };
+
+  const exactRetry = structuredClone(normalized);
+  exactRetry.pack.as_of = '2026-09-15T08:00:00Z';
+  const reused = await importStep1LockV1(env, exactRetry);
+  assert.equal(reused.reused, true);
+  assert.equal(reused.lock_hash, row.lock_hash);
+
+  const changed = structuredClone(exactRetry);
+  changed.legs[0].predictions[0].reasoning = 'Changed sealed interpretation.';
+  await assert.rejects(() => importStep1LockV1(env, changed), /already sealed with different content/);
 });
 
 test('Step 1 prompt v3 is provider-neutral at core and forbids outside/current-market analysis', () => {
