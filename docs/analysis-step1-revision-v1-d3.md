@@ -29,7 +29,7 @@ The AI output contains only the revised affected legs. KentaurAI constructs the 
 
 Scratch, driver and equipment changes are handled as ordinary factual changes when they appear in the D1 pack. Missing optional evidence stays neutral. Current streck, odds, market ownership, turnover, jackpot, value, external tips/rankings, picks, spikes and systems remain prohibited from both revision input and output.
 
-The parent lock is never mutated. The child lock and its lineage row are persisted atomically. Reusing a revision ID with changed content is rejected.
+The parent lock is never mutated. The child lock and its lineage row are persisted atomically. Reusing a revision ID with changed content is rejected. The lineage schema also permits at most one direct child for each parent lock, so concurrent attempts cannot create two competing revision branches from the same sealed state.
 
 ## Step 2 gate
 
