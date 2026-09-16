@@ -93,6 +93,16 @@ test('Step 1 lock uses one strict snake_case wire contract', async () => {
   await assert.rejects(() => validateStep1LockV1AgainstPack(camelCase, syntheticPack()), /strict snake_case/);
 });
 
+test('Step 1 lock rejects unsupported top-level and nested fields fail-closed', async () => {
+  const topLevel = syntheticLock();
+  topLevel.unexpected_field = true;
+  await assert.rejects(() => validateStep1LockV1AgainstPack(topLevel, syntheticPack()), /unsupported fields/);
+
+  const nested = syntheticLock();
+  nested.legs[0].predictions[0].unexpected_field = 'ignored only if validation is unsafe';
+  await assert.rejects(() => validateStep1LockV1AgainstPack(nested, syntheticPack()), /unsupported fields/);
+});
+
 test('Step 1 lock rejects market contamination in structured fields and narrative text', async () => {
   const fieldLeak = syntheticLock();
   fieldLeak.legs[0].predictions[0].market_percent = 30;
@@ -119,7 +129,11 @@ test('Step 1 lock rejects stale/wrong parent identity, incomplete coverage and i
 
   const inverted = syntheticLock();
   inverted.legs[5].predictions[0].blind_probability = 0.4;
+  inverted.legs[5].predictions[0].uncertainty_low = 0.3;
+  inverted.legs[5].predictions[0].uncertainty_high = 0.5;
   inverted.legs[5].predictions[1].blind_probability = 0.6;
+  inverted.legs[5].predictions[1].uncertainty_low = 0.5;
+  inverted.legs[5].predictions[1].uncertainty_high = 0.7;
   await assert.rejects(() => validateStep1LockV1AgainstPack(inverted, syntheticPack()), /raw_rank conflicts/);
 });
 
