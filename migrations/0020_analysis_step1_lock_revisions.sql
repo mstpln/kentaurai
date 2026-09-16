@@ -2,7 +2,7 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS analysis_step1_lock_revisions (
   child_lock_id TEXT PRIMARY KEY REFERENCES analysis_step1_locks(id),
-  parent_lock_id TEXT NOT NULL REFERENCES analysis_step1_locks(id),
+  parent_lock_id TEXT NOT NULL UNIQUE REFERENCES analysis_step1_locks(id),
   game_round_id TEXT NOT NULL REFERENCES game_rounds(id),
   contract_version TEXT NOT NULL CHECK(contract_version = 'kentaurai-step1-revision-v1'),
   parent_facts_fingerprint TEXT NOT NULL,
