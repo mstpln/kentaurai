@@ -1,6 +1,7 @@
 import worker from './worker-v068.js';
 import { requireAdmin } from './auth.js';
 import { appAuthConfigured, hasValidAppSession } from './app-auth.js';
+import { getStep1LockV1 } from './analysis-step1-lock-v1.js';
 import {
   buildStep1RevisionPackV1,
   captureStep1RevisionBasisForLock,
@@ -42,6 +43,20 @@ async function readJsonBody(request) {
 function assertUrlRound(payload, roundId) {
   const payloadRound = String(payload?.round_id ?? '').trim();
   if (!payloadRound || payloadRound !== roundId) throw new Error('URL round_id must match the Step 1 revision round_id');
+}
+
+async function rejectSecondRootLock(request, env, roundId) {
+  const existing = await getStep1LockV1(env, { roundId });
+  if (!existing) return null;
+  const payload = await request.clone().json().catch(() => null);
+  const requestedId = String(payload?.lock_id || '').trim();
+  if (requestedId && requestedId === existing.lock_id) return null;
+  return json({
+    error: 'revision_required',
+    message: 'A sealed Step 1 lock already exists for this round. Use the D3 revision flow so the immutable parent lineage is preserved.',
+    current_lock_id: existing.lock_id,
+    current_lock_hash: existing.lock_hash
+  }, 409);
 }
 
 async function captureBasisAfterInitialLock(response, env) {
@@ -147,6 +162,13 @@ export default {
     const adminInitialLockPost = request.method === 'POST' && /^\/v1\/analysis-step1-lock\/[^/]+$/.test(path);
     const appInitialLockPost = request.method === 'POST' && path === '/app/api/settings/analysis-step1-lock';
     if (adminInitialLockPost || appInitialLockPost) {
+      const roundId = adminInitialLockPost
+        ? decodeURIComponent(path.match(/^\/v1\/analysis-step1-lock\/([^/]+)$/)[1])
+        : String(url.searchParams.get('round_id') || '').trim();
+      if (roundId) {
+        const blocked = await rejectSecondRootLock(request, env, roundId);
+        if (blocked) return blocked;
+      }
       return captureBasisAfterInitialLock(await worker.fetch(request, env, ctx), env);
     }
 
