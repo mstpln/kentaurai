@@ -12,6 +12,8 @@ Step 1 output uses `kentaurai-step1-lock-v1` and is linked to one exact `kentaur
 - `pack.facts_fingerprint`
 - canonical race and active race-entry IDs
 
+The wire contract is strict and deterministic: all object keys use `snake_case`, aliases are not accepted, and unsupported top-level or nested fields are rejected fail-closed rather than silently ignored.
+
 The server regenerates the referenced D1 pack at the submitted `as_of`, applies the D1 replay/as-of guard, and validates the lock against that server-generated parent. Client-supplied round, race, entry or fingerprint identity is not trusted by itself.
 
 Each of the eight legs must cover every active entry exactly once. `blind_probability` must be finite, non-negative and sum to 1 per leg. Rank is unique/contiguous and must follow probability order. ABCD remains a strength grouping and must form contiguous bands along the ranking.
