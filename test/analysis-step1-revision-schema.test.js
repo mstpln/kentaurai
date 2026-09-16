@@ -78,5 +78,8 @@ test('D3 migration preserves immutable single-child lineage under concurrent rev
   }), /UNIQUE constraint failed/);
 
   const lineage = db.prepare('SELECT child_lock_id,parent_lock_id FROM analysis_step1_lock_revisions').all();
-  assert.deepEqual(lineage, [{ child_lock_id: 'child-a', parent_lock_id: 'parent-lock' }]);
+  assert.deepEqual(
+    lineage.map((row) => ({ child_lock_id: row.child_lock_id, parent_lock_id: row.parent_lock_id })),
+    [{ child_lock_id: 'child-a', parent_lock_id: 'parent-lock' }]
+  );
 });
