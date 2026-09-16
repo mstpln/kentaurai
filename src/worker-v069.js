@@ -1,6 +1,7 @@
 import worker from './worker-v068.js';
 import { requireAdmin } from './auth.js';
 import { appAuthConfigured, hasValidAppSession } from './app-auth.js';
+import { getStep1LockV1 } from './analysis-step1-lock-v1.js';
 import {
   ANALYSIS_STEP1_REVISION_VERSION,
   buildStep1RevisionInputV1,
@@ -48,11 +49,51 @@ function assertUrlRound(payload, roundId) {
   if (!payloadRound || payloadRound !== roundId) throw new Error('URL round_id must match the Step 1 revision round_id');
 }
 
+async function rejectParallelStep1Root(request, env, roundId) {
+  const existing = await getStep1LockV1(env, { roundId });
+  if (!existing) return null;
+
+  let payload;
+  try { payload = await request.clone().json(); } catch { return null; }
+  const requestedId = String(payload?.lock_id ?? '').trim();
+  const payloadRound = String(payload?.round_id ?? '').trim();
+  if (!requestedId || !payloadRound || payloadRound !== roundId) return null;
+  if (requestedId === existing.lock_id) return null;
+
+  return json({
+    error: 'revision_required',
+    message: 'A sealed Step 1 lock already exists for this round. Use the D3 revision flow so immutable lock lineage is preserved.',
+    current_lock_id: existing.lock_id,
+    current_lock_hash: existing.lock_hash
+  }, 409);
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
+    const adminRootMatch = path.match(/^\/v1\/analysis-step1-lock\/([^/]+)$/);
     const adminMatch = path.match(/^\/v1\/analysis-step1-revision\/([^/]+)$/);
+
+    if (request.method === 'POST' && adminRootMatch) {
+      const denied = requireAdmin(request, env);
+      if (denied) return denied;
+      const roundId = decodeURIComponent(adminRootMatch[1]);
+      const blocked = await rejectParallelStep1Root(request, env, roundId);
+      if (blocked) return blocked;
+      return worker.fetch(request, env, ctx);
+    }
+
+    if (request.method === 'POST' && path === '/app/api/settings/analysis-step1-lock') {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      const roundId = String(url.searchParams.get('round_id') || '').trim();
+      if (roundId) {
+        const blocked = await rejectParallelStep1Root(request, env, roundId);
+        if (blocked) return blocked;
+      }
+      return worker.fetch(request, env, ctx);
+    }
 
     if (adminMatch && (request.method === 'GET' || request.method === 'POST')) {
       const denied = requireAdmin(request, env);
