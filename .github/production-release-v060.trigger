@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=6599cd654f885d51ba59f81f206fca658bddc5d9
-release_nonce=2026-09-15-analysis-pack-v3-d1
+source_main=910e3b12fb556af74886ebf3a10af7931912c156
+release_nonce=2026-09-16-step1-lock-v1-d2
