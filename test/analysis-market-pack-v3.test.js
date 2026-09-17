@@ -5,11 +5,14 @@ import { createTestEnv } from './helpers/d1.js';
 import {
   ANALYSIS_MARKET_PACK_V3_CONTRACT,
   ANALYSIS_MARKET_SOURCE_QUALITY,
+  assertMarketCutoffAfterStep1V3,
   assertMarketStep1BindingV3,
   buildMarketPackV3Files,
   loadMarketDeadlineV3,
   loadVerifiedMarketRowsV3,
-  marketMaturityV3
+  marketMaturityV3,
+  normalizeMarketPackOptionsV3,
+  sanitizeExternalRankingSignalV3
 } from '../src/analysis-market-pack-v3.js';
 
 globalThis.crypto ??= webcrypto;
@@ -46,6 +49,7 @@ function syntheticLock() {
     pack_as_of: '2099-05-01T13:40:00.000Z',
     facts_fingerprint: 'sha256:facts-d4',
     lock_hash: 'sha256:lock-d4',
+    created_at: '2099-05-01T13:41:00.000Z',
     sealed: true
   };
 }
@@ -115,6 +119,27 @@ test('D4 deadline prefers bet stop, clamps after-stop requests, and documents sc
   await assert.rejects(() => loadMarketDeadlineV3(env, 'round-d4', '2099-05-01T13:00:00Z'), /verified betting stop or round start/);
 });
 
+test('D4 refuses a market cutoff before the newest sealed Step 1 lock', () => {
+  const lock = syntheticLock();
+  assert.equal(assertMarketCutoffAfterStep1V3(lock, lock.created_at), lock.created_at);
+  assert.equal(assertMarketCutoffAfterStep1V3(lock, '2099-05-01T13:41:00.001Z'), '2099-05-01T13:41:00.001Z');
+  assert.throws(
+    () => assertMarketCutoffAfterStep1V3(lock, '2099-05-01T13:40:59.999Z'),
+    /market cutoff cannot precede/
+  );
+});
+
+test('D4 validates explicit Step 1 binding options before any database access', () => {
+  assert.throws(() => normalizeMarketPackOptionsV3({}), /lock_id is required/);
+  assert.throws(() => normalizeMarketPackOptionsV3({ lockId: 'lock-d4' }), /lock_hash is required/);
+  const normalized = normalizeMarketPackOptionsV3({
+    lockId: 'lock-d4', lockHash: 'sha256:lock-d4', asOf: '2099-05-01T13:54:12.345Z'
+  });
+  assert.equal(normalized.lockId, 'lock-d4');
+  assert.equal(normalized.lockHash, 'sha256:lock-d4');
+  assert.equal(normalized.asOf, '2099-05-01T13:54:12.345Z');
+});
+
 test('D4 verified market loader excludes post-cutoff, unnormalized and cross-round snapshots', async () => {
   const { db, env } = createTestEnv();
   db.prepare("INSERT INTO tracks (id,canonical_name) VALUES ('track-d4','Synthetic D4')").run();
@@ -166,7 +191,28 @@ test('D4 maturity is deterministic and never invents trend semantics', () => {
   assert.equal(maturity.trend_label, null);
 });
 
-test('D4 pack is market-only, deterministic by market state, odds-normalized only with complete coverage, and reads external rankings last', async () => {
+test('D4 external ranking sanitizer never exports source identity, excerpts or arbitrary free text', () => {
+  const rank = sanitizeExternalRankingSignalV3({
+    leg_number: 1, race_entry_id: 'entry-1-a', signal_type: 'external_ranking', value: '2',
+    polarity: 'positive', strength: 0.8, fact_or_opinion: 'opinion', confidence: 0.7,
+    published_at: '2099-05-01T13:53:00Z', source_name: 'private-provider', source_url: 'https://private.invalid',
+    evidence_excerpt: 'private excerpt', summary_text: 'private summary'
+  });
+  assert.equal(rank.rank, 2);
+  assert.equal(Object.hasOwn(rank, 'value'), false);
+  assert.equal(Object.hasOwn(rank, 'source_name'), false);
+  assert.equal(Object.hasOwn(rank, 'source_url'), false);
+  assert.equal(Object.hasOwn(rank, 'evidence_excerpt'), false);
+
+  const pick = sanitizeExternalRankingSignalV3({
+    leg_number: 1, race_entry_id: 'entry-1-a', signal_type: 'pick', value: 'DO NOT EXPORT THIS TEXT',
+    fact_or_opinion: 'opinion', published_at: '2099-05-01T13:53:00Z'
+  });
+  assert.equal(pick.rank, null);
+  assert.doesNotMatch(JSON.stringify(pick), /DO NOT EXPORT THIS TEXT/);
+});
+
+test('D4 pack is market-only, deterministic by market state and input order, odds-normalized only with complete coverage, and reads external rankings last', async () => {
   const market = syntheticMarketRows();
   market.betting.push({
     race_entry_id: 'entry-1-a', leg_number: 1, market_ownership_percent: 99, market_rank: 1,
@@ -185,12 +231,24 @@ test('D4 pack is market-only, deterministic by market state, odds-normalized onl
   };
   const first = await buildMarketPackV3Files({ ...args, generatedAt: '2099-05-01T13:55:10Z' });
   const second = await buildMarketPackV3Files({ ...args, generatedAt: '2099-05-01T13:59:10Z' });
+  const shuffled = await buildMarketPackV3Files({
+    ...args,
+    betting: [...args.betting].reverse(),
+    odds: [...args.odds].reverse(),
+    externalRankings: [...args.externalRankings].reverse(),
+    generatedAt: '2099-05-01T13:59:10Z'
+  });
 
   assert.equal(first.manifest.contract_version, ANALYSIS_MARKET_PACK_V3_CONTRACT);
   assert.equal(first.marketFingerprint, second.marketFingerprint);
+  assert.equal(first.marketFingerprint, shuffled.marketFingerprint);
   assert.notEqual(first.manifest.generated_at, second.manifest.generated_at);
   assert.equal(first.manifest.read_order.at(-1), '99_external_rankings.json');
   assert.equal(first.manifest.market_only, true);
+  assert.deepEqual(
+    first.files.map((file) => [file.name, file.content]),
+    shuffled.files.map((file) => [file.name, file.content])
+  );
 
   const leg1 = first.files.find((file) => file.name === '01_leg_1_market.json').payload;
   assert.equal(leg1.entries[0].market_ownership_percent, 60);
@@ -201,6 +259,7 @@ test('D4 pack is market-only, deterministic by market state, odds-normalized onl
 
   const external = first.files.find((file) => file.name === '99_external_rankings.json').content;
   assert.doesNotMatch(external, /must-not-leak|private\.invalid|source_name|source_url|evidence_excerpt/);
+  assert.match(external, /"rank":2/);
 
   const incomplete = structuredClone(market);
   incomplete.odds = incomplete.odds.filter((row) => !(row.leg_number === 1 && row.race_entry_id === 'entry-1-b' && row.market_type === 'win'));
