@@ -9,8 +9,13 @@ export const ANALYSIS_MARKET_SOURCE_QUALITY = 'normalized_verified_subset';
 
 const CONTENT_TYPE = 'application/json; charset=utf-8';
 const EXTERNAL_RANKING_TYPES = Object.freeze([
-  'external_rank', 'external_ranking', 'tip', 'tip_rank', 'tip_ranking', 'pick', 'ranking'
+  'external_rank', 'external_ranking', 'tip', 'tip_rank', 'tip_ranking', 'pick', 'ranking', 'spike'
 ]);
+const EXTERNAL_RANK_TYPES_WITH_NUMERIC_POSITION = new Set([
+  'external_rank', 'external_ranking', 'tip_rank', 'tip_ranking', 'ranking'
+]);
+const EXTERNAL_POLARITIES = new Set(['positive', 'negative', 'neutral', 'mixed', 'unknown']);
+const EXTERNAL_FACT_OR_OPINION = new Set(['fact', 'opinion', 'mixed', 'unknown']);
 
 function requiredText(value, field, max = 240) {
   const text = String(value ?? '').trim();
@@ -20,13 +25,6 @@ function requiredText(value, field, max = 240) {
 
 function validIso(value) {
   return typeof value === 'string' && value.trim() && Number.isFinite(Date.parse(value));
-}
-
-function minuteIso(value, field) {
-  const text = requiredText(value, field, 80);
-  const ms = Date.parse(text);
-  if (!Number.isFinite(ms)) throw new Error(`${field} must be a valid timestamp`);
-  return new Date(Math.floor(ms / 60000) * 60000).toISOString();
 }
 
 function exactIso(value, field) {
@@ -40,6 +38,12 @@ function finiteOrNull(value) {
   if (value == null || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function integerOrNull(value) {
+  if (value == null || value === '') return null;
+  const number = Number(value);
+  return Number.isInteger(number) ? number : null;
 }
 
 function roundNumber(value, digits = 6) {
@@ -87,6 +91,126 @@ function latestIso(values) {
   return new Date(Math.max(...valid.map((value) => Date.parse(value)))).toISOString();
 }
 
+function compareStable(a, b) {
+  return stableFeatureJson(a).localeCompare(stableFeatureJson(b));
+}
+
+function compareBettingRows(a, b) {
+  return Number(a.leg_number) - Number(b.leg_number)
+    || String(a.race_entry_id).localeCompare(String(b.race_entry_id))
+    || Date.parse(a.captured_at) - Date.parse(b.captured_at)
+    || compareStable(a, b);
+}
+
+function compareOddsRows(a, b) {
+  return Number(a.leg_number) - Number(b.leg_number)
+    || String(a.race_entry_id).localeCompare(String(b.race_entry_id))
+    || String(a.market_type).localeCompare(String(b.market_type))
+    || Date.parse(a.captured_at) - Date.parse(b.captured_at)
+    || compareStable(a, b);
+}
+
+function normalizeBettingRows(rows, activeIds, cutoff) {
+  const cutoffMs = Date.parse(cutoff);
+  return (rows || [])
+    .filter((row) => activeIds.has(row?.race_entry_id)
+      && row?.source_quality === ANALYSIS_MARKET_SOURCE_QUALITY
+      && validIso(row?.captured_at)
+      && Date.parse(row.captured_at) <= cutoffMs)
+    .map((row) => ({
+      race_entry_id: requiredText(row.race_entry_id, 'race_entry_id', 200),
+      leg_number: Number(row.leg_number),
+      market_ownership_percent: finiteOrNull(row.market_ownership_percent),
+      market_rank: integerOrNull(row.market_rank),
+      captured_at: exactIso(row.captured_at, 'captured_at'),
+      source_quality: ANALYSIS_MARKET_SOURCE_QUALITY
+    }))
+    .filter((row) => Number.isInteger(row.leg_number) && row.leg_number >= 1 && row.leg_number <= 8)
+    .sort(compareBettingRows);
+}
+
+function normalizeOddsRows(rows, activeIds, cutoff) {
+  const cutoffMs = Date.parse(cutoff);
+  return (rows || [])
+    .filter((row) => activeIds.has(row?.race_entry_id)
+      && row?.source_quality === ANALYSIS_MARKET_SOURCE_QUALITY
+      && validIso(row?.captured_at)
+      && Date.parse(row.captured_at) <= cutoffMs)
+    .map((row) => ({
+      race_entry_id: requiredText(row.race_entry_id, 'race_entry_id', 200),
+      leg_number: Number(row.leg_number),
+      market_type: String(row.market_type || '').trim().toLowerCase() === 'winner' ? 'win' : String(row.market_type || '').trim().toLowerCase(),
+      odds: finiteOrNull(row.odds),
+      captured_at: exactIso(row.captured_at, 'captured_at'),
+      source_quality: ANALYSIS_MARKET_SOURCE_QUALITY
+    }))
+    .filter((row) => Number.isInteger(row.leg_number)
+      && row.leg_number >= 1 && row.leg_number <= 8
+      && ['win', 'place'].includes(row.market_type))
+    .sort(compareOddsRows);
+}
+
+function safeExternalRank(value, signalType) {
+  if (!EXTERNAL_RANK_TYPES_WITH_NUMERIC_POSITION.has(signalType)) return null;
+  const text = String(value ?? '').trim();
+  if (!/^\d{1,3}$/.test(text)) return null;
+  const rank = Number(text);
+  return rank >= 1 ? rank : null;
+}
+
+function safeExternalEnum(value, allowed) {
+  const text = String(value ?? '').trim().toLowerCase();
+  return allowed.has(text) ? text : null;
+}
+
+export function sanitizeExternalRankingSignalV3(row) {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
+  const signalType = String(row.signal_type ?? '').trim().toLowerCase();
+  if (!EXTERNAL_RANKING_TYPES.includes(signalType)) return null;
+  const legNumber = Number(row.leg_number);
+  if (!Number.isInteger(legNumber) || legNumber < 1 || legNumber > 8) return null;
+  const raceEntryId = String(row.race_entry_id ?? '').trim();
+  if (!raceEntryId || raceEntryId.length > 200 || !validIso(row.published_at)) return null;
+  return {
+    leg_number: legNumber,
+    race_entry_id: raceEntryId,
+    signal_type: signalType,
+    rank: safeExternalRank(row.rank ?? row.value, signalType),
+    polarity: safeExternalEnum(row.polarity, EXTERNAL_POLARITIES),
+    strength: finiteOrNull(row.strength),
+    fact_or_opinion: safeExternalEnum(row.fact_or_opinion, EXTERNAL_FACT_OR_OPINION),
+    confidence: finiteOrNull(row.confidence),
+    published_at: exactIso(row.published_at, 'published_at')
+  };
+}
+
+function compareExternalSignals(a, b) {
+  return a.leg_number - b.leg_number
+    || a.race_entry_id.localeCompare(b.race_entry_id)
+    || a.signal_type.localeCompare(b.signal_type)
+    || Date.parse(a.published_at) - Date.parse(b.published_at)
+    || compareStable(a, b);
+}
+
+export function normalizeMarketPackOptionsV3({ lockId, lockHash, asOf = null, file = null } = {}) {
+  return {
+    lockId: requiredText(lockId, 'lock_id', 160),
+    lockHash: requiredText(lockHash, 'lock_hash', 160),
+    asOf: asOf == null || asOf === '' ? null : exactIso(asOf, 'as_of'),
+    file: file == null || file === '' ? null : requiredText(file, 'file', 160)
+  };
+}
+
+export function assertMarketCutoffAfterStep1V3(lock, cutoff) {
+  if (!lock?.lock_id || !lock?.lock_hash || !lock?.round_id) throw new Error('sealed Step 1 lock metadata is required');
+  const marketCutoff = exactIso(cutoff, 'cutoff');
+  const sealedAt = exactIso(lock.created_at, 'lock.created_at');
+  if (Date.parse(marketCutoff) < Date.parse(sealedAt)) {
+    throw new Error('market cutoff cannot precede the newest sealed Step 1 lock');
+  }
+  return marketCutoff;
+}
+
 export async function loadMarketDeadlineV3(env, roundId, asOf = null) {
   if (!env?.DB) throw new Error('DB is not configured');
   const round = requiredText(roundId, 'round_id');
@@ -98,7 +222,7 @@ export async function loadMarketDeadlineV3(env, roundId, asOf = null) {
   `).bind(round).first();
   if (!row) throw new Error('V85/V86 round was not found');
 
-  const requestedAsOf = minuteIso(asOf ?? new Date().toISOString(), 'as_of');
+  const requestedAsOf = exactIso(asOf ?? new Date().toISOString(), 'as_of');
   let deadlineAt;
   let deadlineSource;
   let deadlineQuality;
@@ -136,7 +260,7 @@ export async function assertMarketStep1BindingV3(env, { roundId, lockId, lockHas
 export async function assertNoLateFactsBeforeMarketV3(env, { roundId, lock, cutoff } = {}) {
   const round = requiredText(roundId, 'round_id');
   if (!lock || lock.round_id !== round) throw new Error('sealed Step 1 lock metadata is required');
-  const marketCutoff = exactIso(cutoff, 'cutoff');
+  const marketCutoff = assertMarketCutoffAfterStep1V3(lock, cutoff);
   await assertAnalysisPackReplaySafe(env, round, lock.pack_as_of);
   await assertAnalysisPackReplaySafe(env, round, marketCutoff);
   const sealedPack = await createPreMarketAnalysisPackV3(env, round, { asOf: lock.pack_as_of });
@@ -221,21 +345,23 @@ export async function loadExternalRankingsV3(env, roundId, cutoff) {
       AND lower(es.signal_type) IN (${placeholders})
     ORDER BY gl.leg_number,ei.race_entry_id,julianday(ei.published_at),es.id
   `).bind(round, marketCutoff, ...EXTERNAL_RANKING_TYPES).all();
-  return (results || []).map((row) => ({
+  return (results || []).map((row) => sanitizeExternalRankingSignalV3({
     leg_number: Number(row.leg_number),
     race_entry_id: row.race_entry_id,
-    signal_type: String(row.signal_type).toLowerCase(),
-    value: row.value_text ?? null,
-    polarity: row.polarity ?? null,
-    strength: finiteOrNull(row.strength),
+    signal_type: row.signal_type,
+    value: row.value_text,
+    polarity: row.polarity,
+    strength: row.strength,
     fact_or_opinion: row.fact_or_opinion,
-    confidence: finiteOrNull(row.confidence),
+    confidence: row.confidence,
     published_at: row.published_at
-  }));
+  })).filter(Boolean).sort(compareExternalSignals);
 }
 
 export function marketMaturityV3(history, cutoff) {
-  const rows = [...(history || [])].filter((row) => validIso(row?.captured_at)).sort((a, b) => Date.parse(a.captured_at) - Date.parse(b.captured_at));
+  const rows = [...(history || [])]
+    .filter((row) => validIso(row?.captured_at))
+    .sort((a, b) => Date.parse(a.captured_at) - Date.parse(b.captured_at) || compareStable(a, b));
   const percentages = rows.map((row) => finiteOrNull(row.market_ownership_percent)).filter(Number.isFinite);
   const firstAt = rows[0]?.captured_at ?? null;
   const latestAt = rows.at(-1)?.captured_at ?? null;
@@ -357,12 +483,12 @@ export async function buildMarketPackV3Files({
   generatedAt = new Date().toISOString()
 } = {}) {
   if (!lock?.lock_id || !lock?.lock_hash || !lock?.round_id) throw new Error('sealed Step 1 lock metadata is required');
-  const cutoff = exactIso(deadline?.cutoff, 'cutoff');
+  const cutoff = assertMarketCutoffAfterStep1V3(lock, deadline?.cutoff);
   const generated = exactIso(generatedAt, 'generated_at');
   const legs = activeLegsFromPack(currentPack);
   const activeIds = new Set(legs.flatMap((leg) => leg.active_entry_ids));
-  const safeBetting = betting.filter((row) => activeIds.has(row.race_entry_id) && Date.parse(row.captured_at) <= Date.parse(cutoff));
-  const safeOdds = odds.filter((row) => activeIds.has(row.race_entry_id) && Date.parse(row.captured_at) <= Date.parse(cutoff));
+  const safeBetting = normalizeBettingRows(betting, activeIds, cutoff);
+  const safeOdds = normalizeOddsRows(odds, activeIds, cutoff);
 
   const fingerprintInput = {
     contract_version: ANALYSIS_MARKET_PACK_V3_CONTRACT,
@@ -407,8 +533,15 @@ export async function buildMarketPackV3Files({
   const files = [contentFile('00_round_market.json', roundPayload)];
   for (const payload of legPayloads) files.push(contentFile(`${String(payload.leg_number).padStart(2, '0')}_leg_${payload.leg_number}_market.json`, payload));
 
+  const safeExternalRankings = (externalRankings || [])
+    .map((row) => sanitizeExternalRankingSignalV3(row))
+    .filter((row) => row
+      && activeIds.has(row.race_entry_id)
+      && Date.parse(row.published_at) <= Date.parse(cutoff))
+    .sort(compareExternalSignals);
+
   let externalRankingsFingerprint = null;
-  if (externalRankings.length) {
+  if (safeExternalRankings.length) {
     const payload = {
       contract_version: ANALYSIS_MARKET_PACK_V3_CONTRACT,
       pack_version: ANALYSIS_MARKET_PACK_V3_VERSION,
@@ -418,25 +551,11 @@ export async function buildMarketPackV3Files({
       cutoff,
       read_order: 'last',
       source_identity_exposed: false,
-      signals: externalRankings
-        .filter((row) => activeIds.has(row.race_entry_id) && validIso(row.published_at) && Date.parse(row.published_at) <= Date.parse(cutoff))
-        .map((row) => ({
-          leg_number: Number(row.leg_number),
-          race_entry_id: row.race_entry_id,
-          signal_type: row.signal_type,
-          value: row.value ?? null,
-          polarity: row.polarity ?? null,
-          strength: row.strength ?? null,
-          fact_or_opinion: row.fact_or_opinion,
-          confidence: row.confidence ?? null,
-          published_at: row.published_at
-        }))
+      signals: safeExternalRankings
     };
-    if (payload.signals.length) {
-      externalRankingsFingerprint = await hashValue(payload.signals);
-      payload.external_rankings_fingerprint = externalRankingsFingerprint;
-      files.push(contentFile('99_external_rankings.json', payload));
-    }
+    externalRankingsFingerprint = await hashValue(payload.signals);
+    payload.external_rankings_fingerprint = externalRankingsFingerprint;
+    files.push(contentFile('99_external_rankings.json', payload));
   }
 
   const expectedFiles = [];
@@ -456,6 +575,7 @@ export async function buildMarketPackV3Files({
       pack_id: lock.pack_id,
       pack_as_of: lock.pack_as_of,
       facts_fingerprint: lock.facts_fingerprint,
+      sealed_at: lock.created_at,
       sealed: true
     },
     market_fingerprint: marketFingerprint,
@@ -474,19 +594,26 @@ export async function buildMarketPackV3Files({
   };
 }
 
-export async function createMarketPackV3(env, roundId, { lockId, lockHash, asOf = null, generatedAt = new Date().toISOString() } = {}) {
+export async function createMarketPackV3(env, roundId, options = {}) {
   const round = requiredText(roundId, 'round_id');
-  const deadline = await loadMarketDeadlineV3(env, round, asOf);
-  const lock = await assertMarketStep1BindingV3(env, { roundId: round, lockId, lockHash });
+  const normalized = normalizeMarketPackOptionsV3(options);
+  const lock = await assertMarketStep1BindingV3(env, {
+    roundId: round,
+    lockId: normalized.lockId,
+    lockHash: normalized.lockHash
+  });
+  const deadline = await loadMarketDeadlineV3(env, round, normalized.asOf);
+  assertMarketCutoffAfterStep1V3(lock, deadline.cutoff);
   const currentPack = await assertNoLateFactsBeforeMarketV3(env, { roundId: round, lock, cutoff: deadline.cutoff });
   const market = await loadVerifiedMarketRowsV3(env, round, deadline.cutoff);
   const externalRankings = await loadExternalRankingsV3(env, round, deadline.cutoff);
-  return buildMarketPackV3Files({ lock, deadline, currentPack, ...market, externalRankings, generatedAt });
+  return buildMarketPackV3Files({ lock, deadline, currentPack, ...market, externalRankings, generatedAt: options.generatedAt });
 }
 
-export async function createMarketPackV3Response(env, roundId, { file = null, lockId, lockHash, asOf = null } = {}) {
-  const pack = await createMarketPackV3(env, roundId, { lockId, lockHash, asOf });
-  const requested = file == null || file === '' ? 'manifest.json' : requiredText(file, 'file', 160);
+export async function createMarketPackV3Response(env, roundId, options = {}) {
+  const normalized = normalizeMarketPackOptionsV3(options);
+  const pack = await createMarketPackV3(env, roundId, normalized);
+  const requested = normalized.file ?? 'manifest.json';
   const content = requested === 'manifest.json' ? pack.manifestContent : pack.files.find((item) => item.name === requested)?.content;
   if (content == null) {
     return new Response(stableFeatureJson({ error: 'file_not_found', available_files: ['manifest.json', ...pack.files.map((item) => item.name)] }), {
