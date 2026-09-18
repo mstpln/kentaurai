@@ -946,7 +946,7 @@ async function validateDecisionDocumentForReplay(row, decision) {
   }
 }
 
-function optimizerSystemDiagnostic(optimizerRow, winnersByLeg, roundId, decisionRunId, decision) {
+async function optimizerSystemDiagnostic(env, optimizerRow, winnersByLeg, roundId, decisionRunId, decision) {
   const optimizer = parseJson(optimizerRow.optimizer_json, 'optimizer_json');
   for (const [field, expected] of [
     ['contract_version', 'kentaurai-optimizer-v1'],
@@ -958,6 +958,11 @@ function optimizerSystemDiagnostic(optimizerRow, winnersByLeg, roundId, decision
     ['optimizer_fingerprint', optimizerRow.optimizer_fingerprint]
   ]) {
     if (optimizer[field] !== expected) throw new Error(`optimizer ${optimizerRow.id} ${field} metadata mismatch`);
+  }
+  if (optimizerRow.decision_fingerprint !== decision.decision_fingerprint
+    || optimizerRow.optimizer_version !== ANALYSIS_OPTIMIZER_VERSION
+    || optimizerRow.policy_version !== ANALYSIS_OPTIMIZER_POLICY_VERSION) {
+    throw new Error(`optimizer ${optimizerRow.id} does not match its canonical E1/E2 lineage`);
   }
   const system = optimizer.system;
   if (!system || Number(system.spike_count) !== 3 || Number(optimizerRow.spike_count) !== 3
@@ -1022,6 +1027,41 @@ function optimizerSystemDiagnostic(optimizerRow, winnersByLeg, roundId, decision
     || Math.abs(estimatedP8 - recomputedP8) > 1e-10) {
     throw new Error(`optimizer ${optimizerRow.id} estimated_p8 is invalid or inconsistent with its decision parent`);
   }
+  const rebuilt = await buildCanonicalOptimizerV1({
+    decision,
+    decisionRunId,
+    gameType: optimizer.game_type,
+    policy: optimizer.policy,
+    generatedAt: optimizer.generated_at
+  });
+  if (stableFeatureJson(rebuilt) !== stableFeatureJson(optimizer)
+    || stableFeatureJson(parseJson(optimizerRow.policy_json, 'optimizer policy_json')) !== stableFeatureJson(rebuilt.policy)
+    || stableFeatureJson(parseJson(optimizerRow.metrics_json, 'optimizer metrics_json')) !== stableFeatureJson(rebuilt.metrics)
+    || Number(optimizerRow.target_budget_min_sek) !== rebuilt.system.target_budget_min_sek
+    || Number(optimizerRow.max_budget_sek) !== rebuilt.system.max_budget_sek) {
+    throw new Error(`optimizer ${optimizerRow.id} does not match deterministic canonical E2 output`);
+  }
+  const { results: storedSelections } = await env.DB.prepare(`
+    SELECT leg_number,race_entry_id,is_spike,decision_probability
+    FROM analysis_optimizer_selections
+    WHERE optimizer_run_id=?
+    ORDER BY leg_number,race_entry_id
+  `).bind(optimizerRow.id).all();
+  const expectedSelections = rebuilt.system.legs.flatMap((leg) => leg.selected_entries.map((entry) => ({
+    leg_number: leg.leg_number,
+    race_entry_id: entry.race_entry_id,
+    is_spike: leg.is_spike ? 1 : 0,
+    decision_probability: entry.decision_probability
+  }))).sort((a, b) => a.leg_number - b.leg_number || compareId(a.race_entry_id, b.race_entry_id));
+  const normalizedSelections = (storedSelections || []).map((entry) => ({
+    leg_number: Number(entry.leg_number),
+    race_entry_id: String(entry.race_entry_id),
+    is_spike: Number(entry.is_spike),
+    decision_probability: Number(entry.decision_probability)
+  }));
+  if (stableFeatureJson(normalizedSelections) !== stableFeatureJson(expectedSelections)) {
+    throw new Error(`optimizer ${optimizerRow.id} normalized selections do not match canonical E2 output`);
+  }
   return {
     target_group_id: roundId,
     optimizer_run_id: optimizerRow.id,
@@ -1072,7 +1112,7 @@ async function loadDecisionTargets(env, config) {
   const bindings = [from, to, decisionVersion, ANALYSIS_DECISION_POLICY_VERSION, maxTargets];
   const { results } = await env.DB.prepare(`
     WITH ranked AS (
-      SELECT adr.*,asl.pack_id,asl.pack_as_of,asl.prompt_version AS step1_prompt_version,
+      SELECT adr.*,asl.pack_id,asl.pack_as_of,asl.prompt_version AS step1_prompt_version,asl.lock_json,
         asl.created_at AS step1_lock_created_at,asl.lock_hash AS stored_lock_hash,gr.game_type,
         ROW_NUMBER() OVER (
           PARTITION BY adr.game_round_id
@@ -1098,12 +1138,12 @@ async function loadDecisionTargets(env, config) {
           FROM game_legs gl2 JOIN races r2 ON r2.id=gl2.race_id
           WHERE gl2.game_round_id=adr.game_round_id
         ))
-        AND datetime(adr.created_at) <= datetime((
+        AND datetime(adr.created_at) < datetime((
           SELECT MIN(r3.scheduled_start_at)
           FROM game_legs gl3 JOIN races r3 ON r3.id=gl3.race_id
           WHERE gl3.game_round_id=adr.game_round_id
         ))
-        AND datetime(asl.created_at) <= datetime(adr.market_cutoff)
+        AND datetime(asl.created_at) < datetime(adr.market_cutoff)
         AND NOT EXISTS (
           SELECT 1
           FROM analysis_step1_lock_revisions rev
@@ -1131,8 +1171,11 @@ async function loadDecisionTargets(env, config) {
   };
   for (const row of results || []) {
     if (row.lock_hash !== row.stored_lock_hash) throw new Error(`decision ${row.id} lock hash mismatch`);
+    if (await sha256Text(requiredText(row.lock_json, `decision ${row.id} lock_json`, 2_000_000)) !== row.lock_hash) {
+      throw new Error(`decision ${row.id} Step 1 lock content does not match lock hash`);
+    }
     if (Date.parse(row.pack_as_of) > Date.parse(row.market_cutoff)) throw new Error(`decision ${row.id} market cutoff is before sealed Step 1 as-of`);
-    if (Date.parse(row.step1_lock_created_at) > Date.parse(row.market_cutoff)) {
+    if (Date.parse(row.step1_lock_created_at) >= Date.parse(row.market_cutoff)) {
       exclusions.post_cutoff_step1_lock += 1;
       continue;
     }
@@ -1188,7 +1231,7 @@ async function loadDecisionTargets(env, config) {
     }
     const earliestStart = Math.min(...starts);
     if (Date.parse(row.market_cutoff) > earliestStart) throw new Error(`decision ${row.id} market cutoff is after race start`);
-    if (Date.parse(row.created_at) > earliestStart) {
+    if (Date.parse(row.created_at) >= earliestStart) {
       exclusions.post_start_decision += 1;
       continue;
     }
@@ -1205,13 +1248,14 @@ async function loadDecisionTargets(env, config) {
     }
 
     const { results: optimizerRows } = await env.DB.prepare(`
-      SELECT id,decision_fingerprint,optimizer_version,policy_version,optimizer_fingerprint,
-             line_price_sek,spike_count,row_count,cost_sek,estimated_p8,optimizer_json,created_at
+      SELECT id,game_round_id,decision_fingerprint,optimizer_version,policy_version,optimizer_fingerprint,
+             line_price_sek,target_budget_min_sek,max_budget_sek,spike_count,row_count,cost_sek,estimated_p8,
+             policy_json,metrics_json,optimizer_json,created_at
       FROM analysis_optimizer_runs
       WHERE decision_run_id=?
       ORDER BY optimizer_version,policy_version,optimizer_fingerprint,id
     `).bind(row.id).all();
-    const preStartOptimizerRows = (optimizerRows || []).filter((optimizer) => Date.parse(optimizer.created_at) <= earliestStart);
+    const preStartOptimizerRows = (optimizerRows || []).filter((optimizer) => Date.parse(optimizer.created_at) < earliestStart);
     exclusions.post_start_optimizer += (optimizerRows || []).length - preStartOptimizerRows.length;
     const optimizerLineage = preStartOptimizerRows.map((optimizer) => ({
       optimizer_run_id: optimizer.id,
@@ -1221,14 +1265,21 @@ async function loadDecisionTargets(env, config) {
       optimizer_created_at: exactIso(optimizer.created_at, 'optimizer created_at')
     }));
     for (const optimizer of preStartOptimizerRows) {
-      systemDiagnostics.push(optimizerSystemDiagnostic(optimizer, winnersByLeg, row.game_round_id, row.id, decision));
+      if (optimizer.game_round_id !== row.game_round_id) {
+        throw new Error(`optimizer ${optimizer.id} round metadata does not match its decision parent`);
+      }
+      systemDiagnostics.push(await optimizerSystemDiagnostic(env, optimizer, winnersByLeg, row.game_round_id, row.id, decision));
     }
 
     const { results: integratedRows } = await env.DB.prepare(`
       SELECT av3.id AS analysis_v3_id,av3.analysis_version,av3.step2_version,av3.step2_result_id,
+             av3.contract_version AS analysis_contract_version,av3.decision_probability_version,
              av3.step2_fingerprint,av3.decision_fingerprint,av3.optimizer_run_id,av3.optimizer_version,
              av3.optimizer_fingerprint,av3.lock_id,av3.lock_hash,av3.market_fingerprint,av3.market_cutoff,
              av3.created_at AS analysis_v3_created_at,
+             s2.game_round_id AS step2_round_id,s2.lock_id AS step2_lock_id,s2.lock_hash AS step2_lock_hash,
+             s2.market_fingerprint AS step2_market_fingerprint,s2.market_cutoff AS step2_market_cutoff,
+             s2.step2_version AS stored_step2_version,s2.result_fingerprint AS stored_step2_fingerprint,
              s2.prompt_version AS step2_prompt_version,s2.provider AS step2_provider,s2.model AS step2_model,
              s2.created_at AS step2_created_at
       FROM analysis_v3_runs av3
@@ -1237,15 +1288,24 @@ async function loadDecisionTargets(env, config) {
       ORDER BY av3.analysis_version,av3.optimizer_run_id,av3.id
     `).bind(row.id).all();
     const preStartIntegratedRows = (integratedRows || []).filter((integrated) =>
-      Date.parse(integrated.analysis_v3_created_at) <= earliestStart
-      && Date.parse(integrated.step2_created_at) <= earliestStart
+      Date.parse(integrated.analysis_v3_created_at) < earliestStart
+      && Date.parse(integrated.step2_created_at) < earliestStart
     );
     exclusions.post_start_integration += (integratedRows || []).length - preStartIntegratedRows.length;
     const integratedLineage = preStartIntegratedRows.map((integrated) => {
       if (integrated.lock_id !== row.lock_id || integrated.lock_hash !== row.lock_hash
         || integrated.market_fingerprint !== row.market_fingerprint
         || exactIso(integrated.market_cutoff, 'integrated market_cutoff') !== exactIso(row.market_cutoff, 'decision market_cutoff')
-        || integrated.decision_fingerprint !== row.decision_fingerprint) {
+        || integrated.decision_fingerprint !== row.decision_fingerprint
+        || integrated.analysis_contract_version !== 'kentaurai-analysis-v3'
+        || integrated.decision_probability_version !== row.decision_probability_version
+        || integrated.step2_round_id !== row.game_round_id
+        || integrated.step2_lock_id !== row.lock_id
+        || integrated.step2_lock_hash !== row.lock_hash
+        || integrated.step2_market_fingerprint !== row.market_fingerprint
+        || exactIso(integrated.step2_market_cutoff, 'Step 2 market_cutoff') !== exactIso(row.market_cutoff, 'decision market_cutoff')
+        || integrated.step2_version !== integrated.stored_step2_version
+        || integrated.step2_fingerprint !== integrated.stored_step2_fingerprint) {
         throw new Error(`integrated analysis ${integrated.analysis_v3_id} does not match decision lineage`);
       }
       const optimizer = optimizerLineage.find((item) => item.optimizer_run_id === integrated.optimizer_run_id);
@@ -1367,14 +1427,6 @@ export async function runDecisionReplayV1(env, config = {}) {
   const regressionSystemSummary = summarizeSystems(regressionSystemDiagnostics);
   const evaluationFingerprint = await evaluationFingerprintV1(evaluations);
   const decisionLineages = uniqueDecisionLineages(targets);
-  const cohortFingerprint = await sha256Text(stableFeatureJson(targets.map((target) => ({
-    target_id: target.target_id,
-    target_group_id: target.target_group_id,
-    target_at: target.target_at,
-    winner_entry_id: target.winner_entry_id,
-    decision_run_id: target.decision_run_id,
-    version_metadata: target.version_metadata
-  }))));
   const resultBase = {
     contract_version: REPLAY_CONTRACT_VERSION,
     replay_version: REPLAY_VERSION,
@@ -1392,7 +1444,7 @@ export async function runDecisionReplayV1(env, config = {}) {
       ...resultSourceVersionMetadata(),
       decision_lineages: decisionLineages
     },
-    cohort_fingerprint: cohortFingerprint,
+    cohort_fingerprint: null,
     evaluation_fingerprint: evaluationFingerprint,
     target_count: targets.length,
     evidence_target_count: evidenceTargets.length,
@@ -1421,6 +1473,7 @@ export async function runDecisionReplayV1(env, config = {}) {
       scored_target_count: 0
     }
   };
+  resultBase.cohort_fingerprint = await sha256Text(stableFeatureJson(canonicalCohortFingerprintInput(resultBase, evaluations)));
   const resultFingerprint = await sha256Text(stableFeatureJson(resultBase));
   return { ...resultBase, result_fingerprint: resultFingerprint, evaluations };
 }
@@ -1452,6 +1505,10 @@ export async function persistReplayResultV1(env, result, options = {}) {
   const actualEvaluationFingerprint = await evaluationFingerprintV1(evaluations);
   if (actualEvaluationFingerprint !== result.evaluation_fingerprint) {
     throw new Error('evaluation_fingerprint does not match replay evaluations');
+  }
+  const actualCohortFingerprint = await sha256Text(stableFeatureJson(canonicalCohortFingerprintInput(result, evaluations)));
+  if (actualCohortFingerprint !== result.cohort_fingerprint) {
+    throw new Error('cohort_fingerprint does not match replay targets and version metadata');
   }
   const canonicalBase = { ...result };
   delete canonicalBase.evaluations;
