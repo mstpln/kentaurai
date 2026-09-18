@@ -327,7 +327,9 @@ test('F2 rejects tampered Step 1 content and post-race parent timestamps', async
   {
     const { env, db } = createTestEnv();
     const seeded = seedV3SettledRound(db);
-    db.prepare("UPDATE analysis_step1_locks SET lock_json='{}' WHERE id=?").run(seeded.lockId);
+    const storedLock = JSON.parse(db.prepare('SELECT lock_json FROM analysis_step1_locks WHERE id=?').get(seeded.lockId).lock_json);
+    storedLock.legs[0].data_quality_summary = 'Tampered after seal';
+    db.prepare('UPDATE analysis_step1_locks SET lock_json=? WHERE id=?').run(JSON.stringify(storedLock),seeded.lockId);
     await assert.rejects(
       () => runNextPostRaceReview(env, { roundId: seeded.roundId }),
       /Step 1 lock content does not match stored hash/
