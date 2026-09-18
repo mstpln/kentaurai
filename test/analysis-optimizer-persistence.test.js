@@ -17,6 +17,8 @@ function decisionDocument() {
     decision_probability_version: 'decision-probability-v1-e1',
     policy_version: 'decision-blind-v1',
     round_id: 'round-e2',
+    lock_id: 'lock-e2',
+    lock_hash: 'sha256:lock-e2',
     decision_fingerprint: DECISION_FP,
     legs: Array.from({ length: 8 }, (_, index) => {
       const leg = index + 1;
@@ -110,4 +112,26 @@ test('E2 persists optimizer metrics and selections idempotently from a stored E1
   assert.equal(retry.id, first.id);
   assert.equal(retry.optimizer.generated_at, first.optimizer.generated_at);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM analysis_optimizer_runs').get().n, 1);
+});
+
+test('E2 refuses to optimize a decision bound to a superseded Step 1 lock', async () => {
+  const { db, env } = createTestEnv();
+  seedParents(db);
+  db.prepare(`INSERT INTO analysis_step1_locks (
+    id,game_round_id,contract_version,pack_id,pack_as_of,facts_fingerprint,provider,model,prompt_version,lock_json,lock_hash,created_at
+  ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    'lock-e2-new','round-e2','kentaurai-step1-lock-v1','pack-e2-new','2099-06-01T11:30:00.000Z','sha256:facts-e2-new',
+    'openai','synthetic','step1-prompt-v3-d2','{}','sha256:lock-e2-new','2099-06-01T11:35:00.000Z'
+  );
+
+  await assert.rejects(
+    () => persistOptimizerV1(env, 'round-e2', {
+      decision_run_id: 'decision-e2',
+      line_price_sek: 0.5,
+      target_budget_min_sek: 150,
+      max_budget_sek: 250
+    }),
+    /newest sealed Step 1 lock|older lock is superseded/
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM analysis_optimizer_runs').get().n, 0);
 });
