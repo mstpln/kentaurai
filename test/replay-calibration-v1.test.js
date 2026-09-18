@@ -366,3 +366,63 @@ test('F1 rejects a decision replay whose market cutoff is after race start', asy
     /market cutoff is after race start/
   );
 });
+
+
+test('F1 keeps a designated regression-only round outside promotion evidence', async () => {
+  const { db, env } = createTestEnv();
+  for (let index = 1; index <= 4; index += 1) seedDecisionRound(db, index);
+
+  const result = await runDecisionReplayV1(env, {
+    from: '2099-02-01T00:00:00Z',
+    to: '2099-02-04T23:59:59Z',
+    decision_probability_version: 'decision-probability-synthetic-blend-v1',
+    regression_only_round_ids: ['decision-round-1'],
+    walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
+  });
+
+  assert.equal(result.fold_count, 1);
+  assert.equal(result.target_count, 32);
+  assert.equal(result.evidence_target_count, 24);
+  assert.equal(result.regression_only_target_count, 8);
+  assert.equal(result.decision_summary.target_count, 8);
+  assert.equal(result.regression_only_summary.decision.target_count, 8);
+  assert.equal(result.regression_only_summary.systems.system_count, 1);
+  assert.ok(!result.walk_forward.folds.flatMap((fold) => fold.test_group_ids).includes('decision-round-1'));
+});
+
+test('F1 rejects a stored decision that violates the declared decision-blind policy', async () => {
+  const { db, env } = createTestEnv();
+  seedDecisionRound(db, 1);
+  const row = db.prepare("SELECT decision_json FROM analysis_decision_runs WHERE id='decision-run-1'").get();
+  const decision = JSON.parse(row.decision_json);
+  decision.policy_version = 'decision-blind-v1';
+  db.prepare("UPDATE analysis_decision_runs SET policy_version=?,decision_json=? WHERE id='decision-run-1'")
+    .run('decision-blind-v1', JSON.stringify(decision));
+
+  await assert.rejects(
+    () => runDecisionReplayV1(env, {
+      from: '2099-02-01T00:00:00Z',
+      to: '2099-02-01T23:59:59Z',
+      walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
+    }),
+    /violates decision-blind-v1 policy/
+  );
+});
+
+test('F1 persistence rejects tampered evaluation scores before writing', async () => {
+  const { db, env } = createTestEnv();
+  for (let index = 1; index <= 3; index += 1) seedDecisionRound(db, index);
+  const result = await runDecisionReplayV1(env, {
+    from: '2099-02-01T00:00:00Z',
+    to: '2099-02-03T23:59:59Z',
+    decision_probability_version: 'decision-probability-synthetic-blend-v1',
+    walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
+  });
+  result.evaluations[0].log_loss += 0.01;
+
+  await assert.rejects(
+    () => persistReplayResultV1(env, result),
+    /log_loss does not match forecast score/
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM replay_runs').get().n, 0);
+});
