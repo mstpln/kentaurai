@@ -20,6 +20,7 @@ export function configuredLinePriceSek(env, gameType) {
 }
 
 export function canonicalOptimizerPolicyForGameType(env, gameType) {
+  const type = String(gameType || '').trim().toUpperCase();
   return {
     game_type: type,
     line_price_sek: configuredLinePriceSek(env, gameType),
