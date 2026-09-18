@@ -29,6 +29,36 @@ test('performance Worker injects cache, prefetch and immediate loading UI into p
   assert.doesNotThrow(() => new vm.Script(match[1]));
 });
 
+test('production Worker exposes the v3 round picker endpoint and keeps the legacy picker disabled', async () => {
+  const { env, db } = createTestEnv();
+  env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
+  db.prepare(`INSERT INTO tracks (id,canonical_name,country_code) VALUES ('picker_track','Picker Track','SE')`).run();
+  db.prepare(`
+    INSERT INTO game_rounds (id,game_type,round_date,scheduled_start_at,status)
+    VALUES ('picker_round','V85','2099-09-18','2099-09-18T12:00:00Z','upcoming')
+  `).run();
+  for (let leg = 1; leg <= 8; leg += 1) {
+    db.prepare(`
+      INSERT INTO races (id,track_id,race_date,race_number,scheduled_start_at,status)
+      VALUES (?, 'picker_track','2099-09-18',?,?, 'upcoming')
+    `).run(`picker_race_${leg}`, leg, `2099-09-18T${String(11 + leg).padStart(2,'0')}:00:00Z`);
+    db.prepare(`INSERT INTO game_legs (game_round_id,leg_number,race_id) VALUES ('picker_round',?,?)`)
+      .run(leg, `picker_race_${leg}`);
+  }
+  const cookie = (await createAppSessionCookie(env)).split(';')[0];
+
+  let response = await worker.fetch(new Request('https://example.test/app/api/settings/f3-rounds', { headers: { cookie } }), env, {});
+  assert.equal(response.status, 200);
+  let body = await response.json();
+  assert.equal(body.rounds[0].id, 'picker_round');
+  assert.equal(body.rounds[0].gameType, 'V85');
+
+  response = await worker.fetch(new Request('https://example.test/app/api/settings/analysis-rounds', { headers: { cookie } }), env, {});
+  assert.equal(response.status, 410);
+  body = await response.json();
+  assert.equal(body.error, 'legacy_analysis_creation_disabled');
+});
+
 test('lightweight entity detail omits expensive start enrichment while preserving summary data', async () => {
   const { env, db } = createTestEnv();
   db.prepare(`INSERT INTO tracks (id,canonical_name,country_code) VALUES ('perf_track','Perf Track','SE')`).run();
