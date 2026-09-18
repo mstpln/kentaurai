@@ -132,6 +132,7 @@ function seedSportsReplay(db) {
 
 const capacityProducer = {
   version: 'synthetic-capacity-producer-v1',
+  fingerprint: `sha256:${'c'.repeat(64)}`,
   async predict({ entries }) {
     const raw = entries.map((entry) => {
       const points = Number(entry.features.capacity?.metrics?.official_start_points?.value ?? 1);
