@@ -7,25 +7,23 @@ Updated: 2026-09-18
 - Worker: `kentaurai-api`.
 - D1: `kentaurai`.
 - R2: `kentaurai-raw`.
-- Full-plan QA application source merged at `4085a3fc9a36bddedb39e6e7ee9fc14e7105cb76`; production release trigger/main head is `799e8b1f19a57672c1332f424de89cf6391e9978`.
-- Worker entrypoint is `src/worker-v076.js` with `ANALYSIS_WORKFLOW_MODE=v3`.
-- Production release #60 completed successfully. Full QA (785/785), Cloudflare validation, schema verification, Worker deploy, `/health`, `/app/login`, F4 Step 2 bundle protection and existing private analysis/replay route checks passed.
-- Production schema is current through migration `0025_post_race_learning_f2.sql`.
-- F1 replay/calibration, F2 post-race learning diagnostics, F3 private workflow/observability and F4 v3 cutover are production-live.
-- Historical official/X-Labs jobs keep their durable cursors. No build/release may reset, recreate or silently resume stopped historical work.
+- App-performance application source merged at `3fdb81024f0bbd188e524d42aad0cf7123df2570`; controlled release trigger/main head is `238b55d1307e745e05bb59c7bc6a3fa30523f1df`.
+- Worker entrypoint is `src/worker-v077.js` with `ANALYSIS_WORKFLOW_MODE=v3`; v077 delegates F4 analysis/scheduling behavior to `worker-v076.js`.
+- Production release #61 completed successfully. Exact-head QA, Cloudflare validation, migration/schema/index verification, Worker deploy, `/health`, `/app/login` and private analysis/replay route protection all passed.
+- Production schema is current through migration `0026_app_read_performance.sql`.
+- F1 replay/calibration, F2 post-race learning diagnostics, F3 private workflow/observability, F4 v3 cutover and the private-app navigation performance layer are production-live.
+- Historical official/X-Labs jobs keep their durable cursors. The performance release did not reset, recreate or resume stopped historical work.
 
-## App performance candidate
-- Branch: `perf/private-app-navigation-v1`.
-- Candidate Worker entrypoint: `src/worker-v077.js`, delegating all F4 behavior to `worker-v076.js`.
-- Scope: faster private-app navigation only; no analysis-policy, source-ingestion, replay or learning changes.
-- Adds in-session GET caching/in-flight de-duplication, idle prefetch of first navigation pages, hover/focus detail prefetch and immediate skeleton feedback.
-- Entity detail navigation no longer enriches up to 100 historical starts before rendering the initial profile; paginated history remains loaded on demand.
+## App performance live
+- `worker-v077` adds only the private-app HTML performance layer; racing/analysis semantics and auth boundaries are unchanged.
+- The browser uses short-lived in-memory GET caching and in-flight request de-duplication only; no private API payloads are persisted to localStorage.
+- First navigation pages are idle-prefetched, entity/track details are prefetched on hover/focus, and uncached navigation shows immediate loading feedback.
+- Initial entity detail no longer enriches up to 100 historical starts before rendering; paginated history remains loaded on demand.
 - Track overview defers the expensive home-trainer scan to the dedicated Hemmatränare tab and avoids a duplicate track metadata query.
-- Migration `0026_app_read_performance.sql` adds only genuinely new indexes for the hottest entity/track/history read paths; existing driver/trainer/betting indexes are reused.
-- Production release workflow is prepared to verify worker-v077 and migration/index presence, but no deployment occurs without explicit authorization.
+- Migration `0026_app_read_performance.sql` adds the genuinely new indexes for the hottest entity/track/history read paths; existing driver/trainer/betting indexes are reused.
 
 ## F4 live - v3 cutover, legacy deprecation and release hardening
-- Production Worker entrypoint: `src/worker-v076.js`.
+- F4 cutover layer: `src/worker-v076.js`; production is wrapped by `src/worker-v077.js` for private-app performance only.
 - Production default: `ANALYSIS_WORKFLOW_MODE=v3`.
 - Controlled rollback value: `ANALYSIS_WORKFLOW_MODE=legacy_v2`. Rollback requires a reviewed production release; there is no automatic fallback.
 - The normal creation workflow is v3: deterministic pre-market pack -> server-sealed Step 1 -> optional late-fact revision -> self-contained Step 2 bundle -> Step 2 interpretation -> canonical decision -> deterministic exact-three-spike optimizer.
