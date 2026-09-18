@@ -159,12 +159,12 @@ export async function getTrackDetail(env, id) {
   const track = await env.DB.prepare(`
     SELECT id, canonical_name, city, country_code, lap_length_m, home_stretch_m,
       curve_radius_m, banking_degrees, width_m, surface, open_stretch_lanes,
-      angled_mobile_wing, start_notes, track_notes
+      angled_mobile_wing, start_notes, track_notes, street_address, postal_code, website_url
     FROM tracks WHERE id = ? LIMIT 1
   `).bind(trackId).first();
   if (!track) return null;
 
-  const [summary, distanceRows, homeTrainerCountRow] = await Promise.all([
+  const [summary, distanceRows] = await Promise.all([
     env.DB.prepare(`
       SELECT
         COUNT(DISTINCT r.id) AS races,
@@ -185,8 +185,7 @@ export async function getTrackDetail(env, id) {
       WHERE r.track_id = ? AND re.scratched = 0 AND r.distance_m IS NOT NULL
       GROUP BY r.distance_m
       ORDER BY r.distance_m ASC
-    `).bind(trackId).all(),
-    countHomeTrainers(env, trackId, track.canonical_name)
+    `).bind(trackId).all()
   ]);
 
   return {
@@ -195,6 +194,11 @@ export async function getTrackDetail(env, id) {
     city: track.city,
     countryCode: track.country_code,
     description: trackDescription(track),
+    address: {
+      street: track.street_address || null,
+      postalCode: track.postal_code || null
+    },
+    websiteUrl: track.website_url || null,
     profile: {
       lapLengthM: track.lap_length_m == null ? null : Number(track.lap_length_m),
       homeStretchM: track.home_stretch_m == null ? null : Number(track.home_stretch_m),
@@ -214,7 +218,7 @@ export async function getTrackDetail(env, id) {
       resultStarts: Number(summary?.result_starts ?? 0),
       firstRaceDate: summary?.first_race_date || null,
       lastRaceDate: summary?.last_race_date || null,
-      homeTrainers: Number(homeTrainerCountRow?.total ?? 0)
+      homeTrainers: null
     },
     distanceGroups: mapDistanceGroups(distanceRows?.results || [])
   };
@@ -230,7 +234,9 @@ function homeTrainerCte() {
         ) AS row_number
       FROM normalized_observations o
       JOIN source_records sr ON sr.id = o.source_record_id
-      WHERE o.entity_type = 'trainer' AND sr.source_type = 'official_provider'
+      WHERE o.entity_type = 'trainer'
+        AND sr.source_type = 'official_provider'
+        AND json_valid(o.fields_json)
     ), official_track_ids AS (
       SELECT external_id FROM track_external_ids
       WHERE track_id = ? AND source_type = 'official'
@@ -244,7 +250,6 @@ async function countHomeTrainers(env, trackId, trackName) {
     FROM latest_trainer_observation o
     JOIN trainers tr ON tr.id = o.trainer_id
     WHERE o.row_number = 1
-      AND json_valid(o.fields_json)
       AND (
         CAST(json_extract(o.fields_json, '$.homeTrackExternalId') AS TEXT) IN (SELECT external_id FROM official_track_ids)
         OR (
@@ -270,7 +275,6 @@ export async function getTrackHomeTrainers(env, id, options = {}) {
     FROM latest_trainer_observation o
     JOIN trainers tr ON tr.id = o.trainer_id
     WHERE o.row_number = 1
-      AND json_valid(o.fields_json)
       AND (
         CAST(json_extract(o.fields_json, '$.homeTrackExternalId') AS TEXT) IN (SELECT external_id FROM official_track_ids)
         OR (
