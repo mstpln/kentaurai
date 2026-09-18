@@ -491,6 +491,96 @@ test('F1 rejects tampered canonical E1 decision content', async () => {
   );
 });
 
+test('F1 stale Step 1 parent is excluded when a child revision existed before market cutoff', async () => {
+  const { db, env } = createTestEnv();
+  seedDecisionRound(db, 1);
+  db.prepare(`
+    INSERT INTO analysis_step1_locks (
+      id,game_round_id,contract_version,pack_id,pack_as_of,facts_fingerprint,provider,model,prompt_version,lock_json,lock_hash,created_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    'decision-lock-1-child','decision-round-1','kentaurai-step1-lock-v1','pack-1-child','2099-02-01T09:20:00.000Z',
+    `sha256:${'d'.repeat(64)}`,'openai','synthetic','step1-prompt-v3-d2','{}',
+    `sha256:${'e'.repeat(64)}`,'2099-02-01T09:25:00.000Z'
+  );
+  db.prepare(`
+    INSERT INTO analysis_step1_lock_revisions (
+      child_lock_id,parent_lock_id,game_round_id,contract_version,parent_facts_fingerprint,
+      child_facts_fingerprint,affected_legs_json,revision_json,revision_hash,created_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    'decision-lock-1-child','decision-lock-1','decision-round-1','kentaurai-step1-revision-v1',
+    `sha256:${'f'.repeat(64)}`,`sha256:${'d'.repeat(64)}`,'[1]','{}',
+    `sha256:${'a'.repeat(64)}`,'2099-02-01T09:25:00.000Z'
+  );
+
+  const result = await runDecisionReplayV1(env, {
+    from: '2099-02-01T00:00:00Z',
+    to: '2099-02-01T23:59:59Z',
+    walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
+  });
+  assert.equal(result.target_count, 0);
+});
+
+test('F1 post-start decision cannot hide an earlier eligible pre-race decision', async () => {
+  const { db, env } = createTestEnv();
+  seedDecisionRound(db, 1);
+  db.prepare(`
+    INSERT INTO analysis_decision_runs (
+      id,game_round_id,lock_id,lock_hash,market_fingerprint,market_cutoff,contract_version,
+      decision_probability_version,policy_version,market_proxy_quality_json,context_reliability_json,
+      decision_json,decision_fingerprint,created_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    'decision-run-1-late','decision-round-1','decision-lock-1',
+    `sha256:${'1'.repeat(64)}`,`sha256:${'9'.repeat(64)}`,'2099-02-01T10:30:00.000Z',
+    'kentaurai-decision-probability-v1','decision-probability-v1-e1','decision-blind-v1','[]','[]',
+    '{}',`sha256:${'8'.repeat(64)}`,'2099-02-01T13:00:00.000Z'
+  );
+
+  const result = await runDecisionReplayV1(env, {
+    from: '2099-02-01T00:00:00Z',
+    to: '2099-02-01T23:59:59Z',
+    walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
+  });
+  assert.equal(result.target_count, 8);
+  assert.equal(result.version_metadata.decision_lineages[0].decision_run_id, 'decision-run-1');
+});
+
+test('F1 decision replay requires exact active-field coverage after scratches', async () => {
+  const { db, env } = createTestEnv();
+  seedDecisionRound(db, 1);
+  db.prepare("UPDATE race_entries SET scratched=1 WHERE id='decision-entry-1-1-b'").run();
+
+  await assert.rejects(
+    () => runDecisionReplayV1(env, {
+      from: '2099-02-01T00:00:00Z',
+      to: '2099-02-01T23:59:59Z',
+      walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
+    }),
+    /must cover the exact active field/
+  );
+});
+
+test('F1 independently recomputes optimizer P8 from canonical decision probabilities', async () => {
+  const { db, env } = createTestEnv();
+  seedDecisionRound(db, 1);
+  const row = db.prepare("SELECT optimizer_json FROM analysis_optimizer_runs WHERE id='optimizer-run-1'").get();
+  const optimizer = JSON.parse(row.optimizer_json);
+  optimizer.system.estimated_p8 = 0.9;
+  db.prepare("UPDATE analysis_optimizer_runs SET estimated_p8=0.9,optimizer_json=? WHERE id='optimizer-run-1'")
+    .run(JSON.stringify(optimizer));
+
+  await assert.rejects(
+    () => runDecisionReplayV1(env, {
+      from: '2099-02-01T00:00:00Z',
+      to: '2099-02-01T23:59:59Z',
+      walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
+    }),
+    /inconsistent with its decision parent/
+  );
+});
+
 test('F1 persistence rejects tampered evaluation scores before writing', async () => {
   const { db, env } = createTestEnv();
   for (let index = 1; index <= 3; index += 1) seedDecisionRound(db, index);
@@ -509,6 +599,25 @@ test('F1 persistence rejects tampered evaluation scores before writing', async (
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM replay_runs').get().n, 0);
 });
 
+
+test('F1 persistence rejects tampered ablation deltas before writing', async () => {
+  const { db, env } = createTestEnv();
+  seedSportsReplay(db);
+  const result = await runSportsFeatureReplayV1(env, {
+    from: '2099-01-01T00:00:00Z',
+    to: '2099-01-03T23:59:59Z',
+    baseline_families: ['capacity'],
+    ablations: [{ id: 'add-terms', feature_family: 'terms', mode: 'add' }],
+    walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
+  }, capacityProducer);
+  result.ablations[0].delta_log_loss = 123;
+
+  await assert.rejects(
+    () => persistReplayResultV1(env, result),
+    /ablation add-terms result is inconsistent/
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM replay_runs').get().n, 0);
+});
 
 test('F1 excludes post-start optimizer and integration rows from system evidence', async () => {
   const { db, env } = createTestEnv();
