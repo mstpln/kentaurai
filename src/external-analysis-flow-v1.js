@@ -1,6 +1,7 @@
 import { stableId } from './ids.js';
 import { getVerifiedAnalysisMarket } from './analysis-market.js';
 import { canonicalOptimizerPolicyForRound } from './analysis-optimizer-policy-config.js';
+import { loadExternalRankingsV3, loadVerifiedMarketRowsV3 } from './analysis-market-pack-v3.js';
 
 export const EXTERNAL_ANALYSIS_FLOW_VERSION = 'external-analysis-v1';
 export const MARKET_INPUT_CONTRACT = 'kentaurai-market-input-v1';
@@ -182,6 +183,8 @@ export async function buildMarketInput(env, roundId, asOf = null) {
   const identity = await loadRoundIdentity(env, roundId);
   const requestedAt = validIso(asOf) ? new Date(Date.parse(asOf)).toISOString() : new Date().toISOString();
   const market = await getVerifiedAnalysisMarket(env, roundId, requestedAt);
+  const history = await loadVerifiedMarketRowsV3(env, roundId, market.cutoff);
+  const externalRankings = await loadExternalRankingsV3(env, roundId, market.cutoff);
   const policy = normalizePolicy(await canonicalOptimizerPolicyForRound(env, roundId));
   return {
     contract_version: MARKET_INPUT_CONTRACT,
@@ -189,6 +192,8 @@ export async function buildMarketInput(env, roundId, asOf = null) {
     round: identity.round,
     system_policy: policy,
     market,
+    market_history: history,
+    external_rankings: externalRankings,
     entry_map: identity.legs
   };
 }
