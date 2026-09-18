@@ -8,6 +8,7 @@ import {
 import {
   ANALYSIS_OPTIMIZER_VERSION,
   ANALYSIS_OPTIMIZER_POLICY_VERSION,
+  assertCurrentDecisionFieldV1,
   buildCanonicalOptimizerV1,
   normalizeOptimizerPolicyV1
 } from './analysis-optimizer-v1.js';
@@ -284,6 +285,7 @@ export async function persistIntegratedStep2V1(env, payload, parents, gameType, 
   const decisionExisting = await existingDecisionRow(env, decision);
   const decisionRunId = decisionExisting?.id ?? idFromFingerprint('decision', decision.decision_fingerprint);
 
+  await assertCurrentDecisionFieldV1(env, step2.round_id, decision);
   const policy = normalizeOptimizerPolicyV1(policyOptions);
   const optimizer = await buildCanonicalOptimizerV1({
     decision,
