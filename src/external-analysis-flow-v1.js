@@ -1,7 +1,6 @@
 import { stableId } from './ids.js';
-import { getVerifiedAnalysisMarket } from './analysis-market.js';
 import { canonicalOptimizerPolicyForRound } from './analysis-optimizer-policy-config.js';
-import { loadExternalRankingsV3, loadVerifiedMarketRowsV3 } from './analysis-market-pack-v3.js';
+import { loadExternalRankingsV3, loadMarketDeadlineV3, loadVerifiedMarketRowsV3 } from './analysis-market-pack-v3.js';
 
 export const EXTERNAL_ANALYSIS_FLOW_VERSION = 'external-analysis-v1';
 export const MARKET_INPUT_CONTRACT = 'kentaurai-market-input-v1';
@@ -182,9 +181,40 @@ export async function loadRoundIdentity(env, roundId) {
 export async function buildMarketInput(env, roundId, asOf = null) {
   const identity = await loadRoundIdentity(env, roundId);
   const requestedAt = validIso(asOf) ? new Date(Date.parse(asOf)).toISOString() : new Date().toISOString();
-  const market = await getVerifiedAnalysisMarket(env, roundId, requestedAt);
-  const history = await loadVerifiedMarketRowsV3(env, roundId, market.cutoff);
-  const externalRankings = await loadExternalRankingsV3(env, roundId, market.cutoff);
+  const deadline = await loadMarketDeadlineV3(env, roundId, requestedAt);
+  const history = await loadVerifiedMarketRowsV3(env, roundId, deadline.cutoff);
+  const externalRankings = await loadExternalRankingsV3(env, roundId, deadline.cutoff);
+
+  const latestBetting = new Map();
+  for (const row of history.betting || []) latestBetting.set(row.race_entry_id, row);
+  const latestOdds = new Map();
+  for (const row of history.odds || []) latestOdds.set(row.race_entry_id + '|' + row.market_type, row);
+
+  const market = {
+    definitionVersion: deadline.deadline_source === 'bet_stop_at'
+      ? 'verified-market-at-stop-v1'
+      : 'verified-market-at-round-start-v1',
+    roundId,
+    betStopAt: identity.round.bet_stop_at,
+    marketDeadlineAt: deadline.deadline_at,
+    deadlineSource: deadline.deadline_source,
+    asOf: deadline.requested_as_of,
+    cutoff: deadline.cutoff,
+    betting: [...latestBetting.values()].map((row) => ({
+      raceEntryId: row.race_entry_id,
+      legNumber: Number(row.leg_number),
+      betPercent: row.market_ownership_percent == null ? null : Number(row.market_ownership_percent),
+      marketRank: row.market_rank == null ? null : Number(row.market_rank),
+      capturedAt: row.captured_at
+    })),
+    odds: [...latestOdds.values()].map((row) => ({
+      raceEntryId: row.race_entry_id,
+      marketType: row.market_type,
+      odds: row.odds == null ? null : Number(row.odds),
+      capturedAt: row.captured_at
+    }))
+  };
+
   const policy = normalizePolicy(await canonicalOptimizerPolicyForRound(env, roundId));
   return {
     contract_version: MARKET_INPUT_CONTRACT,
@@ -511,7 +541,7 @@ export async function importRecordedSystem(env, payload) {
 
   let market = null;
   try {
-    market = await getVerifiedAnalysisMarket(env, roundId, new Date().toISOString());
+    market = (await buildMarketInput(env, roundId, new Date().toISOString())).market;
   } catch {
     market = null;
   }
