@@ -23,7 +23,7 @@ Updated: 2026-09-18
 - Migration `0026_app_read_performance.sql` adds the genuinely new indexes for the hottest entity/track/history read paths; existing driver/trainer/betting indexes are reused.
 
 ## F4 live - v3 cutover, legacy deprecation and release hardening
-- Production Worker entrypoint: `src/worker-v076.js`.
+- F4 cutover layer: `src/worker-v076.js`; production is wrapped by `src/worker-v077.js` for private-app performance only.
 - Production default: `ANALYSIS_WORKFLOW_MODE=v3`.
 - Controlled rollback value: `ANALYSIS_WORKFLOW_MODE=legacy_v2`. Rollback requires a reviewed production release; there is no automatic fallback.
 - The normal creation workflow is v3: deterministic pre-market pack -> server-sealed Step 1 -> optional late-fact revision -> self-contained Step 2 bundle -> Step 2 interpretation -> canonical decision -> deterministic exact-three-spike optimizer.
