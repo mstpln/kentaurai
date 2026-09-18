@@ -310,6 +310,14 @@ export async function persistIntegratedStep2V1(env, payload, parents, gameType, 
     step2_result_id: step2.result_id,
     step2_version: step2.step2_version,
     step2_fingerprint: step2.result_fingerprint,
+    step2_interpretation: {
+      provider: step2.provider,
+      model: step2.model,
+      prompt_version: step2.prompt_version,
+      legs: step2.legs,
+      round_risk_flags: step2.round_risk_flags,
+      external_signals_read_last: step2.external_signals_read_last
+    },
     decision_run_id: decisionRunId,
     decision_probability_version: decision.decision_probability_version,
     decision_policy_version: decision.policy_version,
@@ -463,6 +471,7 @@ export function buildFinalNarrativePromptV1(integrated) {
     stableFeatureJson({
       analysis_id: integrated.id,
       optimizer_fingerprint: integrated.analysis.optimizer_fingerprint,
+      step2_interpretation: integrated.analysis.step2_interpretation,
       optimizer_system: integrated.analysis.optimizer_system
     })
   ].join('\n\n');
