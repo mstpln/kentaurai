@@ -110,7 +110,7 @@ The existing E1 and E2 tables remain the canonical stores for decision probabili
 ADMIN_TOKEN protected:
 
 - `GET /v1/analysis-step2-prompt?provider=openai|anthropic`
-- `POST /v1/analysis-step2/:roundId?line_price_sek=...&target_budget_min_sek=...&max_budget_sek=...`
+- `POST /v1/analysis-step2/:roundId` (optimizer policy is resolved server-side from game type/config)
 - `GET /v1/analysis-v3/:analysisId`
 - `GET /v1/analysis-v3/:analysisId/narrative-prompt`
 - `POST /v1/analysis-v3/:analysisId/narrative`
@@ -118,7 +118,7 @@ ADMIN_TOKEN protected:
 Session protected:
 
 - `GET /app/api/settings/analysis-step2-prompt?provider=...`
-- `POST /app/api/settings/analysis-step2?round_id=...&line_price_sek=...&target_budget_min_sek=...&max_budget_sek=...`
+- `POST /app/api/settings/analysis-step2?round_id=...` (optimizer policy is resolved server-side)
 
 ## Removed legacy Step 2 behavior
 
@@ -130,7 +130,7 @@ The E3 v3 Step 2 prompt no longer contains:
 - a forced materially different alternative system;
 - free-form AI ticket optimization.
 
-Legacy v1/v2 analysis creation and persisted history remain available in parallel during the E3 shadow period. Making v3 the default and disabling new v2 creation belongs to F4.
+F4 completed the cutover after the E3 shadow period. Persisted v1/v2 history remains readable, while new legacy creation is disabled in the default v3 mode.
 
 ## Explicit non-scope
 

@@ -37,7 +37,7 @@ test('F4 live documentation agrees on sealed v3, exact3 and legacy read-only pol
   assert.match(agents, /Legacy v1\/v2 analysis artifacts remain readable/i);
   assert.match(decisions, /New legacy creation.*disabled/i);
   assert.match(buildState, /legacy v1\/v2 analysis creation.*disabled/i);
-  assert.match(readme, /disables new legacy creation/i);
+  assert.match(readme, /new legacy creation is disabled|disables new legacy creation/i);
 });
 
 test('F4 active v3 prompts contain no legacy two-spike, 700 SEK or client-built-system policy', () => {

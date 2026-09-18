@@ -66,7 +66,7 @@ function syntheticLock() {
         predictions: [
           {
             race_entry_id: `entry-${leg}-a`, blind_probability: 0.6, uncertainty_low: 0.5, uncertainty_high: 0.7,
-            raw_rank: 1, abcd_group: 'A', assessment_confidence: 0.7, reasoning: 'Stronger supplied capacity and form evidence.'
+            raw_rank: 1, abcd_group: 'A', assessment_confidence: 0.7, key_unknowns: ['No direct X-Labs sample in this context.'], reasoning: 'Stronger supplied capacity and form evidence.'
           },
           {
             race_entry_id: `entry-${leg}-b`, blind_probability: 0.4, uncertainty_low: 0.3, uncertainty_high: 0.5,
@@ -85,6 +85,8 @@ test('Step 1 lock validates exact eight-leg active-entry identity and canonicali
   assert.equal(normalized.legs.length, 8);
   assert.deepEqual(normalized.legs[0].predictions.map((item) => item.race_entry_id), ['entry-1-a', 'entry-1-b']);
   assert.equal(normalized.legs[0].predictions.some((item) => item.race_entry_id.includes('scratched')), false);
+  assert.deepEqual(normalized.legs[0].predictions[0].key_unknowns, ['No direct X-Labs sample in this context.']);
+  assert.equal(Object.hasOwn(normalized.legs[0].predictions[1], 'key_unknowns'), false);
 });
 
 test('Step 1 lock uses one strict snake_case wire contract', async () => {
@@ -207,6 +209,7 @@ test('Step 1 prompt v3 is provider-neutral at core and forbids outside/current-m
     assert.match(prompt, /Do not browse the web/);
     assert.match(prompt, /Missing X-Labs.*must never reduce a horse's baseline strength/s);
     assert.match(prompt, /blind_probability/);
+    assert.match(prompt, /key_unknowns/);
     assert.match(prompt, /kentaurai-step1-lock-v1/);
     assert.match(prompt, /step1-prompt-v3-d2/);
     assert.match(prompt, /Do not use or discuss current streck/);

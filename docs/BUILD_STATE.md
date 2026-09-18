@@ -7,16 +7,16 @@ Updated: 2026-09-18
 - Worker: `kentaurai-api`.
 - D1: `kentaurai`.
 - R2: `kentaurai-raw`.
-- Production source before F4: main `8365f5aa65c308f73c864f686af71d5b8464e481`, Worker entrypoint `src/worker-v075.js`.
-- Production release #58 completed successfully after F3. Full QA, schema verification, Worker deploy, `/health`, `/app/login` and private F3/analysis/replay route protection passed.
+- F4 application source merged at `fe2fddf9cd00e85e45b562b1617a137fd3288515`; release bookkeeping main is `147a4b0efd1893c401b41815b768efe2e2c1fa92`.
+- Worker entrypoint is `src/worker-v076.js` with `ANALYSIS_WORKFLOW_MODE=v3`.
+- Production release #59 completed successfully. Full QA, Cloudflare validation, schema verification, Worker deploy, `/health`, `/app/login`, F4 Step 2 bundle protection and existing private analysis/replay route checks passed.
 - Production schema is current through migration `0025_post_race_learning_f2.sql`.
-- F1 replay/calibration, F2 post-race learning diagnostics and F3 private workflow/observability are production-live.
+- F1 replay/calibration, F2 post-race learning diagnostics, F3 private workflow/observability and F4 v3 cutover are production-live.
 - Historical official/X-Labs jobs keep their durable cursors. No build/release may reset, recreate or silently resume stopped historical work.
 
-## F4 candidate - v3 cutover, legacy deprecation and release hardening
-- Branch: `feat/v3-cutover-f4`.
-- Candidate Worker entrypoint: `src/worker-v076.js`.
-- Candidate default: `ANALYSIS_WORKFLOW_MODE=v3`.
+## F4 live - v3 cutover, legacy deprecation and release hardening
+- Production Worker entrypoint: `src/worker-v076.js`.
+- Production default: `ANALYSIS_WORKFLOW_MODE=v3`.
 - Controlled rollback value: `ANALYSIS_WORKFLOW_MODE=legacy_v2`. Rollback requires a reviewed production release; there is no automatic fallback.
 - The normal creation workflow is v3: deterministic pre-market pack -> server-sealed Step 1 -> optional late-fact revision -> self-contained Step 2 bundle -> Step 2 interpretation -> canonical decision -> deterministic exact-three-spike optimizer.
 - The Step 2 bundle contains the exact persisted sealed Step 1 document plus its bound verified market files. New Step 2 work therefore does not rely on reconstructing Step 1 from conversation memory.
@@ -39,7 +39,7 @@ Updated: 2026-09-18
 - F1 replay/calibration: complete and deployed.
 - F2 post-race/learning evaluation: complete and deployed.
 - F3 private UI/diagnostics/observability: complete and deployed.
-- F4 v3 cutover/deprecation/release hardening: current candidate build.
+- F4 v3 cutover/deprecation/release hardening: complete and deployed.
 
 ## Active invariants
 - Raw facts, deterministic features and AI judgments remain separate.
@@ -52,12 +52,12 @@ Updated: 2026-09-18
 - Learning requires repeated evidence; one result never changes weights automatically.
 - Real provider payloads, real reference exports, private editorial provenance and secrets never enter public GitHub.
 
-## F4 release gate
-Before F4 may be called production-live:
+## F4 release verification
+F4 is production-live. The cutover was accepted after:
 1. Full exact-head CI and architecture review must pass.
 2. Synthetic v3 pack/lock/market/Step2/optimizer integration and private-auth/cutover tests must pass.
 3. Legacy read compatibility must remain intact while new legacy creation is disabled.
 4. Documentation and active prompts must contain no contradictory two-spike/declared-unsealed/current legacy policy.
 5. User must explicitly authorize merge/deploy.
 6. Controlled release must verify Worker v076, v3 health mode, login/private auth, F4 bundle route and legacy creation cutover.
-7. One private dry-run may be performed only as a bounded verification; no historical replay/backfill reset or resume.
+7. No historical replay/backfill reset or resume occurred. A bounded private dry-run remains the separate operational acceptance check when a suitable private current/reference round is available.

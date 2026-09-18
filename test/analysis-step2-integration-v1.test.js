@@ -16,6 +16,7 @@ import {
   ANALYSIS_STEP2_VERSION,
   getAnalysisStep2PromptV3
 } from '../src/analysis-step2-prompt-v3.js';
+import { ANALYSIS_MARKET_PACK_V3_VERSION } from '../src/analysis-market-pack-v3.js';
 
 globalThis.crypto ??= webcrypto;
 
@@ -53,7 +54,7 @@ function marketPack() {
   return {
     manifest: {
       contract_version: 'kentaurai-market-pack-v3',
-      pack_version: 'market-pack-v3-d4',
+      pack_version: ANALYSIS_MARKET_PACK_V3_VERSION,
       round_id: 'round-e3',
       cutoff: '2099-07-01T10:30:00.000Z',
       lock: {
@@ -68,7 +69,7 @@ function marketPack() {
         name: `${String(leg).padStart(2, '0')}_leg_${leg}_market.json`,
         payload: {
           contract_version: 'kentaurai-market-pack-v3',
-          pack_version: 'market-pack-v3-d4',
+          pack_version: ANALYSIS_MARKET_PACK_V3_VERSION,
           round_id: 'round-e3',
           lock_id: 'lock-e3',
           lock_hash: LOCK_HASH,

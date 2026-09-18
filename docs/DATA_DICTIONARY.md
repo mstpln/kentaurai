@@ -4,11 +4,19 @@
 The active analysis contracts are the v3 pack, sealed Step 1 lock/revisions, market pack, Step 2 result, canonical decision, optimizer and integrated analysis records. The F4 Step 2 transport bundles the exact sealed Step 1 with verified market files but does not create a new factual source family. Legacy `analysis_context` / v1-v2 submission rows remain readable history and are not valid new-creation contracts in default v3 mode. New systems are canonical optimizer outputs with exactly three spike legs; old legacy rows retain their historical semantics without being rewritten.
 
 
-Version: 1.0
-Updated: 2026-09-12
-Scope: verified public field inventory for current official, X-Labs, normalized and analysis-context families.
+Version: 1.1
+Updated: 2026-09-18
+Scope: verified public source-field inventory plus post-F4 v3 analytical status.
 
 This is the field-level companion to `docs/DATA_INVENTORY.md`. It contains only generic source-family names, generic verified field identifiers/paths, semantics, mapping/use status and provenance rules. It contains no real racing payload values, private editorial provenance, credentials or private source identities.
+
+The large source-field table below was created before the v3 feature programme and its `status` column describes the state of that raw source field/direct mapping at the inventory baseline, not whether a later deterministic v3 family now consumes equivalent evidence. Do not interpret an older `build_candidate` row as proof that the corresponding v3 feature is unimplemented. Post-F4 analytical truth is:
+
+- official snapshot/as-of selection, race-proposition parsing, relevant history and v3 sports feature families are active;
+- X-Labs interval/evidence/continuous-position families C1-C3 are active and partial-coverage safe;
+- named trip labels C4 remain gated/null;
+- D1-D4/E1-E3/F1-F4 contracts are active, including sealed Step 1, market delta, decision layer, exact-three-spike optimizer, replay and post-race diagnostics;
+- unverified source semantics such as slipstream and source trend remain unpromoted.
 
 ## Status contract
 

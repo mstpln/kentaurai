@@ -32,17 +32,19 @@ test('v3 target contract identifiers are explicit and stable', () => {
 });
 
 test('v3 target policy is exact-three-spikes while legacy two-spike reads remain compatible', () => {
-  assert.equal(ANALYSIS_V3_TARGET_POLICY.status, 'target_not_active');
+  assert.equal(ANALYSIS_V3_TARGET_POLICY.status, 'active_default');
   assert.equal(ANALYSIS_V3_TARGET_POLICY.exactSpikeCount, 3);
   assert.deepEqual(ANALYSIS_V3_TARGET_POLICY.defaultMainBudgetSek, { min: 150, max: 250 });
   assert.equal(ANALYSIS_V3_TARGET_POLICY.alternativesRequired, false);
   assert.equal(ANALYSIS_V3_TARGET_POLICY.optimizerProbabilityField, 'decision_probability');
   assert.equal(ANALYSIS_V3_TARGET_POLICY.missingOptionalEvidenceIsNeutral, true);
 
-  assert.equal(ANALYSIS_V3_LEGACY_BOUNDARY.status, 'legacy_until_v3_cutover');
+  assert.equal(ANALYSIS_V3_LEGACY_BOUNDARY.status, 'read_only_after_v3_cutover');
   assert.equal(ANALYSIS_V3_LEGACY_BOUNDARY.currentInputContract, 'kentaurai-analysis-input-v2');
   assert.equal(ANALYSIS_V3_LEGACY_BOUNDARY.currentSubmissionContract, 'kentaurai-analysis-v2');
   assert.equal(ANALYSIS_V3_LEGACY_BOUNDARY.existingTwoSpikeV85MainReadable, true);
+  assert.equal(ANALYSIS_V3_LEGACY_BOUNDARY.newLegacyCreationEnabled, false);
+  assert.equal(ANALYSIS_V3_LEGACY_BOUNDARY.rollbackMode, 'legacy_v2');
   assert.equal(ANALYSIS_V3_LEGACY_BOUNDARY.v3WritersMayCreateTwoSpikeSystems, false);
   assert.equal(ANALYSIS_V3_LEGACY_BOUNDARY.rewriteHistoricalSystems, false);
 });
