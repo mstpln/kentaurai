@@ -23,7 +23,7 @@ test('E2 admin route fails closed when ADMIN_TOKEN is not configured', async () 
   assert.equal((await response.json()).error, 'service_unavailable');
 });
 
-test('E2 validates required decision and line-price configuration before database queries', async () => {
+test('E2 validates required decision parent before database or policy-config work', async () => {
   let queries = 0;
   const env = {
     ADMIN_TOKEN: 'synthetic-secret',
@@ -34,13 +34,6 @@ test('E2 validates required decision and line-price configuration before databas
   }), env, {});
   assert.equal(response.status, 400);
   assert.match((await response.json()).message, /decision_run_id is required/);
-  assert.equal(queries, 0);
-
-  const responseWithDecision = await worker.fetch(new Request(`${ADMIN_URL}?decision_run_id=decision-e2`, {
-    headers: { authorization: 'Bearer synthetic-secret' }
-  }), env, {});
-  assert.equal(responseWithDecision.status, 400);
-  assert.match((await responseWithDecision.json()).message, /line_price_sek is required/);
   assert.equal(queries, 0);
 });
 
