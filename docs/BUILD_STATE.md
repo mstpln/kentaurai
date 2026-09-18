@@ -4,6 +4,16 @@ Version: 0.6.0
 Updated: 2026-09-18
 
 ## Current production truth
+## App performance candidate
+- Branch: `perf/private-app-navigation-v1`.
+- Candidate Worker entrypoint: `src/worker-v077.js`, delegating all F4 behavior to `worker-v076.js`.
+- Scope: faster private-app navigation only; no analysis-policy, source-ingestion, replay or learning changes.
+- Adds in-session GET caching/in-flight de-duplication, idle prefetch of first navigation pages, hover/focus detail prefetch and immediate skeleton feedback.
+- Entity detail navigation no longer enriches up to 100 historical starts before rendering the initial profile; paginated history remains loaded on demand.
+- Track overview defers the expensive home-trainer scan to the dedicated Hemmatränare tab and avoids a duplicate track metadata query.
+- Migration `0026_app_read_performance.sql` adds indexes for the hottest entity/track/history read paths.
+- Production release workflow is prepared to verify worker-v077 and migration/index presence, but no deployment occurs without explicit authorization.
+
 - Worker: `kentaurai-api`.
 - D1: `kentaurai`.
 - R2: `kentaurai-raw`.
