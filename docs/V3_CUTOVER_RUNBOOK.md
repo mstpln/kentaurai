@@ -29,7 +29,7 @@ F4 makes the sealed v3 workflow the normal KentaurAI analysis path while preserv
 8. Verify all v3 private routes remain protected, including the F4 self-contained Step 2 bundle.
 9. Verify legacy analysis creation endpoints remain auth-protected and, with authorized dry-run credentials, return the F4 deprecation response rather than creating data.
 10. Perform at most one bounded private synthetic/dry-run workflow verification. Do not use a real race result to tune behavior.
-11. Confirm no replay, historical backfill reset/resume or X-Labs historical job was started by the release.
+11. Confirm no historical replay/backfill reset or resume occurred and no X-Labs historical job was started by the release.
 
 ## Rollback
 Rollback is explicit, not automatic.
