@@ -74,6 +74,7 @@ Required shape:
           "raw_rank": 1,
           "abcd_group": "A",
           "assessment_confidence": 0.0,
+          "key_unknowns": ["<important unknown evidence or empty array>"],
           "reasoning": "<concise market-blind reasoning grounded in supplied evidence>"
         }
       ]
@@ -81,7 +82,7 @@ Required shape:
   ]
 }
 
-The legs array must contain exactly legs 1-8. scenario weights, when scenarios are supplied, must sum to 1 within each leg. Use null or an empty array where a non-required narrative/scenario field is genuinely unsupported; never invent evidence to fill it.`;
+The legs array must contain exactly legs 1-8. Every new prediction must include key_unknowns as an array (use [] when no material unknown is identified). scenario weights, when scenarios are supplied, must sum to 1 within each leg. Use null or an empty array where a non-required narrative/scenario field is genuinely unsupported; never invent evidence to fill it.`;
 
 export function getAnalysisStep1PromptV3(providerValue = 'openai') {
   const provider = String(providerValue || '').trim().toLowerCase();
