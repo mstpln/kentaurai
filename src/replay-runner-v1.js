@@ -176,7 +176,7 @@ async function nextSportsTarget(env, row) {
   const cursorId = row.cursor_target_id || '';
   const event = eventExpression('r');
   return env.DB.prepare(`
-    SELECT ara.id AS target_id,ara.race_id,ara.model_version_id,ara.data_snapshot_at,
+    SELECT ara.id AS target_id,ara.race_id,ara.model_version_id,ara.data_snapshot_at,ara.created_at AS analysis_created_at,
            mv.feature_version,mv.prompt_version,mv.config_json,mv.ai_provider,mv.ai_model,
            r.race_date,${event} AS event_at
     FROM ai_race_analyses ara
@@ -199,7 +199,7 @@ async function nextDecisionTarget(env, row) {
   const cursorEvent = row.cursor_event_at || '0000-01-01T00:00:00Z';
   const cursorId = row.cursor_target_id || '';
   return env.DB.prepare(`
-    SELECT adr.id AS target_id,adr.game_round_id,adr.lock_id,adr.lock_hash,adr.market_cutoff,
+    SELECT adr.id AS target_id,adr.game_round_id,adr.lock_id,adr.lock_hash,adr.market_cutoff,adr.created_at AS decision_created_at,
            adr.decision_fingerprint,adr.decision_json,adr.decision_probability_version,
            asl.created_at AS lock_created_at,asl.pack_as_of,
            gr.round_date,
@@ -323,7 +323,11 @@ function featureCoverage(featureMap) {
 async function buildSportsEvaluation(env, run, config, target) {
   const eventAt = isoInstant(target.event_at, 'event_at');
   const forecastAsOf = isoInstant(target.data_snapshot_at, 'forecast_as_of');
+  const referenceTargets = new Set(config.reference_targets || []);
+  const isReference = referenceTargets.has(target.race_id) || referenceTargets.has(target.target_id);
   if (Date.parse(forecastAsOf) >= Date.parse(eventAt)) throw new Error('forecast_not_strictly_pre_event');
+  const analysisCreatedAt = isoInstant(target.analysis_created_at, 'analysis_created_at');
+  if (!isReference && Date.parse(analysisCreatedAt) >= Date.parse(eventAt)) throw new Error('forecast_record_not_pre_event');
   await assertRaceTargetStateAsOfV1(env,target.race_id,forecastAsOf);
 
   const distribution = await sportsDistribution(env,target);
@@ -338,8 +342,6 @@ async function buildSportsEvaluation(env, run, config, target) {
   const manifest = sportsFeatureManifest(target.config_json);
   const coverage = featureCoverage(features);
   const score = scoreProbabilityDistributionV1(distribution,winner.race_entry_id);
-  const referenceTargets = new Set(config.reference_targets || []);
-  const isReference = referenceTargets.has(target.race_id) || referenceTargets.has(target.target_id);
   const prior = await priorScoredGroups(env,run.id,eventAt);
   const wf = walkForwardState(config,prior,isReference);
 
@@ -420,6 +422,8 @@ async function buildDecisionEvaluations(env, run, config, target) {
   const decision=parseDecisionDocument(target);
   const references=new Set(config.reference_targets || []);
   const isReference=references.has(target.game_round_id) || references.has(target.target_id);
+  const decisionCreatedAt=isoInstant(target.decision_created_at,'decision_created_at');
+  if (!isReference && Date.parse(decisionCreatedAt)>=Date.parse(eventAt)) throw new Error('decision_run_not_pre_event');
   const prior=await priorScoredGroups(env,run.id,eventAt);
   const wf=walkForwardState(config,prior,isReference);
 
@@ -769,7 +773,7 @@ export async function stepReplayRunV1(env,runId,options={}) {
       'unique_official_winner_unavailable_as_of_source_cutoff',
       'eight_unique_official_winners_unavailable_as_of_source_cutoff',
       'sealed_blind_forecast_not_pre_event','market_decision_forecast_not_pre_event',
-      'forecast_not_strictly_pre_event'
+      'forecast_not_strictly_pre_event','forecast_record_not_pre_event','decision_run_not_pre_event'
     ];
     if (!failClosedReasons.some((prefix)=>reason.startsWith(prefix))) {
       await env.DB.prepare('UPDATE replay_runs SET last_error=?,updated_at=? WHERE id=?').bind(reason.slice(0,2000),now,run.id).run();
