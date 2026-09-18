@@ -322,7 +322,11 @@ test('F1 V85/V86 decision replay is reproducible, walk-forward and persists exac
 test('F1 rejects a decision replay whose market cutoff is after race start', async () => {
   const { db, env } = createTestEnv();
   seedDecisionRound(db, 1);
-  db.prepare("UPDATE analysis_decision_runs SET market_cutoff='2099-02-01T13:00:00.000Z' WHERE id='decision-run-1'").run();
+  const row = db.prepare("SELECT decision_json FROM analysis_decision_runs WHERE id='decision-run-1'").get();
+  const decision = JSON.parse(row.decision_json);
+  decision.market_cutoff = '2099-02-01T13:00:00.000Z';
+  db.prepare("UPDATE analysis_decision_runs SET market_cutoff=?,decision_json=? WHERE id='decision-run-1'")
+    .run('2099-02-01T13:00:00.000Z', JSON.stringify(decision));
 
   await assert.rejects(
     () => runDecisionReplayV1(env, {
