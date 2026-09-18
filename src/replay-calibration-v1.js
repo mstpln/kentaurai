@@ -818,12 +818,13 @@ export async function persistReplayResultV1(env, result, options = {}) {
     env.DB.prepare(`
       INSERT INTO replay_runs (
         id,contract_version,replay_version,track,status,config_json,version_metadata_json,
-        cohort_fingerprint,result_json,result_fingerprint,target_count,fold_count,created_at
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        cohort_fingerprint,evaluation_fingerprint,result_json,result_fingerprint,target_count,fold_count,created_at
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).bind(
       id,result.contract_version,result.replay_version,result.track,result.status,
       stableFeatureJson(result.config),stableFeatureJson(result.version_metadata),result.cohort_fingerprint,
-      stableFeatureJson(resultForStorage),result.result_fingerprint,result.target_count,result.fold_count,createdAt
+      result.evaluation_fingerprint,stableFeatureJson(resultForStorage),result.result_fingerprint,
+      result.target_count,result.fold_count,createdAt
     )
   ];
   for (const evaluation of evaluations) {
