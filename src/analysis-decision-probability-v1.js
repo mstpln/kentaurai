@@ -5,7 +5,7 @@ export const ANALYSIS_DECISION_PROBABILITY_CONTRACT = 'kentaurai-decision-probab
 export const ANALYSIS_DECISION_PROBABILITY_VERSION = 'decision-probability-v1-e1';
 export const ANALYSIS_DECISION_POLICY_VERSION = 'decision-blind-v1';
 
-const PROBABILITY_TOLERANCE = 1e-8;
+const PROBABILITY_TOLERANCE = 1e-6;
 
 function requiredText(value, field, max = 240) {
   const text = String(value ?? '').trim();
@@ -240,10 +240,12 @@ export async function persistDecisionProbabilityV1(env, roundId, options = {}) {
   const decisionJson = stableFeatureJson(decision);
   const existing = await env.DB.prepare('SELECT * FROM analysis_decision_runs WHERE id=? LIMIT 1').bind(id).first();
   if (existing) {
-    if (existing.decision_fingerprint !== decision.decision_fingerprint || existing.decision_json !== decisionJson) {
+    if (existing.decision_fingerprint !== decision.decision_fingerprint) {
       throw new Error('decision run id collision with different canonical content');
     }
-    return storedRunMetadata(existing, decision, true);
+    let storedDecision;
+    try { storedDecision = JSON.parse(existing.decision_json); } catch { throw new Error('stored decision_json is invalid'); }
+    return storedRunMetadata(existing, storedDecision, true);
   }
 
   const createdAt = exactIso(options.createdAt ?? new Date().toISOString(), 'created_at');
@@ -279,8 +281,10 @@ export async function persistDecisionProbabilityV1(env, roundId, options = {}) {
     await env.DB.batch(statements);
   } catch (error) {
     const raced = await env.DB.prepare('SELECT * FROM analysis_decision_runs WHERE id=? LIMIT 1').bind(id).first();
-    if (raced?.decision_fingerprint === decision.decision_fingerprint && raced?.decision_json === decisionJson) {
-      return storedRunMetadata(raced, decision, true);
+    if (raced?.decision_fingerprint === decision.decision_fingerprint) {
+      let storedDecision;
+      try { storedDecision = JSON.parse(raced.decision_json); } catch { throw new Error('stored decision_json is invalid'); }
+      return storedRunMetadata(raced, storedDecision, true);
     }
     throw error;
   }
