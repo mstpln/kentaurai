@@ -108,6 +108,49 @@ test('E2 stable ID ordering resolves equal-probability ties independently of inp
   }
 });
 
+
+test('E2 keeps exact3 when only two legs have enormous favorites', async () => {
+  const decision = syntheticDecision({ fieldSize: 3 });
+  for (let leg = 0; leg < 2; leg += 1) {
+    decision.legs[leg].entries = [
+      { race_entry_id: `entry-${leg + 1}-a`, decision_probability: 0.96 },
+      { race_entry_id: `entry-${leg + 1}-b`, decision_probability: 0.03 },
+      { race_entry_id: `entry-${leg + 1}-c`, decision_probability: 0.01 }
+    ];
+  }
+  const result = await optimize(decision);
+  assert.equal(result.system.spike_count, 3);
+  assert.equal(result.system.legs.filter((leg) => leg.selected_count === 1).length, 3);
+});
+
+test('E2 still selects exactly three spikes when four legs look spike-like', async () => {
+  const decision = syntheticDecision({ fieldSize: 3 });
+  for (let leg = 0; leg < 4; leg += 1) {
+    decision.legs[leg].entries = [
+      { race_entry_id: `entry-${leg + 1}-a`, decision_probability: 0.98 },
+      { race_entry_id: `entry-${leg + 1}-b`, decision_probability: 0.015 },
+      { race_entry_id: `entry-${leg + 1}-c`, decision_probability: 0.005 }
+    ];
+  }
+  const result = await optimize(decision);
+  assert.equal(result.system.spike_count, 3);
+  assert.equal(result.system.three_spike_legs.length, 3);
+});
+
+test('E2 accepts a budget that exactly equals the selected candidate cost', async () => {
+  const first = await optimize(syntheticDecision({ fieldSize: 3 }), {
+    target_budget_min_sek: 1,
+    max_budget_sek: 250
+  });
+  const exact = await optimize(syntheticDecision({ fieldSize: 3 }), {
+    target_budget_min_sek: 1,
+    max_budget_sek: first.system.cost_sek
+  });
+  assert.equal(exact.system.cost_sek, first.system.cost_sek);
+  assert.equal(exact.system.budget_unused_sek, 0);
+  assert.equal(exact.system.spike_count, 3);
+});
+
 test('E2 does not force budget spend when extra rows add no P8 coverage', async () => {
   const result = await optimize(syntheticDecision({ fieldSize: 4, zeroTail: true }));
   assert.equal(result.system.row_count, 32);
