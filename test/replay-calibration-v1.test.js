@@ -1,0 +1,293 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { webcrypto } from 'node:crypto';
+import { createTestEnv } from './helpers/d1.js';
+import {
+  REPLAY_CONTRACT_VERSION,
+  REPLAY_VERSION,
+  buildAblationFeatureSetsV1,
+  buildCalibrationSummaryV1,
+  buildWalkForwardFoldsV1,
+  persistReplayResultV1,
+  runDecisionReplayV1,
+  runSportsFeatureReplayV1,
+  scoreMulticlassForecastV1
+} from '../src/replay-calibration-v1.js';
+
+globalThis.crypto ??= webcrypto;
+
+function seedSource(db, id, fetchedAt, sourceType = 'official_provider') {
+  db.prepare(`
+    INSERT INTO source_records (id,source_type,external_id,fetched_at,quality_status)
+    VALUES (?,?,?,?,?)
+  `).run(id, sourceType, id, fetchedAt, sourceType === 'official_provider' ? 'normalized_verified_subset' : 'synthetic');
+}
+
+test('F1 multiclass log loss, Brier and calibration are deterministic', () => {
+  const input = {
+    winnerEntryId: 'entry-a',
+    entries: [
+      { race_entry_id: 'entry-b', probability: 0.3 },
+      { race_entry_id: 'entry-a', probability: 0.7 }
+    ]
+  };
+  const first = scoreMulticlassForecastV1(input);
+  const second = scoreMulticlassForecastV1(input);
+  assert.deepEqual(first, second);
+  assert.equal(first.winner_rank, 1);
+  assert.equal(first.top1_hit, true);
+  assert.ok(Math.abs(first.log_loss - (-Math.log(0.7))) < 1e-10);
+  assert.ok(Math.abs(first.brier_score - 0.18) < 1e-10);
+
+  const calibration = buildCalibrationSummaryV1([
+    { winner_entry_id: 'entry-a', forecast: first.forecast },
+    { winner_entry_id: 'entry-b', forecast: first.forecast }
+  ], 5);
+  assert.equal(calibration.bin_count, 5);
+  assert.equal(calibration.prediction_count, 4);
+  assert.ok(calibration.expected_calibration_error >= 0);
+});
+
+test('F1 walk-forward folds are chronological expanding windows with no random split', () => {
+  const targets = Array.from({ length: 7 }, (_, index) => ({
+    target_group_id: `g${index + 1}`,
+    target_at: `2099-01-${String(index + 1).padStart(2, '0')}T12:00:00Z`
+  }));
+  const result = buildWalkForwardFoldsV1(targets, {
+    min_train_groups: 2,
+    calibration_groups: 1,
+    test_groups: 2,
+    step_groups: 2
+  });
+  assert.equal(result.folds.length, 2);
+  assert.deepEqual(result.folds[0].train_group_ids, ['g1','g2']);
+  assert.deepEqual(result.folds[0].calibration_group_ids, ['g3']);
+  assert.deepEqual(result.folds[0].test_group_ids, ['g4','g5']);
+  assert.deepEqual(result.folds[1].train_group_ids, ['g1','g2','g3','g4']);
+  assert.deepEqual(result.folds[1].calibration_group_ids, ['g5']);
+  assert.deepEqual(result.folds[1].test_group_ids, ['g6','g7']);
+});
+
+test('F1 ablation variants can change only their declared feature family', () => {
+  const plan = buildAblationFeatureSetsV1(
+    ['capacity','form','equipment_response'],
+    ['capacity','form'],
+    [
+      { id: 'remove-form', feature_family: 'form', mode: 'remove' },
+      { id: 'add-equipment', feature_family: 'equipment_response', mode: 'add' }
+    ]
+  );
+  assert.deepEqual(plan.variants.find((variant) => variant.id === 'baseline').feature_families, ['capacity','form']);
+  assert.deepEqual(plan.variants.find((variant) => variant.id === 'remove-form').feature_families, ['capacity']);
+  assert.deepEqual(plan.variants.find((variant) => variant.id === 'add-equipment').feature_families, ['capacity','equipment_response','form']);
+
+  assert.throws(
+    () => buildAblationFeatureSetsV1(['capacity','form'], ['capacity'], [{ id:'bad', feature_family:'capacity', mode:'add' }]),
+    /non-baseline family/
+  );
+});
+
+function seedSportsReplay(db) {
+  db.prepare("INSERT INTO tracks (id,canonical_name) VALUES ('track-f1','F1 Track')").run();
+  for (const horse of ['a','b']) {
+    db.prepare('INSERT INTO horses (id,canonical_name) VALUES (?,?)').run(`horse-${horse}`, `Horse ${horse}`);
+  }
+
+  seedSource(db, 'snap-a-early', '2098-12-01T10:00:00Z');
+  seedSource(db, 'snap-b-early', '2098-12-01T10:00:00Z');
+  db.prepare(`
+    INSERT INTO horse_stat_snapshots
+      (id,horse_id,observed_at,snapshot_scope,starts,wins,start_points,source_record_id)
+    VALUES
+      ('stat-a-early','horse-a','2098-12-01T10:00:00Z','life',20,6,70,'snap-a-early'),
+      ('stat-b-early','horse-b','2098-12-01T10:00:00Z','life',20,4,30,'snap-b-early')
+  `).run();
+
+  for (let index = 1; index <= 3; index += 1) {
+    const day = String(index).padStart(2, '0');
+    const raceId = `sports-race-${index}`;
+    const start = `2099-01-${day}T12:00:00Z`;
+    db.prepare(`
+      INSERT INTO races
+        (id,track_id,race_date,race_number,scheduled_start_at,distance_m,start_method,status,source_quality)
+      VALUES (?,?,?,?,?,2140,'auto','finished','normalized_verified_subset')
+    `).run(raceId, 'track-f1', `2099-01-${day}`, index, start);
+    for (const [offset, horse] of ['a','b'].entries()) {
+      const entryId = `sports-entry-${index}-${horse}`;
+      db.prepare(`
+        INSERT INTO race_entries
+          (id,race_id,horse_id,start_number,actual_lane,handicap_m,actual_start_distance_m,scratched,data_quality)
+        VALUES (?,?,?,?,?,0,2140,0,'synthetic')
+      `).run(entryId, raceId, `horse-${horse}`, offset + 1, offset + 1);
+      const resultSource = `sports-result-source-${index}-${horse}`;
+      seedSource(db, resultSource, `2099-01-${day}T13:00:00Z`);
+      db.prepare(`
+        INSERT INTO race_results
+          (race_entry_id,placing,placing_text,result_status,source_record_id)
+        VALUES (?,?,?,?,?)
+      `).run(entryId, horse === 'a' ? 1 : 2, horse === 'a' ? '1' : '2', 'official', resultSource);
+    }
+  }
+}
+
+const capacityProducer = {
+  version: 'synthetic-capacity-producer-v1',
+  async predict({ entries }) {
+    const raw = entries.map((entry) => {
+      const points = Number(entry.features.capacity?.metrics?.official_start_points?.value ?? 1);
+      return { race_entry_id: entry.race_entry_id, points: Math.max(0.001, points) };
+    });
+    const total = raw.reduce((sum, row) => sum + row.points, 0);
+    return raw.map((row) => ({ race_entry_id: row.race_entry_id, probability: row.points / total }));
+  }
+};
+
+test('F1 sports replay reconstructs as-of features and excludes future official snapshots', async () => {
+  const { db, env } = createTestEnv();
+  seedSportsReplay(db);
+  const config = {
+    from: '2099-01-01T00:00:00Z',
+    to: '2099-01-03T23:59:59Z',
+    baseline_families: ['capacity'],
+    walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
+  };
+
+  const before = await runSportsFeatureReplayV1(env, config, capacityProducer);
+  assert.equal(before.contract_version, REPLAY_CONTRACT_VERSION);
+  assert.equal(before.replay_version, REPLAY_VERSION);
+  assert.equal(before.track, 'sports_feature');
+  assert.equal(before.fold_count, 1);
+  assert.equal(before.baseline_summary.target_count, 1);
+
+  seedSource(db, 'snap-a-future', '2099-02-01T10:00:00Z');
+  db.prepare(`
+    INSERT INTO horse_stat_snapshots
+      (id,horse_id,observed_at,snapshot_scope,starts,wins,start_points,source_record_id)
+    VALUES ('stat-a-future','horse-a','2099-02-01T10:00:00Z','life',21,20,999,'snap-a-future')
+  `).run();
+
+  const after = await runSportsFeatureReplayV1(env, config, capacityProducer);
+  assert.equal(after.result_fingerprint, before.result_fingerprint);
+  assert.deepEqual(after.baseline_summary, before.baseline_summary);
+});
+
+function seedDecisionRound(db, index) {
+  const roundId = `decision-round-${index}`;
+  const day = String(index).padStart(2, '0');
+  const roundDate = `2099-02-${day}`;
+  const lockId = `decision-lock-${index}`;
+  const lockHash = `sha256:${String(index).repeat(64).slice(0,64)}`;
+  const marketFingerprint = `sha256:${String(index + 3).repeat(64).slice(0,64)}`;
+  const marketCutoff = `${roundDate}T10:00:00.000Z`;
+
+  db.prepare('INSERT INTO game_rounds (id,game_type,round_date,status) VALUES (?,?,?,?)')
+    .run(roundId, 'V85', roundDate, 'finished');
+  db.prepare(`
+    INSERT INTO analysis_step1_locks (
+      id,game_round_id,contract_version,pack_id,pack_as_of,facts_fingerprint,provider,model,prompt_version,lock_json,lock_hash,created_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    lockId, roundId, 'kentaurai-step1-lock-v1', `pack-${index}`, `${roundDate}T09:00:00.000Z`,
+    `sha256:${'f'.repeat(64)}`, 'openai', 'synthetic', 'step1-prompt-v3-d2', '{}', lockHash, `${roundDate}T09:05:00.000Z`
+  );
+
+  const decisionLegs = [];
+  for (let leg = 1; leg <= 8; leg += 1) {
+    const raceId = `decision-race-${index}-${leg}`;
+    const start = `${roundDate}T12:${String(leg).padStart(2,'0')}:00.000Z`;
+    db.prepare(`
+      INSERT INTO races (id,track_id,race_date,race_number,scheduled_start_at,status)
+      VALUES (?,?,?,?,?,'finished')
+    `).run(raceId, null, roundDate, leg, start);
+    db.prepare('INSERT INTO game_legs (game_round_id,leg_number,race_id) VALUES (?,?,?)').run(roundId, leg, raceId);
+
+    const entries = [];
+    for (const [offset, suffix] of ['a','b'].entries()) {
+      const horseId = `decision-horse-${index}-${leg}-${suffix}`;
+      const entryId = `decision-entry-${index}-${leg}-${suffix}`;
+      db.prepare('INSERT INTO horses (id,canonical_name) VALUES (?,?)').run(horseId, horseId);
+      db.prepare('INSERT INTO race_entries (id,race_id,horse_id,start_number,scratched) VALUES (?,?,?,?,0)')
+        .run(entryId, raceId, horseId, offset + 1);
+      const sourceId = `decision-result-source-${index}-${leg}-${suffix}`;
+      seedSource(db, sourceId, `${roundDate}T14:00:00.000Z`);
+      db.prepare('INSERT INTO race_results (race_entry_id,placing,placing_text,result_status,source_record_id) VALUES (?,?,?,?,?)')
+        .run(entryId, suffix === 'a' ? 1 : 2, suffix === 'a' ? '1' : '2', 'official', sourceId);
+      entries.push({
+        race_entry_id: entryId,
+        blind_probability: suffix === 'a' ? 0.6 : 0.4,
+        decision_probability: suffix === 'a' ? 0.65 : 0.35
+      });
+    }
+    decisionLegs.push({ leg_number: leg, race_id: raceId, entries });
+  }
+
+  const decisionFingerprint = `sha256:${String(index + 6).repeat(64).slice(0,64)}`;
+  const decision = {
+    contract_version: 'kentaurai-decision-probability-v1',
+    decision_probability_version: 'decision-probability-v1-e1',
+    policy_version: 'decision-blind-v1',
+    round_id: roundId,
+    lock_id: lockId,
+    lock_hash: lockHash,
+    market_fingerprint: marketFingerprint,
+    market_cutoff: marketCutoff,
+    decision_fingerprint: decisionFingerprint,
+    legs: decisionLegs
+  };
+  db.prepare(`
+    INSERT INTO analysis_decision_runs (
+      id,game_round_id,lock_id,lock_hash,market_fingerprint,market_cutoff,contract_version,
+      decision_probability_version,policy_version,market_proxy_quality_json,context_reliability_json,
+      decision_json,decision_fingerprint,created_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    `decision-run-${index}`,roundId,lockId,lockHash,marketFingerprint,marketCutoff,
+    'kentaurai-decision-probability-v1','decision-probability-v1-e1','decision-blind-v1','[]','[]',
+    JSON.stringify(decision),decisionFingerprint,`${roundDate}T10:01:00.000Z`
+  );
+}
+
+test('F1 V85/V86 decision replay is reproducible, walk-forward and persists exact version metadata', async () => {
+  const { db, env } = createTestEnv();
+  for (let index = 1; index <= 3; index += 1) seedDecisionRound(db, index);
+
+  const config = {
+    from: '2099-02-01T00:00:00Z',
+    to: '2099-02-03T23:59:59Z',
+    decision_probability_version: 'decision-probability-v1-e1',
+    walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
+  };
+  const first = await runDecisionReplayV1(env, config);
+  const second = await runDecisionReplayV1(env, config);
+  assert.equal(first.result_fingerprint, second.result_fingerprint);
+  assert.deepEqual(first.decision_summary, second.decision_summary);
+  assert.equal(first.fold_count, 1);
+  assert.equal(first.decision_summary.target_count, 8);
+  assert.ok(first.decision_summary.mean_log_loss < first.blind_summary.mean_log_loss);
+  assert.ok(first.decision_summary.mean_brier_score < first.blind_summary.mean_brier_score);
+
+  const saved = await persistReplayResultV1(env, first, { createdAt: '2099-03-01T00:00:00Z' });
+  assert.equal(saved.reused, false);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM replay_runs').get().n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM forecast_evaluations').get().n, 48);
+
+  const retry = await persistReplayResultV1(env, second, { createdAt: '2099-03-02T00:00:00Z' });
+  assert.equal(retry.reused, true);
+  assert.equal(retry.id, saved.id);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM replay_runs').get().n, 1);
+});
+
+test('F1 rejects a decision replay whose market cutoff is after race start', async () => {
+  const { db, env } = createTestEnv();
+  seedDecisionRound(db, 1);
+  db.prepare("UPDATE analysis_decision_runs SET market_cutoff='2099-02-01T13:00:00.000Z' WHERE id='decision-run-1'").run();
+
+  await assert.rejects(
+    () => runDecisionReplayV1(env, {
+      from: '2099-02-01T00:00:00Z',
+      to: '2099-02-01T23:59:59Z',
+      walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
+    }),
+    /market cutoff is after race start/
+  );
+});
