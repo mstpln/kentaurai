@@ -22,7 +22,7 @@ test('performance Worker injects cache, prefetch and immediate loading UI into p
   assert.match(html, /Öppnar profil/);
   assert.match(html, /kentaurai-f3-private-ui-script/);
   assert.doesNotMatch(html, /kentaurai-analysis-export-download-fix/);
-  assert.doesNotMatch(html, /kentaurai-analysis-step1-lock-v3-overlay/);
+  assert.doesNotMatch(html, /kentaurai-step1-lock-v3-overlay/);
   assert.doesNotMatch(html, /\/app\/api\/settings\/analysis-rounds/);
   const match = html.match(/<script id="kentaurai-performance-v1-script">([\s\S]*?)<\/script>/);
   assert.ok(match);
