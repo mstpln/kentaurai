@@ -9,7 +9,7 @@ export const ANALYSIS_V3_CONTRACTS = Object.freeze({
 });
 
 export const ANALYSIS_V3_TARGET_POLICY = Object.freeze({
-  status: 'target_not_active',
+  status: 'active_default',
   supportedGameTypes: Object.freeze(['V85', 'V86']),
   exactSpikeCount: 3,
   defaultMainBudgetSek: Object.freeze({ min: 150, max: 250 }),
@@ -20,10 +20,12 @@ export const ANALYSIS_V3_TARGET_POLICY = Object.freeze({
 });
 
 export const ANALYSIS_V3_LEGACY_BOUNDARY = Object.freeze({
-  status: 'legacy_until_v3_cutover',
+  status: 'read_only_after_v3_cutover',
   currentInputContract: 'kentaurai-analysis-input-v2',
   currentSubmissionContract: 'kentaurai-analysis-v2',
   existingTwoSpikeV85MainReadable: true,
+  newLegacyCreationEnabled: false,
+  rollbackMode: 'legacy_v2',
   rewriteHistoricalSystems: false,
   v3WritersMayCreateTwoSpikeSystems: false
 });
