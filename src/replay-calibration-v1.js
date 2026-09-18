@@ -632,7 +632,9 @@ function validateDecisionDocumentForReplay(row, decision) {
   for (const leg of decision.legs) {
     const blind = normalizeForecastEntries(predictionEntriesFromDecisionLeg(leg, 'blind_probability'));
     const canonical = normalizeForecastEntries(predictionEntriesFromDecisionLeg(leg, 'decision_probability'));
-    if (blind.length !== canonical.length || blind.some((entry, index) => entry.race_entry_id !== canonical[index].race_entry_id)) {
+    const blindIds = [...blind.map((entry) => entry.race_entry_id)].sort(compareId);
+    const canonicalIds = [...canonical.map((entry) => entry.race_entry_id)].sort(compareId);
+    if (blindIds.length !== canonicalIds.length || blindIds.some((id, index) => id !== canonicalIds[index])) {
       throw new Error(`decision ${row.id} blind and canonical entry identities differ`);
     }
     if (row.policy_version === 'decision-blind-v1') {
