@@ -31,7 +31,8 @@ export const REPLAY_WALK_FORWARD_VERSION = 'expanding-window-v1';
 const PROBABILITY_TOLERANCE = 1e-6;
 const LOG_EPSILON = 1e-15;
 const DEFAULT_CALIBRATION_BINS = 10;
-const DEFAULT_MAX_TARGETS = 200;
+const DEFAULT_MAX_TARGETS = 50;
+const MAX_REPLAY_TARGETS = 200;
 
 function requiredText(value, field, max = 240) {
   const text = String(value ?? '').trim();
@@ -57,6 +58,11 @@ function positiveInteger(value, field, max = 100000) {
 function nullablePositiveInteger(value, field, fallback) {
   if (value == null || value === '') return fallback;
   return positiveInteger(value, field);
+}
+
+function replayTargetLimit(value) {
+  if (value == null || value === '') return DEFAULT_MAX_TARGETS;
+  return positiveInteger(value, 'max_targets', MAX_REPLAY_TARGETS);
 }
 
 function finiteProbability(value, field) {
@@ -387,7 +393,7 @@ async function loadSportsTargets(env, config) {
   const from = exactIso(config.from, 'from');
   const to = exactIso(config.to, 'to');
   if (Date.parse(from) > Date.parse(to)) throw new Error('from must not be after to');
-  const maxTargets = nullablePositiveInteger(config.max_targets ?? config.maxTargets, 'max_targets', DEFAULT_MAX_TARGETS);
+  const maxTargets = replayTargetLimit(config.max_targets ?? config.maxTargets);
   const { results } = await env.DB.prepare(`
     SELECT r.id AS race_id,r.scheduled_start_at,r.race_date
     FROM races r
@@ -568,7 +574,7 @@ export async function runSportsFeatureReplayV1(env, config = {}, forecastProduce
     config: {
       from: exactIso(config.from, 'from'),
       to: exactIso(config.to, 'to'),
-      max_targets: nullablePositiveInteger(config.max_targets ?? config.maxTargets, 'max_targets', DEFAULT_MAX_TARGETS),
+      max_targets: replayTargetLimit(config.max_targets ?? config.maxTargets),
       baseline_families: featureSets.baseline_families,
       ablations: normalizeAblations(config.ablations ?? []),
       walk_forward: walkForward.policy
@@ -702,7 +708,7 @@ function summarizeSystems(systemDiagnostics) {
 async function loadDecisionTargets(env, config) {
   const from = exactIso(config.from, 'from');
   const to = exactIso(config.to, 'to');
-  const maxTargets = nullablePositiveInteger(config.max_targets ?? config.maxTargets, 'max_targets', DEFAULT_MAX_TARGETS);
+  const maxTargets = replayTargetLimit(config.max_targets ?? config.maxTargets);
   const decisionVersion = config.decision_probability_version == null
     ? null : requiredText(config.decision_probability_version, 'decision_probability_version', 160);
   const versionClause = decisionVersion ? 'AND adr.decision_probability_version=?' : '';
@@ -901,7 +907,7 @@ export async function runDecisionReplayV1(env, config = {}) {
     config: {
       from: exactIso(config.from, 'from'),
       to: exactIso(config.to, 'to'),
-      max_targets: nullablePositiveInteger(config.max_targets ?? config.maxTargets, 'max_targets', DEFAULT_MAX_TARGETS),
+      max_targets: replayTargetLimit(config.max_targets ?? config.maxTargets),
       decision_probability_version: config.decision_probability_version ?? null,
       walk_forward: walkForward.policy
     },
