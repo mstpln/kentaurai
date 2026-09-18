@@ -29,7 +29,7 @@ async function requireSession(request, env) {
 function removeLegacyAnalysisUiScripts(html) {
   return [
     'kentaurai-analysis-export-download-fix',
-    'kentaurai-analysis-step1-lock-v3-overlay'
+    'kentaurai-step1-lock-v3-overlay'
   ].reduce((source, id) => source.replace(
     new RegExp(`<script id="${id}">[\\s\\S]*?<\\/script>`),
     ''
