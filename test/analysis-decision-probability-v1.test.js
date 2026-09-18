@@ -9,6 +9,7 @@ import {
   buildCanonicalDecisionProbabilityV1,
   persistCanonicalDecisionProbabilityV1
 } from '../src/analysis-decision-probability-v1.js';
+import { ANALYSIS_MARKET_PACK_V3_VERSION } from '../src/analysis-market-pack-v3.js';
 
 globalThis.crypto ??= webcrypto;
 
@@ -71,7 +72,7 @@ function syntheticMarketPack({ completeProxy = true } = {}) {
   return {
     manifest: {
       contract_version: 'kentaurai-market-pack-v3',
-      pack_version: 'market-pack-v3-d4',
+      pack_version: ANALYSIS_MARKET_PACK_V3_VERSION,
       round_id: lock.round_id,
       cutoff,
       lock: { lock_id: lock.lock_id, lock_hash: lockHash },
