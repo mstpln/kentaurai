@@ -178,6 +178,12 @@ export async function buildCanonicalDecisionProbabilityV1({ lockDocument, market
     };
   });
 
+  const policy = {
+    decision_source: 'blind_probability',
+    market_blend_applied: false,
+    ownership_used_as_win_probability: false,
+    calibration_status: 'foundation_only_not_fitted'
+  };
   const fingerprintInput = {
     contract_version: ANALYSIS_DECISION_PROBABILITY_CONTRACT,
     decision_probability_version: ANALYSIS_DECISION_PROBABILITY_VERSION,
@@ -187,19 +193,14 @@ export async function buildCanonicalDecisionProbabilityV1({ lockDocument, market
     lock_hash: lockHash,
     market_fingerprint: marketFingerprint,
     market_cutoff: marketCutoff,
+    policy,
     legs
   };
   const decisionFingerprint = await sha256Text(stableFeatureJson(fingerprintInput));
   return {
     ...fingerprintInput,
     generated_at: generated,
-    decision_fingerprint: decisionFingerprint,
-    policy: {
-      decision_source: 'blind_probability',
-      market_blend_applied: false,
-      ownership_used_as_win_probability: false,
-      calibration_status: 'foundation_only_not_fitted'
-    }
+    decision_fingerprint: decisionFingerprint
   };
 }
 
@@ -271,6 +272,7 @@ async function assertCanonicalDecisionForPersistenceV1(decision) {
       const blind = finiteProbability(entry.blind_probability, `leg ${leg.leg_number} blind_probability`);
       const canonical = finiteProbability(entry.decision_probability, `leg ${leg.leg_number} decision_probability`);
       if (canonical !== blind) throw new Error('E1 v1 decision_probability must equal blind_probability exactly');
+      if (entry.public_proxy_quality !== leg.public_proxy_quality) throw new Error('entry public_proxy_quality must match its leg');
       if (leg.public_proxy_quality !== 'verified_complete_winner_odds_v1' && entry.public_win_probability_proxy != null) {
         throw new Error('weak/unavailable public proxy must remain null');
       }
@@ -288,6 +290,7 @@ async function assertCanonicalDecisionForPersistenceV1(decision) {
     lock_hash: requiredText(decision.lock_hash, 'lock_hash', 160),
     market_fingerprint: requiredText(decision.market_fingerprint, 'market_fingerprint', 160),
     market_cutoff: exactIso(decision.market_cutoff, 'market_cutoff'),
+    policy: decision.policy,
     legs: decision.legs
   };
   const expected = await sha256Text(stableFeatureJson(fingerprintInput));
