@@ -87,7 +87,7 @@ test('F3 private UI is structurally responsive, guided and contains no raw/admin
   assert.match(html,/V3 · Analysflöde/);
   assert.match(html,/Hämta analysdata/);
   assert.match(html,/Försegla Steg 1/);
-  assert.match(html,/Hämta marknadsdata/);
+  assert.match(html,/Hämta Steg 2-underlag/);
   assert.match(html,/Importera och optimera/);
   assert.match(html,/Revidera Steg 1/);
   assert.match(html,/Datatäckning och drift/);
