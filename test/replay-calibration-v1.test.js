@@ -14,8 +14,16 @@ import {
   runSportsFeatureReplayV1,
   scoreMulticlassForecastV1
 } from '../src/replay-calibration-v1.js';
+import { buildCanonicalOptimizerV1 } from '../src/analysis-optimizer-v1.js';
 
 globalThis.crypto ??= webcrypto;
+
+function refingerprintReplay(result) {
+  const canonical = { ...result };
+  delete canonical.evaluations;
+  delete canonical.result_fingerprint;
+  result.result_fingerprint = `sha256:${createHash('sha256').update(stableFeatureJson(canonical)).digest('hex')}`;
+}
 
 function seedSource(db, id, fetchedAt, sourceType = 'official_provider') {
   db.prepare(`
@@ -128,6 +136,10 @@ function seedSportsReplay(db) {
   seedSource(db, 'snap-a-early', '2098-12-01T10:00:00Z');
   seedSource(db, 'snap-b-early', '2098-12-01T10:00:00Z');
   db.prepare(`
+    INSERT INTO official_snapshot_source_sync (source_record_id,status,horse_stat_count)
+    VALUES ('snap-a-early','complete',1),('snap-b-early','complete',1)
+  `).run();
+  db.prepare(`
     INSERT INTO horse_stat_snapshots
       (id,horse_id,observed_at,snapshot_scope,starts,wins,start_points,source_record_id)
     VALUES
@@ -193,10 +205,17 @@ test('F1 sports replay reconstructs as-of features and excludes future official 
   assert.equal(before.baseline_summary.target_count, 1);
 
   seedSource(db, 'snap-a-future', '2099-02-01T10:00:00Z');
+  seedSource(db, 'snap-a-backdated-future-source', '2099-02-01T11:00:00Z');
+  db.prepare(`
+    INSERT INTO official_snapshot_source_sync (source_record_id,status,horse_stat_count)
+    VALUES ('snap-a-future','complete',1),('snap-a-backdated-future-source','complete',1)
+  `).run();
   db.prepare(`
     INSERT INTO horse_stat_snapshots
       (id,horse_id,observed_at,snapshot_scope,starts,wins,start_points,source_record_id)
-    VALUES ('stat-a-future','horse-a','2099-02-01T10:00:00Z','life',21,20,999,'snap-a-future')
+    VALUES
+      ('stat-a-future','horse-a','2099-02-01T10:00:00Z','life',21,20,999,'snap-a-future'),
+      ('stat-a-backdated-future-source','horse-a','2098-12-15T10:00:00Z','life',21,20,888,'snap-a-backdated-future-source')
   `).run();
 
   const after = await runSportsFeatureReplayV1(env, config, capacityProducer);
@@ -228,12 +247,13 @@ test('F1 sports replay supports isolated +terms +Start Points dynamics and +posi
   assert.equal(result.scenario_summary.status, 'unavailable_no_canonical_scenario_contract');
 });
 
-function seedDecisionRound(db, index) {
+async function seedDecisionRound(db, index) {
   const roundId = `decision-round-${index}`;
   const day = String(index).padStart(2, '0');
   const roundDate = `2099-02-${day}`;
   const lockId = `decision-lock-${index}`;
-  const lockHash = `sha256:${String(index).repeat(64).slice(0,64)}`;
+  const lockJson = '{}';
+  const lockHash = `sha256:${createHash('sha256').update(lockJson).digest('hex')}`;
   const marketFingerprint = `sha256:${String(index + 3).repeat(64).slice(0,64)}`;
   const marketCutoff = `${roundDate}T10:00:00.000Z`;
 
@@ -245,7 +265,7 @@ function seedDecisionRound(db, index) {
     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
     lockId, roundId, 'kentaurai-step1-lock-v1', `pack-${index}`, `${roundDate}T09:00:00.000Z`,
-    `sha256:${'f'.repeat(64)}`, 'openai', 'synthetic', 'step1-prompt-v3-d2', '{}', lockHash, `${roundDate}T09:05:00.000Z`
+    `sha256:${'f'.repeat(64)}`, 'openai', 'synthetic', 'step1-prompt-v3-d2', lockJson, lockHash, `${roundDate}T09:05:00.000Z`
   );
 
   const decisionLegs = [];
@@ -331,30 +351,15 @@ function seedDecisionRound(db, index) {
     JSON.stringify(decision),decisionFingerprint,`${roundDate}T10:01:00.000Z`
   );
 
-  const optimizerFingerprint = `sha256:${String(index + 9).repeat(64).slice(0,64)}`;
-  const optimizerSystem = {
-    spike_count: 3,
-    row_count: 32,
-    cost_sek: 16,
-    estimated_p8: 0.216,
-    legs: decisionLegs.map((leg) => ({
-      leg_number: leg.leg_number,
-      is_spike: leg.leg_number <= 3,
-      selected_entries: leg.leg_number <= 3
-        ? [{ race_entry_id: leg.entries[0].race_entry_id }]
-        : leg.entries.map((entry) => ({ race_entry_id: entry.race_entry_id }))
-    }))
-  };
-  const optimizerDocument = {
-    contract_version: 'kentaurai-optimizer-v1',
-    optimizer_version: 'optimizer-p8-exact3-v1-e2',
-    policy_version: 'v85-v86-exact3-main-v1',
-    round_id: roundId,
-    decision_run_id: `decision-run-${index}`,
-    decision_fingerprint: decisionFingerprint,
-    optimizer_fingerprint: optimizerFingerprint,
-    system: optimizerSystem
-  };
+  const optimizerDocument = await buildCanonicalOptimizerV1({
+    decision,
+    decisionRunId: `decision-run-${index}`,
+    gameType: 'V85',
+    policy: { line_price_sek: 0.5, target_budget_min_sek: 150, max_budget_sek: 250 },
+    generatedAt: `${roundDate}T10:01:30.000Z`
+  });
+  const optimizerFingerprint = optimizerDocument.optimizer_fingerprint;
+  const optimizerSystem = optimizerDocument.system;
   db.prepare(`
     INSERT INTO analysis_optimizer_runs (
       id,game_round_id,decision_run_id,decision_fingerprint,contract_version,optimizer_version,policy_version,
@@ -364,8 +369,19 @@ function seedDecisionRound(db, index) {
   `).run(
     `optimizer-run-${index}`,roundId,`decision-run-${index}`,decisionFingerprint,'kentaurai-optimizer-v1',
     'optimizer-p8-exact3-v1-e2','v85-v86-exact3-main-v1',0.5,150,250,3,32,16,0.216,
-    '{}','{}',JSON.stringify(optimizerDocument),optimizerFingerprint,`${roundDate}T10:02:00.000Z`
+    JSON.stringify(optimizerDocument.policy),JSON.stringify(optimizerDocument.metrics),JSON.stringify(optimizerDocument),optimizerFingerprint,`${roundDate}T10:02:00.000Z`
   );
+  for (const leg of optimizerDocument.system.legs) {
+    for (const entry of leg.selected_entries) {
+      db.prepare(`
+        INSERT INTO analysis_optimizer_selections (
+          optimizer_run_id,leg_number,race_entry_id,is_spike,decision_probability
+        ) VALUES (?,?,?,?,?)
+      `).run(
+        `optimizer-run-${index}`,leg.leg_number,entry.race_entry_id,leg.is_spike ? 1 : 0,entry.decision_probability
+      );
+    }
+  }
 
   const step2Fingerprint = `sha256:${String(index + 12).repeat(64).slice(0,64)}`;
   db.prepare(`
@@ -396,7 +412,7 @@ function seedDecisionRound(db, index) {
 
 test('F1 V85/V86 decision replay is reproducible, walk-forward and persists exact version metadata', async () => {
   const { db, env } = createTestEnv();
-  for (let index = 1; index <= 3; index += 1) seedDecisionRound(db, index);
+  for (let index = 1; index <= 3; index += 1) await seedDecisionRound(db, index);
 
   const config = {
     from: '2099-02-01T00:00:00Z',
@@ -436,7 +452,7 @@ test('F1 V85/V86 decision replay is reproducible, walk-forward and persists exac
 
 test('F1 excludes a decision snapshot whose market cutoff is after race start', async () => {
   const { db, env } = createTestEnv();
-  seedDecisionRound(db, 1);
+  await seedDecisionRound(db, 1);
   db.prepare("UPDATE analysis_decision_runs SET market_cutoff='2099-02-01T13:00:00.000Z' WHERE id='decision-run-1'").run();
 
   const result = await runDecisionReplayV1(env, {
@@ -451,7 +467,7 @@ test('F1 excludes a decision snapshot whose market cutoff is after race start', 
 
 test('F1 keeps a designated regression-only round outside promotion evidence', async () => {
   const { db, env } = createTestEnv();
-  for (let index = 1; index <= 4; index += 1) seedDecisionRound(db, index);
+  for (let index = 1; index <= 4; index += 1) await seedDecisionRound(db, index);
 
   const result = await runDecisionReplayV1(env, {
     from: '2099-02-01T00:00:00Z',
@@ -473,7 +489,7 @@ test('F1 keeps a designated regression-only round outside promotion evidence', a
 
 test('F1 rejects tampered canonical E1 decision content', async () => {
   const { db, env } = createTestEnv();
-  seedDecisionRound(db, 1);
+  await seedDecisionRound(db, 1);
   const row = db.prepare("SELECT decision_json FROM analysis_decision_runs WHERE id='decision-run-1'").get();
   const decision = JSON.parse(row.decision_json);
   decision.legs[0].entries[0].decision_probability = 0.65;
@@ -493,7 +509,7 @@ test('F1 rejects tampered canonical E1 decision content', async () => {
 
 test('F1 stale Step 1 parent is excluded when a child revision existed before market cutoff', async () => {
   const { db, env } = createTestEnv();
-  seedDecisionRound(db, 1);
+  await seedDecisionRound(db, 1);
   db.prepare(`
     INSERT INTO analysis_step1_locks (
       id,game_round_id,contract_version,pack_id,pack_as_of,facts_fingerprint,provider,model,prompt_version,lock_json,lock_hash,created_at
@@ -524,7 +540,7 @@ test('F1 stale Step 1 parent is excluded when a child revision existed before ma
 
 test('F1 post-start decision cannot hide an earlier eligible pre-race decision', async () => {
   const { db, env } = createTestEnv();
-  seedDecisionRound(db, 1);
+  await seedDecisionRound(db, 1);
   db.prepare(`
     INSERT INTO analysis_decision_runs (
       id,game_round_id,lock_id,lock_hash,market_fingerprint,market_cutoff,contract_version,
@@ -549,7 +565,7 @@ test('F1 post-start decision cannot hide an earlier eligible pre-race decision',
 
 test('F1 decision replay requires exact active-field coverage after scratches', async () => {
   const { db, env } = createTestEnv();
-  seedDecisionRound(db, 1);
+  await seedDecisionRound(db, 1);
   db.prepare("UPDATE race_entries SET scratched=1 WHERE id='decision-entry-1-1-b'").run();
 
   await assert.rejects(
@@ -564,7 +580,7 @@ test('F1 decision replay requires exact active-field coverage after scratches', 
 
 test('F1 independently recomputes optimizer P8 from canonical decision probabilities', async () => {
   const { db, env } = createTestEnv();
-  seedDecisionRound(db, 1);
+  await seedDecisionRound(db, 1);
   const row = db.prepare("SELECT optimizer_json FROM analysis_optimizer_runs WHERE id='optimizer-run-1'").get();
   const optimizer = JSON.parse(row.optimizer_json);
   optimizer.system.estimated_p8 = 0.9;
@@ -583,7 +599,7 @@ test('F1 independently recomputes optimizer P8 from canonical decision probabili
 
 test('F1 persistence rejects tampered evaluation scores before writing', async () => {
   const { db, env } = createTestEnv();
-  for (let index = 1; index <= 3; index += 1) seedDecisionRound(db, index);
+  for (let index = 1; index <= 3; index += 1) await seedDecisionRound(db, index);
   const result = await runDecisionReplayV1(env, {
     from: '2099-02-01T00:00:00Z',
     to: '2099-02-03T23:59:59Z',
@@ -619,9 +635,115 @@ test('F1 persistence rejects tampered ablation deltas before writing', async () 
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM replay_runs').get().n, 0);
 });
 
+test('F1 persistence reconstructs chronology instead of trusting tampered folds', async () => {
+  const { db, env } = createTestEnv();
+  seedSportsReplay(db);
+  const result = await runSportsFeatureReplayV1(env, {
+    from: '2099-01-01T00:00:00Z',
+    to: '2099-01-03T23:59:59Z',
+    baseline_families: ['capacity'],
+    walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
+  }, capacityProducer);
+  result.walk_forward.folds[0].test_group_ids = ['sports-race-1'];
+  refingerprintReplay(result);
+
+  await assert.rejects(
+    () => persistReplayResultV1(env, result),
+    /walk_forward does not match chronological replay targets/
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM replay_runs').get().n, 0);
+});
+
+test('F1 persistence binds the cohort fingerprint to producer version metadata', async () => {
+  const { db, env } = createTestEnv();
+  seedSportsReplay(db);
+  const result = await runSportsFeatureReplayV1(env, {
+    from: '2099-01-01T00:00:00Z',
+    to: '2099-01-03T23:59:59Z',
+    baseline_families: ['capacity'],
+    walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
+  }, capacityProducer);
+  result.version_metadata.forecast_producer_version = 'tampered-producer-v2';
+  refingerprintReplay(result);
+
+  await assert.rejects(
+    () => persistReplayResultV1(env, result),
+    /cohort_fingerprint does not match replay targets and version metadata/
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM replay_runs').get().n, 0);
+});
+
+test('F1 rejects optimizer metadata that no longer matches deterministic E2 output', async () => {
+  const { db, env } = createTestEnv();
+  await seedDecisionRound(db, 1);
+  const row = db.prepare("SELECT optimizer_json FROM analysis_optimizer_runs WHERE id='optimizer-run-1'").get();
+  const optimizer = JSON.parse(row.optimizer_json);
+  const tamperedFingerprint = `sha256:${'0'.repeat(64)}`;
+  optimizer.optimizer_fingerprint = tamperedFingerprint;
+  db.prepare("UPDATE analysis_optimizer_runs SET optimizer_fingerprint=?,optimizer_json=? WHERE id='optimizer-run-1'")
+    .run(tamperedFingerprint, JSON.stringify(optimizer));
+
+  await assert.rejects(
+    () => runDecisionReplayV1(env, {
+      from: '2099-02-01T00:00:00Z',
+      to: '2099-02-01T23:59:59Z',
+      walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
+    }),
+    /does not match deterministic canonical E2 output/
+  );
+});
+
+test('F1 rejects normalized optimizer selections that diverge from canonical E2 output', async () => {
+  const { db, env } = createTestEnv();
+  await seedDecisionRound(db, 1);
+  db.prepare(`
+    UPDATE analysis_optimizer_selections
+    SET decision_probability=0.59
+    WHERE optimizer_run_id='optimizer-run-1' AND leg_number=1
+  `).run();
+
+  await assert.rejects(
+    () => runDecisionReplayV1(env, {
+      from: '2099-02-01T00:00:00Z',
+      to: '2099-02-01T23:59:59Z',
+      walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
+    }),
+    /normalized selections do not match canonical E2 output/
+  );
+});
+
+test('F1 does not treat a decision created exactly at first-race start as pre-race evidence', async () => {
+  const { db, env } = createTestEnv();
+  await seedDecisionRound(db, 1);
+  db.prepare("UPDATE analysis_decision_runs SET created_at='2099-02-01T12:01:00.000Z' WHERE id='decision-run-1'").run();
+
+  const result = await runDecisionReplayV1(env, {
+    from: '2099-02-01T00:00:00Z',
+    to: '2099-02-01T23:59:59Z',
+    walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
+  });
+  assert.equal(result.target_count, 0);
+});
+
+test('F1 rejects a Step 1 lock whose stored content no longer matches its hash', async () => {
+  const { db, env } = createTestEnv();
+  await seedDecisionRound(db, 1);
+  db.prepare("UPDATE analysis_step1_locks SET lock_json=? WHERE id='decision-lock-1'")
+    .run('{"tampered":true}');
+
+  await assert.rejects(
+    () => runDecisionReplayV1(env, {
+      from: '2099-02-01T00:00:00Z',
+      to: '2099-02-01T23:59:59Z',
+      walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
+    }),
+    /Step 1 lock content does not match lock hash/
+  );
+});
+
 test('F1 excludes post-start optimizer and integration rows from system evidence', async () => {
   const { db, env } = createTestEnv();
-  for (let index = 1; index <= 3; index += 1) seedDecisionRound(db, index);
+  for (let index = 1; index <= 3; index += 1) await seedDecisionRound(db, index);
   db.prepare("UPDATE analysis_optimizer_runs SET created_at='2099-02-03T13:00:00.000Z' WHERE id='optimizer-run-3'").run();
   db.prepare("UPDATE analysis_step2_results SET created_at='2099-02-03T13:00:00.000Z' WHERE id='step2-result-3'").run();
   db.prepare("UPDATE analysis_v3_runs SET created_at='2099-02-03T13:01:00.000Z' WHERE id='analysis-v3-3'").run();
