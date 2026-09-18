@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS replay_runs (
   config_json TEXT NOT NULL,
   version_metadata_json TEXT NOT NULL,
   cohort_fingerprint TEXT NOT NULL,
+  evaluation_fingerprint TEXT NOT NULL,
   result_json TEXT NOT NULL,
   result_fingerprint TEXT NOT NULL UNIQUE,
   target_count INTEGER NOT NULL CHECK(target_count >= 0),
