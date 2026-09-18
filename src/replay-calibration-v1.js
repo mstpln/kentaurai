@@ -650,32 +650,69 @@ function validateDecisionDocumentForReplay(row, decision) {
   }
 }
 
-function optimizerSystemDiagnostic(optimizerRow, winnersByLeg, roundId) {
+function optimizerSystemDiagnostic(optimizerRow, winnersByLeg, roundId, decisionRunId, decision) {
   const optimizer = parseJson(optimizerRow.optimizer_json, 'optimizer_json');
-  if (optimizer.optimizer_fingerprint !== optimizerRow.optimizer_fingerprint) {
-    throw new Error(`optimizer ${optimizerRow.id} fingerprint metadata mismatch`);
-  }
-  if (optimizer.decision_fingerprint !== optimizerRow.decision_fingerprint) {
-    throw new Error(`optimizer ${optimizerRow.id} decision fingerprint metadata mismatch`);
+  for (const [field, expected] of [
+    ['contract_version', 'kentaurai-optimizer-v1'],
+    ['optimizer_version', optimizerRow.optimizer_version],
+    ['policy_version', optimizerRow.policy_version],
+    ['round_id', roundId],
+    ['decision_run_id', decisionRunId],
+    ['decision_fingerprint', optimizerRow.decision_fingerprint],
+    ['optimizer_fingerprint', optimizerRow.optimizer_fingerprint]
+  ]) {
+    if (optimizer[field] !== expected) throw new Error(`optimizer ${optimizerRow.id} ${field} metadata mismatch`);
   }
   const system = optimizer.system;
-  if (!system || Number(system.spike_count) !== 3 || !Array.isArray(system.legs) || system.legs.length !== 8) {
+  if (!system || Number(system.spike_count) !== 3 || Number(optimizerRow.spike_count) !== 3
+    || !Array.isArray(system.legs) || system.legs.length !== 8) {
     throw new Error(`optimizer ${optimizerRow.id} does not contain an exact-three-spike eight-leg system`);
   }
+  const legNumbers = system.legs.map((leg) => Number(leg?.leg_number));
+  if (legNumbers.some((number, index) => number !== index + 1)) {
+    throw new Error(`optimizer ${optimizerRow.id} system legs must be ordered 1 through 8`);
+  }
+
   let coveredLegs = 0;
   let spikeMisses = 0;
+  let spikeCount = 0;
+  let rowProduct = 1;
   for (const leg of system.legs) {
     const legNumber = Number(leg.leg_number);
     const winner = winnersByLeg.get(legNumber);
     if (!winner) throw new Error(`optimizer ${optimizerRow.id} cannot be evaluated without all factual winners`);
-    const selectedIds = (leg.selected_entries || []).map((entry) => String(entry.race_entry_id || ''));
+    const selectedIds = (leg.selected_entries || []).map((entry) => requiredText(entry?.race_entry_id, `optimizer ${optimizerRow.id} selected race_entry_id`, 200));
+    if (!selectedIds.length || new Set(selectedIds).size !== selectedIds.length) {
+      throw new Error(`optimizer ${optimizerRow.id} has empty or duplicate selections in leg ${legNumber}`);
+    }
+    const decisionLeg = decision.legs.find((item) => Number(item.leg_number) === legNumber);
+    const allowedIds = new Set((decisionLeg?.entries || []).map((entry) => String(entry.race_entry_id)));
+    if (selectedIds.some((id) => !allowedIds.has(id))) {
+      throw new Error(`optimizer ${optimizerRow.id} selects an entry outside its decision parent`);
+    }
+    const isSpike = selectedIds.length === 1;
+    if (Boolean(leg.is_spike) !== isSpike) throw new Error(`optimizer ${optimizerRow.id} spike flag does not match selection count`);
+    if (isSpike) spikeCount += 1;
+    rowProduct *= selectedIds.length;
+    if (!Number.isSafeInteger(rowProduct)) throw new Error(`optimizer ${optimizerRow.id} row product is not safe`);
     const covered = selectedIds.includes(winner);
     if (covered) coveredLegs += 1;
-    if (leg.is_spike === true && !covered) spikeMisses += 1;
+    if (isSpike && !covered) spikeMisses += 1;
+  }
+  if (spikeCount !== 3 || rowProduct !== Number(system.row_count) || rowProduct !== Number(optimizerRow.row_count)) {
+    throw new Error(`optimizer ${optimizerRow.id} row/spike invariants do not match persisted metadata`);
+  }
+  const linePrice = Number(optimizerRow.line_price_sek);
+  const cost = Number(system.cost_sek);
+  if (!Number.isFinite(linePrice) || linePrice <= 0 || !Number.isFinite(cost) || cost <= 0
+    || Math.abs(cost - Number(optimizerRow.cost_sek)) > 1e-6
+    || Math.abs(cost - rowProduct * linePrice) > 1e-6) {
+    throw new Error(`optimizer ${optimizerRow.id} cost metadata is inconsistent`);
   }
   const estimatedP8 = Number(system.estimated_p8);
-  if (!Number.isFinite(estimatedP8) || estimatedP8 < 0 || estimatedP8 > 1) {
-    throw new Error(`optimizer ${optimizerRow.id} estimated_p8 is invalid`);
+  if (!Number.isFinite(estimatedP8) || estimatedP8 < 0 || estimatedP8 > 1
+    || Math.abs(estimatedP8 - Number(optimizerRow.estimated_p8)) > 1e-12) {
+    throw new Error(`optimizer ${optimizerRow.id} estimated_p8 is invalid or inconsistent`);
   }
   return {
     target_group_id: roundId,
@@ -683,8 +720,8 @@ function optimizerSystemDiagnostic(optimizerRow, winnersByLeg, roundId) {
     optimizer_version: optimizerRow.optimizer_version,
     optimizer_policy_version: optimizerRow.policy_version,
     optimizer_fingerprint: optimizerRow.optimizer_fingerprint,
-    row_count: Number(system.row_count),
-    cost_sek: Number(system.cost_sek),
+    row_count: rowProduct,
+    cost_sek: cost,
     spike_count: 3,
     estimated_p8: estimatedP8,
     covered_legs: coveredLegs,
@@ -813,7 +850,8 @@ async function loadDecisionTargets(env, config) {
     }
 
     const { results: optimizerRows } = await env.DB.prepare(`
-      SELECT id,decision_fingerprint,optimizer_version,policy_version,optimizer_fingerprint,optimizer_json
+      SELECT id,decision_fingerprint,optimizer_version,policy_version,optimizer_fingerprint,
+             line_price_sek,spike_count,row_count,cost_sek,estimated_p8,optimizer_json
       FROM analysis_optimizer_runs
       WHERE decision_run_id=?
       ORDER BY optimizer_version,policy_version,optimizer_fingerprint,id
@@ -825,7 +863,7 @@ async function loadDecisionTargets(env, config) {
       optimizer_fingerprint: optimizer.optimizer_fingerprint
     }));
     for (const optimizer of optimizerRows || []) {
-      systemDiagnostics.push(optimizerSystemDiagnostic(optimizer, winnersByLeg, row.game_round_id));
+      systemDiagnostics.push(optimizerSystemDiagnostic(optimizer, winnersByLeg, row.game_round_id, row.id, decision));
     }
 
     const groupAt = new Date(earliestStart).toISOString();
