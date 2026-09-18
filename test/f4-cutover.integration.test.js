@@ -109,6 +109,8 @@ test('F4 default private app renders the v3 workflow while rollback preserves th
   assert.match(html, /kentaurai-f3-private-ui-script/);
   assert.match(html, /Hämta Steg 2-underlag/);
   assert.match(html, /förlitar sig inte på konversationsminne/);
+  assert.doesNotMatch(html, /kentaurai-analysis-export-download-fix/);
+  assert.doesNotMatch(html, /\/app\/api\/settings\/analysis-rounds/);
 
   response = await worker.fetch(new Request('https://example.test/app/', { headers: { cookie } }), {
     ...env,
