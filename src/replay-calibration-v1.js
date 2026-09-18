@@ -817,6 +817,7 @@ function optimizerSystemDiagnostic(optimizerRow, winnersByLeg, roundId, decision
   let spikeMisses = 0;
   let spikeCount = 0;
   let rowProduct = 1;
+  let recomputedP8 = 1;
   for (const leg of system.legs) {
     const legNumber = Number(leg.leg_number);
     const winner = winnersByLeg.get(legNumber);
@@ -826,10 +827,20 @@ function optimizerSystemDiagnostic(optimizerRow, winnersByLeg, roundId, decision
       throw new Error(`optimizer ${optimizerRow.id} has empty or duplicate selections in leg ${legNumber}`);
     }
     const decisionLeg = decision.legs.find((item) => Number(item.leg_number) === legNumber);
-    const allowedIds = new Set((decisionLeg?.entries || []).map((entry) => String(entry.race_entry_id)));
+    const decisionEntries = decisionLeg?.entries || [];
+    const allowedIds = new Set(decisionEntries.map((entry) => String(entry.race_entry_id)));
     if (selectedIds.some((id) => !allowedIds.has(id))) {
       throw new Error(`optimizer ${optimizerRow.id} selects an entry outside its decision parent`);
     }
+    const probabilities = new Map(decisionEntries.map((entry) => [
+      String(entry.race_entry_id),
+      finiteProbability(entry.decision_probability, `optimizer ${optimizerRow.id} decision probability`)
+    ]));
+    const legCoverage = selectedIds.reduce((sum, id) => sum + probabilities.get(id), 0);
+    if (!(legCoverage > 0) || legCoverage > 1 + PROBABILITY_TOLERANCE) {
+      throw new Error(`optimizer ${optimizerRow.id} has invalid recomputed leg coverage`);
+    }
+    recomputedP8 *= Math.min(1, legCoverage);
     const isSpike = selectedIds.length === 1;
     if (Boolean(leg.is_spike) !== isSpike) throw new Error(`optimizer ${optimizerRow.id} spike flag does not match selection count`);
     if (isSpike) spikeCount += 1;
@@ -851,8 +862,9 @@ function optimizerSystemDiagnostic(optimizerRow, winnersByLeg, roundId, decision
   }
   const estimatedP8 = Number(system.estimated_p8);
   if (!Number.isFinite(estimatedP8) || estimatedP8 < 0 || estimatedP8 > 1
-    || Math.abs(estimatedP8 - Number(optimizerRow.estimated_p8)) > 1e-12) {
-    throw new Error(`optimizer ${optimizerRow.id} estimated_p8 is invalid or inconsistent`);
+    || Math.abs(estimatedP8 - Number(optimizerRow.estimated_p8)) > 1e-12
+    || Math.abs(estimatedP8 - recomputedP8) > 1e-10) {
+    throw new Error(`optimizer ${optimizerRow.id} estimated_p8 is invalid or inconsistent with its decision parent`);
   }
   return {
     target_group_id: roundId,
