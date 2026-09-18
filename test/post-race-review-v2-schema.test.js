@@ -20,7 +20,7 @@ test('F2 migration stores immutable post-race diagnostics and learning evidence 
     'winner_decision_probability','winner_rank','winner_assessment_confidence','scenario_match',
     'scenario_confidence','data_quality_summary','coverage_json','winner_market_percent','winner_market_rank',
     'public_win_probability_proxy','public_proxy_quality','optimizer_selected','optimizer_is_spike',
-    'optimizer_selected_count','failure_class','learning_classification','diagnostics_json','created_at'
+    'optimizer_selected_count','failure_class','learning_eligible','learning_classification','diagnostics_json','created_at'
   ]) assert.ok(reviews.has(required), `missing post_race_reviews_v2.${required}`);
 
   const links = new Set(db.prepare('PRAGMA table_info(post_race_learning_links)').all().map((row) => row.name));
