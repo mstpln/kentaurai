@@ -30,7 +30,7 @@ test('live-state documentation contains no pre-cutover candidate markers', () =>
   assert.doesNotMatch(serialized, /target contract only; not active runtime behavior/i);
   assert.doesNotMatch(serialized, /legacy runtime behavior until the later v3 cutover build/i);
   assert.doesNotMatch(serialized, /worker-v075/i);
-  assert.match(files.readme, /Production release #59 completed the v3 cutover/i);
+  assert.match(files.readme, /Production release #60 is current/i);
   assert.match(files.buildState, /F4 v3 cutover\/deprecation\/release hardening: complete and deployed/i);
   assert.match(files.contract, /Status: active production contract after F4 cutover/i);
 });
