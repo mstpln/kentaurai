@@ -274,20 +274,30 @@ export function buildWalkForwardFoldsV1(targets, policy = {}) {
     const time = Date.parse(a.target_at) - Date.parse(b.target_at);
     return time || compareId(a.group_id, b.group_id);
   });
+  const timeBlocks = [];
+  for (const group of groups) {
+    const last = timeBlocks[timeBlocks.length - 1];
+    if (last?.target_at === group.target_at) last.groups.push(group);
+    else timeBlocks.push({ target_at: group.target_at, groups: [group] });
+  }
+  const flatten = (blocks) => blocks.flatMap((block) => block.groups.map((group) => group.group_id));
   const folds = [];
   let trainEnd = normalizedPolicy.min_train_groups;
   let foldIndex = 0;
-  while (trainEnd + normalizedPolicy.calibration_groups + normalizedPolicy.test_groups <= groups.length) {
+  while (trainEnd + normalizedPolicy.calibration_groups + normalizedPolicy.test_groups <= timeBlocks.length) {
     const calibrationEnd = trainEnd + normalizedPolicy.calibration_groups;
     const testEnd = calibrationEnd + normalizedPolicy.test_groups;
+    const trainBlocks = timeBlocks.slice(0, trainEnd);
+    const calibrationBlocks = timeBlocks.slice(trainEnd, calibrationEnd);
+    const testBlocks = timeBlocks.slice(calibrationEnd, testEnd);
     folds.push({
       fold_index: foldIndex,
-      train_group_ids: groups.slice(0, trainEnd).map((group) => group.group_id),
-      calibration_group_ids: groups.slice(trainEnd, calibrationEnd).map((group) => group.group_id),
-      test_group_ids: groups.slice(calibrationEnd, testEnd).map((group) => group.group_id),
-      train_through: groups[trainEnd - 1]?.target_at ?? null,
-      calibration_through: groups[calibrationEnd - 1]?.target_at ?? null,
-      test_through: groups[testEnd - 1]?.target_at ?? null
+      train_group_ids: flatten(trainBlocks),
+      calibration_group_ids: flatten(calibrationBlocks),
+      test_group_ids: flatten(testBlocks),
+      train_through: trainBlocks.at(-1)?.target_at ?? null,
+      calibration_through: calibrationBlocks.at(-1)?.target_at ?? null,
+      test_through: testBlocks.at(-1)?.target_at ?? null
     });
     foldIndex += 1;
     trainEnd += normalizedPolicy.step_groups;
@@ -295,6 +305,7 @@ export function buildWalkForwardFoldsV1(targets, policy = {}) {
   return {
     policy: normalizedPolicy,
     group_count: groups.length,
+    time_block_count: timeBlocks.length,
     folds
   };
 }
