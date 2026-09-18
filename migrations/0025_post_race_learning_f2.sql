@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS post_race_reviews_v2 (
   scenario_match TEXT NOT NULL CHECK(scenario_match IN ('matched','missed','unavailable')),
   scenario_confidence REAL CHECK(scenario_confidence IS NULL OR (scenario_confidence >= 0 AND scenario_confidence <= 1)),
   data_quality_summary TEXT,
+  coverage_json TEXT NOT NULL,
   winner_market_percent REAL CHECK(winner_market_percent IS NULL OR (winner_market_percent >= 0 AND winner_market_percent <= 1)),
   winner_market_rank INTEGER,
   public_win_probability_proxy REAL CHECK(public_win_probability_proxy IS NULL OR (public_win_probability_proxy >= 0 AND public_win_probability_proxy <= 1)),
