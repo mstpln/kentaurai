@@ -462,29 +462,123 @@ async function forecastForVariant(producer, target, bundles, variant) {
   return scoreMulticlassForecastV1({ entries, winnerEntryId: target.winner_entry_id });
 }
 
-async function evaluationFingerprintV1(evaluations) {
-  const normalized = [...(evaluations || [])]
-    .map((evaluation) => ({
-      target_id: evaluation.target_id,
-      target_group_id: evaluation.target_group_id,
-      target_at: evaluation.target_at,
-      forecast_variant: evaluation.forecast_variant,
-      winner_entry_id: evaluation.winner_entry_id,
-      entry_count: evaluation.entry_count,
-      log_loss: evaluation.log_loss,
-      brier_score: evaluation.brier_score,
-      top1_hit: Boolean(evaluation.top1_hit),
-      winner_rank: evaluation.winner_rank,
-      forecast: evaluation.forecast
-    }))
-    .sort((a, b) =>
-      compareId(a.target_group_id, b.target_group_id)
-      || Date.parse(a.target_at) - Date.parse(b.target_at)
-      || compareId(a.target_id, b.target_id)
-      || compareId(a.forecast_variant, b.forecast_variant)
-    );
-  return sha256Text(stableFeatureJson(normalized));
+function canonicalReplayEvaluationsV1(evaluations) {
+  if (!Array.isArray(evaluations)) throw new Error('replay evaluations must be an array');
+  const seen = new Set();
+  return evaluations.map((evaluation, index) => {
+    const targetId = requiredText(evaluation?.target_id, `evaluations[${index}].target_id`, 240);
+    const targetGroupId = requiredText(evaluation?.target_group_id, `evaluations[${index}].target_group_id`, 240);
+    const targetAt = exactIso(evaluation?.target_at, `evaluations[${index}].target_at`);
+    const forecastVariant = requiredText(evaluation?.forecast_variant, `evaluations[${index}].forecast_variant`, 160);
+    const winnerEntryId = requiredText(evaluation?.winner_entry_id, `evaluations[${index}].winner_entry_id`, 200);
+    const key = `${targetId}|${forecastVariant}`;
+    if (seen.has(key)) throw new Error(`duplicate replay evaluation ${key}`);
+    seen.add(key);
+
+    const score = scoreMulticlassForecastV1({
+      entries: evaluation?.forecast,
+      winnerEntryId
+    });
+    for (const [field, expected] of [
+      ['entry_count', score.entry_count],
+      ['winner_rank', score.winner_rank],
+      ['log_loss', score.log_loss],
+      ['brier_score', score.brier_score]
+    ]) {
+      if (Number(evaluation?.[field]) !== expected) throw new Error(`evaluations[${index}].${field} does not match forecast score`);
+    }
+    if (Boolean(evaluation?.top1_hit) !== score.top1_hit) {
+      throw new Error(`evaluations[${index}].top1_hit does not match forecast score`);
+    }
+    return {
+      target_id: targetId,
+      target_group_id: targetGroupId,
+      target_at: targetAt,
+      forecast_variant: forecastVariant,
+      winner_entry_id: winnerEntryId,
+      entry_count: score.entry_count,
+      log_loss: score.log_loss,
+      brier_score: score.brier_score,
+      top1_hit: score.top1_hit,
+      winner_rank: score.winner_rank,
+      forecast: score.forecast
+    };
+  }).sort((a, b) =>
+    compareId(a.target_group_id, b.target_group_id)
+    || Date.parse(a.target_at) - Date.parse(b.target_at)
+    || compareId(a.target_id, b.target_id)
+    || compareId(a.forecast_variant, b.forecast_variant)
+  );
 }
+
+async function evaluationFingerprintV1(evaluations) {
+  return sha256Text(stableFeatureJson(canonicalReplayEvaluationsV1(evaluations)));
+}
+
+function assertReplayAggregateConsistency(result, evaluations) {
+  const foldCount = Number(result?.fold_count);
+  if (!Number.isInteger(foldCount) || foldCount < 0 || foldCount !== (result?.walk_forward?.folds || []).length) {
+    throw new Error('fold_count does not match walk_forward folds');
+  }
+  const expectedStatus = foldCount > 0 ? 'completed' : 'insufficient_evidence';
+  if (result.status !== expectedStatus) throw new Error('replay status does not match fold evidence');
+  const uniqueTargets = new Set(evaluations.map((evaluation) => evaluation.target_id));
+  if (Number(result.target_count) !== uniqueTargets.size) throw new Error('target_count does not match replay evaluations');
+
+  const testGroups = testGroupSet(result.walk_forward.folds || []);
+  if (result.track === 'v85_v86_decision') {
+    const byTarget = new Map();
+    for (const evaluation of evaluations) {
+      if (!byTarget.has(evaluation.target_id)) byTarget.set(evaluation.target_id, new Set());
+      byTarget.get(evaluation.target_id).add(evaluation.forecast_variant);
+    }
+    for (const variants of byTarget.values()) {
+      if (variants.size !== 2 || !variants.has('blind') || !variants.has('decision')) {
+        throw new Error('decision replay targets must contain blind and decision variants exactly once');
+      }
+    }
+    const blind = evaluations.filter((item) => item.forecast_variant === 'blind' && testGroups.has(item.target_group_id));
+    const decision = evaluations.filter((item) => item.forecast_variant === 'decision' && testGroups.has(item.target_group_id));
+    if (stableFeatureJson(summarizeScores(blind)) !== stableFeatureJson(result.blind_summary)
+      || stableFeatureJson(summarizeScores(decision)) !== stableFeatureJson(result.decision_summary)) {
+      throw new Error('decision replay summaries do not match held-out evaluations');
+    }
+    const expectedDelta = {
+      delta_log_loss: result.blind_summary.mean_log_loss == null || result.decision_summary.mean_log_loss == null
+        ? null : round(result.decision_summary.mean_log_loss - result.blind_summary.mean_log_loss),
+      delta_brier: result.blind_summary.mean_brier_score == null || result.decision_summary.mean_brier_score == null
+        ? null : round(result.decision_summary.mean_brier_score - result.blind_summary.mean_brier_score)
+    };
+    if (stableFeatureJson(expectedDelta) !== stableFeatureJson(result.decision_minus_blind)) {
+      throw new Error('decision-minus-blind summary is inconsistent');
+    }
+  } else if (result.track === 'sports_feature') {
+    const expectedVariants = ['baseline', ...(result.config?.ablations || []).map((ablation) => ablation.id)].sort(compareId);
+    const byTarget = new Map();
+    for (const evaluation of evaluations) {
+      if (!byTarget.has(evaluation.target_id)) byTarget.set(evaluation.target_id, new Set());
+      byTarget.get(evaluation.target_id).add(evaluation.forecast_variant);
+    }
+    for (const variants of byTarget.values()) {
+      const actual = [...variants].sort(compareId);
+      if (stableFeatureJson(actual) !== stableFeatureJson(expectedVariants)) {
+        throw new Error('sports replay target variant set does not match ablation config');
+      }
+    }
+    const baseline = evaluations.filter((item) => item.forecast_variant === 'baseline' && testGroups.has(item.target_group_id));
+    if (stableFeatureJson(summarizeScores(baseline)) !== stableFeatureJson(result.baseline_summary)) {
+      throw new Error('sports replay baseline summary does not match held-out evaluations');
+    }
+    for (const ablation of result.ablations || []) {
+      const candidate = evaluations.filter((item) => item.forecast_variant === ablation.candidate_variant && testGroups.has(item.target_group_id));
+      const candidateSummary = summarizeScores(candidate);
+      if (stableFeatureJson(candidateSummary) !== stableFeatureJson(ablation.candidate_summary)) {
+        throw new Error(`ablation ${ablation.ablation_id} candidate summary is inconsistent`);
+      }
+    }
+  }
+}
+
 
 function uniqueDecisionLineages(targets) {
   const map = new Map();
@@ -1042,7 +1136,8 @@ export async function persistReplayResultV1(env, result, options = {}) {
     throw new Error('canonical F1 replay result is required');
   }
   if (!REPLAY_TRACKS.includes(result.track)) throw new Error('unsupported replay track');
-  const evaluations = Array.isArray(result.evaluations) ? result.evaluations : [];
+  const evaluations = canonicalReplayEvaluationsV1(result.evaluations);
+  assertReplayAggregateConsistency(result, evaluations);
   const actualEvaluationFingerprint = await evaluationFingerprintV1(evaluations);
   if (actualEvaluationFingerprint !== result.evaluation_fingerprint) {
     throw new Error('evaluation_fingerprint does not match replay evaluations');
