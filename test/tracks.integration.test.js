@@ -98,7 +98,7 @@ test('track list and detail expose verified profile fields and database coverage
   assert.match(detail.description, /Verifierade mått/);
   assert.match(detail.description, /Syntetisk bannotering/);
   assert.equal(detail.coverage.races, 6);
-  assert.equal(detail.coverage.homeTrainers, null);
+  assert.equal(detail.coverage.homeTrainers, 1);
   assert.ok(detail.distanceGroups.some((row) => row.key === '2140'));
   assert.ok(detail.distanceGroups.some((row) => row.key === '2640'));
   assert.ok(detail.distanceGroups.some((row) => row.key === 'other-long'));
