@@ -323,6 +323,57 @@ test('F2 fails closed on a dead heat or ambiguous winner', async () => {
   assert.equal(db.prepare('SELECT COUNT(*) AS count FROM model_change_log').get().count, 0);
 });
 
+test('F2 rejects tampered Step 1 content and post-race parent timestamps', async () => {
+  {
+    const { env, db } = createTestEnv();
+    const seeded = seedV3SettledRound(db);
+    db.prepare("UPDATE analysis_step1_locks SET lock_json='{}' WHERE id=?").run(seeded.lockId);
+    await assert.rejects(
+      () => runNextPostRaceReview(env, { roundId: seeded.roundId }),
+      /Step 1 lock content does not match stored hash/
+    );
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM post_race_reviews_v2').get().count, 0);
+  }
+
+  for (const [table, idColumn, idValue, timeColumn, timestamp, pattern] of [
+    ['analysis_step1_locks','id','lock_f2','created_at','2099-03-01T10:30:00.000Z',/Step 1 lock is not sealed before market cutoff/],
+    ['analysis_decision_runs','id','decision_f2','created_at','2099-03-01T12:01:00.000Z',/v3 lineage is not strictly pre-race/],
+    ['analysis_optimizer_runs','id','optimizer_f2','created_at','2099-03-01T12:01:00.000Z',/v3 lineage is not strictly pre-race/]
+  ]) {
+    const { env, db } = createTestEnv();
+    const seeded = seedV3SettledRound(db);
+    db.prepare(`UPDATE ${table} SET ${timeColumn}=? WHERE ${idColumn}=?`).run(timestamp,idValue);
+    await assert.rejects(
+      () => runNextPostRaceReview(env, { roundId: seeded.roundId }),
+      pattern
+    );
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM post_race_reviews_v2').get().count, 0);
+  }
+});
+
+test('F2 fails closed if deterministic learning evidence was previously tampered', async () => {
+  const { env, db } = createTestEnv();
+  const seeded = seedV3SettledRound(db);
+  await runNextPostRaceReview(env, { roundId: seeded.roundId });
+
+  db.prepare(`
+    DELETE FROM post_race_learning_links
+    WHERE review_id=(SELECT id FROM post_race_reviews_v2 WHERE leg_number=1)
+  `).run();
+  db.prepare(`
+    UPDATE learning_observations
+    SET evidence_json='{"tampered":true}'
+    WHERE race_id='race_f2_1'
+  `).run();
+
+  db.prepare(`DELETE FROM post_race_reviews_v2 WHERE leg_number=8`).run();
+  await assert.rejects(
+    () => runNextPostRaceReview(env, { roundId: seeded.roundId }),
+    /conflicts with deterministic review evidence/
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM model_change_log').get().count, 0);
+});
+
 test('F2 rejects analysis or market lineage created at the first-race boundary', async () => {
   const { env, db } = createTestEnv();
   const seeded = seedV3SettledRound(db);
