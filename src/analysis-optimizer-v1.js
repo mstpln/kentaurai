@@ -12,7 +12,6 @@ export const ANALYSIS_OPTIMIZER_DEFAULT_TARGET_MIN_SEK = 150;
 export const ANALYSIS_OPTIMIZER_DEFAULT_MAX_BUDGET_SEK = 250;
 
 const PROBABILITY_TOLERANCE = 1e-6;
-const OBJECTIVE_TOLERANCE = 1e-15;
 const MONEY_SCALE = 1_000_000;
 const SECONDARY_TIE_BREAK = 'lower_cost_then_stable_selection_signature_v1';
 
@@ -30,6 +29,7 @@ function exactIso(value, field) {
 }
 
 function finiteProbability(value, field) {
+  if (value == null || value === '') throw new Error(`${field} must be a probability between 0 and 1`);
   const number = Number(value);
   if (!Number.isFinite(number) || number < 0 || number > 1) {
     throw new Error(`${field} must be a probability between 0 and 1`);
@@ -142,8 +142,8 @@ function normalizeDecisionForOptimizer(decision) {
 
     entries.sort((a, b) => {
       const probabilityOrder = b.decision_probability - a.decision_probability;
-      if (Math.abs(probabilityOrder) > OBJECTIVE_TOLERANCE) return probabilityOrder;
-      return a.race_entry_id.localeCompare(b.race_entry_id);
+      if (probabilityOrder !== 0) return probabilityOrder;
+      return a.race_entry_id < b.race_entry_id ? -1 : a.race_entry_id > b.race_entry_id ? 1 : 0;
     });
     return { leg_number: legNumber, race_id: raceId, entries };
   });
@@ -178,17 +178,17 @@ function choiceSignature(legNumber, frontier) {
 
 function stateBetter(a, b) {
   if (!b) return true;
-  if (a.log_p8 > b.log_p8 + OBJECTIVE_TOLERANCE) return true;
-  if (b.log_p8 > a.log_p8 + OBJECTIVE_TOLERANCE) return false;
-  return stateSignature(a.signature_parts).localeCompare(stateSignature(b.signature_parts)) < 0;
+  if (a.log_p8 > b.log_p8) return true;
+  if (b.log_p8 > a.log_p8) return false;
+  return stateSignature(a.signature_parts) < stateSignature(b.signature_parts);
 }
 
 function finalBetter(a, b) {
   if (!b) return true;
-  if (a.log_p8 > b.log_p8 + OBJECTIVE_TOLERANCE) return true;
-  if (b.log_p8 > a.log_p8 + OBJECTIVE_TOLERANCE) return false;
+  if (a.log_p8 > b.log_p8) return true;
+  if (b.log_p8 > a.log_p8) return false;
   if (a.row_count !== b.row_count) return a.row_count < b.row_count;
-  return stateSignature(a.signature_parts).localeCompare(stateSignature(b.signature_parts)) < 0;
+  return stateSignature(a.signature_parts) < stateSignature(b.signature_parts);
 }
 
 function searchExact3(frontiers, maxRows) {
