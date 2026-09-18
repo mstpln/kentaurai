@@ -16,10 +16,11 @@ function seedTrackData(db) {
   db.prepare(`INSERT INTO tracks (
     id, canonical_name, city, country_code, lap_length_m, home_stretch_m,
     curve_radius_m, banking_degrees, width_m, surface, open_stretch_lanes,
-    angled_mobile_wing, start_notes, track_notes
+    angled_mobile_wing, start_notes, track_notes, street_address, postal_code, website_url
   ) VALUES (
     'track-a', 'Synthetic Track', 'Teststad', 'SE', 1000, 200,
-    85.5, 12.0, 22.0, 'grus', 1, 1, 'Syntetisk startnotering', 'Syntetisk bannotering'
+    85.5, 12.0, 22.0, 'grus', 1, 1, 'Syntetisk startnotering', 'Syntetisk bannotering',
+    'Testgatan 1', '123 45', 'https://example.test/track'
   )`).run();
   db.prepare(`INSERT INTO track_external_ids (track_id, source_type, external_id) VALUES ('track-a','official','88')`).run();
   db.prepare(`INSERT INTO tracks (id, canonical_name, city, country_code) VALUES ('track-b','Another Track','Annanstad','SE')`).run();
@@ -91,6 +92,9 @@ test('track list and detail expose verified profile fields and database coverage
   assert.equal(detail.profile.curveRadiusM, 85.5);
   assert.equal(detail.profile.openStretchLanes, 1);
   assert.equal(detail.profile.angledMobileWing, true);
+  assert.equal(detail.address.street, 'Testgatan 1');
+  assert.equal(detail.address.postalCode, '123 45');
+  assert.equal(detail.websiteUrl, 'https://example.test/track');
   assert.match(detail.description, /Verifierade mått/);
   assert.match(detail.description, /Syntetisk bannotering/);
   assert.equal(detail.coverage.races, 6);
@@ -98,6 +102,26 @@ test('track list and detail expose verified profile fields and database coverage
   assert.ok(detail.distanceGroups.some((row) => row.key === '2140'));
   assert.ok(detail.distanceGroups.some((row) => row.key === '2640'));
   assert.ok(detail.distanceGroups.some((row) => row.key === 'other-long'));
+});
+
+
+test('track detail does not fail when a malformed trainer observation exists', async () => {
+  const { env, db } = createTestEnv();
+  seedTrackData(db);
+  db.prepare(`
+    INSERT INTO normalized_observations (
+      id, entity_type, entity_id, source_record_id, observed_at, fields_json, quality_status
+    ) VALUES (
+      'obs-malformed','trainer','trainer-private','source-official','2026-09-02T10:00:00Z','{not-json}','normalized_verified_subset'
+    )
+  `).run();
+
+  const detail = await getTrackDetail(env, 'track-a');
+  assert.equal(detail.name, 'Synthetic Track');
+
+  const trainers = await getTrackHomeTrainers(env, 'track-a');
+  assert.equal(trainers.total, 1);
+  assert.deepEqual(trainers.items.map((row) => row.name), ['Home Trainer']);
 });
 
 test('lane statistics combine track, canonical distance and start method and exclude scratched entries', async () => {
