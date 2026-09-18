@@ -223,6 +223,20 @@ test('D4 external ranking sanitizer never exports source identity, excerpts or a
   assert.doesNotMatch(JSON.stringify(pick), /DO NOT EXPORT THIS TEXT/);
 });
 
+test('D4 market pack fails closed without verified server-owned system policy', async () => {
+  const market = syntheticMarketRows();
+  await assert.rejects(
+    () => buildMarketPackV3Files({
+      lock: syntheticLock(),
+      deadline: syntheticDeadline(),
+      currentPack: syntheticCurrentPack(),
+      ...market,
+      generatedAt: '2099-05-01T13:55:10Z'
+    }),
+    /verified system_policy is required/
+  );
+});
+
 test('D4 pack is market-only, deterministic by market state and input order, odds-normalized only with complete coverage, and reads external rankings last', async () => {
   const market = syntheticMarketRows();
   market.betting.push({
