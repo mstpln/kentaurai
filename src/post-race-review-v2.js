@@ -25,7 +25,7 @@ async function candidateV3Round(env, roundId = null) {
     SELECT
       gr.id,gr.game_type,gr.round_date,
       av3.id AS analysis_v3_id,av3.lock_id,av3.decision_run_id,av3.optimizer_run_id,
-      av3.analysis_fingerprint,av3.market_cutoff,av3.created_at AS analysis_created_at,
+      av3.analysis_fingerprint,av3.lock_hash AS analysis_lock_hash,av3.market_cutoff,av3.created_at AS analysis_created_at,
       asl.lock_json,asl.lock_hash,asl.created_at AS lock_created_at,
       adr.decision_json,adr.decision_fingerprint,
       aor.optimizer_json,aor.optimizer_fingerprint
@@ -71,7 +71,8 @@ function assertLineage(row, lock, decision, optimizer) {
   if (lock.round_id !== row.id || decision.round_id !== row.id || optimizer.round_id !== row.id) {
     throw new Error(`round ${row.id} has cross-round v3 lineage`);
   }
-  if (lock.lock_id !== row.lock_id || decision.lock_id !== row.lock_id) {
+  if (lock.lock_id !== row.lock_id || decision.lock_id !== row.lock_id
+    || row.analysis_lock_hash !== row.lock_hash || decision.lock_hash !== row.lock_hash) {
     throw new Error(`round ${row.id} has stale Step 1 lineage`);
   }
   if (decision.decision_fingerprint !== row.decision_fingerprint) {
