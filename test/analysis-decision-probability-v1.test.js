@@ -187,6 +187,18 @@ function seedPersistenceParents(db) {
   );
 }
 
+test('E1 persistence rejects tampered decision content instead of trusting a supplied fingerprint', async () => {
+  const { db, env } = createTestEnv();
+  seedPersistenceParents(db);
+  const decision = await build();
+  decision.legs[0].entries[0].decision_probability = 0.5;
+  await assert.rejects(
+    () => persistCanonicalDecisionProbabilityV1(env, decision, { createdAt: '2099-06-01T12:00:10.000Z' }),
+    /must equal blind_probability exactly/
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM analysis_decision_runs').get().n, 0);
+});
+
 test('E1 persists versioned calibration hooks and reuses the same canonical decision fingerprint idempotently', async () => {
   const { db, env } = createTestEnv();
   seedPersistenceParents(db);
