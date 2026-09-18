@@ -234,7 +234,7 @@ test('F2 stores immutable v3 probability, market, optimizer and learning diagnos
 
   const rows = db.prepare(`
     SELECT leg_number,winner_blind_probability,winner_decision_probability,winner_rank,winner_market_percent,
-      winner_market_rank,optimizer_selected,optimizer_is_spike,failure_class,learning_classification,
+      winner_market_rank,optimizer_selected,optimizer_is_spike,failure_class,learning_eligible,learning_classification,
       scenario_match,coverage_json,pre_race_fingerprint
     FROM post_race_reviews_v2
     WHERE analysis_v3_id=?
@@ -242,6 +242,7 @@ test('F2 stores immutable v3 probability, market, optimizer and learning diagnos
   `).all(seeded.analysisId);
   assert.equal(rows.length, 8);
   assert.equal(rows[0].failure_class, 'spike');
+  assert.equal(rows[0].learning_eligible, 1);
   assert.equal(rows[0].learning_classification, 'candidate_learning');
   assert.equal(rows[0].winner_market_percent, 0.30);
   assert.equal(rows[0].winner_market_rank, 2);
@@ -263,6 +264,35 @@ test('F2 stores immutable v3 probability, market, optimizer and learning diagnos
   const lockAfter = db.prepare('SELECT lock_json FROM analysis_step1_locks WHERE id=?').get(seeded.lockId).lock_json;
   assert.equal(lockAfter, lockBefore);
   assert.equal(db.prepare('SELECT analysis_fingerprint FROM analysis_v3_runs WHERE id=?').get(seeded.analysisId).analysis_fingerprint, seeded.analysisFingerprint);
+});
+
+test('F2 reviews reference rounds diagnostically but never turns them into learning evidence', async () => {
+  const { env, db } = createTestEnv();
+  const seeded = seedV3SettledRound(db);
+  db.prepare(`
+    INSERT INTO source_records (id,source_type,external_id,fetched_at)
+    VALUES ('reference_source_f2','reference_import','synthetic-f2','2099-03-01T08:00:00Z')
+  `).run();
+  db.prepare(`
+    INSERT INTO reference_round_exports (
+      id,game_round_id,source_record_id,export_version,captured_at,source_count,race_count,entry_count
+    ) VALUES ('reference_export_f2',?,'reference_source_f2','kentaurai-reference-v1','2099-03-01T08:00:00Z',1,8,24)
+  `).run(seeded.roundId);
+
+  const result = await runNextPostRaceReview(env, { roundId: seeded.roundId });
+  assert.equal(result.status, 'completed');
+  assert.equal(result.reviews, 8);
+
+  const rows = db.prepare(`
+    SELECT failure_class,learning_eligible,learning_classification
+    FROM post_race_reviews_v2 ORDER BY leg_number
+  `).all();
+  assert.ok(rows.some((row) => row.failure_class != null));
+  assert.ok(rows.every((row) => row.learning_eligible === 0));
+  assert.ok(rows.every((row) => row.learning_classification === 'no_change'));
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM learning_observations').get().count, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM post_race_learning_links').get().count, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS count FROM model_change_log').get().count, 0);
 });
 
 test('F2 post-race review is idempotent and does not duplicate learning evidence', async () => {
