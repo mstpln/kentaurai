@@ -131,7 +131,7 @@ async function handleAppApi(request, env, url) {
 
   const detailMatch = path.match(/^\/app\/api\/entities\/(horses|trainers|drivers)\/([^/]+)$/);
   if (request.method === 'GET' && detailMatch) {
-    const data = await getEntityDetail(env, detailMatch[1], decodeURIComponent(detailMatch[2]));
+    const data = await getEntityDetail(env, detailMatch[1], decodeURIComponent(detailMatch[2]), { includeStarts: false });
     return data ? json(toEntityAppView(data)) : json({ error: 'not_found' }, 404);
   }
 
