@@ -60,6 +60,9 @@ function marketLegsByNumber(pack) {
 
 function normalizePublicProxy(marketLeg, predictionIds) {
   const quality = requiredText(marketLeg.proxy_quality, 'proxy_quality', 120);
+  if (!['verified_complete_winner_odds_v1', 'unavailable_incomplete_winner_odds'].includes(quality)) {
+    throw new Error(`leg ${marketLeg.leg_number} public proxy quality is unsupported`);
+  }
   const method = marketLeg.proxy_method == null ? null : requiredText(marketLeg.proxy_method, 'proxy_method', 160);
   const entries = Array.isArray(marketLeg.entries) ? marketLeg.entries : [];
   if (entries.length !== predictionIds.size) throw new Error(`leg ${marketLeg.leg_number} market entries do not match the sealed Step 1 active field`);
@@ -90,8 +93,12 @@ function normalizePublicProxy(marketLeg, predictionIds) {
 
 function reliabilityForLeg(marketLeg, publicProxy) {
   const entries = Array.isArray(marketLeg.entries) ? marketLeg.entries : [];
-  const observations = entries.map((entry) => Number(entry?.maturity?.ownership_observation_count)).filter(Number.isFinite);
-  const ages = entries.map((entry) => Number(entry?.maturity?.snapshot_age_minutes)).filter(Number.isFinite);
+  const observations = entries
+    .map((entry) => entry?.maturity?.ownership_observation_count)
+    .filter((value) => Number.isFinite(value));
+  const ages = entries
+    .map((entry) => entry?.maturity?.snapshot_age_minutes)
+    .filter((value) => Number.isFinite(value));
   return {
     proxy_available: publicProxy.complete,
     proxy_quality: publicProxy.quality,
