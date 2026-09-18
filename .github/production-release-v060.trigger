@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=8521936eeff5fc5abec1c4b0ff33f79b53eac690
-release_nonce=2026-09-18-f2-post-race-learning
+source_main=0bad270553d44ffcab1539ab83c685888f61b795
+release_nonce=2026-09-18-f3-private-ui-observability
