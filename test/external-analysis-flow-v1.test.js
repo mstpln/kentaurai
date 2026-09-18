@@ -153,3 +153,32 @@ test('recorded-system import fails closed on not-exactly-three spikes and client
 
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM systems WHERE game_round_id=?").get(ROUND_ID).n, 0);
 });
+
+
+test('recorded-system import rejects post-deadline analysis and systems above configured max budget', async () => {
+  {
+    const { env, db } = createTestEnv();
+    seedRound(db);
+    const payload = validPayload();
+    payload.submission_id = 'external-test-late';
+    payload.analysis_as_of = '2099-09-20T14:01:00Z';
+    await assert.rejects(
+      () => importRecordedSystem(env, payload),
+      /analysis_as_of must not be after the round market deadline/
+    );
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM systems WHERE game_round_id=?").get(ROUND_ID).n, 0);
+  }
+
+  {
+    const { env, db } = createTestEnv();
+    seedRound(db);
+    env.V85_LINE_PRICE_SEK = '10';
+    const payload = validPayload();
+    payload.submission_id = 'external-test-over-budget';
+    await assert.rejects(
+      () => importRecordedSystem(env, payload),
+      /system cost exceeds configured max budget/
+    );
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM systems WHERE game_round_id=?").get(ROUND_ID).n, 0);
+  }
+});
