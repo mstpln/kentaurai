@@ -6,11 +6,11 @@ CREATE TABLE IF NOT EXISTS replay_runs (
   replay_version TEXT NOT NULL,
   track TEXT NOT NULL CHECK(track IN ('sports_feature','v85_v86_decision')),
   status TEXT NOT NULL CHECK(status IN ('completed','insufficient_evidence')),
-  config_json TEXT NOT NULL,
-  version_metadata_json TEXT NOT NULL,
+  config_json TEXT NOT NULL CHECK(json_valid(config_json)),
+  version_metadata_json TEXT NOT NULL CHECK(json_valid(version_metadata_json)),
   cohort_fingerprint TEXT NOT NULL,
   evaluation_fingerprint TEXT NOT NULL,
-  result_json TEXT NOT NULL,
+  result_json TEXT NOT NULL CHECK(json_valid(result_json)),
   result_fingerprint TEXT NOT NULL UNIQUE,
   target_count INTEGER NOT NULL CHECK(target_count >= 0),
   fold_count INTEGER NOT NULL CHECK(fold_count >= 0),
@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS forecast_evaluations (
   brier_score REAL NOT NULL CHECK(brier_score >= 0),
   top1_hit INTEGER NOT NULL CHECK(top1_hit IN (0,1)),
   winner_rank INTEGER NOT NULL CHECK(winner_rank >= 1),
-  forecast_json TEXT NOT NULL,
+  forecast_json TEXT NOT NULL CHECK(json_valid(forecast_json)),
   PRIMARY KEY(replay_run_id, target_id, forecast_variant)
 );
 
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS replay_ablation_results (
   baseline_brier REAL,
   candidate_brier REAL,
   delta_brier REAL,
-  result_json TEXT NOT NULL,
+  result_json TEXT NOT NULL CHECK(json_valid(result_json)),
   PRIMARY KEY(replay_run_id, ablation_id)
 );
 
