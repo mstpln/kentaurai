@@ -426,3 +426,24 @@ test('F1 persistence rejects tampered evaluation scores before writing', async (
   );
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM replay_runs').get().n, 0);
 });
+
+
+test('F1 excludes post-start optimizer and integration rows from system evidence', async () => {
+  const { db, env } = createTestEnv();
+  for (let index = 1; index <= 3; index += 1) seedDecisionRound(db, index);
+  db.prepare("UPDATE analysis_optimizer_runs SET created_at='2099-02-03T13:00:00.000Z' WHERE id='optimizer-run-3'").run();
+  db.prepare("UPDATE analysis_step2_results SET created_at='2099-02-03T13:00:00.000Z' WHERE id='step2-result-3'").run();
+  db.prepare("UPDATE analysis_v3_runs SET created_at='2099-02-03T13:01:00.000Z' WHERE id='analysis-v3-3'").run();
+
+  const result = await runDecisionReplayV1(env, {
+    from: '2099-02-01T00:00:00Z',
+    to: '2099-02-03T23:59:59Z',
+    decision_probability_version: 'decision-probability-synthetic-blend-v1',
+    walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
+  });
+
+  assert.equal(result.decision_summary.target_count, 8);
+  assert.equal(result.system_summary.system_count, 0);
+  assert.equal(result.exclusions.post_start_optimizer, 1);
+  assert.equal(result.exclusions.post_start_integration, 1);
+});
