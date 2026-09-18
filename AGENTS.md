@@ -6,12 +6,11 @@ This repository implements the V85/V86 KentaurAI build plan.
 - Raw verified source facts are immutable from the AI layer.
 - Missing data stays null/unknown. Never invent values.
 - Code calculates deterministic metrics; AI interprets structured context.
-- The default live analysis workflow is v3: deterministic pre-market pack -> AI Step 1 -> server-sealed Step 1 lock -> optional late-fact revision -> self-contained Step 2 bundle with the exact sealed lock plus verified market data -> AI Step 2 interpretation -> canonical decision persistence -> deterministic code optimizer.
-- Step 1 must be server-sealed before current market exposure. New analysis must never rely on reconstructing Step 1 from conversation memory.
-- The Step 2 result may interpret market disagreement/value confidence but must not choose decision probabilities, spikes, selections, row counts or budgets. KentaurAI code owns those fields.
-- Canonical decision probability is explicitly versioned. Until a calibrated market blend passes its own evidence gate, the live E1/E3 policy keeps decision probability equal to the sealed blind probability.
-- New V85/V86 systems are created only by the canonical optimizer and contain exactly three one-horse spike legs in three different legs. Multi-selection legs are never spikes.
-- Default optimizer policy is a 150-250 SEK main-system target band with game-specific line price. The optimizer may spend less when extra rows add no probability coverage; budget is a constraint/target, not permission to change the exact-three-spike rule.
+- The default live workflow is external-AI-first: deterministic market-blind Step 1 export -> analysis in ChatGPT/Claude -> verified-market Step 2 export for the same round -> the same AI conversation completes value analysis and system construction -> later round-scoped registration back into KentaurAI.
+- Step 1 is not imported or server-sealed in the normal live workflow. Once market data is shown, its probabilities, ranking and ABCD are treated as the blind baseline and must not be silently rewritten because of the market.
+- The external AI may choose final system selections and explain them. KentaurAI code owns strict validation and arithmetic: canonical IDs, exactly three singleton spike legs, row count, line-price cost and stored market/probability metrics.
+- Every newly registered V85/V86 system must contain exactly three one-horse spike legs in three different legs. Multi-selection legs are never spikes.
+- The normal main-system target remains 150-250 SEK with the game-specific line price; the exact-three-spike rule is mandatory.
 - Legacy v1/v2 analysis artifacts remain readable for historical compatibility, but new legacy analysis creation is disabled after F4 cutover. Do not revive combined/declared-unsealed creation paths as the normal workflow.
 - ANALYSIS_WORKFLOW_MODE=v3 is the production default. legacy_v2 is an explicit controlled rollback mode only; changing it requires the normal reviewed production release process.
 - Manual editorial material is qualitative context, not the quantitative anchor.
