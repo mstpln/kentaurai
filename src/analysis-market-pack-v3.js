@@ -203,6 +203,7 @@ export function normalizeMarketPackOptionsV3({ lockId, lockHash, asOf = null, fi
 
 export function assertMarketCutoffAfterStep1V3(lock, cutoff) {
   if (!lock?.lock_id || !lock?.lock_hash || !lock?.round_id) throw new Error('sealed Step 1 lock metadata is required');
+  if (!systemPolicy || systemPolicy.game_type == null || systemPolicy.line_price_sek == null || systemPolicy.target_budget_min_sek == null || systemPolicy.max_budget_sek == null || Number(systemPolicy.exact_spike_count) !== 3) throw new Error('verified system_policy is required');
   const marketCutoff = exactIso(cutoff, 'cutoff');
   const sealedAt = exactIso(lock.created_at, 'lock.created_at');
   if (Date.parse(marketCutoff) < Date.parse(sealedAt)) {
@@ -480,6 +481,7 @@ export async function buildMarketPackV3Files({
   betting = [],
   odds = [],
   externalRankings = [],
+  systemPolicy,
   generatedAt = new Date().toISOString()
 } = {}) {
   if (!lock?.lock_id || !lock?.lock_hash || !lock?.round_id) throw new Error('sealed Step 1 lock metadata is required');
@@ -516,6 +518,16 @@ export async function buildMarketPackV3Files({
     deadline_source: deadline.deadline_source,
     deadline_quality: deadline.deadline_quality,
     source_quality: ANALYSIS_MARKET_SOURCE_QUALITY,
+    system_policy: {
+      game_type: systemPolicy.game_type,
+      line_price_sek: Number(systemPolicy.line_price_sek),
+      budget_min_sek: Number(systemPolicy.target_budget_min_sek),
+      budget_max_sek: Number(systemPolicy.max_budget_sek),
+      target_budget_sek: [Number(systemPolicy.target_budget_min_sek), Number(systemPolicy.max_budget_sek)],
+      exactly_three_spikes: true,
+      allowed_system_types: [systemPolicy.system_type || 'main'],
+      policy_source: 'server_config'
+    },
     pool_maturity: {
       active_entry_count: activeIds.size,
       ownership_snapshot_count: safeBetting.length,
@@ -607,7 +619,8 @@ export async function createMarketPackV3(env, roundId, options = {}) {
   const currentPack = await assertNoLateFactsBeforeMarketV3(env, { roundId: round, lock, cutoff: deadline.cutoff });
   const market = await loadVerifiedMarketRowsV3(env, round, deadline.cutoff);
   const externalRankings = await loadExternalRankingsV3(env, round, deadline.cutoff);
-  return buildMarketPackV3Files({ lock, deadline, currentPack, ...market, externalRankings, generatedAt: options.generatedAt });
+  const systemPolicy = await canonicalOptimizerPolicyForRound(env, round);
+  return buildMarketPackV3Files({ lock, deadline, currentPack, ...market, externalRankings, systemPolicy, generatedAt: options.generatedAt });
 }
 
 export async function createMarketPackV3Response(env, roundId, options = {}) {
