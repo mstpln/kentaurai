@@ -334,34 +334,37 @@ function resultSourceVersionMetadata() {
   };
 }
 
-async function buildSportsFeatureBundleForRace(env, target) {
+async function buildSportsFeatureBundleForRace(env, target, requiredFamilies) {
   const entryIds = target.entry_ids;
   const asOf = target.target_at;
+  const needed = new Set(requiredFamilies);
+  const performanceNames = new Set(['capacity','form','class_context','development','method_distance','rest_readiness','gallop_risk']);
+  const needsPerformance = [...needed].some((family) => performanceNames.has(family));
+
   const [performance, equipment, person, priors, xlabs] = await Promise.all([
-    buildPerformanceFeaturesV3ForEntries(env, entryIds, asOf),
-    buildEquipmentResponseV1ForEntries(env, entryIds, asOf),
-    buildPersonContextV1ForEntries(env, entryIds, asOf),
-    buildRacePriorsV1ForEntries(env, entryIds, asOf),
-    buildXlabsEvidenceProfilesForRace(env, { raceId: target.race_id, asOf })
+    needsPerformance ? buildPerformanceFeaturesV3ForEntries(env, entryIds, asOf) : Promise.resolve(new Map()),
+    needed.has('equipment_response') ? buildEquipmentResponseV1ForEntries(env, entryIds, asOf) : Promise.resolve(new Map()),
+    needed.has('person_context') ? buildPersonContextV1ForEntries(env, entryIds, asOf) : Promise.resolve(new Map()),
+    needed.has('race_priors') ? buildRacePriorsV1ForEntries(env, entryIds, asOf) : Promise.resolve(new Map()),
+    needed.has('xlabs_evidence') ? buildXlabsEvidenceProfilesForRace(env, { raceId: target.race_id, asOf }) : Promise.resolve({ profiles: [] })
   ]);
   const xlabsByEntry = new Map((xlabs.profiles || []).map((profile) => [profile.race_entry_id, profile]));
   const out = new Map();
   for (const entryId of entryIds) {
-    const perf = performance.get(entryId);
-    if (!perf) throw new Error(`performance features missing for ${entryId}`);
-    out.set(entryId, {
-      capacity: perf.families.capacity,
-      form: perf.families.form,
-      class_context: perf.families.classContext,
-      development: perf.families.development,
-      method_distance: perf.families.methodDistance,
-      rest_readiness: perf.families.restReadiness,
-      gallop_risk: perf.families.gallopRisk,
-      equipment_response: equipment.get(entryId) ?? null,
-      person_context: person.get(entryId) ?? null,
-      race_priors: priors.get(entryId) ?? null,
-      xlabs_evidence: xlabsByEntry.get(entryId) ?? null
-    });
+    const perf = performance.get(entryId) || null;
+    const bundle = {};
+    if (needed.has('capacity')) bundle.capacity = perf?.families?.capacity ?? null;
+    if (needed.has('form')) bundle.form = perf?.families?.form ?? null;
+    if (needed.has('class_context')) bundle.class_context = perf?.families?.classContext ?? null;
+    if (needed.has('development')) bundle.development = perf?.families?.development ?? null;
+    if (needed.has('method_distance')) bundle.method_distance = perf?.families?.methodDistance ?? null;
+    if (needed.has('rest_readiness')) bundle.rest_readiness = perf?.families?.restReadiness ?? null;
+    if (needed.has('gallop_risk')) bundle.gallop_risk = perf?.families?.gallopRisk ?? null;
+    if (needed.has('equipment_response')) bundle.equipment_response = equipment.get(entryId) ?? null;
+    if (needed.has('person_context')) bundle.person_context = person.get(entryId) ?? null;
+    if (needed.has('race_priors')) bundle.race_priors = priors.get(entryId) ?? null;
+    if (needed.has('xlabs_evidence')) bundle.xlabs_evidence = xlabsByEntry.get(entryId) ?? null;
+    out.set(entryId, bundle);
   }
   return out;
 }
@@ -487,9 +490,10 @@ export async function runSportsFeatureReplayV1(env, config = {}, forecastProduce
   );
   const walkForward = buildWalkForwardFoldsV1(targets, config.walk_forward ?? config.walkForward ?? {});
   const scoresByVariant = new Map(featureSets.variants.map((variant) => [variant.id, []]));
+  const requiredFamilies = [...new Set(featureSets.variants.flatMap((variant) => variant.feature_families))];
 
   for (const target of targets) {
-    const bundles = await buildSportsFeatureBundleForRace(env, target);
+    const bundles = await buildSportsFeatureBundleForRace(env, target, requiredFamilies);
     for (const variant of featureSets.variants) {
       const score = await forecastForVariant(forecastProducer, target, bundles, variant);
       scoresByVariant.get(variant.id).push({
