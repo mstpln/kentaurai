@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 
-import worker from '../src/worker-v064.js';
+import worker from '../src/worker-v076.js';
 import { createTestEnv } from './helpers/d1.js';
 
 function classList() {
@@ -35,7 +35,7 @@ async function authenticatedAppHtml() {
   return response.text();
 }
 
-test('canonical Settings script from the actual Wrangler worker renders and executes the three-step analysis workflow', async () => {
+test('F4 actual Wrangler worker retains the legacy Settings script for read/rollback compatibility', async () => {
   const html = await authenticatedAppHtml();
   const script = extractScript(html, 'kentaurai-settings-script');
 
