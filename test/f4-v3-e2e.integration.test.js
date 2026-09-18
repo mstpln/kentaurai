@@ -11,8 +11,9 @@ import {
   ANALYSIS_STEP2_RESULT_CONTRACT,
   ANALYSIS_STEP2_PROMPT_VERSION
 } from '../src/analysis-step2-prompt-v3.js';
-import { importStep2AndOptimizeV1 } from '../src/analysis-step2-integration-v1.js';
 import { createF4Step2Bundle } from '../src/f4-step2-bundle.js';
+import worker from '../src/worker-v076.js';
+import { createAppSessionCookie } from '../src/app-auth.js';
 
 globalThis.crypto ??= webcrypto;
 
@@ -199,13 +200,22 @@ test('F4 synthetic round completes pack -> sealed lock -> self-contained Step2 -
   assert.equal(bundle.market_manifest.market_fingerprint,market.manifest.market_fingerprint);
   assert.equal(bundle.market_files.length,market.files.length);
 
-  const integrated = await importStep2AndOptimizeV1(
-    env,
-    step2Document(lock,market),
-    { line_price_sek:0.5,target_budget_min_sek:150,max_budget_sek:250 }
-  );
+  env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
+  const cookie = (await createAppSessionCookie(env)).split(';')[0];
+  const response = await worker.fetch(new Request(
+    `https://example.test/app/api/settings/analysis-step2?round_id=${encodeURIComponent(ROUND_ID)}`,
+    {
+      method:'POST',
+      headers:{ cookie, 'content-type':'application/json' },
+      body:JSON.stringify(step2Document(lock,market))
+    }
+  ), env, {});
+  assert.equal(response.status,201);
+  const imported = await response.json();
+  const integrated = imported.integrated_analysis;
   assert.equal(integrated.analysis.optimizer_system.spike_count,3);
   assert.equal(integrated.analysis.optimizer_system.legs.filter((leg) => leg.is_spike).length,3);
   assert.ok(integrated.analysis.optimizer_system.cost_sek <= 250);
+  assert.equal(integrated.analysis.optimizer_system.line_price_sek,0.5);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM analysis_v3_runs').get().n,1);
 });
