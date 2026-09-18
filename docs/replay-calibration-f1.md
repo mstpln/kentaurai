@@ -38,26 +38,35 @@ Current replayable feature-family namespaces are:
 - `equipment_response`
 - `person_context`
 - `race_priors`
-- `xlabs_evidence`
+- `xlabs_evidence` (interval/profile evidence)
+- `terms` (allowlist-parsed proposition facts)
+- `start_points_dynamics` (as-of point level/change/field-relative context)
+- `position` (continuous C3 reconstruction aggregates only; no named trip labels)
+
+The last three are replay-only candidate families in F1. They are deliberately isolated so ablation can establish whether they add out-of-sample value before any promotion into the live Step 1 feature contract.
 
 The replay engine does not invent a model that converts features to probabilities. A forecast producer must be explicit, versioned and bound to a SHA-256 producer fingerprint. It must be deterministic/side-effect-free for a fixed input. That keeps F1 as an evaluation system rather than silently introducing a new model.
 
 ### 2. V85/V86 decision track
 
-The decision track evaluates the latest eligible stored decision snapshot per V85/V86 round/version only when its historical lineage is valid:
+The decision track evaluates the latest eligible **canonical E1** decision snapshot per V85/V86 round. F1 does not pretend to validate a future blend contract that does not exist yet. When a future probability version is introduced, its own canonical validator must be registered before F1 may replay it.
+
+A snapshot is eligible only when its historical lineage is valid:
 
 - the exact Step 1 lock exists;
 - lock hash matches;
 - Step 1 pack as-of is not after market cutoff;
 - market cutoff is not after the first race start;
-- the stored decision fingerprint/version/policy metadata matches the decision document;
+- the stored E1 decision fingerprint is recomputed from canonical content and version/policy metadata matches the decision document;
 - a `decision-blind-v1` row actually keeps decision probability identical to blind probability;
 - the sealed lock was created before the market cutoff and the decision was created before race start;
+- the lock had not already been superseded by a child revision before that cutoff;
+- decision entries equal the exact active (non-scratched) field for every leg;
 - each scored round has exactly eight factual, unambiguous winners.
 
 Pre-race optimizer/E3 lineages are recorded when they exist. Optimizer rows created after race start and Step 2/E3 integrations created after race start are excluded from system evidence and counted explicitly.
 
-It reports blind and canonical decision probability scores separately. The initial production policy can therefore be measured without pretending that a market blend exists. For eligible E2 systems it also reports estimated P8 versus observed 8/8 coverage, covered legs, spike misses and row allocation while re-validating the exact-three-spike/row/cost invariants.
+It reports blind and canonical decision probability scores separately. Under the current E1 production policy the two are expected to be identical; any non-zero delta is therefore a replay integrity failure rather than evidence of a blend. For eligible E2 systems it also reports estimated P8 versus observed 8/8 coverage, covered legs, spike misses and row allocation while re-validating the exact-three-spike/row/cost invariants. Estimated P8 is recomputed from the selected entries' canonical decision probabilities rather than trusted from the stored optimizer row.
 
 ## Proper scoring
 
@@ -75,7 +84,7 @@ Zero winner probability is score-clipped only for finite log-loss calculation. S
 
 F1 contains no random train/test split.
 
-Targets are sorted chronologically and grouped deterministically. The versioned expanding-window policy produces:
+Targets are sorted chronologically and grouped deterministically. Distinct target groups with the same timestamp are kept in one indivisible time block, so equal-time observations can never be split across train/calibration/test boundaries. The versioned expanding-window policy produces:
 
 - historical training groups;
 - later calibration groups;
@@ -107,6 +116,10 @@ Baseline and candidate are evaluated on the same chronological test targets. F1 
 - cohort fingerprint.
 
 A negative log-loss/Brier delta means the candidate scored better. Promotion still requires repeated out-of-sample evidence and the existing No change / Candidate learning / Confirmed learning governance.
+
+## Scenario scoring
+
+The master plan also calls for scenario/leader/checkpoint scoring where the prediction is canonically observable. Current sealed Step 1 does not yet persist a versioned canonical scenario forecast contract that can be matched mechanically to reconstructed outcomes. F1 therefore reports `scenario_summary.status=unavailable_no_canonical_scenario_contract` instead of inventing a score. Continuous position evidence is available for feature ablation; named trip labels remain disabled.
 
 ## Reference round
 
