@@ -36,7 +36,7 @@ jobs:
           test "$(printf '%s' "$source_main" | wc -c)" -eq 40 || { echo 'source_main must be a full 40-character lowercase commit SHA'; exit 1; }
           git cat-file -e "$source_main^{commit}"
           git merge-base --is-ancestor "$source_main" HEAD
-          grep -Fq '"main": "./src/worker-v074.js"' wrangler.jsonc
+          grep -Fq '"main": "./src/worker-v075.js"' wrangler.jsonc
 
       - name: Use Node.js 22
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
@@ -150,6 +150,10 @@ jobs:
             '/app/api/settings/analysis-method-prompt?step=1' \
             '/app/api/settings/export?provider=anthropic&stage=pre_market' \
             '/app/api/settings/analysis-step1-revision-prompt?provider=openai' \
+            '/app/api/settings/f3-rounds' \
+            '/app/api/settings/f3-workflow-state?round_id=private-probe' \
+            '/app/api/settings/f3-analysis-pack?round_id=private-probe' \
+            '/app/api/settings/f3-operational-status' \
             '/v1/analysis-pack/private-probe' \
             '/v1/analysis-step1-lock/private-probe' \
             '/v1/analysis-step1-prompt?provider=openai' \
@@ -173,4 +177,4 @@ jobs:
         run: |
           echo 'KentaurAI v0.6.0 production release completed.'
           echo "Worker: $WORKER_URL"
-          echo 'Required production schema through migration 0025, F1 replay storage, F2 post-race learning storage, worker-v074, D3 revision lineage, E1 decision probability storage, E2 optimizer storage, E3 Step 2/integrated analysis storage, exact app version, health, login and private analysis/replay route checks passed.'
+          echo 'Required production schema through migration 0025, F1 replay storage, F2 post-race learning storage, worker-v075, F3 private workflow/observability route protection, D3 revision lineage, E1 decision probability storage, E2 optimizer storage, E3 Step 2/integrated analysis storage, exact app version, health, login and private analysis/replay route checks passed.'
