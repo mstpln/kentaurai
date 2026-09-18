@@ -35,7 +35,9 @@ test('F4 health exposes v3 as the default cutover mode and rollback state explic
   }, {});
   assert.equal(response.status, 200);
   body = await response.json();
-  assert.equal(body.analysisWorkflow, undefined);
+  assert.equal(body.analysisWorkflow, F4_ROLLBACK_MODE);
+  assert.equal(body.analysisCutoverVersion, F4_CUTOVER_VERSION);
+  assert.equal(body.legacyAnalysisCreationEnabled, true);
 
   response = await worker.fetch(new Request('https://example.test/health'), {
     ...env,
