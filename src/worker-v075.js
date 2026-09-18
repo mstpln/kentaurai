@@ -26,11 +26,18 @@ async function requireSession(request, env) {
   return null;
 }
 
+function removeLegacyAnalysisExportUi(html) {
+  return String(html).replace(
+    /<script id="kentaurai-analysis-export-download-fix">[\s\S]*?<\/script>/,
+    ''
+  );
+}
+
 async function enhancedAppResponse(request, response) {
   if (request.method !== 'GET' || new URL(request.url).pathname !== '/app/') return response;
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('text/html')) return response;
-  const body = enhanceF3PrivateUiHtml(await response.text());
+  const body = enhanceF3PrivateUiHtml(removeLegacyAnalysisExportUi(await response.text()));
   const headers = new Headers(response.headers);
   headers.delete('content-length');
   return new Response(body, { status: response.status, statusText: response.statusText, headers });
