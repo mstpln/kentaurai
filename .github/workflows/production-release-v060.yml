@@ -114,6 +114,10 @@ jobs:
           grep -q 'idx_odds_entry_time' /tmp/migration-check.txt
           grep -q 'idx_equipment_entry' /tmp/migration-check.txt
           grep -q 'idx_xlabs_entry' /tmp/migration-check.txt
+          grep -q 'idx_entries_horse_race' /tmp/migration-check.txt
+          grep -q 'idx_game_legs_race' /tmp/migration-check.txt
+          grep -q 'idx_editorial_items_entry' /tmp/migration-check.txt
+          grep -q 'idx_ai_predictions_entry' /tmp/migration-check.txt
 
       - name: Deploy Worker
         id: deploy
