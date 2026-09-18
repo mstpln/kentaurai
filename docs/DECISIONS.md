@@ -12,23 +12,20 @@
 
 ## External AI analysis exchange
 1. KentaurAI is the factual database, deterministic calculation and persistence layer. The normal product does not run a separate autonomous AI model inside the Worker.
-2. ChatGPT, Claude or another authorized AI client may read the same private structured round context and store independent analyses without overwriting another provider/model submission.
-3. New analysis is pre-race only. A verified future betting/start deadline is required; post-deadline attempts fail closed so later facts cannot contaminate a pre-race judgment.
-4. The active workflow has two analysis steps in one AI conversation and one final import. Step 1 is market-blind strength analysis. Step 2 adds verified current market data and builds value/system conclusions while the Step-1 assessment remains locked. No intermediate pre-market import is required.
-5. The final AI-to-KentaurAI payload uses stage `combined`: it contains the Step-1 `legs` plus the Step-2 `systems` and recommendations. It has no `parent_submission_id` in the normal v2 flow.
-6. Step-1 blindness in the combined workflow is a declared process property, not cryptographic proof: because KentaurAI does not receive Step 1 before market exposure, the server stamps `analysisBlindness = declared_unsealed`. The AI must never supply or choose this field. A future separately sealed workflow may use a stronger server-known provenance value.
-7. `legs` in a combined submission must remain market-blind and preserve the Step-1 probabilities, ranking, ABCD, uncertainty, scenarios, conclusions, data quality and reasoning except for explicitly permitted mechanical handling of later scratches. KentaurAI validates structure and market-free content, but cannot prove byte identity to an unseen Step-1 response.
-8. KentaurAI derives value ratios, row count, spike count and stored market fields from the validated submission plus authoritative round/market context rather than trusting client-supplied totals or market facts.
-9. Spike validation is keyed by authoritative game type plus `system_type`, never by budget. V85 `main` may contain two or three singleton spike legs; a two-spike V85 main requires non-empty `notes` preserving the reason. Every other V85/V86 system requires exactly three singleton spike legs. Multi-selection legs are not spikes.
-10. Every context has a stable SHA-256 fingerprint. Time-only market metadata does not invalidate an otherwise unchanged v2 context, while changed canonical identity or market observations do. Stale submissions are rejected. Submission IDs are immutable idempotency keys: exact retries are no-ops; revised content requires a new ID.
-11. Market exposure is source-backed, round/race-entry-bound and capped by the verified betting stop/current stable analysis cutoff. The market-aware export does not require a stored pre-market parent in the active v2 workflow.
-12. Stored producer identity uses an explicit allowlist. This version permits canonical `openai` and `anthropic`; UI aliases such as ChatGPT/Claude are presentation conveniences and are not stored as producer-provider identities. `producer.model` must contain the actual model name when exposed, otherwise `unknown` may be used.
-13. Recommended analysis filenames are descriptive only. The JSON producer fields and canonical KentaurAI IDs remain authoritative and filenames never determine attribution.
-14. Combined import fails closed on stale fingerprints, missing/cross-round canonical IDs, post-deadline imports, malformed numeric/boolean JSON types, invalid probabilities/ranking/ABCD, market contamination in Step-1 fields, invalid spike/system structure and changed content under an existing submission ID. Exact retries remain idempotent.
-15. The combined import is atomic: validation occurs before persistence and all writes are committed through one D1 batch so a failed write cannot leave a partial submission that later appears reusable.
-16. Analysis exchange routes remain private under the existing app/admin authentication boundaries. Real analyses live in private D1 and are never committed to GitHub.
-17. Stored analyses/systems feed deterministic post-race scoring. A wrong outcome is evidence to review, not an automatic logic/model change; learning remains No change / Candidate / Confirmed.
-
+2. The live default is the v3 exchange: round-scoped deterministic pre-market pack -> external AI Step 1 -> server-sealed Step 1 lock -> optional late-fact revision -> self-contained Step 2 bundle containing the exact sealed lock and verified market pack -> external AI Step 2 interpretation -> canonical decision persistence -> deterministic exact-three-spike optimizer.
+3. Step 1 is genuinely server-sealed before current market exposure. A v3 market pack is available only for the newest non-superseded lock and fails closed if later pre-market facts require revision.
+4. New Step 2 work must not depend on conversation memory. The F4 bundle carries the exact sealed Step 1 document plus the bound market files so the Step 2 interpretation is reproducible from persisted inputs.
+5. Step 2 is interpretation only. It may assess market disagreement, maturity, reliability and value confidence, but it cannot submit decision probability, market facts, system selections, spike choices, row counts or budgets.
+6. Canonical decision probability is explicitly versioned. In the current production policy no fitted market blend has passed its evidence gate, so decision probability remains equal to sealed blind probability.
+7. The canonical E2 optimizer is authoritative for all newly created V85/V86 systems. It creates exactly three singleton spike legs and calculates selections, rows, cost and estimated P(8) deterministically under the configured policy.
+8. The normal main-system policy targets 150-250 SEK with the game-specific line price. It may spend below the target band if additional rows add no probability coverage; the budget never relaxes the exact-three-spike rule.
+9. External rankings/editorial signals are read only after the own Step 1 + market synthesis and never rewrite Step 1.
+10. Stable IDs, fingerprints, as-of timestamps and explicit parent lineage bind pack, lock, market, decision, optimizer and integrated analysis. Exact retries are idempotent; changed content requires a new immutable identity.
+11. Legacy v1/v2 analyses, systems and routes remain readable for historical compatibility. New legacy creation through old combined/declared-unsealed submission routes is disabled in the v3 default.
+12. The old combined v2 process may remain in source/tests only as compatibility/rollback code. Its declared-unsealed blindness and historical two-spike V85-main allowance are not valid policies for newly created systems.
+13. Production default is ANALYSIS_WORKFLOW_MODE=v3. legacy_v2 is an explicit rollback mode requiring the normal reviewed production release process; it is not an automatic runtime fallback.
+14. OpenAI and Anthropic remain supported external analysis providers. Provider/model attribution is explicit and private analyses remain in private D1, never in public GitHub.
+15. F1 replay/calibration and F2 post-race diagnostics produce evidence. Model/rule changes still require repeated supporting evidence; one round never changes weights automatically.
 ## Interface direction
 1. Horse, trainer and driver remain primary detail entities, with V85/V86 system/performance history available in a dedicated Spel area.
 2. Bottom navigation is fixed as **Trend -> Tränare -> Hästar -> Kuskar -> Bana -> Spel**.
@@ -79,7 +76,7 @@
 18. A daily X-Labs job whose official live prerequisite never existed may close cleanly once its target date becomes older than yesterday. This closes stale orchestration work only; it does not claim that X-Labs telemetry was checked or unavailable.
 
 ## Spel and post-race analysis
-1. Spike rules follow the authoritative game type plus `system_type`: V85 `main` may contain two or three one-horse spikes in different legs, with a non-empty `notes` reason required when two are used; every other V85/V86 system has exactly three one-horse spikes in three different legs.
+1. Newly created V85/V86 systems come only from the canonical v3 optimizer and always contain exactly three one-horse spikes in three different legs. Historical legacy systems remain readable even if an older policy allowed a different V85-main spike count.
 2. System row count equals the product of selections across all eight legs.
 3. ABCD represents relative winning strength, not value; value is assessed separately against market percentage.
 4. Saved main/alternative systems are preserved. Overview/list metrics use a deterministic primary system while round detail can inspect all saved proposals.
