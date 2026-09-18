@@ -59,7 +59,8 @@ export function createTestEnv() {
     '../../migrations/0021_analysis_decision_probability_v1.sql',
     '../../migrations/0022_analysis_optimizer_v1.sql',
     '../../migrations/0023_analysis_step2_integration_v1.sql',
-    '../../migrations/0024_replay_calibration_v1.sql'
+    '../../migrations/0024_replay_calibration_v1.sql',
+    '../../migrations/0025_post_race_learning_f2.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }
