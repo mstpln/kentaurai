@@ -1,8 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { createTestEnv } from './helpers/d1.js';
 import { runNextPostRaceReview } from '../src/post-race-review.js';
 import { POST_RACE_REVIEW_V2_VERSION } from '../src/post-race-review-v2.js';
+import { stableFeatureJson } from '../src/analysis-v3-foundations.js';
 
 function seedV3SettledRound(db) {
   const roundId = 'round_f2';
@@ -10,7 +12,7 @@ function seedV3SettledRound(db) {
   const decisionId = 'decision_f2';
   const optimizerId = 'optimizer_f2';
   const analysisId = 'analysis_f2';
-  const lockHash = 'sha256:' + '1'.repeat(64);
+  let lockHash = null;
   const decisionFingerprint = 'sha256:' + '2'.repeat(64);
   const optimizerFingerprint = 'sha256:' + '3'.repeat(64);
   const analysisFingerprint = 'sha256:' + '4'.repeat(64);
@@ -117,6 +119,7 @@ function seedV3SettledRound(db) {
     prompt_version: 'step1-prompt-v3-d2',
     legs: lockLegs
   };
+  lockHash = `sha256:${createHash('sha256').update(stableFeatureJson(lock)).digest('hex')}`;
   const decision = {
     contract_version: 'kentaurai-decision-probability-v1',
     round_id: roundId,
