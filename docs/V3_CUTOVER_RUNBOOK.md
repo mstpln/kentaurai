@@ -11,7 +11,7 @@ F4 makes the sealed v3 workflow the normal KentaurAI analysis path while preserv
 
 ## Required pre-release checks
 1. Full repository QA is green on the exact F4 head.
-2. `wrangler.jsonc` points to `src/worker-v076.js` and `ANALYSIS_WORKFLOW_MODE` is `v3`.
+2. `wrangler.jsonc` points to `src/worker-v077.js` (performance wrapper delegating to the F4 `worker-v076.js` cutover layer) and `ANALYSIS_WORKFLOW_MODE` is `v3`.
 3. v3 pack, sealed Step 1, market binding, Step 2 integration and exact-three-spike optimizer tests pass.
 4. Default-mode tests prove all known legacy creation routes are disabled after authentication while legacy reads remain available.
 5. Private-auth tests prove unauthenticated callers learn no private analysis state.
@@ -23,7 +23,7 @@ F4 makes the sealed v3 workflow the normal KentaurAI analysis path while preserv
 2. Validate Cloudflare configuration.
 3. Apply only pending migrations. F4 itself requires no new migration.
 4. Verify existing production schema through migration 0025 without exposing rows.
-5. Deploy Worker v076.
+5. Deploy Worker v077; it must preserve the F4 worker-v076 v3/rollback semantics.
 6. Verify `/health` returns service/version plus `analysisWorkflow: "v3"`, the F4 cutover version and `legacyAnalysisCreationEnabled: false`.
 7. Verify `/app/login`.
 8. Verify all v3 private routes remain protected, including the F4 self-contained Step 2 bundle.
