@@ -43,7 +43,7 @@ test('documentation agrees on external two-step analysis, exact3 registration an
 test('active external prompts keep Step 1 market-blind and require exactly three spikes in Step 2', () => {
   const step1 = getExternalAnalysisStep1Prompt('openai');
   const step2 = getExternalAnalysisStep2Prompt('openai');
-  assert.doesNotMatch(step1, /streckprocent|oddsdata|spelvärde/i);
+  assert.match(step1, /Sök inte på webben och använd inte aktuell streck-, odds- eller tippsinformation/i);
   assert.match(step1, /Bygg inget system/i);
   assert.match(step2, /exakt 3 spikar/i);
   assert.doesNotMatch(step2, /två spikar|2[- ]spike|700\s*(?:SEK|kr)/i);
