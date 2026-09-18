@@ -120,7 +120,7 @@ Session protected:
 
 ## Removed legacy Step 2 behavior
 
-The live Step 2 prompt no longer contains:
+The E3 v3 Step 2 prompt no longer contains:
 
 - the 700 SEK V85 main-system rule;
 - two-spike exceptions;
@@ -128,7 +128,7 @@ The live Step 2 prompt no longer contains:
 - a forced materially different alternative system;
 - free-form AI ticket optimization.
 
-Legacy persisted v1/v2 analyses/systems remain readable. Full legacy creation-path cutover/deprecation belongs to F4.
+Legacy v1/v2 analysis creation and persisted history remain available in parallel during the E3 shadow period. Making v3 the default and disabling new v2 creation belongs to F4.
 
 ## Explicit non-scope
 
