@@ -27,9 +27,11 @@ async function requireSession(request, env) {
 }
 
 async function optimizerOptions(env, roundId, url) {
+  const decisionRunId = String(url.searchParams.get('decision_run_id') || '').trim();
+  if (!decisionRunId) throw new Error('decision_run_id is required');
   return {
     ...await canonicalOptimizerPolicyForRound(env, roundId),
-    decision_run_id: url.searchParams.get('decision_run_id')
+    decision_run_id: decisionRunId
   };
 }
 
