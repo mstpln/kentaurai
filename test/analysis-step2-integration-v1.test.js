@@ -349,3 +349,26 @@ test('E3 rolls back Step2, decision and optimizer writes when the final integrat
     assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n, 0, table);
   }
 });
+
+
+test('E3 refuses optimizer construction after current active-field drift', async () => {
+  const { db, env } = createTestEnv();
+  seedDb(db);
+  db.prepare("UPDATE race_entries SET scratched=1 WHERE id='entry-1-a'").run();
+  const parents = { lockDocument: lockDocument(), marketPack: marketPack() };
+
+  await assert.rejects(
+    () => persistIntegratedStep2V1(
+      env,
+      step2Payload(),
+      parents,
+      'V85',
+      { line_price_sek: 0.5, target_budget_min_sek: 150, max_budget_sek: 250 }
+    ),
+    /current active field no longer matches/
+  );
+
+  for (const table of ['analysis_step2_results','analysis_decision_runs','analysis_optimizer_runs','analysis_v3_runs']) {
+    assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n, 0, table);
+  }
+});
