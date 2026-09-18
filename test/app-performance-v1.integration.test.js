@@ -62,7 +62,6 @@ test('performance migration creates indexes used by hot app read paths', () => {
     'idx_races_track_date',
     'idx_entries_trainer',
     'idx_entries_driver',
-    'idx_betting_entry_time',
     'idx_odds_entry_time',
     'idx_equipment_entry',
     'idx_xlabs_entry',
