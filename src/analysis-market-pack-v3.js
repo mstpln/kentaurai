@@ -203,7 +203,6 @@ export function normalizeMarketPackOptionsV3({ lockId, lockHash, asOf = null, fi
 
 export function assertMarketCutoffAfterStep1V3(lock, cutoff) {
   if (!lock?.lock_id || !lock?.lock_hash || !lock?.round_id) throw new Error('sealed Step 1 lock metadata is required');
-  if (!systemPolicy || systemPolicy.game_type == null || systemPolicy.line_price_sek == null || systemPolicy.target_budget_min_sek == null || systemPolicy.max_budget_sek == null || Number(systemPolicy.exact_spike_count) !== 3) throw new Error('verified system_policy is required');
   const marketCutoff = exactIso(cutoff, 'cutoff');
   const sealedAt = exactIso(lock.created_at, 'lock.created_at');
   if (Date.parse(marketCutoff) < Date.parse(sealedAt)) {
@@ -485,6 +484,7 @@ export async function buildMarketPackV3Files({
   generatedAt = new Date().toISOString()
 } = {}) {
   if (!lock?.lock_id || !lock?.lock_hash || !lock?.round_id) throw new Error('sealed Step 1 lock metadata is required');
+  if (!systemPolicy || systemPolicy.game_type == null || systemPolicy.line_price_sek == null || systemPolicy.target_budget_min_sek == null || systemPolicy.max_budget_sek == null || Number(systemPolicy.exact_spike_count) !== 3) throw new Error('verified system_policy is required');
   const cutoff = assertMarketCutoffAfterStep1V3(lock, deadline?.cutoff);
   const generated = exactIso(generatedAt, 'generated_at');
   const legs = activeLegsFromPack(currentPack);
