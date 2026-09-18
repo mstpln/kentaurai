@@ -224,8 +224,8 @@ function seedDecisionRound(db, index) {
   const decisionFingerprint = `sha256:${String(index + 6).repeat(64).slice(0,64)}`;
   const decision = {
     contract_version: 'kentaurai-decision-probability-v1',
-    decision_probability_version: 'decision-probability-v1-e1',
-    policy_version: 'decision-blind-v1',
+    decision_probability_version: 'decision-probability-synthetic-blend-v1',
+    policy_version: 'synthetic-blend-v1',
     round_id: roundId,
     lock_id: lockId,
     lock_hash: lockHash,
@@ -242,8 +242,44 @@ function seedDecisionRound(db, index) {
     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
     `decision-run-${index}`,roundId,lockId,lockHash,marketFingerprint,marketCutoff,
-    'kentaurai-decision-probability-v1','decision-probability-v1-e1','decision-blind-v1','[]','[]',
+    'kentaurai-decision-probability-v1','decision-probability-synthetic-blend-v1','synthetic-blend-v1','[]','[]',
     JSON.stringify(decision),decisionFingerprint,`${roundDate}T10:01:00.000Z`
+  );
+
+  const optimizerFingerprint = `sha256:${String(index + 9).repeat(64).slice(0,64)}`;
+  const optimizerSystem = {
+    spike_count: 3,
+    row_count: 32,
+    cost_sek: 16,
+    estimated_p8: 0.274625,
+    legs: decisionLegs.map((leg) => ({
+      leg_number: leg.leg_number,
+      is_spike: leg.leg_number <= 3,
+      selected_entries: leg.leg_number <= 3
+        ? [{ race_entry_id: leg.entries[0].race_entry_id }]
+        : leg.entries.map((entry) => ({ race_entry_id: entry.race_entry_id }))
+    }))
+  };
+  const optimizerDocument = {
+    contract_version: 'kentaurai-optimizer-v1',
+    optimizer_version: 'optimizer-p8-exact3-v1-e2',
+    policy_version: 'v85-v86-exact3-main-v1',
+    round_id: roundId,
+    decision_run_id: `decision-run-${index}`,
+    decision_fingerprint: decisionFingerprint,
+    optimizer_fingerprint: optimizerFingerprint,
+    system: optimizerSystem
+  };
+  db.prepare(`
+    INSERT INTO analysis_optimizer_runs (
+      id,game_round_id,decision_run_id,decision_fingerprint,contract_version,optimizer_version,policy_version,
+      line_price_sek,target_budget_min_sek,max_budget_sek,spike_count,row_count,cost_sek,estimated_p8,
+      policy_json,metrics_json,optimizer_json,optimizer_fingerprint,created_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    `optimizer-run-${index}`,roundId,`decision-run-${index}`,decisionFingerprint,'kentaurai-optimizer-v1',
+    'optimizer-p8-exact3-v1-e2','v85-v86-exact3-main-v1',0.5,150,250,3,32,16,0.274625,
+    '{}','{}',JSON.stringify(optimizerDocument),optimizerFingerprint,`${roundDate}T10:02:00.000Z`
   );
 }
 
@@ -254,7 +290,7 @@ test('F1 V85/V86 decision replay is reproducible, walk-forward and persists exac
   const config = {
     from: '2099-02-01T00:00:00Z',
     to: '2099-02-03T23:59:59Z',
-    decision_probability_version: 'decision-probability-v1-e1',
+    decision_probability_version: 'decision-probability-synthetic-blend-v1',
     walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
   };
   const first = await runDecisionReplayV1(env, config);
@@ -265,6 +301,12 @@ test('F1 V85/V86 decision replay is reproducible, walk-forward and persists exac
   assert.equal(first.decision_summary.target_count, 8);
   assert.ok(first.decision_summary.mean_log_loss < first.blind_summary.mean_log_loss);
   assert.ok(first.decision_summary.mean_brier_score < first.blind_summary.mean_brier_score);
+  assert.equal(first.system_summary.system_count, 1);
+  assert.equal(first.system_summary.observed_p8_rate, 1);
+  assert.equal(first.system_summary.spike_miss_rate, 0);
+  assert.equal(first.version_metadata.decision_lineages.length, 3);
+  assert.equal(first.version_metadata.decision_lineages[0].version_metadata.step1_prompt_version, 'step1-prompt-v3-d2');
+  assert.equal(first.version_metadata.decision_lineages[0].version_metadata.optimizer_lineage[0].optimizer_version, 'optimizer-p8-exact3-v1-e2');
 
   const saved = await persistReplayResultV1(env, first, { createdAt: '2099-03-01T00:00:00Z' });
   assert.equal(saved.reused, false);
