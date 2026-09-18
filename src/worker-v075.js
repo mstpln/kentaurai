@@ -1,6 +1,7 @@
 import worker from './worker-v074.js';
 import { appAuthConfigured, hasValidAppSession } from './app-auth.js';
 import { enhanceF3PrivateUiHtml } from './app-f3-private-ui.js';
+import { enhanceExternalAnalysisUiHtml } from './app-external-analysis-ui.js';
 import {
   F3_PRIVATE_UI_VERSION,
   buildF3OperationalStatus,
@@ -66,7 +67,7 @@ async function enhancedAppResponse(request, response) {
   if (request.method !== 'GET' || new URL(request.url).pathname !== '/app/') return response;
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('text/html')) return response;
-  const body = enhanceF3PrivateUiHtml(removeLegacyAnalysisUiScripts(await response.text()));
+  const body = enhanceExternalAnalysisUiHtml(enhanceF3PrivateUiHtml(removeLegacyAnalysisUiScripts(await response.text())));
   const headers = new Headers(response.headers);
   headers.delete('content-length');
   return new Response(body, { status: response.status, statusText: response.statusText, headers });
