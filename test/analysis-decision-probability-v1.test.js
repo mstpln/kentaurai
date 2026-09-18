@@ -71,6 +71,7 @@ function syntheticMarketPack({ completeProxy = true } = {}) {
   return {
     manifest: {
       contract_version: 'kentaurai-market-pack-v3',
+      pack_version: 'market-pack-v3-d4',
       round_id: lock.round_id,
       cutoff,
       lock: { lock_id: lock.lock_id, lock_hash: lockHash },
