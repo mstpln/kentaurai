@@ -40,6 +40,12 @@ function requiredText(value, field, max = 240) {
   return text;
 }
 
+function requiredSha256(value, field) {
+  const text = requiredText(value, field, 80);
+  if (!/^sha256:[0-9a-f]{64}$/.test(text)) throw new Error(`${field} must be a sha256 fingerprint`);
+  return text;
+}
+
 function exactIso(value, field) {
   const text = requiredText(value, field, 80);
   const ms = Date.parse(text);
@@ -532,6 +538,7 @@ export async function runSportsFeatureReplayV1(env, config = {}, forecastProduce
   if (!env?.DB) throw new Error('DB is not configured');
   if (!forecastProducer || typeof forecastProducer.predict !== 'function') throw new Error('forecastProducer.predict is required');
   const producerVersion = requiredText(forecastProducer.version, 'forecastProducer.version', 160);
+  const producerFingerprint = requiredSha256(forecastProducer.fingerprint, 'forecastProducer.fingerprint');
   const targets = await loadSportsTargets(env, config);
   const featureSets = buildAblationFeatureSetsV1(
     SPORTS_FAMILIES,
@@ -581,7 +588,8 @@ export async function runSportsFeatureReplayV1(env, config = {}, forecastProduce
     },
     version_metadata: {
       ...resultSourceVersionMetadata(),
-      forecast_producer_version: producerVersion
+      forecast_producer_version: producerVersion,
+      forecast_producer_fingerprint: producerFingerprint
     },
     cohort_fingerprint: cohortFingerprint,
     evaluation_fingerprint: evaluationFingerprint,
