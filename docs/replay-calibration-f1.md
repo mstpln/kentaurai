@@ -40,20 +40,24 @@ Current replayable feature-family namespaces are:
 - `race_priors`
 - `xlabs_evidence`
 
-The replay engine does not invent a model that converts features to probabilities. A forecast producer must be explicit and versioned. That keeps F1 as an evaluation system rather than silently introducing a new model.
+The replay engine does not invent a model that converts features to probabilities. A forecast producer must be explicit, versioned and bound to a SHA-256 producer fingerprint. It must be deterministic/side-effect-free for a fixed input. That keeps F1 as an evaluation system rather than silently introducing a new model.
 
 ### 2. V85/V86 decision track
 
-The decision track evaluates stored v3 E1 decision runs only when their historical lineage is valid:
+The decision track evaluates the latest eligible stored decision snapshot per V85/V86 round/version only when its historical lineage is valid:
 
 - the exact Step 1 lock exists;
 - lock hash matches;
 - Step 1 pack as-of is not after market cutoff;
 - market cutoff is not after the first race start;
-- the stored decision fingerprint metadata matches the decision document;
-- each scored leg has exactly one factual winner.
+- the stored decision fingerprint/version/policy metadata matches the decision document;
+- a `decision-blind-v1` row actually keeps decision probability identical to blind probability;
+- the sealed lock was created before the market cutoff and the decision was created before race start;
+- each scored round has exactly eight factual, unambiguous winners.
 
-It reports blind and canonical decision probability scores separately. The initial production policy can therefore be measured without pretending that a market blend exists.
+Pre-race optimizer/E3 lineages are recorded when they exist. Optimizer rows created after race start and Step 2/E3 integrations created after race start are excluded from system evidence and counted explicitly.
+
+It reports blind and canonical decision probability scores separately. The initial production policy can therefore be measured without pretending that a market blend exists. For eligible E2 systems it also reports estimated P8 versus observed 8/8 coverage, covered legs, spike misses and row allocation while re-validating the exact-three-spike/row/cost invariants.
 
 ## Proper scoring
 
@@ -108,7 +112,7 @@ A negative log-loss/Brier delta means the candidate scored better. Promotion sti
 
 The private real reference round remains a deterministic regression/no-leak case only.
 
-It must never be committed to GitHub and must not be used as training evidence.
+It must never be committed to GitHub and must not be used as promotion/training evidence. The decision replay accepts private runtime-only `regression_only_round_ids`; those rounds are scored into a separate regression summary but are removed before walk-forward folds and held-out promotion metrics are built. No private reference ID is stored in public code or fixtures.
 
 ## Persistence
 
@@ -118,9 +122,9 @@ Migration `0024_replay_calibration_v1.sql` adds:
 - `forecast_evaluations`
 - `replay_ablation_results`
 
-Replay fingerprints are deterministic and exclude persistence timestamps.
+Replay fingerprints are deterministic and exclude persistence timestamps. A separate evaluation fingerprint binds the replay to the exact per-target forecasts and scores; persistence recomputes every forecast score and held-out aggregate before writing.
 
-Exact retries reuse the same replay run.
+Exact retries reuse the same replay run, including race-safe concurrent retry handling.
 
 ## Explicit operational API
 
@@ -129,7 +133,7 @@ ADMIN_TOKEN protected:
 - `POST /v1/replay/decision`
 - `GET /v1/replay/:replayId`
 
-The POST is an explicit bounded replay request. F1 introduces no scheduler and starts no automatic historical replay/backfill.
+The POST is an explicit bounded replay request. Default cohort size is 50 and the hard request bound is 200. F1 introduces no scheduler and starts no automatic historical replay/backfill.
 
 Sports-feature replay is a library workflow because it requires an explicit versioned forecast producer. F3 may later expose safe UI/diagnostic controls.
 
