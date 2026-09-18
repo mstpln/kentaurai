@@ -861,7 +861,7 @@ async function loadDecisionTargets(env, config) {
   const { results } = await env.DB.prepare(`
     WITH ranked AS (
       SELECT adr.*,asl.pack_id,asl.pack_as_of,asl.prompt_version AS step1_prompt_version,
-        asl.lock_hash AS stored_lock_hash,gr.game_type,
+        asl.created_at AS step1_lock_created_at,asl.lock_hash AS stored_lock_hash,gr.game_type,
         ROW_NUMBER() OVER (
           PARTITION BY adr.game_round_id
           ORDER BY datetime(adr.market_cutoff) DESC,datetime(adr.created_at) DESC,adr.id DESC
@@ -882,10 +882,22 @@ async function loadDecisionTargets(env, config) {
 
   const targets = [];
   const systemDiagnostics = [];
-  const exclusions = { incomplete_round_structure: 0, ambiguous_or_incomplete_result: 0, missing_start_time: 0 };
+  const exclusions = {
+    incomplete_round_structure: 0,
+    ambiguous_or_incomplete_result: 0,
+    missing_start_time: 0,
+    post_cutoff_step1_lock: 0,
+    post_start_decision: 0,
+    post_start_optimizer: 0,
+    post_start_integration: 0
+  };
   for (const row of results || []) {
     if (row.lock_hash !== row.stored_lock_hash) throw new Error(`decision ${row.id} lock hash mismatch`);
     if (Date.parse(row.pack_as_of) > Date.parse(row.market_cutoff)) throw new Error(`decision ${row.id} market cutoff is before sealed Step 1 as-of`);
+    if (Date.parse(row.step1_lock_created_at) > Date.parse(row.market_cutoff)) {
+      exclusions.post_cutoff_step1_lock += 1;
+      continue;
+    }
     const decision = parseJson(row.decision_json, 'decision_json');
     validateDecisionDocumentForReplay(row, decision);
 
@@ -937,6 +949,10 @@ async function loadDecisionTargets(env, config) {
     }
     const earliestStart = Math.min(...starts);
     if (Date.parse(row.market_cutoff) > earliestStart) throw new Error(`decision ${row.id} market cutoff is after race start`);
+    if (Date.parse(row.created_at) > earliestStart) {
+      exclusions.post_start_decision += 1;
+      continue;
+    }
 
     const winnersByLeg = new Map();
     for (const legRow of legs) {
@@ -951,18 +967,21 @@ async function loadDecisionTargets(env, config) {
 
     const { results: optimizerRows } = await env.DB.prepare(`
       SELECT id,decision_fingerprint,optimizer_version,policy_version,optimizer_fingerprint,
-             line_price_sek,spike_count,row_count,cost_sek,estimated_p8,optimizer_json
+             line_price_sek,spike_count,row_count,cost_sek,estimated_p8,optimizer_json,created_at
       FROM analysis_optimizer_runs
       WHERE decision_run_id=?
       ORDER BY optimizer_version,policy_version,optimizer_fingerprint,id
     `).bind(row.id).all();
-    const optimizerLineage = (optimizerRows || []).map((optimizer) => ({
+    const preStartOptimizerRows = (optimizerRows || []).filter((optimizer) => Date.parse(optimizer.created_at) <= earliestStart);
+    exclusions.post_start_optimizer += (optimizerRows || []).length - preStartOptimizerRows.length;
+    const optimizerLineage = preStartOptimizerRows.map((optimizer) => ({
       optimizer_run_id: optimizer.id,
       optimizer_version: optimizer.optimizer_version,
       optimizer_policy_version: optimizer.policy_version,
-      optimizer_fingerprint: optimizer.optimizer_fingerprint
+      optimizer_fingerprint: optimizer.optimizer_fingerprint,
+      optimizer_created_at: exactIso(optimizer.created_at, 'optimizer created_at')
     }));
-    for (const optimizer of optimizerRows || []) {
+    for (const optimizer of preStartOptimizerRows) {
       systemDiagnostics.push(optimizerSystemDiagnostic(optimizer, winnersByLeg, row.game_round_id, row.id, decision));
     }
 
@@ -970,13 +989,20 @@ async function loadDecisionTargets(env, config) {
       SELECT av3.id AS analysis_v3_id,av3.analysis_version,av3.step2_version,av3.step2_result_id,
              av3.step2_fingerprint,av3.decision_fingerprint,av3.optimizer_run_id,av3.optimizer_version,
              av3.optimizer_fingerprint,av3.lock_id,av3.lock_hash,av3.market_fingerprint,av3.market_cutoff,
-             s2.prompt_version AS step2_prompt_version,s2.provider AS step2_provider,s2.model AS step2_model
+             av3.created_at AS analysis_v3_created_at,
+             s2.prompt_version AS step2_prompt_version,s2.provider AS step2_provider,s2.model AS step2_model,
+             s2.created_at AS step2_created_at
       FROM analysis_v3_runs av3
       JOIN analysis_step2_results s2 ON s2.id=av3.step2_result_id
       WHERE av3.decision_run_id=?
       ORDER BY av3.analysis_version,av3.optimizer_run_id,av3.id
     `).bind(row.id).all();
-    const integratedLineage = (integratedRows || []).map((integrated) => {
+    const preStartIntegratedRows = (integratedRows || []).filter((integrated) =>
+      Date.parse(integrated.analysis_v3_created_at) <= earliestStart
+      && Date.parse(integrated.step2_created_at) <= earliestStart
+    );
+    exclusions.post_start_integration += (integratedRows || []).length - preStartIntegratedRows.length;
+    const integratedLineage = preStartIntegratedRows.map((integrated) => {
       if (integrated.lock_id !== row.lock_id || integrated.lock_hash !== row.lock_hash
         || integrated.market_fingerprint !== row.market_fingerprint
         || exactIso(integrated.market_cutoff, 'integrated market_cutoff') !== exactIso(row.market_cutoff, 'decision market_cutoff')
@@ -996,10 +1022,12 @@ async function loadDecisionTargets(env, config) {
         step2_prompt_version: integrated.step2_prompt_version,
         step2_provider: integrated.step2_provider,
         step2_model: integrated.step2_model,
+        step2_created_at: exactIso(integrated.step2_created_at, 'step2 created_at'),
         step2_fingerprint: integrated.step2_fingerprint,
         optimizer_run_id: integrated.optimizer_run_id,
         optimizer_version: integrated.optimizer_version,
-        optimizer_fingerprint: integrated.optimizer_fingerprint
+        optimizer_fingerprint: integrated.optimizer_fingerprint,
+        analysis_v3_created_at: exactIso(integrated.analysis_v3_created_at, 'analysis_v3 created_at')
       };
     });
 
@@ -1031,9 +1059,11 @@ async function loadDecisionTargets(env, config) {
           step1_pack_id: row.pack_id,
           step1_pack_as_of: exactIso(row.pack_as_of, 'pack_as_of'),
           step1_prompt_version: row.step1_prompt_version,
+          step1_lock_created_at: exactIso(row.step1_lock_created_at, 'step1 lock created_at'),
           market_cutoff: exactIso(row.market_cutoff, 'market_cutoff'),
           decision_probability_version: row.decision_probability_version,
           decision_policy_version: row.policy_version,
+          decision_created_at: exactIso(row.created_at, 'decision created_at'),
           optimizer_lineage: optimizerLineage,
           integrated_lineage: integratedLineage
         }
