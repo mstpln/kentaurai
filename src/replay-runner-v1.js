@@ -190,6 +190,16 @@ async function nextSportsTarget(env, row) {
     WHERE ara.market_blind=1
       AND r.race_date BETWEEN ? AND ?
       AND julianday(ara.data_snapshot_at)<julianday(${event})
+      AND ara.id=(
+        SELECT ara2.id
+        FROM ai_race_analyses ara2
+        WHERE ara2.race_id=ara.race_id
+          AND ara2.model_version_id=ara.model_version_id
+          AND ara2.market_blind=1
+          AND julianday(ara2.data_snapshot_at)<julianday(${event})
+        ORDER BY julianday(ara2.data_snapshot_at) DESC,julianday(ara2.created_at) DESC,ara2.id DESC
+        LIMIT 1
+      )
       AND julianday(${event})<=julianday(?)
       AND (
         julianday(${event})>julianday(?)
@@ -511,6 +521,8 @@ async function buildSystemEvaluations(env, run, target, winners, isReference, ev
   `).bind(target.target_id).all();
   const out=[];
   for (const row of results || []) {
+    const optimizerCreatedAt=isoInstant(row.created_at,'optimizer_created_at');
+    if (!isReference && Date.parse(optimizerCreatedAt)>=Date.parse(eventAt)) continue;
     const optimizer=parseJson(row.optimizer_json,'optimizer_json');
     const legs=optimizer?.system?.legs;
     if (!Array.isArray(legs) || legs.length!==8 || Number(optimizer?.system?.spike_count)!==3) {
@@ -640,7 +652,11 @@ async function finalizeAblation(env,run,config,createdAt) {
   const byTarget=new Map();
   for (const row of results||[]) {
     if (!byTarget.has(row.target_group_id)) byTarget.set(row.target_group_id,new Map());
-    byTarget.get(row.target_group_id).set(row.forecast_key,row);
+    const targetMap=byTarget.get(row.target_group_id);
+    if (targetMap.has(row.forecast_key)) {
+      throw new Error(`ablation forecast key ${row.forecast_key} is ambiguous for target group ${row.target_group_id}`);
+    }
+    targetMap.set(row.forecast_key,row);
   }
   const pairs=[];
   for (const [targetId,items] of byTarget) {
