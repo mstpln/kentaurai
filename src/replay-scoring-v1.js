@@ -145,8 +145,8 @@ export function assertDeclaredAblationV1(baselineManifest, candidateManifest, de
     throw new Error('ablation pair does not actually change the declared feature family');
   }
 
-  const baselineCore = { ...baselineManifest, declared_feature_families: undefined };
-  const candidateCore = { ...candidateManifest, declared_feature_families: undefined };
+  const { declared_feature_families: _baselineFamilies, ...baselineCore } = baselineManifest || {};
+  const { declared_feature_families: _candidateFamilies, ...candidateCore } = candidateManifest || {};
   if (stableFeatureJson(baselineCore) !== stableFeatureJson(candidateCore)) {
     throw new Error('ablation manifests differ outside declared feature-family membership');
   }
