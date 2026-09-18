@@ -93,6 +93,8 @@ test('F3 private UI is structurally responsive, guided and contains no raw/admin
   assert.match(html,/Datatäckning och drift/);
   assert.match(html,/@media\(max-width:760px\)/);
   assert.match(html,/button\.disabled = !enabled/);
+  assert.match(html,/analysis-workflow-intro/);
+  assert.match(html,/f3LegacyUi/);
   assert.doesNotMatch(html,/ADMIN_TOKEN/);
   assert.doesNotMatch(html,/raw_object_key/);
   assert.doesNotMatch(html,/source_records/);
