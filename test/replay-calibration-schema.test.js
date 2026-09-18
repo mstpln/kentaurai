@@ -22,7 +22,7 @@ test('F1 migration stores replay metadata, forecast scores and declared ablation
   const evaluations = new Set(db.prepare('PRAGMA table_info(forecast_evaluations)').all().map((row) => row.name));
   for (const required of [
     'replay_run_id','target_id','target_group_id','target_at','forecast_variant','winner_entry_id',
-    'entry_count','log_loss','brier_score','top1_hit','winner_rank','forecast_json'
+    'entry_count','log_loss','brier_score','top1_hit','top2_hit','top3_hit','winner_rank','forecast_json'
   ]) assert.ok(evaluations.has(required), `missing forecast_evaluations.${required}`);
 
   const ablations = new Set(db.prepare('PRAGMA table_info(replay_ablation_results)').all().map((row) => row.name));
