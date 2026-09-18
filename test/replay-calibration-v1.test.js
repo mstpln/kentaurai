@@ -204,6 +204,30 @@ test('F1 sports replay reconstructs as-of features and excludes future official 
   assert.deepEqual(after.baseline_summary, before.baseline_summary);
 });
 
+test('F1 sports replay supports isolated +terms +Start Points dynamics and +position ablations', async () => {
+  const { db, env } = createTestEnv();
+  seedSportsReplay(db);
+  const result = await runSportsFeatureReplayV1(env, {
+    from: '2099-01-01T00:00:00Z',
+    to: '2099-01-03T23:59:59Z',
+    baseline_families: ['capacity'],
+    ablations: [
+      { id: 'add-terms', feature_family: 'terms', mode: 'add' },
+      { id: 'add-start-points', feature_family: 'start_points_dynamics', mode: 'add' },
+      { id: 'add-position', feature_family: 'position', mode: 'add' }
+    ],
+    walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
+  }, capacityProducer);
+
+  assert.deepEqual(result.ablations.map((item) => item.feature_family), [
+    'terms','start_points_dynamics','position'
+  ]);
+  assert.equal(result.version_metadata.replay_race_terms_version, 'replay-race-terms-v1');
+  assert.equal(result.version_metadata.replay_start_points_dynamics_version, 'replay-start-points-dynamics-v1');
+  assert.equal(result.version_metadata.replay_position_evidence_version, 'replay-position-evidence-v1');
+  assert.equal(result.scenario_summary.status, 'unavailable_no_canonical_scenario_contract');
+});
+
 function seedDecisionRound(db, index) {
   const roundId = `decision-round-${index}`;
   const day = String(index).padStart(2, '0');
