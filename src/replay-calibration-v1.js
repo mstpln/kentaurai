@@ -746,7 +746,7 @@ function predictionEntriesFromDecisionLeg(leg, field) {
   }));
 }
 
-function validateDecisionDocumentForReplay(row, decision) {
+async function validateDecisionDocumentForReplay(row, decision) {
   if (!decision || typeof decision !== 'object' || Array.isArray(decision)) throw new Error(`decision ${row.id} JSON must be an object`);
   if (decision.contract_version !== 'kentaurai-decision-probability-v1') throw new Error(`decision ${row.id} has unsupported contract`);
   for (const [field, expected] of [
@@ -763,6 +763,11 @@ function validateDecisionDocumentForReplay(row, decision) {
     throw new Error(`decision ${row.id} market_cutoff metadata mismatch`);
   }
   if (decision.decision_fingerprint !== row.decision_fingerprint) throw new Error(`decision ${row.id} fingerprint metadata mismatch`);
+  if (row.decision_probability_version !== ANALYSIS_DECISION_PROBABILITY_VERSION
+    || row.policy_version !== ANALYSIS_DECISION_POLICY_VERSION) {
+    throw new Error(`decision ${row.id} uses unsupported probability/policy version for F1 replay`);
+  }
+  await assertCanonicalDecisionProbabilityV1(decision);
   if (!Array.isArray(decision.legs) || decision.legs.length !== 8) throw new Error(`decision ${row.id} must contain exactly eight legs`);
   const legNumbers = decision.legs.map((leg) => Number(leg?.leg_number));
   if (legNumbers.some((number, index) => number !== index + 1)) throw new Error(`decision ${row.id} legs must be ordered 1 through 8`);
@@ -890,9 +895,13 @@ async function loadDecisionTargets(env, config) {
   const to = exactIso(config.to, 'to');
   const maxTargets = replayTargetLimit(config.max_targets ?? config.maxTargets);
   const decisionVersion = config.decision_probability_version == null
-    ? null : requiredText(config.decision_probability_version, 'decision_probability_version', 160);
-  const versionClause = decisionVersion ? 'AND adr.decision_probability_version=?' : '';
-  const bindings = decisionVersion ? [from, to, decisionVersion, maxTargets] : [from, to, maxTargets];
+    ? ANALYSIS_DECISION_PROBABILITY_VERSION
+    : requiredText(config.decision_probability_version, 'decision_probability_version', 160);
+  if (decisionVersion !== ANALYSIS_DECISION_PROBABILITY_VERSION) {
+    throw new Error(`F1 currently supports only canonical ${ANALYSIS_DECISION_PROBABILITY_VERSION} decision replay`);
+  }
+  const versionClause = 'AND adr.decision_probability_version=? AND adr.policy_version=?';
+  const bindings = [from, to, decisionVersion, ANALYSIS_DECISION_POLICY_VERSION, maxTargets];
   const { results } = await env.DB.prepare(`
     WITH ranked AS (
       SELECT adr.*,asl.pack_id,asl.pack_as_of,asl.prompt_version AS step1_prompt_version,
@@ -908,6 +917,24 @@ async function loadDecisionTargets(env, config) {
         AND datetime(adr.market_cutoff)>=datetime(?)
         AND datetime(adr.market_cutoff)<=datetime(?)
         ${versionClause}
+        AND datetime(adr.market_cutoff) <= datetime((
+          SELECT MIN(r2.scheduled_start_at)
+          FROM game_legs gl2 JOIN races r2 ON r2.id=gl2.race_id
+          WHERE gl2.game_round_id=adr.game_round_id
+        ))
+        AND datetime(adr.created_at) <= datetime((
+          SELECT MIN(r3.scheduled_start_at)
+          FROM game_legs gl3 JOIN races r3 ON r3.id=gl3.race_id
+          WHERE gl3.game_round_id=adr.game_round_id
+        ))
+        AND datetime(asl.created_at) <= datetime(adr.market_cutoff)
+        AND NOT EXISTS (
+          SELECT 1
+          FROM analysis_step1_lock_revisions rev
+          JOIN analysis_step1_locks child ON child.id=rev.child_lock_id
+          WHERE rev.parent_lock_id=adr.lock_id
+            AND datetime(child.created_at) <= datetime(adr.market_cutoff)
+        )
     )
     SELECT * FROM ranked
     WHERE round_rank=1
@@ -934,7 +961,7 @@ async function loadDecisionTargets(env, config) {
       continue;
     }
     const decision = parseJson(row.decision_json, 'decision_json');
-    validateDecisionDocumentForReplay(row, decision);
+    await validateDecisionDocumentForReplay(row, decision);
 
     const { results: roundRows } = await env.DB.prepare(`
       SELECT gl.leg_number,gl.race_id,r.scheduled_start_at,
