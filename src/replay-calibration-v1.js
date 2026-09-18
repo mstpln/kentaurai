@@ -721,12 +721,10 @@ export async function persistReplayResultV1(env, result, options = {}) {
   if (!REPLAY_TRACKS.includes(result.track)) throw new Error('unsupported replay track');
   const canonicalBase = { ...result };
   delete canonicalBase.evaluations;
-  const expected = await sha256Text(stableFeatureJson({ ...canonicalBase, result_fingerprint: undefined }).replace(/,"result_fingerprint":undefined/g, ''));
-  if (result.result_fingerprint !== expected) {
-    const copy = { ...canonicalBase };
-    delete copy.result_fingerprint;
-    const recalculated = await sha256Text(stableFeatureJson(copy));
-    if (recalculated !== result.result_fingerprint) throw new Error('result_fingerprint does not match canonical replay content');
+  delete canonicalBase.result_fingerprint;
+  const recalculated = await sha256Text(stableFeatureJson(canonicalBase));
+  if (recalculated !== result.result_fingerprint) {
+    throw new Error('result_fingerprint does not match canonical replay content');
   }
   const id = replayIdFromFingerprint(result.result_fingerprint);
   const existing = await env.DB.prepare('SELECT * FROM replay_runs WHERE id=? LIMIT 1').bind(id).first();
