@@ -65,6 +65,17 @@ function syntheticDeadline() {
   };
 }
 
+function syntheticSystemPolicy() {
+  return {
+    game_type: 'V85',
+    line_price_sek: 0.5,
+    target_budget_min_sek: 150,
+    max_budget_sek: 250,
+    exact_spike_count: 3,
+    system_type: 'main'
+  };
+}
+
 function syntheticMarketRows() {
   const betting = [];
   const odds = [];
@@ -223,6 +234,7 @@ test('D4 pack is market-only, deterministic by market state and input order, odd
     deadline: syntheticDeadline(),
     currentPack: syntheticCurrentPack(),
     ...market,
+    systemPolicy: syntheticSystemPolicy(),
     externalRankings: [{
       leg_number: 1, race_entry_id: 'entry-1-b', signal_type: 'external_ranking', value: '2', polarity: 'positive',
       strength: 0.8, fact_or_opinion: 'opinion', confidence: 0.7, published_at: '2099-05-01T13:53:00.000Z',
@@ -245,6 +257,17 @@ test('D4 pack is market-only, deterministic by market state and input order, odd
   assert.notEqual(first.manifest.generated_at, second.manifest.generated_at);
   assert.equal(first.manifest.read_order.at(-1), '99_external_rankings.json');
   assert.equal(first.manifest.market_only, true);
+  const roundMarket = first.files.find((file) => file.name === '00_round_market.json').payload;
+  assert.deepEqual(roundMarket.system_policy, {
+    game_type: 'V85',
+    line_price_sek: 0.5,
+    budget_min_sek: 150,
+    budget_max_sek: 250,
+    target_budget_sek: [150, 250],
+    exactly_three_spikes: true,
+    allowed_system_types: ['main'],
+    policy_source: 'server_config'
+  });
   assert.deepEqual(
     first.files.map((file) => [file.name, file.content]),
     shuffled.files.map((file) => [file.name, file.content])
@@ -265,6 +288,7 @@ test('D4 pack is market-only, deterministic by market state and input order, odd
   incomplete.odds = incomplete.odds.filter((row) => !(row.leg_number === 1 && row.race_entry_id === 'entry-1-b' && row.market_type === 'win'));
   const withoutCompleteOdds = await buildMarketPackV3Files({
     lock: syntheticLock(), deadline: syntheticDeadline(), currentPack: syntheticCurrentPack(), ...incomplete,
+    systemPolicy: syntheticSystemPolicy(),
     generatedAt: '2099-05-01T13:55:10Z'
   });
   const incompleteLeg1 = withoutCompleteOdds.files.find((file) => file.name === '01_leg_1_market.json').payload;
