@@ -23,8 +23,8 @@ test('F4 authoritative game config supplies current V85/V86 line prices and fail
   assert.throws(() => canonicalOptimizerPolicyForGameType({}, 'V85'), /V85_LINE_PRICE_SEK is not configured/);
 });
 
-test('F4 repository default points at worker-v076 and explicit v3 workflow mode', () => {
-  assert.match(wrangler, /"main": "\.\/src\/worker-v076\.js"/);
+test('repository default keeps F4 v3 mode behind the worker-v077 performance layer', () => {
+  assert.match(wrangler, /"main": "\.\/src\/worker-v077\.js"/);
   assert.match(wrangler, /"ANALYSIS_WORKFLOW_MODE": "v3"/);
 });
 
@@ -52,5 +52,5 @@ test('F4 runbook preserves controlled release source, rollback and no-backfill b
   assert.match(runbook, /source_main.*application merge commit/i);
   assert.match(runbook, /ANALYSIS_WORKFLOW_MODE=legacy_v2/);
   assert.match(runbook, /no historical replay\/backfill reset or resume/i);
-  assert.match(runbook, /Worker v076/i);
+  assert.match(runbook, /Worker v077/i);
 });
