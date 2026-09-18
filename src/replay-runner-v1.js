@@ -4,7 +4,12 @@ import {
   buildPerformanceFeaturesV3ForEntries,
   getPerformanceFeatureVersionRegistry
 } from './performance-features-v3.js';
-import { assertFeatureProvenanceAsOfV1, assertRaceTargetStateAsOfV1 } from './replay-asof-v1.js';
+import {
+  assertFeatureProvenanceAsOfV1,
+  assertHistoricalRaceEntryStateAsOfV1,
+  assertRaceTargetStateAsOfV1
+} from './replay-asof-v1.js';
+import { getReplayHistoryStateRefsV1 } from './relevant-history-v1.js';
 import {
   REPLAY_CONTRACT_VERSION,
   REPLAY_VERSION,
@@ -335,6 +340,16 @@ async function buildSportsEvaluation(env, run, config, target) {
   if (!winner) throw new Error('unique_official_winner_unavailable_as_of_source_cutoff');
 
   const entryIds = distribution.map((item)=>item.race_entry_id);
+  const historyAudit = await getReplayHistoryStateRefsV1(env,entryIds,forecastAsOf);
+  const auditedHistory = new Set();
+  for (const audit of historyAudit.values()) {
+    for (const item of audit.rows) {
+      const key = `${item.race_id}|${item.race_entry_id}`;
+      if (auditedHistory.has(key)) continue;
+      auditedHistory.add(key);
+      await assertHistoricalRaceEntryStateAsOfV1(env,item.race_id,item.race_entry_id,forecastAsOf);
+    }
+  }
   const features = await buildPerformanceFeaturesV3ForEntries(env,entryIds,forecastAsOf);
   for (const document of features.values()) await assertFeatureProvenanceAsOfV1(document,forecastAsOf);
   const featureDocuments = orderedFeatureDocuments(features);
@@ -769,7 +784,8 @@ export async function stepReplayRunV1(env,runId,options={}) {
   } catch (error) {
     const reason=String(error?.message||error);
     const failClosedReasons=[
-      'missing_asof_','replay_target_state_drift','future_source_row_in_feature_provenance',
+      'missing_asof_','replay_target_state_drift','missing_asof_historical_','replay_historical_state_drift',
+      'future_source_row_in_feature_provenance',
       'unique_official_winner_unavailable_as_of_source_cutoff',
       'eight_unique_official_winners_unavailable_as_of_source_cutoff',
       'sealed_blind_forecast_not_pre_event','market_decision_forecast_not_pre_event',
