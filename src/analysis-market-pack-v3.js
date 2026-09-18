@@ -5,7 +5,7 @@ import { canonicalLegsFromAnalysisPack, requireLatestStep1LockV1 } from './analy
 import { canonicalOptimizerPolicyForRound } from './analysis-optimizer-policy-config.js';
 
 export const ANALYSIS_MARKET_PACK_V3_CONTRACT = 'kentaurai-market-pack-v3';
-export const ANALYSIS_MARKET_PACK_V3_VERSION = 'market-pack-v3-d4';
+export const ANALYSIS_MARKET_PACK_V3_VERSION = 'market-pack-v3-d4.1';
 export const ANALYSIS_MARKET_SOURCE_QUALITY = 'normalized_verified_subset';
 
 const CONTENT_TYPE = 'application/json; charset=utf-8';
@@ -40,6 +40,33 @@ function finiteOrNull(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
+
+function normalizeSystemPolicyV3(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('verified system_policy is required');
+  const gameType = String(value.game_type || '').trim().toUpperCase();
+  if (!['V85', 'V86'].includes(gameType)) throw new Error('system_policy.game_type must be V85 or V86');
+  const linePrice = Number(value.line_price_sek);
+  const targetMin = Number(value.target_budget_min_sek);
+  const maxBudget = Number(value.max_budget_sek);
+  const exactSpikes = Number(value.exact_spike_count);
+  const systemType = String(value.system_type || '').trim().toLowerCase();
+  if (!Number.isFinite(linePrice) || linePrice <= 0) throw new Error('system_policy.line_price_sek must be positive');
+  if (!Number.isFinite(targetMin) || targetMin < 0) throw new Error('system_policy.target_budget_min_sek must be non-negative');
+  if (!Number.isFinite(maxBudget) || maxBudget <= 0 || targetMin > maxBudget) throw new Error('system_policy budget bounds are invalid');
+  if (exactSpikes !== 3) throw new Error('system_policy.exact_spike_count must be exactly three');
+  if (systemType !== 'main') throw new Error('system_policy.system_type must be main');
+  return {
+    game_type: gameType,
+    line_price_sek: linePrice,
+    budget_min_sek: targetMin,
+    budget_max_sek: maxBudget,
+    target_budget_sek: [targetMin, maxBudget],
+    exactly_three_spikes: true,
+    allowed_system_types: ['main'],
+    policy_source: 'server_config'
+  };
+}
+
 
 function integerOrNull(value) {
   if (value == null || value === '') return null;
@@ -485,7 +512,7 @@ export async function buildMarketPackV3Files({
   generatedAt = new Date().toISOString()
 } = {}) {
   if (!lock?.lock_id || !lock?.lock_hash || !lock?.round_id) throw new Error('sealed Step 1 lock metadata is required');
-  if (!systemPolicy || systemPolicy.game_type == null || systemPolicy.line_price_sek == null || systemPolicy.target_budget_min_sek == null || systemPolicy.max_budget_sek == null || Number(systemPolicy.exact_spike_count) !== 3) throw new Error('verified system_policy is required');
+  const normalizedSystemPolicy = normalizeSystemPolicyV3(systemPolicy);
   const cutoff = assertMarketCutoffAfterStep1V3(lock, deadline?.cutoff);
   const generated = exactIso(generatedAt, 'generated_at');
   const legs = activeLegsFromPack(currentPack);
@@ -501,7 +528,8 @@ export async function buildMarketPackV3Files({
     cutoff,
     deadline_source: deadline.deadline_source,
     betting: safeBetting,
-    odds: safeOdds
+    odds: safeOdds,
+    system_policy: normalizedSystemPolicy
   };
   const marketFingerprint = await hashValue(fingerprintInput);
   const legPayloads = legs.map((leg) => buildLegMarketPayload(leg, safeBetting, safeOdds, cutoff, lock, marketFingerprint));
@@ -519,16 +547,7 @@ export async function buildMarketPackV3Files({
     deadline_source: deadline.deadline_source,
     deadline_quality: deadline.deadline_quality,
     source_quality: ANALYSIS_MARKET_SOURCE_QUALITY,
-    system_policy: {
-      game_type: systemPolicy.game_type,
-      line_price_sek: Number(systemPolicy.line_price_sek),
-      budget_min_sek: Number(systemPolicy.target_budget_min_sek),
-      budget_max_sek: Number(systemPolicy.max_budget_sek),
-      target_budget_sek: [Number(systemPolicy.target_budget_min_sek), Number(systemPolicy.max_budget_sek)],
-      exactly_three_spikes: true,
-      allowed_system_types: [systemPolicy.system_type || 'main'],
-      policy_source: 'server_config'
-    },
+    system_policy: normalizedSystemPolicy,
     pool_maturity: {
       active_entry_count: activeIds.size,
       ownership_snapshot_count: safeBetting.length,
