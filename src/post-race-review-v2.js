@@ -1,5 +1,6 @@
 import { stableId } from './ids.js';
 import { stableFeatureJson } from './analysis-v3-foundations.js';
+import { step1LockHash } from './analysis-step1-lock-v1.js';
 
 export const POST_RACE_REVIEW_V2_VERSION = 'post-race-review-v2-f2';
 const LEARNING_EVIDENCE_VERSION = 'post-race-learning-evidence-v1';
@@ -28,8 +29,10 @@ async function candidateV3Round(env, roundId = null) {
       av3.id AS analysis_v3_id,av3.lock_id,av3.decision_run_id,av3.optimizer_run_id,
       av3.analysis_fingerprint,av3.lock_hash AS analysis_lock_hash,av3.market_cutoff,av3.created_at AS analysis_created_at,
       asl.lock_json,asl.lock_hash,asl.created_at AS lock_created_at,
-      adr.decision_json,adr.decision_fingerprint,
-      aor.optimizer_json,aor.optimizer_fingerprint
+      adr.decision_json,adr.decision_fingerprint,adr.created_at AS decision_created_at,
+      aor.optimizer_json,aor.optimizer_fingerprint,aor.created_at AS optimizer_created_at,
+      (SELECT MIN(COALESCE(r.scheduled_start_at, r.race_date || 'T23:59:59Z'))
+       FROM game_legs gl0 JOIN races r ON r.id=gl0.race_id WHERE gl0.game_round_id=gr.id) AS first_start_at
     FROM game_rounds gr
     JOIN analysis_v3_runs av3 ON av3.id = (
       SELECT candidate.id
@@ -68,7 +71,7 @@ async function candidateV3Round(env, roundId = null) {
   return roundId ? env.DB.prepare(sql).bind(roundId).first() : env.DB.prepare(sql).first();
 }
 
-function assertLineage(row, lock, decision, optimizer) {
+async function assertLineage(row, lock, decision, optimizer) {
   if (lock.round_id !== row.id || decision.round_id !== row.id || optimizer.round_id !== row.id) {
     throw new Error(`round ${row.id} has cross-round v3 lineage`);
   }
@@ -83,6 +86,19 @@ function assertLineage(row, lock, decision, optimizer) {
     || optimizer.decision_fingerprint !== row.decision_fingerprint
     || optimizer.optimizer_fingerprint !== row.optimizer_fingerprint) {
     throw new Error(`round ${row.id} optimizer lineage mismatch`);
+  }
+  if (await step1LockHash(lock) !== row.lock_hash) {
+    throw new Error(`round ${row.id} Step 1 lock content does not match stored hash`);
+  }
+  const firstStart = Date.parse(exactIso(row.first_start_at, 'first_start_at'));
+  const marketCutoff = Date.parse(exactIso(row.market_cutoff, 'market_cutoff'));
+  const lockCreated = Date.parse(exactIso(row.lock_created_at, 'lock_created_at'));
+  const decisionCreated = Date.parse(exactIso(row.decision_created_at, 'decision_created_at'));
+  const optimizerCreated = Date.parse(exactIso(row.optimizer_created_at, 'optimizer_created_at'));
+  const analysisCreated = Date.parse(exactIso(row.analysis_created_at, 'analysis_created_at'));
+  if (lockCreated >= marketCutoff) throw new Error(`round ${row.id} Step 1 lock is not sealed before market cutoff`);
+  if (decisionCreated >= firstStart || optimizerCreated >= firstStart || analysisCreated >= firstStart || marketCutoff >= firstStart) {
+    throw new Error(`round ${row.id} v3 lineage is not strictly pre-race`);
   }
 }
 
@@ -373,7 +389,7 @@ export async function runNextPostRaceReviewV2(env, options = {}) {
   const lock = parseJson(row.lock_json, 'Step 1 lock');
   const decision = parseJson(row.decision_json, 'decision');
   const optimizer = parseJson(row.optimizer_json, 'optimizer');
-  assertLineage(row, lock, decision, optimizer);
+  await assertLineage(row, lock, decision, optimizer);
 
   const facts = await loadRoundFacts(env, row);
   const indexed = indexPreRace(lock, decision, optimizer);
