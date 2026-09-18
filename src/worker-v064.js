@@ -211,7 +211,7 @@ export default {
     const trackDetailMatch = path.match(/^\/app\/api\/tracks\/([^/]+)$/);
     if (request.method === 'GET' && trackDetailMatch) {
       const denied = await requireSession(request, env); if (denied) return denied;
-      try { const data = await getTrackDetailV064(env, decodeURIComponent(trackDetailMatch[1])); return data ? json(data) : json({ error: 'not_found' }, 404); }
+      try { const data = await getTrackDetailV064(env, decodeURIComponent(trackDetailMatch[1]), { includeHomeTrainerCount: false }); return data ? json(data) : json({ error: 'not_found' }, 404); }
       catch (error) { console.error(error); return json({ error: 'request_failed', message: error.message }, 400); }
     }
 
