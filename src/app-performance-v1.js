@@ -36,6 +36,13 @@ function performanceClient() {
   if(typeof openTrackDetail==='function'){ const old=openTrackDetail; openTrackDetail=async function(id){ const path='/tracks/'+encodeURIComponent(id); if(!fresh(path)) show('tracks','Öppnar bana…'); return old(id); }; }
   const oldGames=renderGames;
   renderGames=async function(){ const path=listPath('games'); if(!fresh(path)) show('games','Läser spel…'); return oldGames(); };
+  document.addEventListener('click',event=>{
+    const target=event.target instanceof Element?event.target:null;
+    const trackNav=target?.closest('.nav-item[data-page="tracks"]');
+    if(trackNav&&!fresh(listPath('tracks'))) show('tracks','Läser banor…');
+    const trackRow=target?.closest('[data-track-id]');
+    if(trackRow){ const path='/tracks/'+encodeURIComponent(trackRow.dataset.trackId); if(!fresh(path)) show('tracks','Öppnar bana…'); }
+  },true);
   document.addEventListener('pointerover',event=>{
     const target=event.target instanceof Element?event.target:null;
     const row=target?.closest('.entity-row[data-id]');
