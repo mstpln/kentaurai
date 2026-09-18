@@ -24,6 +24,7 @@ async function candidateV3Round(env, roundId = null) {
   const sql = `
     SELECT
       gr.id,gr.game_type,gr.round_date,
+      CASE WHEN EXISTS (SELECT 1 FROM reference_round_exports rre WHERE rre.game_round_id=gr.id) THEN 1 ELSE 0 END AS regression_only,
       av3.id AS analysis_v3_id,av3.lock_id,av3.decision_run_id,av3.optimizer_run_id,
       av3.analysis_fingerprint,av3.lock_hash AS analysis_lock_hash,av3.market_cutoff,av3.created_at AS analysis_created_at,
       asl.lock_json,asl.lock_hash,asl.created_at AS lock_created_at,
@@ -236,6 +237,7 @@ async function linkCandidateEvidence(env, review) {
     VALUES (?,?,?)
   `).bind(review.id,hypothesisId,observationId).run();
 
+  await env.DB.prepare('UPDATE learning_hypotheses SET updated_at=? WHERE id=?').bind(now,hypothesisId).run();
   return { hypothesisId, observationId };
 }
 
@@ -279,7 +281,8 @@ async function persistLegReview(env, row, facts, indexed, legNumber, now) {
     topPickIncident,
     hasWinnerPrediction: Boolean(winnerPrediction && winnerDecision)
   });
-  const learningClassification = failureClass ? 'candidate_learning' : 'no_change';
+  const learningEligible = Number(row.regression_only) !== 1;
+  const learningClassification = failureClass && learningEligible ? 'candidate_learning' : 'no_change';
   const id = stableId('post-race-review-v2', POST_RACE_REVIEW_V2_VERSION, row.analysis_v3_id, winner.race_id);
   const diagnostics = {
     review_version: POST_RACE_REVIEW_V2_VERSION,
@@ -317,6 +320,7 @@ async function persistLegReview(env, row, facts, indexed, legNumber, now) {
       top_pick_incident: topPickIncident
     },
     failure_class: failureClass,
+    learning_eligible: learningEligible,
     learning_classification: learningClassification
   };
 
@@ -326,9 +330,9 @@ async function persistLegReview(env, row, facts, indexed, legNumber, now) {
       review_version,pre_race_fingerprint,winner_blind_probability,winner_decision_probability,winner_rank,
       winner_assessment_confidence,scenario_match,scenario_confidence,data_quality_summary,coverage_json,
       winner_market_percent,winner_market_rank,public_win_probability_proxy,public_proxy_quality,
-      optimizer_selected,optimizer_is_spike,optimizer_selected_count,failure_class,learning_classification,
+      optimizer_selected,optimizer_is_spike,optimizer_selected_count,failure_class,learning_eligible,learning_classification,
       diagnostics_json,created_at
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).bind(
     id,row.id,winner.race_id,legNumber,winner.winner_entry_id,row.analysis_v3_id,row.lock_id,row.decision_run_id,row.optimizer_run_id,
     POST_RACE_REVIEW_V2_VERSION,row.analysis_fingerprint,
@@ -337,14 +341,27 @@ async function persistLegReview(env, row, facts, indexed, legNumber, now) {
     lockLeg.data_quality_summary || null,stableFeatureJson(coverage),
     asNumber(market?.bet_percent),asNumber(market?.market_rank),asNumber(winnerDecision?.public_win_probability_proxy),
     winnerDecision?.public_proxy_quality || null,selectedWinner ? 1 : 0,isSpike ? 1 : 0,selectedEntries.length,
-    failureClass,learningClassification,stableFeatureJson(diagnostics),now
+    failureClass,learningEligible ? 1 : 0,learningClassification,stableFeatureJson(diagnostics),now
   ).run();
 
   const review = {
     id,roundId: row.id,raceId: winner.race_id,analysisV3Id: row.analysis_v3_id,
     preRaceFingerprint: row.analysis_fingerprint,failureClass,learningClassification,createdAt: now
   };
-  if (Number(write.meta?.changes || 0) > 0) await linkCandidateEvidence(env, review);
+  const stored = await env.DB.prepare(`
+    SELECT winner_entry_id,pre_race_fingerprint,failure_class,learning_eligible,learning_classification,diagnostics_json
+    FROM post_race_reviews_v2 WHERE id=? LIMIT 1
+  `).bind(id).first();
+  if (!stored
+    || stored.winner_entry_id !== winner.winner_entry_id
+    || stored.pre_race_fingerprint !== row.analysis_fingerprint
+    || (stored.failure_class || null) !== (failureClass || null)
+    || Number(stored.learning_eligible) !== (learningEligible ? 1 : 0)
+    || stored.learning_classification !== learningClassification
+    || stored.diagnostics_json !== stableFeatureJson(diagnostics)) {
+    throw new Error(`existing F2 review conflicts with current settled outcome for leg ${legNumber}`);
+  }
+  if (learningEligible && learningClassification === 'candidate_learning') await linkCandidateEvidence(env, review);
   return Number(write.meta?.changes || 0);
 }
 
