@@ -33,6 +33,11 @@ import {
   ANALYSIS_DECISION_POLICY_VERSION,
   assertCanonicalDecisionProbabilityV1
 } from './analysis-decision-probability-v1.js';
+import {
+  ANALYSIS_OPTIMIZER_POLICY_VERSION,
+  ANALYSIS_OPTIMIZER_VERSION,
+  buildCanonicalOptimizerV1
+} from './analysis-optimizer-v1.js';
 
 export const REPLAY_CONTRACT_VERSION = 'kentaurai-replay-v1';
 export const REPLAY_VERSION = 'replay-calibration-v1-f1';
@@ -561,15 +566,97 @@ async function evaluationFingerprintV1(evaluations) {
   return sha256Text(stableFeatureJson(canonicalReplayEvaluationsV1(evaluations)));
 }
 
+function canonicalEvaluationTargets(evaluations) {
+  const targets = new Map();
+  for (const evaluation of evaluations) {
+    const entryIds = evaluation.forecast.map((entry) => entry.race_entry_id).sort(compareId);
+    const existing = targets.get(evaluation.target_id);
+    const identity = {
+      target_id: evaluation.target_id,
+      target_group_id: evaluation.target_group_id,
+      target_at: evaluation.target_at,
+      winner_entry_id: evaluation.winner_entry_id,
+      entry_ids: entryIds
+    };
+    if (existing && stableFeatureJson(existing) !== stableFeatureJson(identity)) {
+      throw new Error(`replay target ${evaluation.target_id} has inconsistent identity or forecast field across variants`);
+    }
+    if (!existing) targets.set(evaluation.target_id, identity);
+  }
+  return [...targets.values()].sort((a, b) =>
+    Date.parse(a.target_at) - Date.parse(b.target_at)
+    || compareId(a.target_group_id, b.target_group_id)
+    || compareId(a.target_id, b.target_id)
+  );
+}
+
+function canonicalCohortFingerprintInput(result, evaluations) {
+  const targets = canonicalEvaluationTargets(evaluations);
+  if (result.track === 'sports_feature') {
+    return {
+      targets: targets.map((target) => ({
+        target_id: target.target_id,
+        target_at: target.target_at,
+        target_group_at: target.target_at,
+        winner_entry_id: target.winner_entry_id,
+        entry_ids: target.entry_ids
+      })),
+      version_metadata: result.version_metadata
+    };
+  }
+  const lineages = new Map((result.version_metadata?.decision_lineages || []).map((lineage) => [lineage.target_group_id, lineage]));
+  return {
+    targets: targets.map((target) => {
+      const lineage = lineages.get(target.target_group_id);
+      if (!lineage) throw new Error(`decision replay target ${target.target_id} is missing exact lineage metadata`);
+      return {
+        target_id: target.target_id,
+        target_group_id: target.target_group_id,
+        target_at: target.target_at,
+        winner_entry_id: target.winner_entry_id,
+        decision_run_id: lineage.decision_run_id,
+        version_metadata: lineage.version_metadata
+      };
+    }),
+    version_metadata: result.version_metadata
+  };
+}
+
+function canonicalWalkForwardTargets(targets, excludedGroupIds = new Set()) {
+  const groups = new Map();
+  for (const target of targets) {
+    if (excludedGroupIds.has(target.target_group_id)) continue;
+    const previous = groups.get(target.target_group_id);
+    if (!previous || Date.parse(target.target_at) < Date.parse(previous.target_group_at)) {
+      groups.set(target.target_group_id, {
+        target_group_id: target.target_group_id,
+        target_group_at: target.target_at
+      });
+    }
+  }
+  return [...groups.values()];
+}
+
 function assertReplayAggregateConsistency(result, evaluations) {
+  const targets = canonicalEvaluationTargets(evaluations);
   const foldCount = Number(result?.fold_count);
   if (!Number.isInteger(foldCount) || foldCount < 0 || foldCount !== (result?.walk_forward?.folds || []).length) {
     throw new Error('fold_count does not match walk_forward folds');
   }
   const expectedStatus = foldCount > 0 ? 'completed' : 'insufficient_evidence';
   if (result.status !== expectedStatus) throw new Error('replay status does not match fold evidence');
-  const uniqueTargets = new Set(evaluations.map((evaluation) => evaluation.target_id));
-  if (Number(result.target_count) !== uniqueTargets.size) throw new Error('target_count does not match replay evaluations');
+  if (Number(result.target_count) !== targets.length) throw new Error('target_count does not match replay evaluations');
+
+  const regressionGroups = result.track === 'v85_v86_decision'
+    ? new Set(normalizeIdList(result.config?.regression_only_round_ids, 'config.regression_only_round_ids'))
+    : new Set();
+  const expectedWalkForward = buildWalkForwardFoldsV1(
+    canonicalWalkForwardTargets(targets, regressionGroups),
+    result.config?.walk_forward || {}
+  );
+  if (stableFeatureJson(expectedWalkForward) !== stableFeatureJson(result.walk_forward)) {
+    throw new Error('walk_forward does not match chronological replay targets and policy');
+  }
 
   const testGroups = testGroupSet(result.walk_forward.folds || []);
   if (result.track === 'v85_v86_decision') {
@@ -597,6 +684,28 @@ function assertReplayAggregateConsistency(result, evaluations) {
     };
     if (stableFeatureJson(expectedDelta) !== stableFeatureJson(result.decision_minus_blind)) {
       throw new Error('decision-minus-blind summary is inconsistent');
+    }
+    const evidenceTargetCount = targets.filter((target) => !regressionGroups.has(target.target_group_id)).length;
+    const regressionTargetCount = targets.length - evidenceTargetCount;
+    if (Number(result.evidence_target_count) !== evidenceTargetCount
+      || Number(result.regression_only_target_count) !== regressionTargetCount) {
+      throw new Error('decision replay evidence/regression target counts are inconsistent');
+    }
+    const regressionBlind = evaluations.filter((item) => item.forecast_variant === 'blind' && regressionGroups.has(item.target_group_id));
+    const regressionDecision = evaluations.filter((item) => item.forecast_variant === 'decision' && regressionGroups.has(item.target_group_id));
+    if (stableFeatureJson(summarizeScores(regressionBlind)) !== stableFeatureJson(result.regression_only_summary?.blind)
+      || stableFeatureJson(summarizeScores(regressionDecision)) !== stableFeatureJson(result.regression_only_summary?.decision)) {
+      throw new Error('decision replay regression-only summaries are inconsistent');
+    }
+    const testSystems = (result.system_diagnostics || []).filter((item) => testGroups.has(item.target_group_id));
+    const regressionSystems = result.regression_only_summary?.system_diagnostics || [];
+    if (testSystems.length !== (result.system_diagnostics || []).length
+      || regressionSystems.some((item) => !regressionGroups.has(item.target_group_id))) {
+      throw new Error('decision replay system diagnostics are assigned outside their evidence cohorts');
+    }
+    if (stableFeatureJson(summarizeSystems(testSystems)) !== stableFeatureJson(result.system_summary)
+      || stableFeatureJson(summarizeSystems(regressionSystems)) !== stableFeatureJson(result.regression_only_summary?.systems)) {
+      throw new Error('decision replay system summaries are inconsistent');
     }
   } else if (result.track === 'sports_feature') {
     const expectedVariants = ['baseline', ...(result.config?.ablations || []).map((ablation) => ablation.id)].sort(compareId);
@@ -653,6 +762,12 @@ function assertReplayAggregateConsistency(result, evaluations) {
         throw new Error(`ablation ${ablation.ablation_id} result is inconsistent with held-out evaluations`);
       }
     }
+  }
+  if (stableFeatureJson(result.scenario_summary) !== stableFeatureJson({
+    status: 'unavailable_no_canonical_scenario_contract',
+    scored_target_count: 0
+  })) {
+    throw new Error('scenario_summary must remain unavailable until a canonical scenario contract exists');
   }
 }
 
@@ -743,13 +858,11 @@ export async function runSportsFeatureReplayV1(env, config = {}, forecastProduce
   const comparisons = ablationResultsFromVariantScores(featureSets, scoresByVariant, walkForward);
   const allScores = [...scoresByVariant.entries()].flatMap(([variant, items]) => items.map((item) => ({ ...item, forecast_variant: variant })));
   const evaluationFingerprint = await evaluationFingerprintV1(allScores);
-  const cohortFingerprint = await sha256Text(stableFeatureJson(targets.map((target) => ({
-    target_id: target.target_id,
-    target_at: target.target_at,
-    target_group_at: target.target_group_at,
-    winner_entry_id: target.winner_entry_id,
-    entry_ids: target.entry_ids
-  }))));
+  const versionMetadata = {
+    ...resultSourceVersionMetadata(),
+    forecast_producer_version: producerVersion,
+    forecast_producer_fingerprint: producerFingerprint
+  };
   const resultBase = {
     contract_version: REPLAY_CONTRACT_VERSION,
     replay_version: REPLAY_VERSION,
@@ -763,12 +876,8 @@ export async function runSportsFeatureReplayV1(env, config = {}, forecastProduce
       ablations: normalizeAblations(config.ablations ?? []),
       walk_forward: walkForward.policy
     },
-    version_metadata: {
-      ...resultSourceVersionMetadata(),
-      forecast_producer_version: producerVersion,
-      forecast_producer_fingerprint: producerFingerprint
-    },
-    cohort_fingerprint: cohortFingerprint,
+    version_metadata: versionMetadata,
+    cohort_fingerprint: null,
     evaluation_fingerprint: evaluationFingerprint,
     target_count: targets.length,
     fold_count: walkForward.folds.length,
@@ -780,6 +889,7 @@ export async function runSportsFeatureReplayV1(env, config = {}, forecastProduce
       scored_target_count: 0
     }
   };
+  resultBase.cohort_fingerprint = await sha256Text(stableFeatureJson(canonicalCohortFingerprintInput(resultBase, allScores)));
   const resultFingerprint = await sha256Text(stableFeatureJson(resultBase));
   return { ...resultBase, result_fingerprint: resultFingerprint, evaluations: allScores };
 }
