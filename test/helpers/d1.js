@@ -56,7 +56,8 @@ export function createTestEnv() {
     '../../migrations/0018_xlabs_position_reconstruction_v1.sql',
     '../../migrations/0019_analysis_step1_locks.sql',
     '../../migrations/0020_analysis_step1_lock_revisions.sql',
-    '../../migrations/0021_analysis_decision_probability_v1.sql'
+    '../../migrations/0021_analysis_decision_probability_v1.sql',
+    '../../migrations/0022_analysis_optimizer_v1.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }
