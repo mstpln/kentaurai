@@ -7,12 +7,12 @@ Updated: 2026-09-18
 - Worker: `kentaurai-api`.
 - D1: `kentaurai`.
 - R2: `kentaurai-raw`.
-- App-performance application source merged at `3fdb81024f0bbd188e524d42aad0cf7123df2570`; controlled release trigger/main head is `238b55d1307e745e05bb59c7bc6a3fa30523f1df`.
+- Latest v3 round-picker application source merged at `c3d36ff400b1a617475458d884e39cc0adebe372`; controlled release trigger/main head is `c86d3d209c3d42b86150c4522d11f708a6e94bf1`.
 - Worker entrypoint is `src/worker-v077.js` with `ANALYSIS_WORKFLOW_MODE=v3`; v077 delegates F4 analysis/scheduling behavior to `worker-v076.js`.
-- Production release #61 completed successfully. Exact-head QA, Cloudflare validation, migration/schema/index verification, Worker deploy, `/health`, `/app/login` and private analysis/replay route protection all passed.
+- Production release #62 completed successfully. Exact-head QA, Cloudflare validation, migration/schema/index verification, Worker deploy, `/health`, `/app/login` and private analysis/replay route protection all passed.
 - Production schema is current through migration `0026_app_read_performance.sql`.
 - F1 replay/calibration, F2 post-race learning diagnostics, F3 private workflow/observability, F4 v3 cutover and the private-app navigation performance layer are production-live.
-- Historical official/X-Labs jobs keep their durable cursors. The performance release did not reset, recreate or resume stopped historical work.
+- Historical official/X-Labs jobs keep their durable cursors. The round-picker release did not reset, recreate or resume stopped historical work.
 
 ## App performance live
 - `worker-v077` adds only the private-app HTML performance layer; racing/analysis semantics and auth boundaries are unchanged.
