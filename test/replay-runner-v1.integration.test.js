@@ -237,3 +237,66 @@ test('F1 public proxy is not scored when E1 quality is not verified complete', a
   assert.equal(first.scored_forecasts, 16);
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM forecast_evaluations WHERE forecast_key='market_win_probability_proxy'").get().n, 0);
 });
+
+
+test('F1 finalization stores paired ablation evidence only for the declared family', async () => {
+  const { db, env } = createTestEnv();
+  db.prepare("INSERT INTO tracks (id,canonical_name) VALUES ('track-ab','Ablation Track')").run();
+  db.prepare("INSERT INTO races (id,track_id,race_date,race_number) VALUES ('race-ab-1','track-ab','2099-04-01',1),('race-ab-2','track-ab','2099-04-02',1)").run();
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('horse-ab-1','A'),('horse-ab-2','B')").run();
+  db.prepare("INSERT INTO race_entries (id,race_id,horse_id,start_number) VALUES ('entry-ab-1','race-ab-1','horse-ab-1',1),('entry-ab-2','race-ab-2','horse-ab-2',1)").run();
+
+  const run = await createReplayRunV1(env, {
+    track: 'sports_feature',
+    start_date: '2099-04-01',
+    end_date: '2099-04-02',
+    source_data_cutoff: '2099-04-03T00:00:00Z',
+    ablation: {
+      declared_feature_family: 'xlabs_interval_profile',
+      baseline_forecast_key: 'baseline',
+      candidate_forecast_key: 'candidate',
+      min_pairs: 2
+    }
+  }, { createdAt: '2099-04-03T01:00:00Z' });
+
+  const baseManifest = JSON.stringify({
+    contract_version: 'kentaurai-replay-feature-manifest-v1',
+    deterministic_feature_contract: 'kentaurai-performance-features-v3',
+    deterministic_feature_registry: [],
+    evaluation_invariant: { policy: 'same' },
+    declared_feature_families: ['form']
+  });
+  const candidateManifest = JSON.stringify({
+    contract_version: 'kentaurai-replay-feature-manifest-v1',
+    deterministic_feature_contract: 'kentaurai-performance-features-v3',
+    deterministic_feature_registry: [],
+    evaluation_invariant: { policy: 'same' },
+    declared_feature_families: ['form','xlabs_interval_profile']
+  });
+  const rows = [
+    ['eval-ab-1-base','race-ab-1','2099-04-01T12:00:00Z','entry-ab-1','baseline',0.9,0.5,baseManifest],
+    ['eval-ab-1-cand','race-ab-1','2099-04-01T12:00:00Z','entry-ab-1','candidate',0.7,0.4,candidateManifest],
+    ['eval-ab-2-base','race-ab-2','2099-04-02T12:00:00Z','entry-ab-2','baseline',0.8,0.45,baseManifest],
+    ['eval-ab-2-cand','race-ab-2','2099-04-02T12:00:00Z','entry-ab-2','candidate',0.6,0.35,candidateManifest]
+  ];
+  for (const [id,target,event,winner,key,logLoss,brier,manifest] of rows) {
+    db.prepare(`INSERT INTO forecast_evaluations (
+      id,replay_run_id,track,target_id,target_group_id,event_at,forecast_as_of,fold_index,evidence_eligible,is_reference,
+      forecast_key,forecast_version,winner_entry_id,winner_probability,log_loss,brier_score,top1_hit,top2_coverage,
+      entry_count,feature_manifest_json,coverage_bucket,probability_json,source_metadata_json,created_at
+    ) VALUES (?,?,'sports_feature',?,?,?,'2099-03-31T12:00:00Z',1,1,0,?,'synthetic',?,0.6,?,?,1,1,2,?,'high','[]','{}','2099-04-03T01:00:00Z')`)
+      .run(id,run.id,`${target}:${key}`,target,event,key,winner,logLoss,brier,manifest);
+    db.prepare("INSERT INTO forecast_probability_observations (evaluation_id,race_entry_id,probability,won,calibration_bin) VALUES (?,?,0.6,1,6)")
+      .run(id,winner);
+  }
+
+  const done = await stepReplayRunV1(env, run.id, { updatedAt: '2099-04-03T02:00:00Z' });
+  assert.equal(done.status, 'completed');
+  assert.equal(done.summary.ablation.find((item) => item.coverage_bucket === 'all').evidence_status, 'candidate_better');
+  assert.equal(done.summary.ablation.find((item) => item.coverage_bucket === 'high').paired_target_count, 2);
+  const stored = db.prepare("SELECT * FROM replay_ablation_results WHERE replay_run_id=? AND coverage_bucket='all'").get(run.id);
+  assert.equal(stored.evidence_status, 'candidate_better');
+  assert.equal(stored.paired_target_count, 2);
+  assert.ok(stored.delta_log_loss < 0);
+  assert.ok(stored.delta_brier < 0);
+});
