@@ -65,6 +65,10 @@ The target pre-market pack is round-scoped rather than a database dump. It conta
 
 The target lock preserves the market-blind sports assessment before market exposure. It will contain the exact active-entry probabilities, rank, ABCD, uncertainty, scenario material and confidence/data-quality fields. Probabilities sum to 1 per leg. The lock is fingerprinted and immutable; any later factual revision creates a linked revision rather than silently editing the prior lock.
 
+### F4 cutover transport
+
+The default creation workflow is v3. `kentaurai-step2-bundle-v1` is a transport wrapper that combines the exact persisted sealed Step 1 document with the bound D4 market manifest/files so Step 2 is reproducible without conversation-memory reconstruction. It does not create a new factual source layer or allow AI-authored system structure. Historical v1/v2 artifacts remain readable but their creation routes are disabled in default v3 mode.
+
 ### Market pack
 
 The target market pack is a delta linked to a valid Step-1 lock. It contains current verified market facts, cutoff/maturity/quality metadata and no replacement copy of the sports history pack.
