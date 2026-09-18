@@ -228,25 +228,44 @@ async function linkCandidateEvidence(env, review) {
     now
   ).run();
 
+  const observationText = `F2 recorded a ${review.failureClass} diagnostic; this is candidate evidence only.`;
+  const evidenceJson = stableFeatureJson({
+    evidence_version: LEARNING_EVIDENCE_VERSION,
+    review_id: review.id,
+    analysis_v3_id: review.analysisV3Id,
+    pre_race_fingerprint: review.preRaceFingerprint,
+    failure_class: review.failureClass
+  });
   await env.DB.prepare(`
     INSERT OR IGNORE INTO learning_observations
       (id,hypothesis_id,game_round_id,race_id,direction,strength,observation_text,evidence_json,created_at)
     VALUES (?,?,?,?, 'supporting', NULL, ?, ?, ?)
   `).bind(
-    observationId,
-    hypothesisId,
-    review.roundId,
-    review.raceId,
-    `F2 recorded a ${review.failureClass} diagnostic; this is candidate evidence only.`,
-    stableFeatureJson({
-      evidence_version: LEARNING_EVIDENCE_VERSION,
-      review_id: review.id,
-      analysis_v3_id: review.analysisV3Id,
-      pre_race_fingerprint: review.preRaceFingerprint,
-      failure_class: review.failureClass
-    }),
-    now
+    observationId,hypothesisId,review.roundId,review.raceId,observationText,evidenceJson,now
   ).run();
+
+  const storedHypothesis = await env.DB.prepare(`
+    SELECT category,status,min_evidence_target FROM learning_hypotheses WHERE id=? LIMIT 1
+  `).bind(hypothesisId).first();
+  if (!storedHypothesis
+    || storedHypothesis.category !== `post_race_${review.failureClass}`
+    || storedHypothesis.status !== 'candidate'
+    || Number(storedHypothesis.min_evidence_target) !== LEARNING_MIN_EVIDENCE_TARGET) {
+    throw new Error(`F2 learning hypothesis ${hypothesisId} conflicts with versioned evidence policy`);
+  }
+  const storedObservation = await env.DB.prepare(`
+    SELECT hypothesis_id,game_round_id,race_id,direction,observation_text,evidence_json
+    FROM learning_observations WHERE id=? LIMIT 1
+  `).bind(observationId).first();
+  if (!storedObservation
+    || storedObservation.hypothesis_id !== hypothesisId
+    || storedObservation.game_round_id !== review.roundId
+    || storedObservation.race_id !== review.raceId
+    || storedObservation.direction !== 'supporting'
+    || storedObservation.observation_text !== observationText
+    || storedObservation.evidence_json !== evidenceJson) {
+    throw new Error(`F2 learning observation ${observationId} conflicts with deterministic review evidence`);
+  }
 
   await env.DB.prepare(`
     INSERT OR IGNORE INTO post_race_learning_links (review_id,hypothesis_id,observation_id)
