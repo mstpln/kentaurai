@@ -271,6 +271,8 @@ test('E3 final narrative is post-optimizer, fingerprint-bound, immutable and can
   const prompt = buildFinalNarrativePromptV1(integrated);
   assert.match(prompt, /authoritative system.*selected by KentaurAI code/i);
   assert.match(prompt, /do not alter/i);
+  assert.match(prompt, /step2_interpretation/);
+  assert.match(prompt, /Synthetic market interpretation/);
 
   const narrative = {
     contract_version: ANALYSIS_V3_NARRATIVE_CONTRACT,
@@ -297,4 +299,46 @@ test('E3 final narrative is post-optimizer, fingerprint-bound, immutable and can
 
   const changed = { ...narrative, summary: 'Changed after sealing.' };
   await assert.rejects(() => persistFinalNarrativeV1(env, changed), /already sealed with different content/);
+});
+
+
+test('E3 rejects a Step 2 result bound to a different market fingerprint or lock hash', async () => {
+  const parents = { lockDocument: lockDocument(), marketPack: marketPack() };
+
+  const wrongMarket = step2Payload();
+  wrongMarket.market_fingerprint = `sha256:${'d'.repeat(64)}`;
+  await assert.rejects(() => normalizeStep2ResultV1(wrongMarket, parents), /market pack binding/);
+
+  const wrongLock = step2Payload();
+  wrongLock.lock_hash = `sha256:${'e'.repeat(64)}`;
+  await assert.rejects(() => normalizeStep2ResultV1(wrongLock, parents), /market pack binding/);
+});
+
+test('E3 rolls back Step2, decision and optimizer writes when the final integrated insert fails', async () => {
+  const { db, env } = createTestEnv();
+  seedDb(db);
+  db.exec(`
+    CREATE TRIGGER fail_e3_analysis_insert
+    BEFORE INSERT ON analysis_v3_runs
+    BEGIN
+      SELECT RAISE(ABORT, 'synthetic E3 atomic failure');
+    END;
+  `);
+  const parents = { lockDocument: lockDocument(), marketPack: marketPack() };
+
+  await assert.rejects(
+    () => persistIntegratedStep2V1(
+      env,
+      step2Payload(),
+      parents,
+      'V85',
+      { line_price_sek: 0.5, target_budget_min_sek: 150, max_budget_sek: 250 },
+      { generatedAt: '2099-07-01T10:31:00.000Z', createdAt: '2099-07-01T10:31:01.000Z' }
+    ),
+    /synthetic E3 atomic failure/
+  );
+
+  for (const table of ['analysis_step2_results','analysis_decision_runs','analysis_decision_probabilities','analysis_optimizer_runs','analysis_optimizer_selections','analysis_v3_runs']) {
+    assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n, 0, table);
+  }
 });
