@@ -12,7 +12,7 @@ async function cookie(env) {
 function seedRound(db) {
   db.prepare("INSERT INTO tracks (id,canonical_name,country_code) VALUES ('ui-track','UI Track','SE')").run();
   db.prepare("INSERT INTO game_rounds (id,game_type,round_date,scheduled_start_at,bet_stop_at,status) VALUES ('ui-round','V85','2099-10-01','2099-10-01T14:00:00Z','2099-10-01T13:55:00Z','upcoming')").run();
-  db.prepare("INSERT INTO source_records (id,source_type,fetched_at,quality_status) VALUES ('ui-source','official_provider','2099-10-01T10:00:00Z','normalized_verified_subset')").run();
+  db.prepare("INSERT INTO source_records (id,source_type,fetched_at,quality_status) VALUES ('ui-source','official_provider','2026-09-18T10:00:00Z','normalized_verified_subset')").run();
   for (let leg=1; leg<=8; leg+=1) {
     const race='ui-race-'+leg;
     db.prepare("INSERT INTO races (id,track_id,race_date,race_number,scheduled_start_at,distance_m,start_method,status) VALUES (?, 'ui-track','2099-10-01',?,'2099-10-01T14:00:00Z',2140,'auto','upcoming')").run(race,leg);
@@ -23,7 +23,7 @@ function seedRound(db) {
       db.prepare("INSERT INTO horses (id,canonical_name) VALUES (?,?)").run(horse,'UI Horse '+leg+'-'+starter);
       db.prepare("INSERT INTO race_entries (id,race_id,horse_id,start_number,scratched,data_quality) VALUES (?,?,?,?,0,'normalized_verified_subset')").run(entry,race,horse,starter);
       db.prepare("INSERT INTO betting_snapshots (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id) VALUES (?,?,?,?,?,?,?,?)")
-        .run('ui-bet-'+leg+'-'+starter,'ui-round',leg,entry,'2099-10-01T10:00:00Z',starter===1?60:40,starter,'ui-source');
+        .run('ui-bet-'+leg+'-'+starter,'ui-round',leg,entry,'2026-09-18T10:00:00Z',starter===1?60:40,starter,'ui-source');
     }
   }
 }
