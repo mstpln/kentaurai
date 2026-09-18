@@ -171,49 +171,49 @@ async function getStats(env, relationColumn, id) {
 }
 
 async function getBreakdowns(env, relationColumn, id) {
-  const { results: methods } = await env.DB.prepare(`
-    SELECT COALESCE(r.start_method, 'unknown') AS label,
-      COUNT(*) AS starts,
-      SUM(CASE WHEN rr.race_entry_id IS NOT NULL THEN 1 ELSE 0 END) AS result_starts,
-      SUM(CASE WHEN rr.placing = 1 THEN 1 ELSE 0 END) AS wins,
-      SUM(CASE WHEN rr.placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) AS top3
-    FROM race_entries re
-    JOIN races r ON r.id = re.race_id
-    LEFT JOIN race_results rr ON rr.race_entry_id = re.id
-    WHERE re.${relationColumn} = ? AND re.scratched = 0
-    GROUP BY COALESCE(r.start_method, 'unknown')
-    ORDER BY starts DESC, label ASC
-  `).bind(id).all();
-
-  const { results: distances } = await env.DB.prepare(`
-    SELECT COALESCE(CAST(r.distance_m AS TEXT), 'unknown') AS label,
-      COUNT(*) AS starts,
-      SUM(CASE WHEN rr.race_entry_id IS NOT NULL THEN 1 ELSE 0 END) AS result_starts,
-      SUM(CASE WHEN rr.placing = 1 THEN 1 ELSE 0 END) AS wins,
-      SUM(CASE WHEN rr.placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) AS top3
-    FROM race_entries re
-    JOIN races r ON r.id = re.race_id
-    LEFT JOIN race_results rr ON rr.race_entry_id = re.id
-    WHERE re.${relationColumn} = ? AND re.scratched = 0
-    GROUP BY r.distance_m
-    ORDER BY starts DESC, r.distance_m ASC
-  `).bind(id).all();
-
-  const { results: tracks } = await env.DB.prepare(`
-    SELECT COALESCE(t.canonical_name, 'Okänd bana') AS label,
-      COUNT(*) AS starts,
-      SUM(CASE WHEN rr.race_entry_id IS NOT NULL THEN 1 ELSE 0 END) AS result_starts,
-      SUM(CASE WHEN rr.placing = 1 THEN 1 ELSE 0 END) AS wins,
-      SUM(CASE WHEN rr.placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) AS top3
-    FROM race_entries re
-    JOIN races r ON r.id = re.race_id
-    LEFT JOIN tracks t ON t.id = r.track_id
-    LEFT JOIN race_results rr ON rr.race_entry_id = re.id
-    WHERE re.${relationColumn} = ? AND re.scratched = 0
-    GROUP BY t.id, t.canonical_name
-    ORDER BY starts DESC, label COLLATE NOCASE ASC
-    LIMIT 20
-  `).bind(id).all();
+  const [{ results: methods }, { results: distances }, { results: tracks }] = await Promise.all([
+    env.DB.prepare(`
+      SELECT COALESCE(r.start_method, 'unknown') AS label,
+        COUNT(*) AS starts,
+        SUM(CASE WHEN rr.race_entry_id IS NOT NULL THEN 1 ELSE 0 END) AS result_starts,
+        SUM(CASE WHEN rr.placing = 1 THEN 1 ELSE 0 END) AS wins,
+        SUM(CASE WHEN rr.placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) AS top3
+      FROM race_entries re
+      JOIN races r ON r.id = re.race_id
+      LEFT JOIN race_results rr ON rr.race_entry_id = re.id
+      WHERE re.${relationColumn} = ? AND re.scratched = 0
+      GROUP BY COALESCE(r.start_method, 'unknown')
+      ORDER BY starts DESC, label ASC
+    `).bind(id).all(),
+    env.DB.prepare(`
+      SELECT COALESCE(CAST(r.distance_m AS TEXT), 'unknown') AS label,
+        COUNT(*) AS starts,
+        SUM(CASE WHEN rr.race_entry_id IS NOT NULL THEN 1 ELSE 0 END) AS result_starts,
+        SUM(CASE WHEN rr.placing = 1 THEN 1 ELSE 0 END) AS wins,
+        SUM(CASE WHEN rr.placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) AS top3
+      FROM race_entries re
+      JOIN races r ON r.id = re.race_id
+      LEFT JOIN race_results rr ON rr.race_entry_id = re.id
+      WHERE re.${relationColumn} = ? AND re.scratched = 0
+      GROUP BY r.distance_m
+      ORDER BY starts DESC, r.distance_m ASC
+    `).bind(id).all(),
+    env.DB.prepare(`
+      SELECT COALESCE(t.canonical_name, 'Okänd bana') AS label,
+        COUNT(*) AS starts,
+        SUM(CASE WHEN rr.race_entry_id IS NOT NULL THEN 1 ELSE 0 END) AS result_starts,
+        SUM(CASE WHEN rr.placing = 1 THEN 1 ELSE 0 END) AS wins,
+        SUM(CASE WHEN rr.placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) AS top3
+      FROM race_entries re
+      JOIN races r ON r.id = re.race_id
+      LEFT JOIN tracks t ON t.id = r.track_id
+      LEFT JOIN race_results rr ON rr.race_entry_id = re.id
+      WHERE re.${relationColumn} = ? AND re.scratched = 0
+      GROUP BY t.id, t.canonical_name
+      ORDER BY starts DESC, label COLLATE NOCASE ASC
+      LIMIT 20
+    `).bind(id).all()
+  ]);
 
   const map = (rows) => rows.map((row) => {
     const resultStarts = Number(row.result_starts ?? 0);
@@ -571,7 +571,7 @@ async function getCoverage(env, relationColumn, id) {
   };
 }
 
-async function getHorseDetail(env, id) {
+async function getHorseDetail(env, id, options = {}) {
   const horse = await env.DB.prepare(`
     SELECT
       h.id, h.canonical_name AS name, h.sex, h.birth_year, h.breed, h.color, h.sire_name, h.dam_name,
@@ -584,18 +584,19 @@ async function getHorseDetail(env, id) {
   `).bind(id).first();
   if (!horse) return null;
 
+  const includeStarts = options.includeStarts !== false;
   const [observation, stats, breakdowns, coverage, baseStarts] = await Promise.all([
     latestObservation(env, 'horse', id),
     getStats(env, 'horse_id', id),
     getBreakdowns(env, 'horse_id', id),
     getCoverage(env, 'horse_id', id),
-    getBaseStarts(env, 'horse_id', id)
+    includeStarts ? getBaseStarts(env, 'horse_id', id) : Promise.resolve([])
   ]);
-  const starts = await enrichStarts(env, baseStarts);
+  const starts = includeStarts ? await enrichStarts(env, baseStarts) : [];
   return { type: 'horse', entity: horse, latestObservation: observation, stats, breakdowns, coverage, starts };
 }
 
-async function getPersonDetail(env, type, id) {
+async function getPersonDetail(env, type, id, options = {}) {
   const driver = type === 'drivers';
   const table = driver ? 'drivers' : 'trainers';
   const entityType = driver ? 'driver' : 'trainer';
@@ -609,21 +610,22 @@ async function getPersonDetail(env, type, id) {
   `).bind(id).first();
   if (!person) return null;
 
+  const includeStarts = options.includeStarts !== false;
   const [observation, stats, breakdowns, coverage, baseStarts] = await Promise.all([
     latestObservation(env, entityType, id),
     getStats(env, relationColumn, id),
     getBreakdowns(env, relationColumn, id),
     getCoverage(env, relationColumn, id),
-    getBaseStarts(env, relationColumn, id)
+    includeStarts ? getBaseStarts(env, relationColumn, id) : Promise.resolve([])
   ]);
-  const starts = await enrichStarts(env, baseStarts);
+  const starts = includeStarts ? await enrichStarts(env, baseStarts) : [];
   return { type: entityType, entity: person, latestObservation: observation, stats, breakdowns, coverage, starts };
 }
 
-export async function getEntityDetail(env, type, id) {
+export async function getEntityDetail(env, type, id, options = {}) {
   configFor(type);
   const normalizedId = String(id || '').trim();
   if (!normalizedId) return null;
-  if (type === 'horses') return getHorseDetail(env, normalizedId);
-  return getPersonDetail(env, type, normalizedId);
+  if (type === 'horses') return getHorseDetail(env, normalizedId, options);
+  return getPersonDetail(env, type, normalizedId, options);
 }
