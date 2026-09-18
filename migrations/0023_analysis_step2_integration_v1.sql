@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS analysis_v3_runs (
   optimizer_fingerprint TEXT NOT NULL,
   analysis_json TEXT NOT NULL,
   analysis_fingerprint TEXT NOT NULL UNIQUE,
+  narrative_json TEXT,
+  narrative_fingerprint TEXT,
   created_at TEXT NOT NULL,
   UNIQUE(step2_result_id, decision_run_id, optimizer_run_id)
 );
