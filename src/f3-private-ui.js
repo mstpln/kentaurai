@@ -80,34 +80,42 @@ export async function buildF3WorkflowState(env, roundId, now = new Date().toISOS
     }
   }
 
-  const decision = lock ? await env.DB.prepare(`
-    SELECT id,decision_probability_version,policy_version,market_cutoff,market_fingerprint,created_at
-    FROM analysis_decision_runs WHERE game_round_id=? AND lock_id=?
-    ORDER BY datetime(created_at) DESC,id DESC LIMIT 1
-  `).bind(roundId,lock.id).first() : null;
-
-  const optimizer = decision ? await env.DB.prepare(`
-    SELECT id,optimizer_version,policy_version,spike_count,row_count,cost_sek,estimated_p8,optimizer_json,created_at
-    FROM analysis_optimizer_runs WHERE game_round_id=? AND decision_run_id=?
-    ORDER BY datetime(created_at) DESC,id DESC LIMIT 1
-  `).bind(roundId,decision.id).first() : null;
-
-  const step2 = lock ? await env.DB.prepare(`
-    SELECT id,step2_version,prompt_version,market_cutoff,result_fingerprint,created_at
-    FROM analysis_step2_results WHERE game_round_id=? AND lock_id=?
-    ORDER BY datetime(created_at) DESC,id DESC LIMIT 1
-  `).bind(roundId,lock.id).first() : null;
-
-  const analysis = await env.DB.prepare(`
+  const analysis = lock ? await env.DB.prepare(`
     SELECT id,analysis_version,step2_result_id,decision_run_id,optimizer_run_id,
       analysis_fingerprint,narrative_fingerprint,created_at
-    FROM analysis_v3_runs WHERE game_round_id=?
+    FROM analysis_v3_runs
+    WHERE game_round_id=? AND lock_id=?
     ORDER BY datetime(created_at) DESC,id DESC LIMIT 1
-  `).bind(roundId).first();
+  `).bind(roundId,lock.id).first() : null;
+
+  const decision = analysis ? await env.DB.prepare(`
+    SELECT id,decision_probability_version,policy_version,market_cutoff,market_fingerprint,created_at
+    FROM analysis_decision_runs
+    WHERE id=? AND game_round_id=? AND lock_id=?
+    LIMIT 1
+  `).bind(analysis.decision_run_id,roundId,lock.id).first() : null;
+
+  const optimizer = analysis ? await env.DB.prepare(`
+    SELECT id,optimizer_version,policy_version,spike_count,row_count,cost_sek,estimated_p8,optimizer_json,created_at
+    FROM analysis_optimizer_runs
+    WHERE id=? AND game_round_id=? AND decision_run_id=?
+    LIMIT 1
+  `).bind(analysis.optimizer_run_id,roundId,analysis.decision_run_id).first() : null;
+
+  const step2 = analysis ? await env.DB.prepare(`
+    SELECT id,step2_version,prompt_version,market_cutoff,result_fingerprint,created_at
+    FROM analysis_step2_results
+    WHERE id=? AND game_round_id=? AND lock_id=?
+    LIMIT 1
+  `).bind(analysis.step2_result_id,roundId,lock.id).first() : null;
+
+  if (analysis && (!decision || !optimizer || !step2)) {
+    throw new Error('persisted v3 analysis has incomplete canonical lineage');
+  }
 
   const optimizerDocument = parseJson(optimizer?.optimizer_json, null);
-  const system = optimizerDocument?.system || null;
-  const completed = Boolean(analysis);
+  const system = analysis ? (optimizerDocument?.system || null) : null;
+  const completed = Boolean(analysis && decision && optimizer && step2);
 
   return {
     contract_version: F3_PRIVATE_UI_VERSION,
@@ -127,7 +135,7 @@ export async function buildF3WorkflowState(env, roundId, now = new Date().toISOS
       } : null },
       market_pack: { status: completed ? 'completed' : (marketGate.ready ? 'ready' : 'blocked'), reason: marketGate.reason },
       step2_import: { status: completed ? 'completed' : (marketGate.ready ? 'ready' : 'blocked'), reason: marketGate.reason },
-      optimized_system: { status: completed ? 'completed' : (optimizer ? 'completed' : 'blocked') }
+      optimized_system: { status: completed ? 'completed' : 'blocked' }
     },
     persisted: {
       decision_run_id: decision?.id || null,
