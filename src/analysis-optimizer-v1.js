@@ -162,9 +162,10 @@ function buildLegFrontier(leg) {
   let cumulative = 0;
   return leg.entries.map((entry, index) => {
     cumulative += entry.decision_probability;
+    const coverage = Math.min(1, cumulative);
     return {
       k: index + 1,
-      q: cumulative,
+      q: coverage,
       selected_entries: leg.entries.slice(0, index + 1)
     };
   });
