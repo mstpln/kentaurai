@@ -56,12 +56,15 @@ export async function buildReplayStartPointsDynamicsV1ForEntries(env, raceEntryI
 
   for (const group of chunks(horseIds)) {
     const { results } = await env.DB.prepare(`
-      SELECT id,horse_id,points,observed_at,source_record_id
-      FROM horse_start_points
-      WHERE horse_id IN (${placeholders(group)})
-        AND julianday(observed_at) <= julianday(?)
-      ORDER BY horse_id,julianday(observed_at) DESC,id DESC
-    `).bind(...group, cutoff.iso).all();
+      SELECT hsp.id,hsp.horse_id,hsp.points,hsp.observed_at,hsp.source_record_id,s.fetched_at AS source_fetched_at
+      FROM horse_start_points hsp
+      JOIN source_records s ON s.id=hsp.source_record_id
+      WHERE hsp.horse_id IN (${placeholders(group)})
+        AND s.source_type='official_provider'
+        AND julianday(hsp.observed_at) <= julianday(?)
+        AND julianday(s.fetched_at) <= julianday(?)
+      ORDER BY hsp.horse_id,julianday(hsp.observed_at) DESC,julianday(s.fetched_at) DESC,hsp.id DESC
+    `).bind(...group, cutoff.iso, cutoff.iso).all();
     for (const row of results || []) byHorse.get(row.horse_id)?.push(row);
   }
 
@@ -103,7 +106,11 @@ export async function buildReplayStartPointsDynamicsV1ForEntries(env, raceEntryI
       field_percentile: fieldRank == null ? null : known.length <= 1 ? 1 : 1 - ((fieldRank - 1) / (known.length - 1)),
       source_refs: [current, previousDifferent]
         .filter(Boolean)
-        .map((row) => ({ source_record_id: row.source_record_id, observed_at: row.observed_at }))
+        .map((row) => ({
+          source_record_id: row.source_record_id,
+          observed_at: row.observed_at,
+          source_fetched_at: row.source_fetched_at
+        }))
     });
   }
   return out;
@@ -132,6 +139,7 @@ export async function buildReplayRaceTermsV1ForEntries(env, raceEntryIds, asOf) 
       unparsed_fragment_count: Array.isArray(proposition?.unparsedFragments) ? proposition.unparsedFragments.length : 0,
       ambiguous_fragment_count: Array.isArray(proposition?.ambiguousFragments) ? proposition.ambiguousFragments.length : 0,
       observed_at: proposition?.observedAt || null,
+      source_fetched_at: proposition?.sourceFetchedAt || null,
       source_record_id: proposition?.sourceRecordId || null
     });
   }
@@ -173,6 +181,7 @@ export async function buildReplayPositionEvidenceV1ForEntries(env, raceEntryIds,
          AND rts.reconstruction_version=?
         JOIN source_records s ON s.id=rts.source_record_id
         WHERE re.horse_id IN (${placeholders(group)})
+          AND s.source_type='xlabs_race_json'
           AND julianday(COALESCE(r.scheduled_start_at, r.race_date || 'T23:59:59Z')) < julianday(?)
           AND julianday(s.fetched_at) <= julianday(?)
       ),
