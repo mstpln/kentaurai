@@ -1,3 +1,4 @@
+import { runNextPostRaceReviewV2 } from './post-race-review-v2.js';
 import { stableId } from './ids.js';
 
 const REVIEW_VERSION = 'deterministic-v1';
@@ -157,6 +158,9 @@ async function reviewSystem(env, round, system) {
 }
 
 export async function runNextPostRaceReview(env, options = {}) {
+  const v2 = await runNextPostRaceReviewV2(env, options);
+  if (v2) return v2;
+
   const round = await candidateRound(env, options.roundId || null);
   if (!round) return { status: 'idle', roundId: options.roundId || null, reviewedSystems: 0, reviews: 0 };
 
