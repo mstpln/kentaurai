@@ -104,6 +104,20 @@ async function loadRoundFacts(env, row) {
     ORDER BY gl.leg_number,re.id
   `).bind(row.id).all();
 
+  const { results: decisionRows } = await env.DB.prepare(`
+    SELECT leg_number,race_entry_id,blind_probability,public_win_probability_proxy,public_proxy_quality,decision_probability
+    FROM analysis_decision_probabilities
+    WHERE decision_run_id=?
+    ORDER BY leg_number,race_entry_id
+  `).bind(row.decision_run_id).all();
+
+  const { results: optimizerRows } = await env.DB.prepare(`
+    SELECT leg_number,race_entry_id,is_spike,decision_probability
+    FROM analysis_optimizer_selections
+    WHERE optimizer_run_id=?
+    ORDER BY leg_number,race_entry_id
+  `).bind(row.optimizer_run_id).all();
+
   const cutoff = exactIso(row.market_cutoff, 'market_cutoff');
   const { results: markets } = await env.DB.prepare(`
     WITH ranked AS (
@@ -121,6 +135,8 @@ async function loadRoundFacts(env, row) {
   return {
     winners: new Map((winners || []).map((item) => [Number(item.leg_number), item])),
     results: new Map((results || []).map((item) => [item.race_entry_id, item])),
+    decisions: new Map((decisionRows || []).map((item) => [`${item.leg_number}:${item.race_entry_id}`, item])),
+    optimizerSelections: new Map(Array.from({ length: 8 }, (_, index) => [index + 1, (optimizerRows || []).filter((item) => Number(item.leg_number) === index + 1)])),
     markets: new Map((markets || []).map((item) => [`${item.leg_number}:${item.race_entry_id}`, item]))
   };
 }
@@ -231,9 +247,22 @@ async function persistLegReview(env, row, facts, indexed, legNumber, now) {
   if (lockLeg.race_id !== winner.race_id) throw new Error(`F2 leg ${legNumber} race identity mismatch`);
 
   const winnerPrediction = (lockLeg.predictions || []).find((item) => item.race_entry_id === winner.winner_entry_id) || null;
-  const winnerDecision = (decisionLeg.entries || []).find((item) => item.race_entry_id === winner.winner_entry_id) || null;
+  const winnerDecisionDocument = (decisionLeg.entries || []).find((item) => item.race_entry_id === winner.winner_entry_id) || null;
+  const winnerDecision = facts.decisions.get(`${legNumber}:${winner.winner_entry_id}`) || null;
+  if (!winnerDecision || !winnerDecisionDocument
+    || Number(winnerDecision.decision_probability) !== Number(winnerDecisionDocument.decision_probability)
+    || Number(winnerDecision.blind_probability) !== Number(winnerDecisionDocument.blind_probability)) {
+    throw new Error(`F2 leg ${legNumber} canonical decision storage mismatch`);
+  }
   const selectedEntries = optimizerLeg.selected_entries || [];
-  const selectedWinner = selectedEntries.some((item) => item.race_entry_id === winner.winner_entry_id);
+  const storedSelections = facts.optimizerSelections.get(legNumber) || [];
+  const expectedSelectionIds = selectedEntries.map((item) => String(item.race_entry_id)).sort();
+  const storedSelectionIds = storedSelections.map((item) => String(item.race_entry_id)).sort();
+  if (stableFeatureJson(expectedSelectionIds) !== stableFeatureJson(storedSelectionIds)
+    || storedSelections.some((item) => Number(item.is_spike) !== (optimizerLeg.is_spike ? 1 : 0))) {
+    throw new Error(`F2 leg ${legNumber} canonical optimizer storage mismatch`);
+  }
+  const selectedWinner = storedSelections.some((item) => item.race_entry_id === winner.winner_entry_id);
   const isSpike = Boolean(optimizerLeg.is_spike);
   const topPick = [...(lockLeg.predictions || [])].sort((a,b) => Number(a.raw_rank) - Number(b.raw_rank))[0] || null;
   const topPickResult = topPick ? facts.results.get(topPick.race_entry_id) : null;
