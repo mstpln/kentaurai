@@ -3,6 +3,7 @@ import {
   ANALYSIS_DECISION_PROBABILITY_CONTRACT,
   getDecisionProbabilityV1
 } from './analysis-decision-probability-v1.js';
+import { requireLatestStep1LockV1 } from './analysis-step1-revision-v1.js';
 
 export const ANALYSIS_OPTIMIZER_CONTRACT = 'kentaurai-optimizer-v1';
 export const ANALYSIS_OPTIMIZER_VERSION = 'optimizer-p8-exact3-v1-e2';
@@ -354,6 +355,10 @@ export async function loadOptimizerParentsV1(env, roundId, options = {}) {
   if (!stored || stored.round_id !== round) throw new Error('decision run was not found for the requested round');
   if (stored.decision_fingerprint !== stored.decision?.decision_fingerprint) {
     throw new Error('stored decision fingerprint metadata does not match decision content');
+  }
+  const latestLock = await requireLatestStep1LockV1(env, { roundId: round, lockId: stored.lock_id });
+  if (latestLock.lock_hash !== stored.lock_hash || stored.decision?.lock_id !== stored.lock_id || stored.decision?.lock_hash !== stored.lock_hash) {
+    throw new Error('decision run is not bound to the newest sealed Step 1 lock');
   }
   return {
     decision: stored.decision,
