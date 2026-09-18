@@ -608,6 +608,121 @@ function predictionEntriesFromDecisionLeg(leg, field) {
   }));
 }
 
+function validateDecisionDocumentForReplay(row, decision) {
+  if (!decision || typeof decision !== 'object' || Array.isArray(decision)) throw new Error(`decision ${row.id} JSON must be an object`);
+  if (decision.contract_version !== 'kentaurai-decision-probability-v1') throw new Error(`decision ${row.id} has unsupported contract`);
+  for (const [field, expected] of [
+    ['round_id', row.game_round_id],
+    ['lock_id', row.lock_id],
+    ['lock_hash', row.lock_hash],
+    ['market_fingerprint', row.market_fingerprint],
+    ['decision_probability_version', row.decision_probability_version],
+    ['policy_version', row.policy_version]
+  ]) {
+    if (decision[field] !== expected) throw new Error(`decision ${row.id} ${field} metadata mismatch`);
+  }
+  if (exactIso(decision.market_cutoff, 'decision market_cutoff') !== exactIso(row.market_cutoff, 'stored market_cutoff')) {
+    throw new Error(`decision ${row.id} market_cutoff metadata mismatch`);
+  }
+  if (decision.decision_fingerprint !== row.decision_fingerprint) throw new Error(`decision ${row.id} fingerprint metadata mismatch`);
+  if (!Array.isArray(decision.legs) || decision.legs.length !== 8) throw new Error(`decision ${row.id} must contain exactly eight legs`);
+  const legNumbers = decision.legs.map((leg) => Number(leg?.leg_number));
+  if (legNumbers.some((number, index) => number !== index + 1)) throw new Error(`decision ${row.id} legs must be ordered 1 through 8`);
+  for (const leg of decision.legs) {
+    const blind = normalizeForecastEntries(predictionEntriesFromDecisionLeg(leg, 'blind_probability'));
+    const canonical = normalizeForecastEntries(predictionEntriesFromDecisionLeg(leg, 'decision_probability'));
+    if (blind.length !== canonical.length || blind.some((entry, index) => entry.race_entry_id !== canonical[index].race_entry_id)) {
+      throw new Error(`decision ${row.id} blind and canonical entry identities differ`);
+    }
+    if (row.policy_version === 'decision-blind-v1') {
+      const blindById = new Map(blind.map((entry) => [entry.race_entry_id, entry.probability]));
+      for (const entry of canonical) {
+        if (entry.probability !== blindById.get(entry.race_entry_id)) {
+          throw new Error(`decision ${row.id} violates decision-blind-v1 policy`);
+        }
+      }
+    }
+  }
+}
+
+async function assertDecisionLegIdentities(env, decisionId, decision, legs) {
+  for (const legRow of legs) {
+    const leg = decision.legs.find((item) => Number(item.leg_number) === Number(legRow.leg_number));
+    if (!leg || leg.race_id !== legRow.race_id) throw new Error(`decision ${decisionId} race identity mismatch in leg ${legRow.leg_number}`);
+    const { results: entryRows } = await env.DB.prepare(`
+      SELECT id FROM race_entries WHERE race_id=? ORDER BY id
+    `).bind(legRow.race_id).all();
+    const factualIds = new Set((entryRows || []).map((entry) => String(entry.id)));
+    const predictionIds = (leg.entries || []).map((entry) => String(entry.race_entry_id || ''));
+    if (new Set(predictionIds).size !== predictionIds.length || predictionIds.some((id) => !factualIds.has(id))) {
+      throw new Error(`decision ${decisionId} contains non-canonical entry identity in leg ${legRow.leg_number}`);
+    }
+  }
+}
+
+function optimizerSystemDiagnostic(optimizerRow, winnersByLeg, roundId) {
+  const optimizer = parseJson(optimizerRow.optimizer_json, 'optimizer_json');
+  if (optimizer.optimizer_fingerprint !== optimizerRow.optimizer_fingerprint) {
+    throw new Error(`optimizer ${optimizerRow.id} fingerprint metadata mismatch`);
+  }
+  if (optimizer.decision_fingerprint !== optimizerRow.decision_fingerprint) {
+    throw new Error(`optimizer ${optimizerRow.id} decision fingerprint metadata mismatch`);
+  }
+  const system = optimizer.system;
+  if (!system || Number(system.spike_count) !== 3 || !Array.isArray(system.legs) || system.legs.length !== 8) {
+    throw new Error(`optimizer ${optimizerRow.id} does not contain an exact-three-spike eight-leg system`);
+  }
+  let coveredLegs = 0;
+  let spikeMisses = 0;
+  for (const leg of system.legs) {
+    const legNumber = Number(leg.leg_number);
+    const winner = winnersByLeg.get(legNumber);
+    if (!winner) throw new Error(`optimizer ${optimizerRow.id} cannot be evaluated without all factual winners`);
+    const selectedIds = (leg.selected_entries || []).map((entry) => String(entry.race_entry_id || ''));
+    const covered = selectedIds.includes(winner);
+    if (covered) coveredLegs += 1;
+    if (leg.is_spike === true && !covered) spikeMisses += 1;
+  }
+  const estimatedP8 = Number(system.estimated_p8);
+  if (!Number.isFinite(estimatedP8) || estimatedP8 < 0 || estimatedP8 > 1) {
+    throw new Error(`optimizer ${optimizerRow.id} estimated_p8 is invalid`);
+  }
+  return {
+    target_group_id: roundId,
+    optimizer_run_id: optimizerRow.id,
+    optimizer_version: optimizerRow.optimizer_version,
+    optimizer_policy_version: optimizerRow.policy_version,
+    optimizer_fingerprint: optimizerRow.optimizer_fingerprint,
+    row_count: Number(system.row_count),
+    cost_sek: Number(system.cost_sek),
+    spike_count: 3,
+    estimated_p8: estimatedP8,
+    covered_legs: coveredLegs,
+    observed_p8: coveredLegs === 8 ? 1 : 0,
+    spike_misses: spikeMisses
+  };
+}
+
+function summarizeSystems(systemDiagnostics) {
+  const items = Array.isArray(systemDiagnostics) ? systemDiagnostics : [];
+  if (!items.length) return {
+    system_count: 0,
+    mean_estimated_p8: null,
+    observed_p8_rate: null,
+    mean_covered_legs: null,
+    spike_miss_rate: null,
+    mean_row_count: null
+  };
+  return {
+    system_count: items.length,
+    mean_estimated_p8: round(items.reduce((sum, item) => sum + item.estimated_p8, 0) / items.length),
+    observed_p8_rate: round(items.reduce((sum, item) => sum + item.observed_p8, 0) / items.length),
+    mean_covered_legs: round(items.reduce((sum, item) => sum + item.covered_legs, 0) / items.length),
+    spike_miss_rate: round(items.reduce((sum, item) => sum + item.spike_misses, 0) / (items.length * 3)),
+    mean_row_count: round(items.reduce((sum, item) => sum + item.row_count, 0) / items.length)
+  };
+}
+
 async function loadDecisionTargets(env, config) {
   const from = exactIso(config.from, 'from');
   const to = exactIso(config.to, 'to');
@@ -617,25 +732,36 @@ async function loadDecisionTargets(env, config) {
   const versionClause = decisionVersion ? 'AND adr.decision_probability_version=?' : '';
   const bindings = decisionVersion ? [from, to, decisionVersion, maxTargets] : [from, to, maxTargets];
   const { results } = await env.DB.prepare(`
-    SELECT adr.*,asl.pack_id,asl.pack_as_of,asl.prompt_version AS step1_prompt_version,
-      asl.lock_hash AS stored_lock_hash,gr.game_type
-    FROM analysis_decision_runs adr
-    JOIN analysis_step1_locks asl ON asl.id=adr.lock_id
-    JOIN game_rounds gr ON gr.id=adr.game_round_id
-    WHERE gr.game_type IN ('V85','V86')
-      AND datetime(adr.market_cutoff)>=datetime(?)
-      AND datetime(adr.market_cutoff)<=datetime(?)
-      ${versionClause}
-    ORDER BY datetime(adr.market_cutoff),adr.game_round_id,adr.id
+    WITH ranked AS (
+      SELECT adr.*,asl.pack_id,asl.pack_as_of,asl.prompt_version AS step1_prompt_version,
+        asl.lock_hash AS stored_lock_hash,gr.game_type,
+        ROW_NUMBER() OVER (
+          PARTITION BY adr.game_round_id
+          ORDER BY datetime(adr.market_cutoff) DESC,datetime(adr.created_at) DESC,adr.id DESC
+        ) AS round_rank
+      FROM analysis_decision_runs adr
+      JOIN analysis_step1_locks asl ON asl.id=adr.lock_id
+      JOIN game_rounds gr ON gr.id=adr.game_round_id
+      WHERE gr.game_type IN ('V85','V86')
+        AND datetime(adr.market_cutoff)>=datetime(?)
+        AND datetime(adr.market_cutoff)<=datetime(?)
+        ${versionClause}
+    )
+    SELECT * FROM ranked
+    WHERE round_rank=1
+    ORDER BY datetime(market_cutoff),game_round_id,id
     LIMIT ?
   `).bind(...bindings).all();
 
   const targets = [];
+  const systemDiagnostics = [];
+  const exclusions = { incomplete_round_structure: 0, ambiguous_or_incomplete_result: 0, missing_start_time: 0 };
   for (const row of results || []) {
     if (row.lock_hash !== row.stored_lock_hash) throw new Error(`decision ${row.id} lock hash mismatch`);
     if (Date.parse(row.pack_as_of) > Date.parse(row.market_cutoff)) throw new Error(`decision ${row.id} market cutoff is before sealed Step 1 as-of`);
     const decision = parseJson(row.decision_json, 'decision_json');
-    if (decision.decision_fingerprint !== row.decision_fingerprint) throw new Error(`decision ${row.id} fingerprint metadata mismatch`);
+    validateDecisionDocumentForReplay(row, decision);
+
     const { results: legs } = await env.DB.prepare(`
       SELECT gl.leg_number,gl.race_id,r.scheduled_start_at
       FROM game_legs gl
@@ -643,12 +769,36 @@ async function loadDecisionTargets(env, config) {
       WHERE gl.game_round_id=?
       ORDER BY gl.leg_number
     `).bind(row.game_round_id).all();
-    if ((legs || []).length !== 8) continue;
-    const earliestStart = Math.min(...legs.map((leg) => Date.parse(String(leg.scheduled_start_at || ''))).filter(Number.isFinite));
-    if (!Number.isFinite(earliestStart)) continue;
+    if ((legs || []).length !== 8) {
+      exclusions.incomplete_round_structure += 1;
+      continue;
+    }
+    if (legs.some((leg, index) => Number(leg.leg_number) !== index + 1)) {
+      exclusions.incomplete_round_structure += 1;
+      continue;
+    }
+    await assertDecisionLegIdentities(env, row.id, decision, legs);
+    const starts = legs.map((leg) => Date.parse(String(leg.scheduled_start_at || '')));
+    if (starts.some((value) => !Number.isFinite(value))) {
+      exclusions.missing_start_time += 1;
+      continue;
+    }
+    const earliestStart = Math.min(...starts);
     if (Date.parse(row.market_cutoff) > earliestStart) throw new Error(`decision ${row.id} market cutoff is after race start`);
+
+    const winnersByLeg = new Map();
+    for (const legRow of legs) {
+      const winner = await loadWinnerForRace(env, legRow.race_id);
+      if (!winner) break;
+      winnersByLeg.set(Number(legRow.leg_number), winner);
+    }
+    if (winnersByLeg.size !== 8) {
+      exclusions.ambiguous_or_incomplete_result += 1;
+      continue;
+    }
+
     const { results: optimizerRows } = await env.DB.prepare(`
-      SELECT id,optimizer_version,policy_version,optimizer_fingerprint
+      SELECT id,decision_fingerprint,optimizer_version,policy_version,optimizer_fingerprint,optimizer_json
       FROM analysis_optimizer_runs
       WHERE decision_run_id=?
       ORDER BY optimizer_version,policy_version,optimizer_fingerprint,id
@@ -659,12 +809,14 @@ async function loadDecisionTargets(env, config) {
       optimizer_policy_version: optimizer.policy_version,
       optimizer_fingerprint: optimizer.optimizer_fingerprint
     }));
+    for (const optimizer of optimizerRows || []) {
+      systemDiagnostics.push(optimizerSystemDiagnostic(optimizer, winnersByLeg, row.game_round_id));
+    }
+
     const groupAt = new Date(earliestStart).toISOString();
     for (const legRow of legs) {
-      const leg = decision.legs?.find((item) => Number(item.leg_number) === Number(legRow.leg_number));
-      if (!leg) throw new Error(`decision ${row.id} missing leg ${legRow.leg_number}`);
-      const winner = await loadWinnerForRace(env, legRow.race_id);
-      if (!winner) continue;
+      const leg = decision.legs.find((item) => Number(item.leg_number) === Number(legRow.leg_number));
+      const winner = winnersByLeg.get(Number(legRow.leg_number));
       const blindScore = scoreMulticlassForecastV1({
         entries: predictionEntriesFromDecisionLeg(leg, 'blind_probability'),
         winnerEntryId: winner
@@ -674,7 +826,7 @@ async function loadDecisionTargets(env, config) {
         winnerEntryId: winner
       });
       targets.push({
-        target_id: `${row.game_round_id}:leg:${legRow.leg_number}`,
+        target_id: `${row.game_round_id}:${row.id}:leg:${legRow.leg_number}`,
         target_group_id: row.game_round_id,
         target_group_at: groupAt,
         target_at: exactIso(legRow.scheduled_start_at, 'leg scheduled_start_at'),
@@ -697,12 +849,13 @@ async function loadDecisionTargets(env, config) {
       });
     }
   }
-  return targets;
+  return { targets, systemDiagnostics, exclusions };
 }
 
 export async function runDecisionReplayV1(env, config = {}) {
   if (!env?.DB) throw new Error('DB is not configured');
-  const targets = await loadDecisionTargets(env, config);
+  const loaded = await loadDecisionTargets(env, config);
+  const targets = loaded.targets;
   const walkForward = buildWalkForwardFoldsV1(targets, config.walk_forward ?? config.walkForward ?? {});
   const testGroups = testGroupSet(walkForward.folds);
   const blindScores = [];
@@ -727,6 +880,8 @@ export async function runDecisionReplayV1(env, config = {}) {
   }
   const blindSummary = summarizeScores(blindScores);
   const decisionSummary = summarizeScores(decisionScores);
+  const testSystemDiagnostics = loaded.systemDiagnostics.filter((item) => testGroups.has(item.target_group_id));
+  const systemSummary = summarizeSystems(testSystemDiagnostics);
   const evaluationFingerprint = await evaluationFingerprintV1(evaluations);
   const decisionLineages = uniqueDecisionLineages(targets);
   const cohortFingerprint = await sha256Text(stableFeatureJson(targets.map((target) => ({
@@ -758,8 +913,11 @@ export async function runDecisionReplayV1(env, config = {}) {
     target_count: targets.length,
     fold_count: walkForward.folds.length,
     walk_forward: walkForward,
+    exclusions: loaded.exclusions,
     blind_summary: blindSummary,
     decision_summary: decisionSummary,
+    system_summary: systemSummary,
+    system_diagnostics: testSystemDiagnostics,
     decision_minus_blind: {
       delta_log_loss: blindSummary.mean_log_loss == null || decisionSummary.mean_log_loss == null
         ? null : round(decisionSummary.mean_log_loss - blindSummary.mean_log_loss),
