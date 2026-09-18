@@ -295,11 +295,8 @@ export async function persistIntegratedStep2V1(env, payload, parents, gameType, 
   const optimizerExisting = await existingOptimizerRow(env, optimizer);
   const optimizerRunId = optimizerExisting?.id ?? idFromFingerprint('optimizer', optimizer.optimizer_fingerprint);
 
-  if (optimizerExisting) {
-    const stored = parseJsonField(optimizerExisting, 'optimizer_json');
-    if (stableFeatureJson(stored) !== stableFeatureJson(optimizer)) {
-      throw new Error('stored optimizer fingerprint is bound to different canonical content');
-    }
+  if (optimizerExisting && optimizerExisting.decision_fingerprint !== decision.decision_fingerprint) {
+    throw new Error('stored optimizer fingerprint is bound to a different canonical decision');
   }
 
   const analysisBase = {
