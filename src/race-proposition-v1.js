@@ -352,23 +352,26 @@ export async function getRacePropositionsAsOf(env, raceIds, asOf, parserVersion 
   const ph = ids.map(() => '?').join(',');
   const { results } = await env.DB.prepare(`
     WITH ranked AS (
-      SELECT rpf.*, ROW_NUMBER() OVER (
+      SELECT rpf.*, s.fetched_at AS source_fetched_at, ROW_NUMBER() OVER (
         PARTITION BY rpf.race_id
-        ORDER BY julianday(rpf.observed_at) DESC, rpf.id DESC
+        ORDER BY julianday(rpf.observed_at) DESC, julianday(s.fetched_at) DESC, rpf.id DESC
       ) AS rn
       FROM race_proposition_facts rpf
+      JOIN source_records s ON s.id = rpf.source_record_id
       WHERE rpf.race_id IN (${ph})
         AND rpf.parser_version = ?
         AND julianday(rpf.observed_at) <= julianday(?)
+        AND julianday(s.fetched_at) <= julianday(?)
     )
     SELECT * FROM ranked WHERE rn = 1
-  `).bind(...ids, parserVersion, cutoff).all();
+  `).bind(...ids, parserVersion, cutoff, cutoff).all();
   const out = new Map(ids.map((id) => [id, null]));
   for (const row of results) {
     out.set(row.race_id, {
       parserVersion: row.parser_version,
       parseStatus: row.parse_status,
       observedAt: row.observed_at,
+      sourceFetchedAt: row.source_fetched_at,
       sourceRecordId: row.source_record_id,
       sourceObservationId: row.source_observation_id,
       rawTerms: JSON.parse(row.raw_terms_json),
