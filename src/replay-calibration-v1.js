@@ -972,8 +972,16 @@ async function loadDecisionTargets(env, config) {
       JOIN analysis_step1_locks asl ON asl.id=adr.lock_id
       JOIN game_rounds gr ON gr.id=adr.game_round_id
       WHERE gr.game_type IN ('V85','V86')
-        AND datetime(adr.market_cutoff)>=datetime(?)
-        AND datetime(adr.market_cutoff)<=datetime(?)
+        AND datetime((
+          SELECT MIN(r0.scheduled_start_at)
+          FROM game_legs gl0 JOIN races r0 ON r0.id=gl0.race_id
+          WHERE gl0.game_round_id=adr.game_round_id
+        )) >= datetime(?)
+        AND datetime((
+          SELECT MIN(r1.scheduled_start_at)
+          FROM game_legs gl1 JOIN races r1 ON r1.id=gl1.race_id
+          WHERE gl1.game_round_id=adr.game_round_id
+        )) <= datetime(?)
         ${versionClause}
         AND datetime(adr.market_cutoff) <= datetime((
           SELECT MIN(r2.scheduled_start_at)
