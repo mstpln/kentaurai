@@ -43,6 +43,7 @@ function parseFields(row) {
 async function canonicalRaceState(env, raceId) {
   const { results } = await env.DB.prepare(`
     SELECT r.id AS race_id,r.race_date,r.race_name,r.distance_m,r.start_method,r.scheduled_start_at,
+      r.first_prize_sek,
       (SELECT external_id FROM track_external_ids x WHERE x.track_id=r.track_id AND x.source_type='official' ORDER BY external_id LIMIT 1) AS track_external_id,
       re.id AS race_entry_id,re.start_number,re.actual_lane,re.start_tier,re.handicap_m,re.actual_start_distance_m,re.scratched,
       (SELECT external_id FROM horse_external_ids x WHERE x.horse_id=re.horse_id AND x.source_type='official' ORDER BY external_id LIMIT 1) AS horse_external_id,
@@ -71,6 +72,26 @@ async function latestObservation(env, entityType, entityId, asOf) {
   return row ? { ...row, fields: parseFields(row) } : null;
 }
 
+
+function firstPrizeFromObservation(fields) {
+  const text = typeof fields?.prizeText === 'string' ? fields.prizeText.trim() : '';
+  if (!text.startsWith('Pris: ')) return null;
+  const rest = text.slice(6);
+  const dash = rest.indexOf('-');
+  if (dash <= 0) return null;
+  const amount = rest.slice(0, dash).trim();
+  if (!amount) return null;
+  const digits = amount.replaceAll('.', '');
+  if (!/^\d+$/.test(digits)) return null;
+  const dotCount = (amount.match(/\./g) || []).length;
+  const validGrouping = dotCount === 0
+    || (dotCount === 1 && amount.length >= 5 && amount.length <= 7 && amount.at(-4) === '.')
+    || (dotCount === 2 && amount.length >= 9 && amount.length <= 11 && amount.at(-4) === '.' && amount.at(-8) === '.');
+  if (!validGrouping) return null;
+  const value = Number(digits);
+  return Number.isInteger(value) && value >= 1 && value <= 999999999 ? value : null;
+}
+
 function compareRace(row, observation, mismatches) {
   const fields = observation.fields || {};
   const pairs = [
@@ -79,7 +100,8 @@ function compareRace(row, observation, mismatches) {
     ['race_name', row.race_name || null, fields.raceName || null],
     ['distance_m', finiteOrNull(row.distance_m), finiteOrNull(fields.distanceM)],
     ['start_method', normalizeMethod(row.start_method), normalizeMethod(fields.startMethod)],
-    ['scheduled_start_at', instantOrNull(row.scheduled_start_at), instantOrNull(fields.scheduledStartAt)]
+    ['scheduled_start_at', instantOrNull(row.scheduled_start_at), instantOrNull(fields.scheduledStartAt)],
+    ['first_prize_sek', finiteOrNull(row.first_prize_sek), firstPrizeFromObservation(fields)]
   ];
   for (const [field, canonical, observed] of pairs) {
     if (canonical == null && observed == null) continue;
@@ -138,6 +160,28 @@ export async function assertRaceTargetStateAsOfV1(env, raceId, forecastAsOf) {
     race_source_record_id: raceObservation.source_record_id,
     race_observed_at: raceObservation.observed_at
   };
+}
+
+export async function assertHistoricalRaceEntryStateAsOfV1(env, raceId, raceEntryId, forecastAsOf) {
+  if (!env?.DB) throw new Error('DB is not configured');
+  const asOf = requiredInstant(forecastAsOf, 'forecast_as_of');
+  const rows = await canonicalRaceState(env, raceId);
+  const row = rows.find((item) => String(item.race_entry_id) === String(raceEntryId));
+  if (!row) throw new Error(`historical_race_entry_not_found:${raceEntryId}`);
+  const [raceObservation, entryObservation] = await Promise.all([
+    latestObservation(env, 'race', raceId, asOf),
+    latestObservation(env, 'race_entry', raceEntryId, asOf)
+  ]);
+  if (!raceObservation) throw new Error(`missing_asof_historical_race_observation:${raceId}`);
+  if (!entryObservation) throw new Error(`missing_asof_historical_entry_observation:${raceEntryId}`);
+  const mismatches = [];
+  compareRace(row, raceObservation, mismatches);
+  compareEntry(row, entryObservation, mismatches);
+  if (mismatches.length) {
+    const sample = mismatches.slice(0, 8).map((item) => `${item.scope}:${item.id}:${item.field}`).join(', ');
+    throw new Error(`replay_historical_state_drift:${sample}`);
+  }
+  return true;
 }
 
 export async function assertFeatureProvenanceAsOfV1(featureDocument, forecastAsOf) {
