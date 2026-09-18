@@ -20,6 +20,19 @@ import {
   XLABS_EVIDENCE_PROFILE_VERSION,
   buildXlabsEvidenceProfilesForRace
 } from './xlabs-evidence-profiles-v1.js';
+import {
+  REPLAY_POSITION_EVIDENCE_VERSION,
+  REPLAY_RACE_TERMS_VERSION,
+  REPLAY_START_POINTS_DYNAMICS_VERSION,
+  buildReplayPositionEvidenceV1ForEntries,
+  buildReplayRaceTermsV1ForEntries,
+  buildReplayStartPointsDynamicsV1ForEntries
+} from './replay-feature-candidates-v1.js';
+import {
+  ANALYSIS_DECISION_PROBABILITY_VERSION,
+  ANALYSIS_DECISION_POLICY_VERSION,
+  assertCanonicalDecisionProbabilityV1
+} from './analysis-decision-probability-v1.js';
 
 export const REPLAY_CONTRACT_VERSION = 'kentaurai-replay-v1';
 export const REPLAY_VERSION = 'replay-calibration-v1-f1';
@@ -354,7 +367,10 @@ function resultSourceVersionMetadata() {
     equipment_feature_version: EQUIPMENT_RESPONSE_FEATURE_VERSION,
     person_context_feature_version: PERSON_CONTEXT_FEATURE_VERSION,
     race_prior_feature_version: RACE_PRIOR_FEATURE_VERSION,
-    xlabs_evidence_profile_version: XLABS_EVIDENCE_PROFILE_VERSION
+    xlabs_evidence_profile_version: XLABS_EVIDENCE_PROFILE_VERSION,
+    replay_race_terms_version: REPLAY_RACE_TERMS_VERSION,
+    replay_start_points_dynamics_version: REPLAY_START_POINTS_DYNAMICS_VERSION,
+    replay_position_evidence_version: REPLAY_POSITION_EVIDENCE_VERSION
   };
 }
 
@@ -365,12 +381,15 @@ async function buildSportsFeatureBundleForRace(env, target, requiredFamilies) {
   const performanceNames = new Set(['capacity','form','class_context','development','method_distance','rest_readiness','gallop_risk']);
   const needsPerformance = [...needed].some((family) => performanceNames.has(family));
 
-  const [performance, equipment, person, priors, xlabs] = await Promise.all([
+  const [performance, equipment, person, priors, xlabs, terms, startPointsDynamics, position] = await Promise.all([
     needsPerformance ? buildPerformanceFeaturesV3ForEntries(env, entryIds, asOf) : Promise.resolve(new Map()),
     needed.has('equipment_response') ? buildEquipmentResponseV1ForEntries(env, entryIds, asOf) : Promise.resolve(new Map()),
     needed.has('person_context') ? buildPersonContextV1ForEntries(env, entryIds, asOf) : Promise.resolve(new Map()),
     needed.has('race_priors') ? buildRacePriorsV1ForEntries(env, entryIds, asOf) : Promise.resolve(new Map()),
-    needed.has('xlabs_evidence') ? buildXlabsEvidenceProfilesForRace(env, { raceId: target.race_id, asOf }) : Promise.resolve({ profiles: [] })
+    needed.has('xlabs_evidence') ? buildXlabsEvidenceProfilesForRace(env, { raceId: target.race_id, asOf }) : Promise.resolve({ profiles: [] }),
+    needed.has('terms') ? buildReplayRaceTermsV1ForEntries(env, entryIds, asOf) : Promise.resolve(new Map()),
+    needed.has('start_points_dynamics') ? buildReplayStartPointsDynamicsV1ForEntries(env, entryIds, asOf) : Promise.resolve(new Map()),
+    needed.has('position') ? buildReplayPositionEvidenceV1ForEntries(env, entryIds, asOf) : Promise.resolve(new Map())
   ]);
   const xlabsByEntry = new Map((xlabs.profiles || []).map((profile) => [profile.race_entry_id, profile]));
   const out = new Map();
@@ -388,6 +407,9 @@ async function buildSportsFeatureBundleForRace(env, target, requiredFamilies) {
     if (needed.has('person_context')) bundle.person_context = person.get(entryId) ?? null;
     if (needed.has('race_priors')) bundle.race_priors = priors.get(entryId) ?? null;
     if (needed.has('xlabs_evidence')) bundle.xlabs_evidence = xlabsByEntry.get(entryId) ?? null;
+    if (needed.has('terms')) bundle.terms = terms.get(entryId) ?? null;
+    if (needed.has('start_points_dynamics')) bundle.start_points_dynamics = startPointsDynamics.get(entryId) ?? null;
+    if (needed.has('position')) bundle.position = position.get(entryId) ?? null;
     out.set(entryId, bundle);
   }
   return out;
@@ -404,7 +426,10 @@ const SPORTS_FAMILIES = Object.freeze([
   'equipment_response',
   'person_context',
   'race_priors',
-  'xlabs_evidence'
+  'xlabs_evidence',
+  'terms',
+  'start_points_dynamics',
+  'position'
 ]);
 
 async function loadSportsTargets(env, config) {
