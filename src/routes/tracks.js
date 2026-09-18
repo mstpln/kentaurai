@@ -152,7 +152,7 @@ export async function listTracks(env, options = {}) {
   };
 }
 
-export async function getTrackDetail(env, id) {
+export async function getTrackDetail(env, id, options = {}) {
   if (!env.DB) throw new Error('DB is not configured');
   const trackId = String(id || '').trim();
   if (!trackId) return null;
@@ -164,6 +164,7 @@ export async function getTrackDetail(env, id) {
   `).bind(trackId).first();
   if (!track) return null;
 
+  const includeHomeTrainerCount = options.includeHomeTrainerCount !== false;
   const [summary, distanceRows, homeTrainerCountRow] = await Promise.all([
     env.DB.prepare(`
       SELECT
@@ -186,7 +187,7 @@ export async function getTrackDetail(env, id) {
       GROUP BY r.distance_m
       ORDER BY r.distance_m ASC
     `).bind(trackId).all(),
-    countHomeTrainers(env, trackId, track.canonical_name)
+    includeHomeTrainerCount ? countHomeTrainers(env, trackId, track.canonical_name) : Promise.resolve(null)
   ]);
 
   return {
@@ -219,7 +220,7 @@ export async function getTrackDetail(env, id) {
       resultStarts: Number(summary?.result_starts ?? 0),
       firstRaceDate: summary?.first_race_date || null,
       lastRaceDate: summary?.last_race_date || null,
-      homeTrainers: Number(homeTrainerCountRow?.total ?? 0)
+      homeTrainers: includeHomeTrainerCount ? Number(homeTrainerCountRow?.total ?? 0) : null
     },
     distanceGroups: mapDistanceGroups(distanceRows?.results || [])
   };
