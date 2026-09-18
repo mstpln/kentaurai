@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=0bad270553d44ffcab1539ab83c685888f61b795
-release_nonce=2026-09-18-f3-private-ui-observability
+source_main=fe2fddf9cd00e85e45b562b1617a137fd3288515
+release_nonce=2026-09-18-f4-v3-cutover
