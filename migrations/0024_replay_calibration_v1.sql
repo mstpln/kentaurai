@@ -28,6 +28,8 @@ CREATE TABLE IF NOT EXISTS forecast_evaluations (
   log_loss REAL NOT NULL CHECK(log_loss >= 0),
   brier_score REAL NOT NULL CHECK(brier_score >= 0),
   top1_hit INTEGER NOT NULL CHECK(top1_hit IN (0,1)),
+  top2_hit INTEGER NOT NULL CHECK(top2_hit IN (0,1)),
+  top3_hit INTEGER NOT NULL CHECK(top3_hit IN (0,1)),
   winner_rank INTEGER NOT NULL CHECK(winner_rank >= 1),
   forecast_json TEXT NOT NULL CHECK(json_valid(forecast_json)),
   PRIMARY KEY(replay_run_id, target_id, forecast_variant)
