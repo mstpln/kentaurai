@@ -965,7 +965,7 @@ async function loadDecisionTargets(env, config) {
 
     const { results: roundRows } = await env.DB.prepare(`
       SELECT gl.leg_number,gl.race_id,r.scheduled_start_at,
-             re.id AS race_entry_id,rr.placing
+             re.id AS race_entry_id,re.scratched,rr.placing
       FROM game_legs gl
       JOIN races r ON r.id=gl.race_id
       JOIN race_entries re ON re.race_id=r.id
@@ -986,7 +986,7 @@ async function loadDecisionTargets(env, config) {
       if (grouped.race_id !== item.race_id || grouped.scheduled_start_at !== item.scheduled_start_at) {
         throw new Error(`round ${row.game_round_id} contains inconsistent leg identity`);
       }
-      grouped.entries.push({ race_entry_id: item.race_entry_id, placing: item.placing });
+      grouped.entries.push({ race_entry_id: item.race_entry_id, scratched: Number(item.scratched || 0) === 1, placing: item.placing });
     }
     const legs = [...legMap.values()].sort((a, b) => a.leg_number - b.leg_number);
     if (legs.length !== 8 || legs.some((leg, index) => leg.leg_number !== index + 1)) {
@@ -997,10 +997,11 @@ async function loadDecisionTargets(env, config) {
     for (const legRow of legs) {
       const leg = decision.legs.find((item) => Number(item.leg_number) === legRow.leg_number);
       if (!leg || leg.race_id !== legRow.race_id) throw new Error(`decision ${row.id} race identity mismatch in leg ${legRow.leg_number}`);
-      const factualIds = new Set(legRow.entries.map((entry) => String(entry.race_entry_id)));
-      const predictionIds = (leg.entries || []).map((entry) => String(entry.race_entry_id || ''));
-      if (new Set(predictionIds).size !== predictionIds.length || predictionIds.some((id) => !factualIds.has(id))) {
-        throw new Error(`decision ${row.id} contains non-canonical entry identity in leg ${legRow.leg_number}`);
+      const activeIds = legRow.entries.filter((entry) => !entry.scratched).map((entry) => String(entry.race_entry_id)).sort(compareId);
+      const predictionIds = (leg.entries || []).map((entry) => String(entry.race_entry_id || '')).sort(compareId);
+      if (new Set(predictionIds).size !== predictionIds.length
+        || stableFeatureJson(predictionIds) !== stableFeatureJson(activeIds)) {
+        throw new Error(`decision ${row.id} must cover the exact active field in leg ${legRow.leg_number}`);
       }
     }
 
@@ -1018,7 +1019,7 @@ async function loadDecisionTargets(env, config) {
 
     const winnersByLeg = new Map();
     for (const legRow of legs) {
-      const winners = legRow.entries.filter((entry) => Number(entry.placing) === 1);
+      const winners = legRow.entries.filter((entry) => !entry.scratched && Number(entry.placing) === 1);
       if (winners.length !== 1) break;
       winnersByLeg.set(legRow.leg_number, winners[0].race_entry_id);
     }
