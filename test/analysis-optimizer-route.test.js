@@ -33,7 +33,14 @@ test('E2 validates required decision and line-price configuration before databas
     headers: { authorization: 'Bearer synthetic-secret' }
   }), env, {});
   assert.equal(response.status, 400);
-  assert.match((await response.json()).message, /line_price_sek is required/);
+  assert.match((await response.json()).message, /decision_run_id is required/);
+  assert.equal(queries, 0);
+
+  const responseWithDecision = await worker.fetch(new Request(`${ADMIN_URL}?decision_run_id=decision-e2`, {
+    headers: { authorization: 'Bearer synthetic-secret' }
+  }), env, {});
+  assert.equal(responseWithDecision.status, 400);
+  assert.match((await responseWithDecision.json()).message, /line_price_sek is required/);
   assert.equal(queries, 0);
 });
 
