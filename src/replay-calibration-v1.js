@@ -228,9 +228,9 @@ export function buildWalkForwardFoldsV1(targets, policy = {}) {
   const grouped = new Map();
   for (const target of targets) {
     const groupId = requiredText(target?.target_group_id ?? target?.targetGroupId, 'target_group_id', 200);
-    const targetAt = exactIso(target?.target_at ?? target?.targetAt, 'target_at');
+    const targetAt = exactIso(target?.target_group_at ?? target?.targetGroupAt ?? target?.target_at ?? target?.targetAt, 'target_group_at');
     const current = grouped.get(groupId);
-    if (current && current.target_at !== targetAt) throw new Error('target_group_id cannot contain mixed target times');
+    if (current && current.target_at !== targetAt) throw new Error('target_group_id cannot contain mixed group times');
     if (!current) grouped.set(groupId, { group_id: groupId, target_at: targetAt });
   }
   const groups = [...grouped.values()].sort((a, b) => {
@@ -511,6 +511,7 @@ export async function runSportsFeatureReplayV1(env, config = {}, forecastProduce
   const cohortFingerprint = await sha256Text(stableFeatureJson(targets.map((target) => ({
     target_id: target.target_id,
     target_at: target.target_at,
+    target_group_at: target.target_group_at,
     winner_entry_id: target.winner_entry_id,
     entry_ids: target.entry_ids
   }))));
@@ -571,7 +572,8 @@ async function loadDecisionTargets(env, config) {
   const versionClause = decisionVersion ? 'AND adr.decision_probability_version=?' : '';
   const bindings = decisionVersion ? [from, to, decisionVersion, maxTargets] : [from, to, maxTargets];
   const { results } = await env.DB.prepare(`
-    SELECT adr.*,asl.pack_as_of,asl.lock_hash AS stored_lock_hash,gr.game_type
+    SELECT adr.*,asl.pack_id,asl.pack_as_of,asl.prompt_version AS step1_prompt_version,
+      asl.lock_hash AS stored_lock_hash,gr.game_type
     FROM analysis_decision_runs adr
     JOIN analysis_step1_locks asl ON asl.id=adr.lock_id
     JOIN game_rounds gr ON gr.id=adr.game_round_id
@@ -600,6 +602,19 @@ async function loadDecisionTargets(env, config) {
     const earliestStart = Math.min(...legs.map((leg) => Date.parse(String(leg.scheduled_start_at || ''))).filter(Number.isFinite));
     if (!Number.isFinite(earliestStart)) continue;
     if (Date.parse(row.market_cutoff) > earliestStart) throw new Error(`decision ${row.id} market cutoff is after race start`);
+    const { results: optimizerRows } = await env.DB.prepare(`
+      SELECT id,optimizer_version,policy_version,optimizer_fingerprint
+      FROM analysis_optimizer_runs
+      WHERE decision_run_id=?
+      ORDER BY optimizer_version,policy_version,optimizer_fingerprint,id
+    `).bind(row.id).all();
+    const optimizerLineage = (optimizerRows || []).map((optimizer) => ({
+      optimizer_run_id: optimizer.id,
+      optimizer_version: optimizer.optimizer_version,
+      optimizer_policy_version: optimizer.policy_version,
+      optimizer_fingerprint: optimizer.optimizer_fingerprint
+    }));
+    const groupAt = new Date(earliestStart).toISOString();
     for (const legRow of legs) {
       const leg = decision.legs?.find((item) => Number(item.leg_number) === Number(legRow.leg_number));
       if (!leg) throw new Error(`decision ${row.id} missing leg ${legRow.leg_number}`);
@@ -616,6 +631,7 @@ async function loadDecisionTargets(env, config) {
       targets.push({
         target_id: `${row.game_round_id}:leg:${legRow.leg_number}`,
         target_group_id: row.game_round_id,
+        target_group_at: groupAt,
         target_at: exactIso(legRow.scheduled_start_at, 'leg scheduled_start_at'),
         round_id: row.game_round_id,
         decision_run_id: row.id,
@@ -625,10 +641,13 @@ async function loadDecisionTargets(env, config) {
         version_metadata: {
           step1_lock_id: row.lock_id,
           step1_lock_hash: row.lock_hash,
+          step1_pack_id: row.pack_id,
           step1_pack_as_of: exactIso(row.pack_as_of, 'pack_as_of'),
+          step1_prompt_version: row.step1_prompt_version,
           market_cutoff: exactIso(row.market_cutoff, 'market_cutoff'),
           decision_probability_version: row.decision_probability_version,
-          decision_policy_version: row.policy_version
+          decision_policy_version: row.policy_version,
+          optimizer_lineage: optimizerLineage
         }
       });
     }
