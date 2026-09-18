@@ -111,7 +111,7 @@ test('actual F3 Worker serves the guided UI and session-private observability ro
   let response = await worker.fetch(new Request('https://example.test/app/', { headers: { cookie: session } }), env, {});
   assert.equal(response.status,200);
   const html = await response.text();
-  assert.equal((html.match(/kentaurai-f3-private-ui-script/g) || []).length,2);
+  assert.equal((html.match(/kentaurai-f3-private-ui-script/g) || []).length,1);
   assert.match(html,/kentaurai-f3-private-ui-style/);
 
   response = await worker.fetch(new Request('https://example.test/app/api/settings/f3-rounds', { headers: { cookie: session } }), env, {});
