@@ -71,6 +71,35 @@ test('F1 walk-forward folds are chronological expanding windows with no random s
   assert.deepEqual(result.folds[1].test_group_ids, ['g6','g7']);
 });
 
+test('F1 walk-forward never splits equal-time groups across chronology windows', () => {
+  const targets = [
+    { target_group_id: 'g1', target_at: '2099-01-01T12:00:00Z' },
+    { target_group_id: 'g2', target_at: '2099-01-02T12:00:00Z' },
+    { target_group_id: 'g3a', target_at: '2099-01-03T12:00:00Z' },
+    { target_group_id: 'g3b', target_at: '2099-01-03T12:00:00Z' },
+    { target_group_id: 'g4', target_at: '2099-01-04T12:00:00Z' }
+  ];
+  const result = buildWalkForwardFoldsV1(targets, {
+    min_train_groups: 1,
+    calibration_groups: 1,
+    test_groups: 1,
+    step_groups: 1
+  });
+  assert.equal(result.time_block_count, 4);
+  for (const fold of result.folds) {
+    const windows = [
+      new Set(fold.train_group_ids),
+      new Set(fold.calibration_group_ids),
+      new Set(fold.test_group_ids)
+    ];
+    const containing = windows.filter((window) => window.has('g3a') || window.has('g3b'));
+    if (containing.length) {
+      assert.equal(containing.length, 1);
+      assert.ok(containing[0].has('g3a') && containing[0].has('g3b'));
+    }
+  }
+});
+
 test('F1 ablation variants can change only their declared feature family', () => {
   const plan = buildAblationFeatureSetsV1(
     ['capacity','form','equipment_response'],
