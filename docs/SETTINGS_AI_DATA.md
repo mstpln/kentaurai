@@ -1,43 +1,29 @@
 # Inställningar: AI och Data
 
-KentaurAI har en privat inställningsyta som nås via kugghjulet uppe till höger på alla inloggade sidor. Huvudnavigationen Trend / Tränare / Hästar / Kuskar / Spel ändras inte.
+KentaurAI har en privat inställningsyta som nås via kugghjulet på inloggade sidor. Den normala analysvägen efter F4 är v3 och kräver ingen utvecklarkonsol eller manuell JSON-redigering.
 
 ## AI
 
-### Exportera all data
-- Exporten är en JSON-fil med kontrakt `kentaurai-full-export-v1`.
-- Exporten innehåller all strukturerad D1-data som KentaurAI har lagrat, inklusive historik, beräknade features, tidigare analyser, system, resultat, lärande och driftdata.
-- Råa R2-snapshots och hemligheter exporteras inte.
-- Användaren väljer ChatGPT eller Claude eftersom marknadsblindheten hålls separat per AI-leverantör.
-- För en kommande V85/V86-omgång döljs aktuell marknadsdata, marknadsberoende features och aktuella AI/systembedömningar för den valda leverantören tills en giltig `pre_market`-analys från samma leverantör har importerats.
-- Historiska marknadsdata och historiska resultat finns kvar i full export.
-- Efter importerad `pre_market`-analys exporteras filen igen. Då innehåller den även marknadskontext för den sparade förhandsanalysen.
-- Exportfilens metadata innehåller analysinstruktioner, kontraktsversion, kontextfingeravtryck och mallar för AI:s returfil.
+### V3 · Analysflöde
+1. Välj en komplett V85/V86-omgång.
+2. Hämta den marknadsblinda analysfilen och kör Steg 1 hos vald AI.
+3. Ladda upp AI:ns strikta Step 1-JSON. KentaurAI validerar och förseglar den server-side.
+4. Om nya marknadsblinda fakta har kommit efter förseglingen visar gränssnittet revisionssteget. En ny version måste förseglas innan marknadssteget öppnas.
+5. Hämta **Steg 2-underlag**. F4-filen är självständig och innehåller exakt lagrat förseglat Steg 1 plus den verifierade marknadsfilen. Den kan därför användas i en ny AI-konversation; KentaurAI förlitar sig inte på konversationsminne.
+6. Kör Steg 2 och ladda upp resultatet. AI:n tolkar marknadsskillnad, mognad, tillförlitlighet och värde men väljer inte systemet.
+7. KentaurAI lagrar canonical decision och kodoptimeraren bygger det auktoritativa systemet med exakt tre spikar.
 
-Rekommenderat exportfilnamn skapas automatiskt:
+Aktuell standardpolicy för huvudsystemet är 150-250 SEK. Om fler rader inte ökar beräknad P(8) kan optimeraren stanna under målbandet. Exakt tre spikar gäller ändå.
 
-`kentaurai-full-export_<provider>_<timestamp>.json`
-
-### Importera AI-analys
-- Returfilen ska vara JSON och följa `kentaurai-analysis-v1`.
-- Rekommenderade filnamn är `kentaurai-analysis_openai_YYYY-MM-DD.json` och `kentaurai-analysis_anthropic_YYYY-MM-DD.json`.
-- Importen använder samma validering som den provider-neutrala analysväxeln.
-- KentaurAI kontrollerar bland annat kontextfingeravtryck, full rankning av aktiva starter, sannolikhetssumma, ABCD, oförändrad styrkebedömning i finalpasset och exakt tre verkliga spikar per V85/V86-system.
-- Analysen skrivs direkt till privat D1 och går aldrig via det publika GitHub-repot.
+### Legacy
+Historiska v1/v2-analyser och system får fortfarande läsas. Nya gamla combined/declared-unsealed analyser kan inte skapas när ANALYSIS_WORKFLOW_MODE=v3. legacy_v2 är endast ett kontrollerat rollback-läge och aktiveras aldrig automatiskt.
 
 ## Data
 
-### Datamängd
-Visar antal lagrade tränare, hästar, kuskar och V85/V86-spelomgångar.
+### Datatäckning och drift
+Data-fliken visar Coverage v2 i läsbar form, inklusive täckning för nästa omgång och sanerad status för officiell historik/X-Labs-jobb. Full datatäckningsrapport kan hämtas via den privata app-sessionen.
 
-### Senaste körningar
-Visar de senaste registrerade import-/arbetsflödeskörningarna med antal nya, uppdaterade, överhoppade och fel samt tydlig status.
-
-### Datakällor
-Visar en enkel hälsobild för officiell datakälla och X-Labs baserad på de senaste registrerade körningarna. Sidan gör inga extra externa kontrollanrop enbart för statusvisningen.
-
-## Gemensam footer
-Båda flikarna visar aktuell KentaurAI-version samt `Logga ut`.
+Driftinformationen är skrivskyddad i appen. Råpayloads, privata R2-objektnycklar, råa feltexter, hemligheter och ADMIN_TOKEN visas inte. Att återuppta eller ändra historiska jobb görs endast via det separata administratörsflödet.
 
 ## Säkerhet
-Alla inställnings-, export- och importroutes kräver giltig privat app-session (`APP_PASSWORD`). `ADMIN_TOKEN` exponeras aldrig i webbläsaren. Exporten har `no-store` och råa privata R2-objekt eller hemligheter lämnar inte Cloudflare genom denna funktion.
+Alla app-routes kräver giltig privat session via APP_PASSWORD. Operativa /v1/*-routes använder separat ADMIN_TOKEN. Den privata appen exponerar aldrig administratörstoken och svar använder no-store där relevant.

@@ -1,12 +1,13 @@
 export const ANALYSIS_STEP2_RESULT_CONTRACT = 'kentaurai-step2-result-v1';
 export const ANALYSIS_STEP2_VERSION = 'step2-result-v1-e3';
-export const ANALYSIS_STEP2_PROMPT_VERSION = 'step2-prompt-v3-e3';
+export const ANALYSIS_STEP2_PROMPT_VERSION = 'step2-prompt-v3-f4';
 
 const CORE = `KENTAURAI STEP 2 V3 - MARKET INTERPRETATION ONLY
 
 You are performing Step 2 of KentaurAI's sealed V85/V86 analysis.
 
 AUTHORITATIVE INPUTS
+If the supplied file is kentaurai-step2-bundle-v1, use only bundle.sealed_step1, bundle.market_manifest and bundle.market_files. Do not reconstruct Step 1 from conversation history or memory.
 1. Read the exact sealed kentaurai-step1-lock-v1 first.
 2. Validate the market pack references the same round_id, lock_id and lock_hash.
 3. Read 00_round_market.json.
@@ -45,7 +46,7 @@ Return strict JSON only:
   "market_cutoff": "<exact market cutoff>",
   "provider": "<provider named by adapter>",
   "model": "<actual model identifier if known, otherwise truthful descriptive name>",
-  "prompt_version": "step2-prompt-v3-e3",
+  "prompt_version": "step2-prompt-v3-f4",
   "legs": [
     {
       "leg_number": 1,
@@ -84,8 +85,8 @@ export function getAnalysisStep2PromptV3(providerValue = 'openai') {
   const provider = String(providerValue || '').trim().toLowerCase();
   if (!['openai', 'anthropic'].includes(provider)) throw new Error('provider must be openai or anthropic');
   const adapter = provider === 'anthropic'
-    ? '\n\nCLAUDE FILE ADAPTER\nRead the sealed Step 1 lock and market pack files from the supplied files only. Set provider to "anthropic". Return one complete JSON result.'
-    : '\n\nCHATGPT FILE ADAPTER\nRead the sealed Step 1 lock and market pack files from the supplied files only. Set provider to "openai". Return one complete JSON result.';
+    ? '\n\nCLAUDE FILE ADAPTER\nRead the sealed Step 1 lock and market pack data from the supplied files only. A kentaurai-step2-bundle-v1 is self-contained; do not use conversation memory to reconstruct Step 1. Set provider to "anthropic". Return one complete JSON result.'
+    : '\n\nCHATGPT FILE ADAPTER\nRead the sealed Step 1 lock and market pack data from the supplied files only. A kentaurai-step2-bundle-v1 is self-contained; do not use conversation memory to reconstruct Step 1. Set provider to "openai". Return one complete JSON result.';
   return CORE + adapter;
 }
 

@@ -34,7 +34,7 @@ test('E3 Step 2 prompt route is versioned and contains no legacy AI system-build
 
   assert.equal(response.status, 200);
   const body = await response.json();
-  assert.equal(body.prompt_version, 'step2-prompt-v3-e3');
+  assert.equal(body.prompt_version, 'step2-prompt-v3-f4');
   assert.match(body.prompt, /kentaurai-step2-result-v1/);
   assert.match(body.prompt, /code optimizer will build the authoritative system/i);
   assert.doesNotMatch(body.prompt, /700\s*kr/i);

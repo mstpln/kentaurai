@@ -1,5 +1,9 @@
 # KentaurAI public data dictionary
 
+## F4 analysis-layer interpretation
+The active analysis contracts are the v3 pack, sealed Step 1 lock/revisions, market pack, Step 2 result, canonical decision, optimizer and integrated analysis records. The F4 Step 2 transport bundles the exact sealed Step 1 with verified market files but does not create a new factual source family. Legacy `analysis_context` / v1-v2 submission rows remain readable history and are not valid new-creation contracts in default v3 mode. New systems are canonical optimizer outputs with exactly three spike legs; old legacy rows retain their historical semantics without being rewritten.
+
+
 Version: 1.0
 Updated: 2026-09-12
 Scope: verified public field inventory for current official, X-Labs, normalized and analysis-context families.

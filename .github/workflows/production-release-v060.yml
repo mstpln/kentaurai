@@ -36,7 +36,10 @@ jobs:
           test "$(printf '%s' "$source_main" | wc -c)" -eq 40 || { echo 'source_main must be a full 40-character lowercase commit SHA'; exit 1; }
           git cat-file -e "$source_main^{commit}"
           git merge-base --is-ancestor "$source_main" HEAD
-          grep -Fq '"main": "./src/worker-v075.js"' wrangler.jsonc
+          grep -Fq '"main": "./src/worker-v076.js"' wrangler.jsonc
+          grep -Fq '"ANALYSIS_WORKFLOW_MODE": "v3"' wrangler.jsonc
+          grep -Fq '"V85_LINE_PRICE_SEK": "0.50"' wrangler.jsonc
+          grep -Fq '"V86_LINE_PRICE_SEK": "0.25"' wrangler.jsonc
 
       - name: Use Node.js 22
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
@@ -127,7 +130,7 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --retry 5 --retry-delay 2 "$WORKER_URL/health" > /tmp/health.json
-          node -e "const fs=require('fs'); const h=JSON.parse(fs.readFileSync('/tmp/health.json','utf8')); if(h.ok!==true||h.service!=='kentaurai-api'||h.version!=='0.6.0') process.exit(1);"
+          node -e "const fs=require('fs'); const h=JSON.parse(fs.readFileSync('/tmp/health.json','utf8')); if(h.ok!==true||h.service!=='kentaurai-api'||h.version!=='0.6.0'||h.analysisWorkflow!=='v3'||h.analysisCutoverVersion!=='analysis-v3-default-f4'||h.legacyAnalysisCreationEnabled!==false) process.exit(1);"
 
       - name: Verify private app login remains available
         shell: bash
@@ -153,6 +156,7 @@ jobs:
             '/app/api/settings/f3-rounds' \
             '/app/api/settings/f3-workflow-state?round_id=private-probe' \
             '/app/api/settings/f3-analysis-pack?round_id=private-probe' \
+            '/app/api/settings/f4-step2-bundle?round_id=private-probe' \
             '/app/api/settings/f3-operational-status' \
             '/v1/analysis-pack/private-probe' \
             '/v1/analysis-step1-lock/private-probe' \
@@ -177,4 +181,4 @@ jobs:
         run: |
           echo 'KentaurAI v0.6.0 production release completed.'
           echo "Worker: $WORKER_URL"
-          echo 'Required production schema through migration 0025, F1 replay storage, F2 post-race learning storage, worker-v075, F3 private workflow/observability route protection, D3 revision lineage, E1 decision probability storage, E2 optimizer storage, E3 Step 2/integrated analysis storage, exact app version, health, login and private analysis/replay route checks passed.'
+          echo 'Required production schema through migration 0025, F1 replay storage, F2 post-race learning storage, worker-v076, F4 v3 cutover health, self-contained Step 2 bundle protection, controlled legacy boundary, game-specific optimizer policy config, exact app version, health, login and private analysis/replay route checks passed.'

@@ -1,4 +1,12 @@
-# KentaurAI data inventory and analysis opportunity map
+# KentaurAI data inventory
+
+## F4 live analysis transport status
+- The default creation path is v3. Market-blind deterministic data is exported through the round-scoped v3 analysis pack and sealed Step 1 is persisted before current market exposure.
+- Step 2 uses a self-contained bundle containing the exact persisted sealed Step 1 document plus the bound verified market pack. Conversation memory is not a data source or reconstruction mechanism.
+- Canonical decision probability and optimizer output are deterministic/versioned KentaurAI records. New V85/V86 systems are exact-three-spike optimizer output.
+- Legacy v1/v2 analysis rows remain historical/read-compatible. Their combined/declared-unsealed transport is deprecated and cannot create new analyses in the default v3 mode.
+- C4 named X-Labs trip labels remain unpromoted; unsupported semantic labels stay null.
+ and analysis opportunity map
 
 Updated: 2026-09-11
 Status: Build F inventory

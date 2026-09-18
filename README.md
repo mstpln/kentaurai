@@ -3,7 +3,20 @@
 Private V85/V86 data, analysis backend and read-only intelligence interface with a public codebase.
 
 ## Current build
-Version 0.6.0 contains the verified official/X-Labs data foundation, resumable ordinary-race history pipeline, automatic official V85/V86 pre-race acquisition, separately checkpointed X-Labs acquisition, installable PWA packaging, deterministic automatic post-race review and the private Bana workspace. Real provider payloads and private reference/editorial/contact data remain outside the public repository; GitHub contains code, migrations, tests, documentation and synthetic fixtures only.
+Version 0.6.0 contains the verified official/X-Labs data foundation, resumable history pipelines, the full sealed v3 V85/V86 analysis stack, replay/calibration, post-race learning diagnostics, private workflow/coverage observability and the read-only PWA. Real provider payloads and private reference/editorial/contact data remain outside the public repository; GitHub contains code, migrations, tests, documentation and synthetic fixtures only.
+
+F4 is the final v3 cutover candidate. Source default is `ANALYSIS_WORKFLOW_MODE=v3` through `src/worker-v076.js`; the last production release before F4 uses `worker-v075.js`. F4 keeps historical v1/v2 analysis reads but disables new legacy creation in v3 mode. `legacy_v2` exists only as a controlled release rollback value.
+
+### Default v3 analysis workflow
+1. KentaurAI generates a deterministic round-scoped pre-market analysis pack with no current market.
+2. The external AI performs Step 1 and KentaurAI validates and server-seals the result.
+3. New pre-market facts after sealing require a versioned Step 1 revision before market exposure.
+4. KentaurAI generates a self-contained Step 2 bundle containing the exact persisted sealed Step 1 plus the verified market pack. Step 2 does not rely on conversation memory.
+5. The external AI interprets market disagreement/value confidence only. It cannot submit canonical decision probabilities or system construction.
+6. KentaurAI persists the versioned canonical decision and the deterministic optimizer builds the authoritative system with exactly three spikes.
+7. Default optimizer policy targets 150-250 SEK with the game-specific line price; it may spend less when added rows provide no additional P(8) coverage.
+
+C4 named X-Labs trip labels remain optional/gated; the v3 workflow uses only validated continuous evidence while unsupported labels remain null.
 
 The current build contains:
 - D1 normalized relational schema and provenance model
@@ -25,7 +38,9 @@ The current build contains:
 - Bana list/detail with Översikt, Spårstatistik and Hemmatränare; track statistics combine period, start method, distance, STL class and race type
 - nullable track address/website presentation with fact-level provenance for private enrichment
 - Spel area with Översikt / V85 / V86 plus saved-round post-race detail
-- deterministic automatic post-race review for fully settled saved V85/V86 systems, with misses recorded as candidate learning only and no automatic model changes
+- F1 replay/calibration and ablation evidence with chronological leakage guards
+- F2 v3 post-race probability/system diagnostics, with repeated misses recorded as candidate learning only and no automatic model changes
+- F3 guided private v3 workflow plus sanitized coverage/backfill observability
 - complete presentation of currently stored measurement families on entity/start detail, while internal provenance remains backend-only
 - verified X-Labs race-telemetry capture, normalization and raw-vs-normalized checks; exact payloads remain private
 - scheduled previous-day X-Labs catch-up for stored V85/V86 game legs

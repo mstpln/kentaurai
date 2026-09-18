@@ -7,6 +7,7 @@ import {
   createOptimizerV1,
   persistOptimizerV1
 } from './analysis-optimizer-v1.js';
+import { canonicalOptimizerPolicyForRound } from './analysis-optimizer-policy-config.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -25,19 +26,17 @@ async function requireSession(request, env) {
   return null;
 }
 
-function optimizerOptions(url) {
+async function optimizerOptions(env, roundId, url) {
+  const decisionRunId = String(url.searchParams.get('decision_run_id') || '').trim();
+  if (!decisionRunId) throw new Error('decision_run_id is required');
   return {
-    decision_run_id: url.searchParams.get('decision_run_id'),
-    line_price_sek: url.searchParams.get('line_price_sek'),
-    target_budget_min_sek: url.searchParams.get('target_budget_min_sek'),
-    max_budget_sek: url.searchParams.get('max_budget_sek'),
-    exact_spike_count: url.searchParams.get('exact_spike_count') || undefined,
-    system_type: url.searchParams.get('system_type') || undefined
+    ...await canonicalOptimizerPolicyForRound(env, roundId),
+    decision_run_id: decisionRunId
   };
 }
 
 async function handleOptimizer(request, env, roundId, url) {
-  const options = optimizerOptions(url);
+  const options = await optimizerOptions(env, roundId, url);
   if (request.method === 'GET') {
     const optimizer = await createOptimizerV1(env, roundId, options);
     return json({

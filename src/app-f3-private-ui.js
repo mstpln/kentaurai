@@ -185,9 +185,9 @@ function f3PrivateUiClient() {
           </div>
           <div class="f3-action">
             <strong>Steg 2</strong>
-            <span>Hämta marknadsfilen, fortsätt i samma AI-konversation och importera svaret. Systemet optimeras därefter i kod.</span>
+            <span>Hämta det självständiga Steg 2-underlaget med förseglat Steg 1 + marknadsdata. Det kan användas i en ny AI-konversation; KentaurAI förlitar sig inte på konversationsminne. Systemet optimeras därefter i kod.</span>
             <div class="settings-actions">
-              <button id="f3DownloadMarket" class="settings-primary" type="button">Hämta marknadsdata</button>
+              <button id="f3DownloadMarket" class="settings-primary" type="button">Hämta Steg 2-underlag</button>
               <button id="f3CopyStep2" class="settings-secondary" type="button">Kopiera Steg 2-instruktion</button>
             </div>
             <div class="settings-actions f3-import">
@@ -272,7 +272,7 @@ function f3PrivateUiClient() {
       } catch (error) { box.className = 'settings-result show error'; box.textContent = error.message; }
     });
     document.getElementById('f3DownloadMarket').addEventListener('click', () => {
-      const id = roundId(); if (id) download('/app/api/settings/analysis-market-pack?round_id=' + encodeURIComponent(id));
+      const id = roundId(); if (id) download('/app/api/settings/f4-step2-bundle?round_id=' + encodeURIComponent(id));
     });
     document.getElementById('f3CopyStep2').addEventListener('click', (event) => copyText(event.currentTarget, '/app/api/settings/analysis-step2-prompt?provider=' + encodeURIComponent(provider())));
     document.getElementById('f3ImportStep2').addEventListener('click', async (event) => {

@@ -70,6 +70,8 @@ export function createTestEnv() {
     db,
     env: {
       DB: new D1Adapter(db),
+      V85_LINE_PRICE_SEK: '0.50',
+      V86_LINE_PRICE_SEK: '0.25',
       RAW_BUCKET: {
         async put(key, body, options) { objects.set(key, { body, options }); },
         async get(key) {

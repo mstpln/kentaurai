@@ -6,7 +6,7 @@ E3 completes the Wave E production path from the sealed market-blind Step 1 thro
 
 - Step 2 result contract: `kentaurai-step2-result-v1`
 - Step 2 result version: `step2-result-v1-e3`
-- Step 2 prompt version: `step2-prompt-v3-e3`
+- Step 2 prompt version: `step2-prompt-v3-f4`
 - Integrated analysis contract: `kentaurai-analysis-v3`
 - Integrated analysis version: `analysis-v3-e3`
 - Final narrative contract: `kentaurai-analysis-v3-narrative-v1`
@@ -14,6 +14,8 @@ E3 completes the Wave E production path from the sealed market-blind Step 1 thro
 The canonical decision layer remains E1 `decision-probability-v1-e1` with the initial `decision-blind-v1` policy. E3 does not introduce a fitted market blend.
 
 ## Step 2 read order
+
+F4 packages the exact sealed Step 1 document and its bound verified D4 market files into `kentaurai-step2-bundle-v1`. The AI may receive that single self-contained file in a new conversation; persisted inputs, not conversation memory, are authoritative.
 
 The Step 2 prompt requires the AI to:
 

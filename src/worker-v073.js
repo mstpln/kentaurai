@@ -9,6 +9,7 @@ import {
   importStep2AndOptimizeV1,
   persistFinalNarrativeV1
 } from './analysis-step2-integration-v1.js';
+import { canonicalOptimizerPolicyForRound } from './analysis-optimizer-policy-config.js';
 
 const MAX_JSON_BYTES = 1024 * 1024;
 
@@ -40,20 +41,11 @@ async function readJson(request) {
   return value;
 }
 
-function optimizerPolicy(url) {
-  return {
-    line_price_sek: url.searchParams.get('line_price_sek'),
-    target_budget_min_sek: url.searchParams.get('target_budget_min_sek'),
-    max_budget_sek: url.searchParams.get('max_budget_sek'),
-    exact_spike_count: url.searchParams.get('exact_spike_count') || undefined,
-    system_type: url.searchParams.get('system_type') || undefined
-  };
-}
-
-async function handleStep2Import(request, env, roundId, url) {
+async function handleStep2Import(request, env, roundId) {
   const payload = await readJson(request);
   if (String(payload.round_id || '') !== roundId) throw new Error('payload round_id must match route round');
-  const integrated = await importStep2AndOptimizeV1(env, payload, optimizerPolicy(url));
+  const policy = await canonicalOptimizerPolicyForRound(env, roundId);
+  const integrated = await importStep2AndOptimizeV1(env, payload, policy);
   return json({
     analysis_version: ANALYSIS_V3_VERSION,
     persisted: true,
@@ -87,7 +79,7 @@ export default {
       const denied = requireAdmin(request, env);
       if (denied) return denied;
       try {
-        return await handleStep2Import(request, env, decodeURIComponent(step2Match[1]), url);
+        return await handleStep2Import(request, env, decodeURIComponent(step2Match[1]));
       } catch (error) {
         console.error(error);
         return json({ error: 'request_failed', message: error.message }, 400);
@@ -158,7 +150,7 @@ export default {
       try {
         const roundId = String(url.searchParams.get('round_id') || '').trim();
         if (!roundId) throw new Error('round_id is required');
-        return await handleStep2Import(request, env, roundId, url);
+        return await handleStep2Import(request, env, roundId);
       } catch (error) {
         console.error(error);
         return json({ error: 'request_failed', message: error.message }, 400);
