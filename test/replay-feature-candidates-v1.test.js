@@ -39,11 +39,13 @@ test('F1 Start Points dynamics is as-of safe and field-relative without future o
   source(db, 'sp-a-2', '2099-06-01T10:00:00Z');
   source(db, 'sp-b-1', '2099-06-01T10:00:00Z');
   source(db, 'sp-a-future', '2099-06-20T10:00:00Z');
+  source(db, 'sp-a-backdated-future-source', '2099-06-20T11:00:00Z');
   db.prepare(`
     INSERT INTO horse_start_points (id,horse_id,points,observed_at,source_record_id) VALUES
       ('hsp-a-1','horse-a',40,'2099-05-01T10:00:00Z','sp-a-1'),
       ('hsp-a-2','horse-a',70,'2099-06-01T10:00:00Z','sp-a-2'),
       ('hsp-b-1','horse-b',50,'2099-06-01T10:00:00Z','sp-b-1'),
+      ('hsp-a-backdated-future-source','horse-a',888,'2099-06-05T10:00:00Z','sp-a-backdated-future-source'),
       ('hsp-a-future','horse-a',999,'2099-06-20T10:00:00Z','sp-a-future')
   `).run();
 
@@ -56,6 +58,7 @@ test('F1 Start Points dynamics is as-of safe and field-relative without future o
   assert.equal(a.field_rank, 1);
   assert.equal(a.field_known_count, 2);
   assert.ok(!a.source_refs.some((ref) => ref.source_record_id === 'sp-a-future'));
+  assert.ok(!a.source_refs.some((ref) => ref.source_record_id === 'sp-a-backdated-future-source'));
 });
 
 test('F1 terms candidate selects only parser facts observed by target as-of', async () => {
@@ -68,14 +71,20 @@ test('F1 terms candidate selects only parser facts observed by target as-of', as
       VALUES (?,?,?,?,?,'{}')
     `).run(`obs-${id}`, 'race', 'target-race', id, at);
   }
+  source(db, 'terms-backdated-future-source', '2099-06-20T11:00:00Z');
+  db.prepare(`
+    INSERT INTO normalized_observations (id,entity_type,entity_id,source_record_id,observed_at,fields_json)
+    VALUES ('obs-terms-backdated-future-source','race','target-race','terms-backdated-future-source','2099-06-05T10:00:00Z','{}')
+  `).run();
   db.prepare(`
     INSERT INTO race_proposition_facts (
       id,race_id,source_observation_id,source_record_id,observed_at,parser_version,parse_status,
       raw_terms_json,facts_json,matched_patterns_json,unparsed_fragments_json,ambiguous_fragments_json
     ) VALUES
       ('rpf-early','target-race','obs-terms-early','terms-early','2099-06-01T10:00:00Z',?,'parsed','[]','{"final":true}','[]','[]','[]'),
+      ('rpf-backdated-future-source','target-race','obs-terms-backdated-future-source','terms-backdated-future-source','2099-06-05T10:00:00Z',?,'parsed','[]','{"futureSource":true}','[]','[]','[]'),
       ('rpf-future','target-race','obs-terms-future','terms-future','2099-06-20T10:00:00Z',?,'parsed','[]','{"final":false}','[]','[]','[]')
-  `).run(RACE_PROPOSITION_PARSER_VERSION, RACE_PROPOSITION_PARSER_VERSION);
+  `).run(RACE_PROPOSITION_PARSER_VERSION, RACE_PROPOSITION_PARSER_VERSION, RACE_PROPOSITION_PARSER_VERSION);
 
   const features = await buildReplayRaceTermsV1ForEntries(env, ['target-a'], '2099-06-10T12:00:00Z');
   const row = features.get('target-a');
