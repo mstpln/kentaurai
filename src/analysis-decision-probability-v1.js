@@ -254,7 +254,7 @@ function storedRunMetadata(row, decision, reused) {
   };
 }
 
-async function assertCanonicalDecisionForPersistenceV1(decision) {
+export async function assertCanonicalDecisionProbabilityV1(decision) {
   if (!decision || decision.contract_version !== ANALYSIS_DECISION_PROBABILITY_CONTRACT) throw new Error('canonical E1 decision is required');
   if (decision.decision_probability_version !== ANALYSIS_DECISION_PROBABILITY_VERSION || decision.policy_version !== ANALYSIS_DECISION_POLICY_VERSION) {
     throw new Error('unsupported E1 decision/policy version');
@@ -321,7 +321,7 @@ async function assertCanonicalDecisionForPersistenceV1(decision) {
 
 export async function persistCanonicalDecisionProbabilityV1(env, decision, options = {}) {
   if (!env?.DB) throw new Error('DB is not configured');
-  await assertCanonicalDecisionForPersistenceV1(decision);
+  await assertCanonicalDecisionProbabilityV1(decision);
   const id = decisionIdFromFingerprint(decision.decision_fingerprint);
   const decisionJson = stableFeatureJson(decision);
   const existing = await env.DB.prepare('SELECT * FROM analysis_decision_runs WHERE id=? LIMIT 1').bind(id).first();

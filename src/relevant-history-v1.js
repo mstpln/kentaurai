@@ -154,10 +154,22 @@ function normalizedProposition(row) {
     parserVersion: row.parser_version,
     parseStatus: row.parse_status,
     observedAt: row.observed_at,
+    sourceFetchedAt: row.source_fetched_at,
     sourceRecordId: row.source_record_id,
     sourceObservationId: row.source_observation_id,
     facts
   };
+}
+
+function latestPropositionAtOrBefore(rows, cutoffMs) {
+  for (const row of rows || []) {
+    const observed = Date.parse(String(row?.observed_at ?? ''));
+    const fetched = Date.parse(String(row?.source_fetched_at ?? ''));
+    if (!Number.isFinite(observed) || !Number.isFinite(fetched) || observed > cutoffMs || fetched > cutoffMs) continue;
+    const normalized = normalizedProposition(row);
+    if (normalized) return normalized;
+  }
+  return null;
 }
 
 function propositionSignature(value) {
@@ -270,10 +282,11 @@ async function loadPropositionRows(env, raceIds) {
   const out = new Map(raceIds.map((id) => [id, []]));
   for (const group of chunks(raceIds)) {
     const { results } = await env.DB.prepare(`
-      SELECT rpf.*
+      SELECT rpf.*, sr.fetched_at AS source_fetched_at
       FROM race_proposition_facts rpf
+      JOIN source_records sr ON sr.id = rpf.source_record_id
       WHERE rpf.race_id IN (${placeholders(group)}) AND rpf.parser_version = ?
-      ORDER BY rpf.race_id, julianday(rpf.observed_at) DESC, rpf.id DESC
+      ORDER BY rpf.race_id, julianday(rpf.observed_at) DESC, julianday(sr.fetched_at) DESC, rpf.id DESC
     `).bind(...group, RACE_PROPOSITION_PARSER_VERSION).all();
     for (const row of results) out.get(row.race_id)?.push(row);
   }
@@ -506,7 +519,7 @@ export async function buildRelevantHistoryForEntries(env, raceEntryIds, asOf, op
   for (const target of targets) {
     const cutoff = cutoffByEntry.get(target.race_entry_id);
     const targetEquipment = latestObservedAtOrBefore(equipmentRows.get(target.race_entry_id), cutoff, normalizedEquipment);
-    const targetProposition = latestObservedAtOrBefore(propositionRows.get(target.race_id), cutoff, normalizedProposition, 'observed_at');
+    const targetProposition = latestPropositionAtOrBefore(propositionRows.get(target.race_id), cutoff);
     const safe = (historiesByHorse.get(target.horse_id) || [])
       .filter((row) => row.race_entry_id !== target.race_entry_id && row.race_id !== target.race_id)
       .map((row) => ({ ...row, eventMs: raceEventMs(row), inclusionReasons: [] }))
@@ -517,7 +530,7 @@ export async function buildRelevantHistoryForEntries(env, raceEntryIds, asOf, op
     for (const row of safe) {
       row.equipment = latestObservedAtOrBefore(equipmentRows.get(row.race_entry_id), cutoff, normalizedEquipment);
       row.xlabs = latestObservedAtOrBefore(xlabsRows.get(row.race_entry_id), cutoff, normalizedXlabs);
-      row.proposition = latestObservedAtOrBefore(propositionRows.get(row.race_id), cutoff, normalizedProposition, 'observed_at');
+      row.proposition = latestPropositionAtOrBefore(propositionRows.get(row.race_id), cutoff);
     }
 
     const rest = annotateReasons(safe, target, targetEquipment, targetProposition, cutoff, policy);

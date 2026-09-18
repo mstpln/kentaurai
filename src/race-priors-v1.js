@@ -138,12 +138,15 @@ async function loadTargets(env, entryIds) {
 
 async function latestProposition(env, raceId, cutoff) {
   const row = await env.DB.prepare(`
-    SELECT parse_status, facts_json, observed_at, source_record_id
-    FROM race_proposition_facts
-    WHERE race_id = ? AND parser_version = ? AND observed_at <= ?
-    ORDER BY julianday(observed_at) DESC, id DESC
+    SELECT rpf.parse_status, rpf.facts_json, rpf.observed_at, rpf.source_record_id, sr.fetched_at AS source_fetched_at
+    FROM race_proposition_facts rpf
+    JOIN source_records sr ON sr.id = rpf.source_record_id
+    WHERE rpf.race_id = ? AND rpf.parser_version = ?
+      AND julianday(rpf.observed_at) <= julianday(?)
+      AND julianday(sr.fetched_at) <= julianday(?)
+    ORDER BY julianday(rpf.observed_at) DESC, julianday(sr.fetched_at) DESC, rpf.id DESC
     LIMIT 1
-  `).bind(raceId, RACE_PROPOSITION_PARSER_VERSION, cutoff).first();
+  `).bind(raceId, RACE_PROPOSITION_PARSER_VERSION, cutoff, cutoff).first();
   return row ? {
     parseStatus: row.parse_status,
     facts: parseJson(row.facts_json, {}),
@@ -361,18 +364,22 @@ async function loadSpecificContextRows(env, context) {
   const { results } = await env.DB.prepare(`${baseCte()}
     SELECT eligible.*,
       (SELECT rpf.parse_status FROM race_proposition_facts rpf
-        WHERE rpf.race_id = eligible.race_id AND rpf.parser_version = ? AND rpf.observed_at <= ?
+        JOIN source_records rpf_sr ON rpf_sr.id = rpf.source_record_id
+        WHERE rpf.race_id = eligible.race_id AND rpf.parser_version = ?
+          AND julianday(rpf.observed_at) <= julianday(?) AND julianday(rpf_sr.fetched_at) <= julianday(?)
         ORDER BY julianday(rpf.observed_at) DESC, rpf.id DESC LIMIT 1) AS proposition_status,
       (SELECT rpf.facts_json FROM race_proposition_facts rpf
-        WHERE rpf.race_id = eligible.race_id AND rpf.parser_version = ? AND rpf.observed_at <= ?
+        JOIN source_records rpf_sr ON rpf_sr.id = rpf.source_record_id
+        WHERE rpf.race_id = eligible.race_id AND rpf.parser_version = ?
+          AND julianday(rpf.observed_at) <= julianday(?) AND julianday(rpf_sr.fetched_at) <= julianday(?)
         ORDER BY julianday(rpf.observed_at) DESC, rpf.id DESC LIMIT 1) AS proposition_facts_json
     FROM eligible
     WHERE ${condition.where}
     ORDER BY race_id, actual_lane
   `).bind(
     context.cutoff, context.cutoff, context.raceId,
-    RACE_PROPOSITION_PARSER_VERSION, context.cutoff,
-    RACE_PROPOSITION_PARSER_VERSION, context.cutoff,
+    RACE_PROPOSITION_PARSER_VERSION, context.cutoff, context.cutoff,
+    RACE_PROPOSITION_PARSER_VERSION, context.cutoff, context.cutoff,
     ...condition.bindings
   ).all();
   return results.map((row) => ({
