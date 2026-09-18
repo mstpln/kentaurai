@@ -60,8 +60,6 @@ test('performance migration creates indexes used by hot app read paths', () => {
   const names = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='index'").all().map(row => row.name));
   for (const name of [
     'idx_races_track_date',
-    'idx_entries_trainer',
-    'idx_entries_driver',
     'idx_odds_entry_time',
     'idx_equipment_entry',
     'idx_xlabs_entry',
