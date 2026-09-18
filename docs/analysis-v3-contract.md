@@ -1,8 +1,8 @@
 # KentaurAI analysis v3 contract
 
-Status: target contract only; not active runtime behavior.
+Status: active production contract after F4 cutover.
 
-This public-safe document defines the version vocabulary and compatibility boundary for the future KentaurAI v3 analysis workflow. It intentionally does not change the current production workflow, prompts, persistence rules, system writer, schedules, backfills, D1 schema or Worker behavior.
+This public-safe document defines the version vocabulary and compatibility boundary for the production KentaurAI v3 analysis workflow. F4 made this contract the default creation path while retaining historical v1/v2 reads.
 
 ## Architectural boundary
 
@@ -26,7 +26,7 @@ Unknown source facts remain null/unknown. Optional evidence, including X-Labs, i
 | System policy | `kentaurai-system-policy-v1` | Internal code/config | V85/V86 constraints, exact three spikes and budget/line-price policy. |
 | Analysis persistence view | `kentaurai-analysis-v3` | Internal persistence | Links pack, lock, Step 2, decision probability, optimizer output and fingerprints. |
 
-These names are stable contracts for later builds. A later change in semantics requires a new version rather than silently changing an existing identifier.
+These names are stable production contracts. A later change in semantics requires a new version rather than silently changing an existing identifier.
 
 ## Target v3 system policy
 
@@ -42,11 +42,11 @@ For every newly written v3 V85/V86 system:
 - alternative systems are optional diagnostics and are never forced to differ,
 - the optimizer consumes `decision_probability`, initially equal to the locked blind probability until a validated blend exists.
 
-This policy is a target invariant only in Build A1. No existing live writer is switched here.
+This policy is the active invariant for newly created V85/V86 systems. Historical legacy rows keep the policy/version that was valid when they were written.
 
 ## Legacy compatibility boundary
 
-Current v2 behavior remains legacy runtime behavior until the later v3 cutover build.
+F4 completed the cutover. V3 is the default creation workflow; v1/v2 artifacts remain read-compatible only, except during an explicitly reviewed `legacy_v2` rollback release.
 
 - Existing `kentaurai-analysis-input-v2` and `kentaurai-analysis-v2` artifacts remain readable.
 - Existing V85 main systems with two spikes remain readable historical records where they were valid under the policy active when written.
@@ -55,15 +55,15 @@ Current v2 behavior remains legacy runtime behavior until the later v3 cutover b
 - No future v3 writer may create a two-spike system even while legacy rows remain readable.
 - Legacy policy/version and v3 target policy must be distinguishable in tests, persistence metadata and future UI/diagnostics.
 
-## Stage invariants reserved for later builds
+## Active stage invariants
 
 ### Pre-market pack
 
-The target pre-market pack is round-scoped rather than a database dump. It contains one round file plus exactly eight leg files and a manifest. Current-market ownership/odds/rank data is forbidden from Step 1. Each pack will carry a facts fingerprint, as-of time, data coverage, feature/parser/reconstruction versions and explicit `contains_current_market=false`.
+The production pre-market pack is round-scoped rather than a database dump. It contains one round file plus exactly eight leg files and a manifest. Current-market ownership/odds/rank data is forbidden from Step 1. Each pack will carry a facts fingerprint, as-of time, data coverage, feature/parser/reconstruction versions and explicit `contains_current_market=false`.
 
 ### Step-1 lock
 
-The target lock preserves the market-blind sports assessment before market exposure. It will contain the exact active-entry probabilities, rank, ABCD, uncertainty, scenario material and confidence/data-quality fields. Probabilities sum to 1 per leg. The lock is fingerprinted and immutable; any later factual revision creates a linked revision rather than silently editing the prior lock.
+The production lock preserves the market-blind sports assessment before market exposure. It will contain the exact active-entry probabilities, rank, ABCD, uncertainty, scenario material and confidence/data-quality fields. Probabilities sum to 1 per leg. The lock is fingerprinted and immutable; any later factual revision creates a linked revision rather than silently editing the prior lock.
 
 ### F4 cutover transport
 
@@ -71,11 +71,11 @@ The default creation workflow is v3. `kentaurai-step2-bundle-v1` is a transport 
 
 ### Market pack
 
-The target market pack is a delta linked to a valid Step-1 lock. It contains current verified market facts, cutoff/maturity/quality metadata and no replacement copy of the sports history pack.
+The production market pack is a delta linked to a valid Step-1 lock. It contains current verified market facts, cutoff/maturity/quality metadata and no replacement copy of the sports history pack.
 
 ### Optimizer
 
-The target optimizer is deterministic code, not free-form prompt arithmetic. Given identical decision probabilities, market ownership, policy and budget inputs, it must return the same result. It enforces exactly three spikes and validates row count/cost mechanically.
+The production optimizer is deterministic code, not free-form prompt arithmetic. Given identical decision probabilities, market ownership, policy and budget inputs, it must return the same result. It enforces exactly three spikes and validates row count/cost mechanically.
 
 ## Missing optional evidence
 
@@ -87,7 +87,7 @@ The public repository may contain this sanitized contract, code, schema, tests a
 
 Synthetic v3 fixtures must use invented IDs/names and generic source labels only.
 
-## Build A1 non-goals
+## Historical Build A1 non-goals
 
 Build A1 deliberately does not:
 
