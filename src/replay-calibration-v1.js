@@ -148,7 +148,9 @@ export function scoreMulticlassForecastV1({ entries, winnerEntryId } = {}) {
     winner_entry_id: winner,
     winner_probability: winnerProbability,
     winner_rank: winnerIndex + 1,
-    top1_hit: winnerIndex === 0,
+    top1_hit: winnerIndex < 1,
+    top2_hit: winnerIndex < 2,
+    top3_hit: winnerIndex < 3,
     log_loss: round(logLoss),
     brier_score: round(brier),
     forecast: normalized
@@ -213,6 +215,8 @@ function summarizeScores(scoredTargets) {
     mean_log_loss: null,
     mean_brier_score: null,
     top1_accuracy: null,
+    top2_coverage: null,
+    top3_coverage: null,
     mean_winner_rank: null,
     calibration: buildCalibrationSummaryV1([])
   };
@@ -221,6 +225,8 @@ function summarizeScores(scoredTargets) {
     mean_log_loss: round(scoredTargets.reduce((sum, item) => sum + item.log_loss, 0) / count),
     mean_brier_score: round(scoredTargets.reduce((sum, item) => sum + item.brier_score, 0) / count),
     top1_accuracy: round(scoredTargets.reduce((sum, item) => sum + (item.top1_hit ? 1 : 0), 0) / count),
+    top2_coverage: round(scoredTargets.reduce((sum, item) => sum + (item.top2_hit ? 1 : 0), 0) / count),
+    top3_coverage: round(scoredTargets.reduce((sum, item) => sum + (item.top3_hit ? 1 : 0), 0) / count),
     mean_winner_rank: round(scoredTargets.reduce((sum, item) => sum + item.winner_rank, 0) / count),
     calibration: buildCalibrationSummaryV1(scoredTargets)
   };
@@ -487,8 +493,10 @@ function canonicalReplayEvaluationsV1(evaluations) {
     ]) {
       if (Number(evaluation?.[field]) !== expected) throw new Error(`evaluations[${index}].${field} does not match forecast score`);
     }
-    if (Boolean(evaluation?.top1_hit) !== score.top1_hit) {
-      throw new Error(`evaluations[${index}].top1_hit does not match forecast score`);
+    for (const field of ['top1_hit','top2_hit','top3_hit']) {
+      if (Boolean(evaluation?.[field]) !== score[field]) {
+        throw new Error(`evaluations[${index}].${field} does not match forecast score`);
+      }
     }
     return {
       target_id: targetId,
@@ -500,6 +508,8 @@ function canonicalReplayEvaluationsV1(evaluations) {
       log_loss: score.log_loss,
       brier_score: score.brier_score,
       top1_hit: score.top1_hit,
+      top2_hit: score.top2_hit,
+      top3_hit: score.top3_hit,
       winner_rank: score.winner_rank,
       forecast: score.forecast
     };
@@ -1249,12 +1259,13 @@ export async function persistReplayResultV1(env, result, options = {}) {
     statements.push(env.DB.prepare(`
       INSERT INTO forecast_evaluations (
         replay_run_id,target_id,target_group_id,target_at,forecast_variant,winner_entry_id,entry_count,
-        log_loss,brier_score,top1_hit,winner_rank,forecast_json
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        log_loss,brier_score,top1_hit,top2_hit,top3_hit,winner_rank,forecast_json
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).bind(
       id,evaluation.target_id,evaluation.target_group_id,evaluation.target_at,evaluation.forecast_variant,
       evaluation.winner_entry_id,evaluation.entry_count,evaluation.log_loss,evaluation.brier_score,
-      evaluation.top1_hit ? 1 : 0,evaluation.winner_rank,stableFeatureJson(evaluation.forecast)
+      evaluation.top1_hit ? 1 : 0,evaluation.top2_hit ? 1 : 0,evaluation.top3_hit ? 1 : 0,
+      evaluation.winner_rank,stableFeatureJson(evaluation.forecast)
     ));
   }
   for (const ablation of result.ablations || []) {
