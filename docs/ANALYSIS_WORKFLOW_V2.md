@@ -1,5 +1,7 @@
 # Analysis workflow v2
 
+> **Legacy compatibility document.** This describes a historical v1/v2 workflow and is not the default creation path after F4. In `ANALYSIS_WORKFLOW_MODE=v3`, new legacy analysis creation is disabled; these contracts remain only for historical reads and controlled rollback compatibility. The live workflow is the sealed v3 pack -> Step 1 lock/revision -> self-contained Step 2 bundle -> canonical decision -> exact-three-spike optimizer path documented in `README.md` and `docs/V3_CUTOVER_RUNBOOK.md`.
+
 KentaurAI uses one AI conversation per V85/V86 round and three user-facing steps:
 
 1. Export market-blind data and run the canonical step-1 strength-analysis prompt.
