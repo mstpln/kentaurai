@@ -295,7 +295,7 @@ export async function buildCanonicalOptimizerV1({
   if (rowCount !== search.best.row_count) throw new Error('optimizer invariant failed: row product mismatch');
   const costScaled = rowCount * linePriceScaled;
   if (!Number.isSafeInteger(costScaled) || costScaled > maxBudgetScaled) throw new Error('optimizer invariant failed: cost exceeds budget');
-  const estimatedP8 = systemLegs.reduce((probability, leg) => probability * leg.leg_coverage_probability, 1);
+  const estimatedP8 = Math.exp(search.best.log_p8);
 
   const system = {
     system_type: normalizedPolicy.system_type,
@@ -358,6 +358,8 @@ async function assertCurrentDecisionFieldV1(env, roundId, decision) {
       expected.push({ leg_number: Number(leg.leg_number), race_entry_id: String(entry.race_entry_id || '') });
     }
   }
+  expected.sort((a, b) => a.leg_number - b.leg_number
+    || (a.race_entry_id < b.race_entry_id ? -1 : a.race_entry_id > b.race_entry_id ? 1 : 0));
   const active = current
     .filter((row) => Number(row.scratched) !== 1)
     .map((row) => ({ leg_number: Number(row.leg_number), race_entry_id: String(row.race_entry_id || '') }));
