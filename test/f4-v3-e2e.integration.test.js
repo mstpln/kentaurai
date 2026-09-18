@@ -19,7 +19,7 @@ globalThis.crypto ??= webcrypto;
 const ROUND_ID = 'f4-e2e-round';
 const PACK_AS_OF = '2099-08-01T10:00:00.000Z';
 const LOCK_AT = '2099-08-01T10:05:00.000Z';
-const MARKET_AT = '2099-08-01T10:20:00.000Z';
+const MARKET_AT = '2099-08-01T09:59:00.000Z';
 const BET_STOP = '2099-08-01T10:30:00.000Z';
 
 function seedRound(db) {
