@@ -132,9 +132,46 @@ function externalAnalysisUiClient() {
     loadRounds('registration','externalRegistrationRound');
   }
 
+  async function loadOperationalStatus() {
+    const box = document.getElementById('externalOperationalBody');
+    if (!box) return;
+    try {
+      const data = await jsonFetch('/app/api/settings/f3-operational-status');
+      const current = data.current_round || {};
+      function metric(value) { return value && value.percent != null ? value.percent + '%' : '—'; }
+      box.innerHTML =
+        '<div class="external-coverage">' +
+          '<div><strong>' + esc(current.active_entries == null ? '—' : current.active_entries) + '</strong><span>Aktiva starter</span></div>' +
+          '<div><strong>' + esc(metric(current.current_start_points)) + '</strong><span>Start Points</span></div>' +
+          '<div><strong>' + esc(metric(current.current_entry_equipment)) + '</strong><span>Utrustning</span></div>' +
+          '<div><strong>' + esc(metric(current.horses_with_prior_verified_xlabs)) + '</strong><span>X-Labs historik</span></div>' +
+        '</div>';
+    } catch (error) {
+      box.innerHTML = '<div class="external-error">Kunde inte läsa driftstatus: ' + esc(error.message) + '</div>';
+    }
+  }
+
+  function installOperational() {
+    const layout = document.querySelector('.settings-layout');
+    if (!layout || document.getElementById('externalOperationalCard')) return;
+    const activeData = Array.from(document.querySelectorAll('.tab.active')).some(function(node){ return node.textContent.trim() === 'Data'; });
+    if (!activeData) return;
+    const section = document.createElement('section');
+    section.id = 'externalOperationalCard';
+    section.className = 'settings-section settings-card';
+    section.innerHTML = '<div class="settings-card-head"><h2>Datatäckning och drift</h2></div>' +
+      '<div class="settings-card-body"><div class="settings-actions"><button id="externalCoverageDownload" class="settings-secondary" type="button">Hämta full datatäckningsrapport</button></div>' +
+      '<div id="externalOperationalBody"><div class="settings-help">Läser status…</div></div></div>';
+    layout.appendChild(section);
+    document.getElementById('externalCoverageDownload').addEventListener('click', function(){ download('/app/api/settings/data-coverage'); });
+    loadOperationalStatus();
+  }
+
   function install() {
     const activeAi = Array.from(document.querySelectorAll('.tab.active')).some(function(node){ return node.textContent.trim() === 'AI'; });
     if (activeAi) installWorkflow();
+    const activeData = Array.from(document.querySelectorAll('.tab.active')).some(function(node){ return node.textContent.trim() === 'Data'; });
+    if (activeData) installOperational();
   }
   const observer = new MutationObserver(function(){ queueMicrotask(install); });
   observer.observe(document.getElementById('app') || document.body, {childList:true,subtree:true});
@@ -143,7 +180,7 @@ function externalAnalysisUiClient() {
 
 const externalCss = '<style id="kentaurai-external-analysis-ui-style">' +
 '.external-workflow{display:grid;gap:0}.external-section-title{font-size:18px;margin:16px 0 9px}.external-card{border-color:#3a3125;overflow:hidden}.external-context{display:flex;gap:12px;flex-wrap:wrap;align-items:end;padding:16px 18px;border-bottom:1px solid var(--line-soft)}.external-context .settings-field{min-width:230px}.external-card-body{padding:18px}.external-timeline{display:grid;grid-template-columns:34px minmax(0,1fr);gap:0 14px}.external-node{position:relative}.external-node span{width:30px;height:30px;border:1px solid #a77f49;border-radius:50%;display:grid;place-items:center;color:#d0b178;font-size:12px;font-weight:700}.external-node:not(.external-last)::after{content:"";position:absolute;top:31px;left:14px;bottom:-18px;width:1px;background:var(--line-soft)}.external-step{padding:2px 0 22px}.external-step h3{font-size:14px;margin:4px 0 10px}.external-import{margin-top:12px;align-items:end}.external-import .settings-field{min-width:260px}' +
-'@media(max-width:760px){.external-context{display:grid}.external-context .settings-field,.external-import .settings-field{min-width:0;width:100%}.external-step .settings-actions,.external-import{display:grid}.external-step .settings-primary,.external-step .settings-secondary,.external-step .settings-file{width:100%;max-width:none}}' +
+'@media(max-width:760px){.external-coverage{grid-template-columns:1fr 1fr}.external-context{display:grid}.external-context .settings-field,.external-import .settings-field{min-width:0;width:100%}.external-step .settings-actions,.external-import{display:grid}.external-step .settings-primary,.external-step .settings-secondary,.external-step .settings-file{width:100%;max-width:none}}' +
 '</style>';
 
 function stripLegacyF3(html) {
