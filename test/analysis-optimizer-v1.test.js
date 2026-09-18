@@ -221,3 +221,17 @@ test('E2 rejects two-spike policy proposals and unsupported game/system policy',
     /only V85\/V86/
   );
 });
+
+
+test('E2 keeps coverage and P8 within probability bounds for tolerance-only probability excess', async () => {
+  const decision = syntheticDecision({ fieldSize: 2 });
+  for (const leg of decision.legs) {
+    leg.entries = [
+      { race_entry_id: `entry-${leg.leg_number}-a`, decision_probability: 0.6000002 },
+      { race_entry_id: `entry-${leg.leg_number}-b`, decision_probability: 0.4000002 }
+    ];
+  }
+  const result = await optimize(decision);
+  assert.ok(result.system.estimated_p8 <= 1);
+  assert.ok(result.system.legs.every((leg) => leg.leg_coverage_probability <= 1));
+});
