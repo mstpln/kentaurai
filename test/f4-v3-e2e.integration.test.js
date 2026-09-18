@@ -146,7 +146,7 @@ function step1Document(pack) {
 function step2Document(lock, market) {
   return {
     contract_version:ANALYSIS_STEP2_RESULT_CONTRACT,
-    result_id:'f4-step2-result',
+    result_id:'step2_f4_e2e_result',
     round_id:ROUND_ID,
     lock_id:lock.lock_id,
     lock_hash:lock.lock_hash,
