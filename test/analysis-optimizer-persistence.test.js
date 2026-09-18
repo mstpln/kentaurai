@@ -135,3 +135,21 @@ test('E2 refuses to optimize a decision bound to a superseded Step 1 lock', asyn
   );
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM analysis_optimizer_runs').get().n, 0);
 });
+
+
+test('E2 refuses to optimize when the current active field has drifted after the decision', async () => {
+  const { db, env } = createTestEnv();
+  seedParents(db);
+  db.prepare("UPDATE race_entries SET scratched=1 WHERE id='entry-1-a'").run();
+
+  await assert.rejects(
+    () => persistOptimizerV1(env, 'round-e2', {
+      decision_run_id: 'decision-e2',
+      line_price_sek: 0.5,
+      target_budget_min_sek: 150,
+      max_budget_sek: 250
+    }),
+    /current active field no longer matches/
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM analysis_optimizer_runs').get().n, 0);
+});
