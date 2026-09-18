@@ -7,9 +7,9 @@ Updated: 2026-09-18
 - Worker: `kentaurai-api`.
 - D1: `kentaurai`.
 - R2: `kentaurai-raw`.
-- F4 application source merged at `fe2fddf9cd00e85e45b562b1617a137fd3288515`; release bookkeeping main is `147a4b0efd1893c401b41815b768efe2e2c1fa92`.
+- Full-plan QA application source merged at `4085a3fc9a36bddedb39e6e7ee9fc14e7105cb76`; production release trigger/main head is `799e8b1f19a57672c1332f424de89cf6391e9978`.
 - Worker entrypoint is `src/worker-v076.js` with `ANALYSIS_WORKFLOW_MODE=v3`.
-- Production release #59 completed successfully. Full QA, Cloudflare validation, schema verification, Worker deploy, `/health`, `/app/login`, F4 Step 2 bundle protection and existing private analysis/replay route checks passed.
+- Production release #60 completed successfully. Full QA (785/785), Cloudflare validation, schema verification, Worker deploy, `/health`, `/app/login`, F4 Step 2 bundle protection and existing private analysis/replay route checks passed.
 - Production schema is current through migration `0025_post_race_learning_f2.sql`.
 - F1 replay/calibration, F2 post-race learning diagnostics, F3 private workflow/observability and F4 v3 cutover are production-live.
 - Historical official/X-Labs jobs keep their durable cursors. No build/release may reset, recreate or silently resume stopped historical work.
@@ -32,7 +32,7 @@ Updated: 2026-09-18
 - D1 pre-market pack v3: complete and deployed.
 - D2 Step 1 prompt + sealed lock: complete and deployed.
 - D3 late-fact revision + lock lineage: complete and deployed.
-- D4 market delta pack v3 + maturity: complete and deployed.
+- D4.1 market delta pack v3 + maturity + server-owned system policy binding: complete and deployed.
 - E1 canonical decision probability: complete and deployed.
 - E2 exact-three-spike P(8) optimizer: complete and deployed.
 - E3 Step 2 + integrated v3 analysis: complete and deployed.
