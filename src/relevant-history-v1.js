@@ -554,3 +554,40 @@ export async function buildRelevantHistoryForEntries(env, raceEntryIds, asOf, op
   }
   return out;
 }
+
+
+export async function getReplayHistoryStateRefsV1(env, raceEntryIds, asOf) {
+  if (!env?.DB) throw new Error('DB is not configured');
+  if (!Array.isArray(raceEntryIds)) throw new Error('raceEntryIds must be an array');
+  const entryIds = [...new Set(raceEntryIds.filter(Boolean).map(String))];
+  if (!entryIds.length) return new Map();
+  const requestedAsOf = requireInstant(asOf);
+  const targets = await loadTargetEntries(env, entryIds);
+  const cutoffByEntry = new Map(targets.map((target) => [target.race_entry_id, targetCutoffMs(target, requestedAsOf.ms)]));
+  const horseIds = [...new Set(targets.map((target) => target.horse_id).filter(Boolean))];
+  const historyRows = await loadHistory(env, horseIds);
+  const historiesByHorse = new Map(horseIds.map((id) => [id, []]));
+  for (const row of historyRows) historiesByHorse.get(row.horse_id)?.push(row);
+
+  const out = new Map();
+  for (const target of targets) {
+    const cutoff = cutoffByEntry.get(target.race_entry_id);
+    const rows = (historiesByHorse.get(target.horse_id) || [])
+      .filter((row) => row.race_entry_id !== target.race_entry_id && row.race_id !== target.race_id)
+      .map((row) => ({ ...row, eventMs: raceEventMs(row) }))
+      .filter((row) => Number.isFinite(row.eventMs) && row.eventMs < cutoff)
+      .filter((row) => sourceObservedMs(row) != null && sourceObservedMs(row) <= cutoff)
+      .sort(compareHistoryDesc)
+      .map((row) => ({
+        race_id: String(row.race_id),
+        race_entry_id: String(row.race_entry_id),
+        result_source_record_id: row.result_source_record_id || null,
+        result_observed_at: row.result_observed_at || null
+      }));
+    out.set(target.race_entry_id, {
+      forecast_as_of: new Date(cutoff).toISOString(),
+      rows
+    });
+  }
+  return out;
+}
