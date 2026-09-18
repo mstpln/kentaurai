@@ -589,18 +589,6 @@ export async function runSportsFeatureReplayV1(env, config = {}, forecastProduce
   return { ...resultBase, result_fingerprint: resultFingerprint, evaluations: allScores };
 }
 
-async function loadWinnerForRace(env, raceId) {
-  const { results } = await env.DB.prepare(`
-    SELECT re.id AS race_entry_id
-    FROM race_entries re
-    JOIN race_results rr ON rr.race_entry_id=re.id
-    WHERE re.race_id=? AND rr.placing=1
-    ORDER BY re.id
-  `).bind(raceId).all();
-  if ((results || []).length !== 1) return null;
-  return results[0].race_entry_id;
-}
-
 function predictionEntriesFromDecisionLeg(leg, field) {
   if (!Array.isArray(leg?.entries) || leg.entries.length < 2) throw new Error('decision leg must contain at least two entries');
   return leg.entries.map((entry) => ({
@@ -644,21 +632,6 @@ function validateDecisionDocumentForReplay(row, decision) {
           throw new Error(`decision ${row.id} violates decision-blind-v1 policy`);
         }
       }
-    }
-  }
-}
-
-async function assertDecisionLegIdentities(env, decisionId, decision, legs) {
-  for (const legRow of legs) {
-    const leg = decision.legs.find((item) => Number(item.leg_number) === Number(legRow.leg_number));
-    if (!leg || leg.race_id !== legRow.race_id) throw new Error(`decision ${decisionId} race identity mismatch in leg ${legRow.leg_number}`);
-    const { results: entryRows } = await env.DB.prepare(`
-      SELECT id FROM race_entries WHERE race_id=? ORDER BY id
-    `).bind(legRow.race_id).all();
-    const factualIds = new Set((entryRows || []).map((entry) => String(entry.id)));
-    const predictionIds = (leg.entries || []).map((entry) => String(entry.race_entry_id || ''));
-    if (new Set(predictionIds).size !== predictionIds.length || predictionIds.some((id) => !factualIds.has(id))) {
-      throw new Error(`decision ${decisionId} contains non-canonical entry identity in leg ${legRow.leg_number}`);
     }
   }
 }
@@ -765,22 +738,47 @@ async function loadDecisionTargets(env, config) {
     const decision = parseJson(row.decision_json, 'decision_json');
     validateDecisionDocumentForReplay(row, decision);
 
-    const { results: legs } = await env.DB.prepare(`
-      SELECT gl.leg_number,gl.race_id,r.scheduled_start_at
+    const { results: roundRows } = await env.DB.prepare(`
+      SELECT gl.leg_number,gl.race_id,r.scheduled_start_at,
+             re.id AS race_entry_id,rr.placing
       FROM game_legs gl
       JOIN races r ON r.id=gl.race_id
+      JOIN race_entries re ON re.race_id=r.id
+      LEFT JOIN race_results rr ON rr.race_entry_id=re.id
       WHERE gl.game_round_id=?
-      ORDER BY gl.leg_number
+      ORDER BY gl.leg_number,re.id
     `).bind(row.game_round_id).all();
-    if ((legs || []).length !== 8) {
+    const legMap = new Map();
+    for (const item of roundRows || []) {
+      const legNumber = Number(item.leg_number);
+      if (!legMap.has(legNumber)) legMap.set(legNumber, {
+        leg_number: legNumber,
+        race_id: item.race_id,
+        scheduled_start_at: item.scheduled_start_at,
+        entries: []
+      });
+      const grouped = legMap.get(legNumber);
+      if (grouped.race_id !== item.race_id || grouped.scheduled_start_at !== item.scheduled_start_at) {
+        throw new Error(`round ${row.game_round_id} contains inconsistent leg identity`);
+      }
+      grouped.entries.push({ race_entry_id: item.race_entry_id, placing: item.placing });
+    }
+    const legs = [...legMap.values()].sort((a, b) => a.leg_number - b.leg_number);
+    if (legs.length !== 8 || legs.some((leg, index) => leg.leg_number !== index + 1)) {
       exclusions.incomplete_round_structure += 1;
       continue;
     }
-    if (legs.some((leg, index) => Number(leg.leg_number) !== index + 1)) {
-      exclusions.incomplete_round_structure += 1;
-      continue;
+
+    for (const legRow of legs) {
+      const leg = decision.legs.find((item) => Number(item.leg_number) === legRow.leg_number);
+      if (!leg || leg.race_id !== legRow.race_id) throw new Error(`decision ${row.id} race identity mismatch in leg ${legRow.leg_number}`);
+      const factualIds = new Set(legRow.entries.map((entry) => String(entry.race_entry_id)));
+      const predictionIds = (leg.entries || []).map((entry) => String(entry.race_entry_id || ''));
+      if (new Set(predictionIds).size !== predictionIds.length || predictionIds.some((id) => !factualIds.has(id))) {
+        throw new Error(`decision ${row.id} contains non-canonical entry identity in leg ${legRow.leg_number}`);
+      }
     }
-    await assertDecisionLegIdentities(env, row.id, decision, legs);
+
     const starts = legs.map((leg) => Date.parse(String(leg.scheduled_start_at || '')));
     if (starts.some((value) => !Number.isFinite(value))) {
       exclusions.missing_start_time += 1;
@@ -791,9 +789,9 @@ async function loadDecisionTargets(env, config) {
 
     const winnersByLeg = new Map();
     for (const legRow of legs) {
-      const winner = await loadWinnerForRace(env, legRow.race_id);
-      if (!winner) break;
-      winnersByLeg.set(Number(legRow.leg_number), winner);
+      const winners = legRow.entries.filter((entry) => Number(entry.placing) === 1);
+      if (winners.length !== 1) break;
+      winnersByLeg.set(legRow.leg_number, winners[0].race_entry_id);
     }
     if (winnersByLeg.size !== 8) {
       exclusions.ambiguous_or_incomplete_result += 1;
