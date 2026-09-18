@@ -20,7 +20,7 @@ Updated: 2026-09-18
 - Controlled rollback value: `ANALYSIS_WORKFLOW_MODE=legacy_v2`. Rollback requires a reviewed production release; there is no automatic fallback.
 - The normal creation workflow is v3: deterministic pre-market pack -> server-sealed Step 1 -> optional late-fact revision -> self-contained Step 2 bundle -> Step 2 interpretation -> canonical decision -> deterministic exact-three-spike optimizer.
 - The Step 2 bundle contains the exact persisted sealed Step 1 document plus its bound verified market files. New Step 2 work therefore does not rely on reconstructing Step 1 from conversation memory.
-- New legacy v1/v2 analysis creation routes return a deprecation error in v3 mode after authentication. Historical legacy read routes/artifacts remain available.
+- Legacy v1/v2 analysis creation is disabled in v3 mode after authentication; creation routes return a deprecation error. Historical legacy read routes/artifacts remain available.
 - Newly created V85/V86 systems are authoritative optimizer output with exactly three spikes. Current default policy targets 150-250 SEK and may spend less when additional rows add no P(8) coverage.
 - C4 named trip-label promotion remains optional/gated and is not required for the cutover.
 - F4 has no planned schema migration and does not reset or start replay/backfill work.
