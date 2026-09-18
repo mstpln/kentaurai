@@ -21,9 +21,6 @@ CREATE INDEX IF NOT EXISTS idx_entries_driver_race
 CREATE INDEX IF NOT EXISTS idx_game_legs_race
   ON game_legs(race_id);
 
-CREATE INDEX IF NOT EXISTS idx_betting_entry_time
-  ON betting_snapshots(race_entry_id, captured_at);
-
 CREATE INDEX IF NOT EXISTS idx_odds_entry_time
   ON odds_snapshots(race_entry_id, captured_at);
 
