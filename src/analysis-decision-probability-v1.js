@@ -254,8 +254,9 @@ async function assertCanonicalDecisionForPersistenceV1(decision) {
   }
   if (decision.policy?.decision_source !== 'blind_probability'
     || decision.policy?.market_blend_applied !== false
-    || decision.policy?.ownership_used_as_win_probability !== false) {
-    throw new Error('E1 v1 policy must remain decision=blind without ownership substitution');
+    || decision.policy?.ownership_used_as_win_probability !== false
+    || decision.policy?.calibration_status !== 'foundation_only_not_fitted') {
+    throw new Error('E1 v1 policy must remain decision=blind without ownership substitution or fitted calibration');
   }
   if (!Array.isArray(decision.legs) || decision.legs.length !== 8) throw new Error('canonical E1 decision must contain exactly eight legs');
   for (let index = 0; index < decision.legs.length; index += 1) {
@@ -264,6 +265,19 @@ async function assertCanonicalDecisionForPersistenceV1(decision) {
       throw new Error('canonical E1 decision legs must be ordered 1 through 8 with entries');
     }
     let sum = 0;
+    let publicSum = 0;
+    const completePublic = leg.public_proxy_quality === 'verified_complete_winner_odds_v1';
+    if (completePublic && leg.public_proxy_method !== 'normalized_inverse_decimal_winner_odds') {
+      throw new Error('verified complete public proxy must use the D4 winner-odds method');
+    }
+    if (!completePublic && leg.public_proxy_method != null) throw new Error('weak/unavailable public proxy method must remain null');
+    if (leg.context_reliability?.proxy_quality !== leg.public_proxy_quality
+      || leg.context_reliability?.proxy_method !== leg.public_proxy_method
+      || leg.context_reliability?.proxy_available !== completePublic
+      || leg.context_reliability?.blend_applied !== false
+      || leg.context_reliability?.trend_semantics_verified !== false) {
+      throw new Error('E1 context reliability metadata is inconsistent');
+    }
     const ids = new Set();
     for (const entry of leg.entries) {
       const id = requiredText(entry?.race_entry_id, 'race_entry_id', 200);
@@ -273,13 +287,13 @@ async function assertCanonicalDecisionForPersistenceV1(decision) {
       const canonical = finiteProbability(entry.decision_probability, `leg ${leg.leg_number} decision_probability`);
       if (canonical !== blind) throw new Error('E1 v1 decision_probability must equal blind_probability exactly');
       if (entry.public_proxy_quality !== leg.public_proxy_quality) throw new Error('entry public_proxy_quality must match its leg');
-      if (leg.public_proxy_quality !== 'verified_complete_winner_odds_v1' && entry.public_win_probability_proxy != null) {
-        throw new Error('weak/unavailable public proxy must remain null');
-      }
-      if (entry.public_win_probability_proxy != null) finiteProbability(entry.public_win_probability_proxy, `leg ${leg.leg_number} public proxy`);
+      if (!completePublic && entry.public_win_probability_proxy != null) throw new Error('weak/unavailable public proxy must remain null');
+      if (completePublic && entry.public_win_probability_proxy == null) throw new Error('verified complete public proxy must cover every active entry');
+      if (entry.public_win_probability_proxy != null) publicSum += finiteProbability(entry.public_win_probability_proxy, `leg ${leg.leg_number} public proxy`);
       sum += canonical;
     }
     if (Math.abs(sum - 1) > PROBABILITY_TOLERANCE) throw new Error(`leg ${leg.leg_number} decision probabilities must sum to 1`);
+    if (completePublic && Math.abs(publicSum - 1) > PROBABILITY_TOLERANCE) throw new Error(`leg ${leg.leg_number} public proxy probabilities must sum to 1`);
   }
   const fingerprintInput = {
     contract_version: decision.contract_version,
