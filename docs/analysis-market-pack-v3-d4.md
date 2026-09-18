@@ -4,7 +4,7 @@ D4 adds the market-only transport layer that follows the newest sealed Step 1 lo
 
 ## Contract and read order
 
-The export contract is `kentaurai-market-pack-v3` (`market-pack-v3-d4`). A pack is bound to an explicit `lock_id` and `lock_hash`; implicit or stale Step 1 parents are rejected. Required lock parameters are validated before database access.
+The export contract is `kentaurai-market-pack-v3` (`market-pack-v3-d4.1`). A pack is bound to an explicit `lock_id` and `lock_hash`; implicit or stale Step 1 parents are rejected. Required lock parameters are validated before database access.
 
 The private export contains:
 
@@ -12,7 +12,7 @@ The private export contains:
 2. `01_leg_1_market.json` through `08_leg_8_market.json`
 3. optional `99_external_rankings.json`, always last when present
 
-The manifest records the exact Step 1 lock, its seal time, market cutoff, `deadline_source`, deadline quality, deterministic `market_fingerprint`, file hashes and read order. The market fingerprint is independent of export generation time and input row order.
+The manifest records the exact Step 1 lock, its seal time, market cutoff, `deadline_source`, deadline quality, deterministic `market_fingerprint`, file hashes and read order. The market fingerprint is independent of export generation time and input row order. D4.1 also binds the server-resolved system policy into the fingerprint so line price/budget/exact-spike policy cannot drift independently of the decision context.
 
 ## Timing and Step 1 safety
 
@@ -21,6 +21,10 @@ D4 reuses the verified market deadline logic. A real `bet_stop_at` is preferred.
 The effective market cutoff must be at or after the newest sealed Step 1 lock's `created_at`. A request for market state before that seal fails closed instead of attaching earlier market facts to a later judgment.
 
 The requested Step 1 lock must be the newest sealed lock. D4 also reconstructs the lock's parent pre-market pack and compares it with the pre-market facts available at the effective market cutoff. Transport-only `as_of` changes are ignored; semantic round or leg changes fail closed and require the D3 late-fact revision flow before market export.
+
+## Server-owned system policy
+
+`00_round_market.json` contains a verified `system_policy` resolved by KentaurAI code/config for the round. It includes the game type, game-specific line price, 150-250 SEK main-system budget bounds, exactly-three-spikes requirement and allowed authoritative system type. The pack fails closed if this policy cannot be resolved or violates the canonical V85/V86 policy. AI does not invent or override these values.
 
 ## Market facts and maturity
 
