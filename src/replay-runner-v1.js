@@ -400,6 +400,11 @@ function parseDecisionDocument(target) {
 }
 
 function decisionDistribution(leg,key) {
+  if (key === 'public_win_probability_proxy'
+    && (leg?.public_proxy_quality !== 'verified_complete_winner_odds_v1'
+      || leg?.public_proxy_method !== 'normalized_inverse_decimal_winner_odds')) {
+    return null;
+  }
   const entries=(leg.entries || []).map((entry)=>({
     race_entry_id:String(entry.race_entry_id),
     probability: entry[key]
