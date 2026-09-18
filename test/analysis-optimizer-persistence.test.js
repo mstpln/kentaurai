@@ -153,3 +153,35 @@ test('E2 refuses to optimize when the current active field has drifted after the
   );
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM analysis_optimizer_runs').get().n, 0);
 });
+
+
+test('E2 canonical persistence rejects a forged decision parent even when optimizer content is otherwise valid', async () => {
+  const { db, env } = createTestEnv();
+  seedParents(db);
+
+  const storedDecision = decisionDocument();
+  const forgedDecision = structuredClone(storedDecision);
+  forgedDecision.legs[0].entries = [
+    { race_entry_id: 'entry-1-a', decision_probability: 0.55 },
+    { race_entry_id: 'entry-1-b', decision_probability: 0.45 }
+  ];
+
+  const { buildCanonicalOptimizerV1, persistCanonicalOptimizerV1 } = await import('../src/analysis-optimizer-v1.js');
+  const optimizer = await buildCanonicalOptimizerV1({
+    decision: forgedDecision,
+    decisionRunId: 'decision-e2',
+    gameType: 'V85',
+    policy: {
+      line_price_sek: 0.5,
+      target_budget_min_sek: 150,
+      max_budget_sek: 250
+    },
+    generatedAt: '2099-06-01T12:10:00.000Z'
+  });
+
+  await assert.rejects(
+    () => persistCanonicalOptimizerV1(env, optimizer, forgedDecision),
+    /decision parent does not match the stored E1 decision run/
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM analysis_optimizer_runs').get().n, 0);
+});
