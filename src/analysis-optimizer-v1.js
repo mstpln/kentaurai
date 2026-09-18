@@ -443,7 +443,23 @@ async function assertCanonicalOptimizerForPersistenceV1(optimizer, decision) {
 
 export async function persistCanonicalOptimizerV1(env, optimizer, decision, options = {}) {
   if (!env?.DB) throw new Error('DB is not configured');
-  await assertCanonicalOptimizerForPersistenceV1(optimizer, decision);
+  if (!optimizer?.policy) throw new Error('canonical E2 optimizer policy is required');
+  const parents = await loadOptimizerParentsV1(env, optimizer.round_id, {
+    decision_run_id: optimizer.decision_run_id,
+    line_price_sek: optimizer.policy.line_price_sek,
+    target_budget_min_sek: optimizer.policy.target_budget_min_sek,
+    max_budget_sek: optimizer.policy.max_budget_sek,
+    exact_spike_count: optimizer.policy.exact_spike_count,
+    system_type: optimizer.policy.system_type,
+    secondary_tie_break: optimizer.policy.secondary_tie_break
+  });
+  if (optimizer.game_type !== parents.gameType) {
+    throw new Error('optimizer game_type does not match the stored decision round');
+  }
+  if (stableFeatureJson(decision) !== stableFeatureJson(parents.decision)) {
+    throw new Error('optimizer decision parent does not match the stored E1 decision run');
+  }
+  await assertCanonicalOptimizerForPersistenceV1(optimizer, parents.decision);
   const id = optimizerIdFromFingerprint(optimizer.optimizer_fingerprint);
   const existing = await env.DB.prepare('SELECT * FROM analysis_optimizer_runs WHERE id=? LIMIT 1').bind(id).first();
   if (existing) {
