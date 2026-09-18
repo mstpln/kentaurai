@@ -966,6 +966,43 @@ async function loadDecisionTargets(env, config) {
       systemDiagnostics.push(optimizerSystemDiagnostic(optimizer, winnersByLeg, row.game_round_id, row.id, decision));
     }
 
+    const { results: integratedRows } = await env.DB.prepare(`
+      SELECT av3.id AS analysis_v3_id,av3.analysis_version,av3.step2_version,av3.step2_result_id,
+             av3.step2_fingerprint,av3.decision_fingerprint,av3.optimizer_run_id,av3.optimizer_version,
+             av3.optimizer_fingerprint,av3.lock_id,av3.lock_hash,av3.market_fingerprint,av3.market_cutoff,
+             s2.prompt_version AS step2_prompt_version,s2.provider AS step2_provider,s2.model AS step2_model
+      FROM analysis_v3_runs av3
+      JOIN analysis_step2_results s2 ON s2.id=av3.step2_result_id
+      WHERE av3.decision_run_id=?
+      ORDER BY av3.analysis_version,av3.optimizer_run_id,av3.id
+    `).bind(row.id).all();
+    const integratedLineage = (integratedRows || []).map((integrated) => {
+      if (integrated.lock_id !== row.lock_id || integrated.lock_hash !== row.lock_hash
+        || integrated.market_fingerprint !== row.market_fingerprint
+        || exactIso(integrated.market_cutoff, 'integrated market_cutoff') !== exactIso(row.market_cutoff, 'decision market_cutoff')
+        || integrated.decision_fingerprint !== row.decision_fingerprint) {
+        throw new Error(`integrated analysis ${integrated.analysis_v3_id} does not match decision lineage`);
+      }
+      const optimizer = optimizerLineage.find((item) => item.optimizer_run_id === integrated.optimizer_run_id);
+      if (!optimizer || optimizer.optimizer_version !== integrated.optimizer_version
+        || optimizer.optimizer_fingerprint !== integrated.optimizer_fingerprint) {
+        throw new Error(`integrated analysis ${integrated.analysis_v3_id} does not match optimizer lineage`);
+      }
+      return {
+        analysis_v3_id: integrated.analysis_v3_id,
+        analysis_version: integrated.analysis_version,
+        step2_result_id: integrated.step2_result_id,
+        step2_version: integrated.step2_version,
+        step2_prompt_version: integrated.step2_prompt_version,
+        step2_provider: integrated.step2_provider,
+        step2_model: integrated.step2_model,
+        step2_fingerprint: integrated.step2_fingerprint,
+        optimizer_run_id: integrated.optimizer_run_id,
+        optimizer_version: integrated.optimizer_version,
+        optimizer_fingerprint: integrated.optimizer_fingerprint
+      };
+    });
+
     const groupAt = new Date(earliestStart).toISOString();
     for (const legRow of legs) {
       const leg = decision.legs.find((item) => Number(item.leg_number) === Number(legRow.leg_number));
@@ -997,7 +1034,8 @@ async function loadDecisionTargets(env, config) {
           market_cutoff: exactIso(row.market_cutoff, 'market_cutoff'),
           decision_probability_version: row.decision_probability_version,
           decision_policy_version: row.policy_version,
-          optimizer_lineage: optimizerLineage
+          optimizer_lineage: optimizerLineage,
+          integrated_lineage: integratedLineage
         }
       });
     }
