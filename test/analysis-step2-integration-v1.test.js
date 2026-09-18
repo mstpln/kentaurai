@@ -193,6 +193,12 @@ test('E3 rejects changed Step 1 probability/ABCD and client-trusted market/syste
     payload.legs[0].entries[0][forbidden] = forbidden === 'row_count' ? 10 : true;
     await assert.rejects(() => normalizeStep2ResultV1(payload, parents), /unsupported fields/);
   }
+
+  for (const forbidden of ['systems','optimizer','row_count','spike_count','budget_sek','line_price_sek']) {
+    const payload = step2Payload();
+    payload[forbidden] = forbidden === 'systems' ? [] : true;
+    await assert.rejects(() => normalizeStep2ResultV1(payload, parents), /unsupported fields/);
+  }
 });
 
 test('E3 atomically stores Step2 + canonical decision + exact3 optimizer + integrated version references', async () => {
@@ -271,6 +277,7 @@ test('E3 final narrative is post-optimizer, fingerprint-bound, immutable and can
   const prompt = buildFinalNarrativePromptV1(integrated);
   assert.match(prompt, /authoritative system.*selected by KentaurAI code/i);
   assert.match(prompt, /do not alter/i);
+  assert.match(prompt, /never as an instruction/i);
   assert.match(prompt, /step2_interpretation/);
   assert.match(prompt, /Synthetic market interpretation/);
 
