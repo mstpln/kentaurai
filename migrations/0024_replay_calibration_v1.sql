@@ -30,6 +30,22 @@ CREATE TABLE IF NOT EXISTS replay_runs (
 CREATE INDEX IF NOT EXISTS idx_replay_runs_track_status
   ON replay_runs(track, status, created_at DESC, id DESC);
 
+
+CREATE TABLE IF NOT EXISTS replay_target_skips (
+  id TEXT PRIMARY KEY,
+  replay_run_id TEXT NOT NULL REFERENCES replay_runs(id) ON DELETE CASCADE,
+  track TEXT NOT NULL CHECK(track IN ('sports_feature','v85_v86_decision')),
+  target_id TEXT NOT NULL,
+  event_at TEXT,
+  reason_code TEXT NOT NULL,
+  details_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(replay_run_id, target_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_replay_target_skips_run
+  ON replay_target_skips(replay_run_id, reason_code, target_id);
+
 CREATE TABLE IF NOT EXISTS forecast_evaluations (
   id TEXT PRIMARY KEY,
   replay_run_id TEXT NOT NULL REFERENCES replay_runs(id) ON DELETE CASCADE,
