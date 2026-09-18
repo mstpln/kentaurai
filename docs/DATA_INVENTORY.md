@@ -1,4 +1,27 @@
-# KentaurAI data inventory
+# KentaurAI data inventory and analysis opportunity map
+
+Updated: 2026-09-18
+Status: live-source inventory plus post-F4 implementation overlay
+
+## Post-F4 implementation overlay
+
+This document originated as the Build F source/opportunity inventory. The detailed source-by-source sections below preserve that historical inventory baseline and are useful for source semantics, but their older phrases such as "candidate", "currently underused" and "recommended next build" are not the authoritative implementation-status list after the v3 programme.
+
+The following planned families are now implemented and used by the v3 analysis path:
+
+- timestamped official horse/person snapshot promotion and as-of selection;
+- Start Points dynamics and field-relative evidence;
+- allowlist-parsed race proposition facts with unparsed/null fallback;
+- full-history aggregates plus deterministic `relevant_history_union` with inclusion/omitted counts;
+- separate v3 capacity, form, class-context, development, method/distance, rest/readiness and gallop-risk feature families;
+- equipment-response and person/driver-horse/trainer context features;
+- hierarchical race/track/lane structural priors without market leakage;
+- partial-tolerant X-Labs 100 m interval features, evidence/coverage profiles and population-shift diagnostics;
+- versioned continuous X-Labs position reconstruction/checkpoints. Named trip labels remain gated/null (C4);
+- round-scoped analysis pack v3, sealed Step 1/revision lineage, market delta/maturity, versioned decision layer and exact-three-spike optimizer;
+- replay/calibration/ablation and post-race learning diagnostics.
+
+Still deliberately unpromoted or optional include unverified named trip labels, unverified source trend semantics, slipstream semantics, unverified static track geometry/day-profile fields and other later opportunities called out below.
 
 ## F4 live analysis transport status
 - The default creation path is v3. Market-blind deterministic data is exported through the round-scoped v3 analysis pack and sealed Step 1 is persisted before current market exposure.
@@ -6,10 +29,6 @@
 - Canonical decision probability and optimizer output are deterministic/versioned KentaurAI records. New V85/V86 systems are exact-three-spike optimizer output.
 - Legacy v1/v2 analysis rows remain historical/read-compatible. Their combined/declared-unsealed transport is deprecated and cannot create new analyses in the default v3 mode.
 - C4 named X-Labs trip labels remain unpromoted; unsupported semantic labels stay null.
- and analysis opportunity map
-
-Updated: 2026-09-11
-Status: Build F inventory
 
 ## Purpose
 
@@ -33,7 +52,7 @@ The objective is the same as the earlier Start Points discovery: identify source
 
 ## Executive findings
 
-Build F found several meaningful gaps between **data received** and **data used**. The most important are not cosmetic profile fields; they can materially improve race assessment if promoted correctly.
+The original Build F audit found several meaningful gaps between **data received** and **data used**. The post-F4 overlay above records which of those gaps have since been implemented. The most important are not cosmetic profile fields; they can materially improve race assessment if promoted correctly.
 
 ### Highest-value discoveries
 
@@ -892,9 +911,9 @@ Every new field family must pass these gates:
 9. **Market isolation** - any odds/streck/trend/public expectation remains outside pre-market strength.
 10. **Incremental value** - do not add a feature if it only duplicates an existing signal without measurable benefit.
 
-## 16. Recommended next scoped builds
+## 16. Historical recommended next scoped builds (implemented by the v3 programme)
 
-Build F itself is an inventory and prioritization build. It should not quietly introduce many new model signals at once.
+This section records the implementation sequence recommended by the original Build F inventory. Builds A-F4 subsequently implemented these core families in smaller reviewed slices; it is retained as historical design context, not as a current backlog.
 
 Recommended implementation sequence after Build F:
 
