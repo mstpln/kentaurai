@@ -164,7 +164,7 @@ export async function getTrackDetail(env, id) {
   `).bind(trackId).first();
   if (!track) return null;
 
-  const [summary, distanceRows] = await Promise.all([
+  const [summary, distanceRows, homeTrainerCountRow] = await Promise.all([
     env.DB.prepare(`
       SELECT
         COUNT(DISTINCT r.id) AS races,
@@ -185,7 +185,8 @@ export async function getTrackDetail(env, id) {
       WHERE r.track_id = ? AND re.scratched = 0 AND r.distance_m IS NOT NULL
       GROUP BY r.distance_m
       ORDER BY r.distance_m ASC
-    `).bind(trackId).all()
+    `).bind(trackId).all(),
+    countHomeTrainers(env, trackId, track.canonical_name)
   ]);
 
   return {
@@ -218,7 +219,7 @@ export async function getTrackDetail(env, id) {
       resultStarts: Number(summary?.result_starts ?? 0),
       firstRaceDate: summary?.first_race_date || null,
       lastRaceDate: summary?.last_race_date || null,
-      homeTrainers: null
+      homeTrainers: Number(homeTrainerCountRow?.total ?? 0)
     },
     distanceGroups: mapDistanceGroups(distanceRows?.results || [])
   };
