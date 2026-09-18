@@ -12,7 +12,7 @@ const TOP_LEVEL_KEYS = new Set(['contract_version', 'lock_id', 'round_id', 'pack
 const PACK_KEYS = new Set(['pack_id', 'as_of', 'facts_fingerprint']);
 const LEG_KEYS = new Set(['leg_number', 'race_id', 'data_quality_summary', 'race_shape_summary', 'scenario_confidence', 'scenarios', 'predictions']);
 const SCENARIO_KEYS = new Set(['name', 'weight', 'assumptions', 'beneficiaries', 'disadvantaged', 'evidence_quality']);
-const PREDICTION_KEYS = new Set(['race_entry_id', 'blind_probability', 'uncertainty_low', 'uncertainty_high', 'raw_rank', 'abcd_group', 'assessment_confidence', 'reasoning']);
+const PREDICTION_KEYS = new Set(['race_entry_id', 'blind_probability', 'uncertainty_low', 'uncertainty_high', 'raw_rank', 'abcd_group', 'assessment_confidence', 'key_unknowns', 'reasoning']);
 const DENIED_KEY_PATTERNS = Object.freeze([
   /^(?:bet_percent|bet_percentage|bet_distribution|betting|betting_percent|betting_percentage|betting_snapshot|betting_snapshots)$/,
   /^(?:market|market_percent|market_percentage|market_rank|market_share|market_ownership|market_probability|market_win_probability|market_win_probability_proxy|ownership|ownership_percent|ownership_percentage)$/,
@@ -193,6 +193,15 @@ function normalizePrediction(value, field, allowedEntries) {
   const abcdGroup = requiredText(value.abcd_group, `${field}.abcd_group`, 1).toUpperCase();
   if (!ABCD_ORDER.has(abcdGroup)) throw new Error(`${field}.abcd_group must be A, B, C or D`);
   const assessmentConfidence = finiteNumber(value.assessment_confidence, `${field}.assessment_confidence`, { min: 0, max: 1, nullable: true });
+  let keyUnknowns;
+  if (value.key_unknowns != null) {
+    if (!Array.isArray(value.key_unknowns)) throw new Error(`${field}.key_unknowns must be an array`);
+    keyUnknowns = value.key_unknowns.map((item, index) => {
+      const text = requiredText(item, `${field}.key_unknowns[${index}]`, 1000);
+      assertMarketBlindText(text, `${field}.key_unknowns[${index}]`);
+      return text;
+    });
+  }
   const reasoning = optionalText(value.reasoning, `${field}.reasoning`, 4000);
   assertMarketBlindText(reasoning, `${field}.reasoning`);
   return {
@@ -203,6 +212,7 @@ function normalizePrediction(value, field, allowedEntries) {
     raw_rank: rawRank,
     abcd_group: abcdGroup,
     assessment_confidence: assessmentConfidence,
+    ...(keyUnknowns === undefined ? {} : { key_unknowns: keyUnknowns }),
     reasoning
   };
 }
