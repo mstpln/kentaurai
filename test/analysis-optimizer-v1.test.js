@@ -198,7 +198,7 @@ test('E2 fails closed on missing probability, duplicate entry identity, scratche
   await assert.rejects(() => optimize(scratched), /ineligible\/scratched entry/);
 
   const impossible = syntheticDecision();
-  for (let leg = 0; leg < 4; leg += 1) impossible.legs[leg].entries = impossible.legs[leg].entries.slice(0, 1);
+  for (let leg = 0; leg < 4; leg += 1) impossible.legs[leg].entries = [{ race_entry_id: `entry-${leg + 1}-a`, decision_probability: 1 }];
   await assert.rejects(() => optimize(impossible), /more than three legs have only one active entry/);
 });
 
