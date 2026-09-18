@@ -47,6 +47,19 @@ function f3PrivateUiClient() {
 
   function download(url) { window.location.href = url; }
 
+  async function downloadJson(url, filename) {
+    const data = await jsonFetch(url);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(objectUrl);
+  }
+
   function stepRow(key, label, step) {
     const status = step?.status || 'blocked';
     const reason = step?.reason ? (REASON_SV[step.reason] || step.reason) : '';
@@ -79,6 +92,8 @@ function f3PrivateUiClient() {
       gate(document.getElementById('f3ImportLock'), s.step1_lock?.status !== 'completed');
       gate(document.getElementById('f3DownloadMarket'), s.market_pack?.status === 'ready');
       gate(document.getElementById('f3ImportStep2'), s.step2_import?.status === 'ready');
+      const revision = document.getElementById('f3RevisionAction');
+      if (revision) revision.hidden = data.market_gate?.reason !== 'late_facts_require_revision';
       const systemBox = document.getElementById('f3SystemSummary');
       if (systemBox) {
         if (data.system) {
@@ -156,6 +171,18 @@ function f3PrivateUiClient() {
               <button id="f3ImportLock" class="settings-primary" type="button">Försegla Steg 1</button>
             </div>
           </div>
+          <div class="f3-action" id="f3RevisionAction" hidden>
+            <strong>Revidera Steg 1</strong>
+            <span>Nya marknadsblinda fakta har kommit efter låset. Hämta revisionsunderlaget, låt AI:n ompröva endast berörda avdelningar och importera revisionen.</span>
+            <div class="settings-actions">
+              <button id="f3DownloadRevision" class="settings-secondary" type="button">Hämta revisionsunderlag</button>
+              <button id="f3CopyRevision" class="settings-secondary" type="button">Kopiera revisionsinstruktion</button>
+            </div>
+            <div class="settings-actions f3-import">
+              <input id="f3RevisionFile" class="settings-file" type="file" accept="application/json,.json">
+              <button id="f3ImportRevision" class="settings-primary" type="button">Importera revision</button>
+            </div>
+          </div>
           <div class="f3-action">
             <strong>Steg 2</strong>
             <span>Hämta marknadsfilen, fortsätt i samma AI-konversation och importera svaret. Systemet optimeras därefter i kod.</span>
@@ -206,6 +233,12 @@ function f3PrivateUiClient() {
     const existingAi = document.getElementById('sealedStep1V3Card') || layout.querySelector('.settings-section');
     const card = workflowCard();
     layout.insertBefore(card, existingAi || layout.firstChild);
+    [...layout.querySelectorAll(':scope > .settings-section')].forEach((section) => {
+      if (section !== card && !section.classList.contains('data-coverage-card')) {
+        section.dataset.f3LegacyUi = 'hidden';
+        section.style.display = 'none';
+      }
+    });
     document.getElementById('f3Round').addEventListener('change', refreshWorkflow);
     document.getElementById('f3DownloadPack').addEventListener('click', () => {
       const id = roundId(); if (id) download('/app/api/settings/f3-analysis-pack?round_id=' + encodeURIComponent(id));
@@ -216,6 +249,21 @@ function f3PrivateUiClient() {
       try {
         await importJsonFile('f3LockFile', '/app/api/settings/analysis-step1-lock?round_id=' + encodeURIComponent(roundId()), event.currentTarget);
         box.className = 'settings-result show success'; box.textContent = 'Steg 1 är förseglat.';
+      } catch (error) { box.className = 'settings-result show error'; box.textContent = error.message; }
+    });
+    document.getElementById('f3DownloadRevision').addEventListener('click', async () => {
+      const id = roundId(); if (!id) return;
+      const box = document.getElementById('f3Message');
+      try {
+        await downloadJson('/app/api/settings/analysis-step1-revision?round_id=' + encodeURIComponent(id), 'kentaurai-step1-revision-input.json');
+      } catch (error) { box.className = 'settings-result show error'; box.textContent = error.message; }
+    });
+    document.getElementById('f3CopyRevision').addEventListener('click', (event) => copyText(event.currentTarget, '/app/api/settings/analysis-step1-revision-prompt?provider=' + encodeURIComponent(provider())));
+    document.getElementById('f3ImportRevision').addEventListener('click', async (event) => {
+      const box = document.getElementById('f3Message');
+      try {
+        await importJsonFile('f3RevisionFile', '/app/api/settings/analysis-step1-revision?round_id=' + encodeURIComponent(roundId()), event.currentTarget);
+        box.className = 'settings-result show success'; box.textContent = 'Steg 1-revisionen är förseglad.';
       } catch (error) { box.className = 'settings-result show error'; box.textContent = error.message; }
     });
     document.getElementById('f3DownloadMarket').addEventListener('click', () => {
