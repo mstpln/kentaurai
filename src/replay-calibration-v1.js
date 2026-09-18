@@ -443,6 +443,49 @@ async function forecastForVariant(producer, target, bundles, variant) {
   return scoreMulticlassForecastV1({ entries, winnerEntryId: target.winner_entry_id });
 }
 
+async function evaluationFingerprintV1(evaluations) {
+  const normalized = [...(evaluations || [])]
+    .map((evaluation) => ({
+      target_id: evaluation.target_id,
+      target_group_id: evaluation.target_group_id,
+      target_at: evaluation.target_at,
+      forecast_variant: evaluation.forecast_variant,
+      winner_entry_id: evaluation.winner_entry_id,
+      entry_count: evaluation.entry_count,
+      log_loss: evaluation.log_loss,
+      brier_score: evaluation.brier_score,
+      top1_hit: Boolean(evaluation.top1_hit),
+      winner_rank: evaluation.winner_rank,
+      forecast: evaluation.forecast
+    }))
+    .sort((a, b) =>
+      compareId(a.target_group_id, b.target_group_id)
+      || Date.parse(a.target_at) - Date.parse(b.target_at)
+      || compareId(a.target_id, b.target_id)
+      || compareId(a.forecast_variant, b.forecast_variant)
+    );
+  return sha256Text(stableFeatureJson(normalized));
+}
+
+function uniqueDecisionLineages(targets) {
+  const map = new Map();
+  for (const target of targets) {
+    const key = stableFeatureJson({
+      target_group_id: target.target_group_id,
+      decision_run_id: target.decision_run_id,
+      version_metadata: target.version_metadata
+    });
+    map.set(key, {
+      target_group_id: target.target_group_id,
+      decision_run_id: target.decision_run_id,
+      version_metadata: target.version_metadata
+    });
+  }
+  return [...map.values()].sort((a, b) =>
+    compareId(a.target_group_id, b.target_group_id) || compareId(a.decision_run_id, b.decision_run_id)
+  );
+}
+
 function foldFilteredScores(scored, walkForward) {
   const groups = testGroupSet(walkForward.folds);
   return scored.filter((item) => groups.has(item.target_group_id));
@@ -508,6 +551,7 @@ export async function runSportsFeatureReplayV1(env, config = {}, forecastProduce
 
   const comparisons = ablationResultsFromVariantScores(featureSets, scoresByVariant, walkForward);
   const allScores = [...scoresByVariant.entries()].flatMap(([variant, items]) => items.map((item) => ({ ...item, forecast_variant: variant })));
+  const evaluationFingerprint = await evaluationFingerprintV1(allScores);
   const cohortFingerprint = await sha256Text(stableFeatureJson(targets.map((target) => ({
     target_id: target.target_id,
     target_at: target.target_at,
@@ -533,6 +577,7 @@ export async function runSportsFeatureReplayV1(env, config = {}, forecastProduce
       forecast_producer_version: producerVersion
     },
     cohort_fingerprint: cohortFingerprint,
+    evaluation_fingerprint: evaluationFingerprint,
     target_count: targets.length,
     fold_count: walkForward.folds.length,
     walk_forward: walkForward,
@@ -682,6 +727,8 @@ export async function runDecisionReplayV1(env, config = {}) {
   }
   const blindSummary = summarizeScores(blindScores);
   const decisionSummary = summarizeScores(decisionScores);
+  const evaluationFingerprint = await evaluationFingerprintV1(evaluations);
+  const decisionLineages = uniqueDecisionLineages(targets);
   const cohortFingerprint = await sha256Text(stableFeatureJson(targets.map((target) => ({
     target_id: target.target_id,
     target_group_id: target.target_group_id,
@@ -702,8 +749,12 @@ export async function runDecisionReplayV1(env, config = {}) {
       decision_probability_version: config.decision_probability_version ?? null,
       walk_forward: walkForward.policy
     },
-    version_metadata: resultSourceVersionMetadata(),
+    version_metadata: {
+      ...resultSourceVersionMetadata(),
+      decision_lineages: decisionLineages
+    },
     cohort_fingerprint: cohortFingerprint,
+    evaluation_fingerprint: evaluationFingerprint,
     target_count: targets.length,
     fold_count: walkForward.folds.length,
     walk_forward: walkForward,
@@ -742,6 +793,11 @@ export async function persistReplayResultV1(env, result, options = {}) {
     throw new Error('canonical F1 replay result is required');
   }
   if (!REPLAY_TRACKS.includes(result.track)) throw new Error('unsupported replay track');
+  const evaluations = Array.isArray(result.evaluations) ? result.evaluations : [];
+  const actualEvaluationFingerprint = await evaluationFingerprintV1(evaluations);
+  if (actualEvaluationFingerprint !== result.evaluation_fingerprint) {
+    throw new Error('evaluation_fingerprint does not match replay evaluations');
+  }
   const canonicalBase = { ...result };
   delete canonicalBase.evaluations;
   delete canonicalBase.result_fingerprint;
@@ -757,7 +813,6 @@ export async function persistReplayResultV1(env, result, options = {}) {
   }
   const createdAt = exactIso(options.createdAt ?? new Date().toISOString(), 'created_at');
   const resultForStorage = { ...result };
-  const evaluations = Array.isArray(resultForStorage.evaluations) ? resultForStorage.evaluations : [];
   delete resultForStorage.evaluations;
   const statements = [
     env.DB.prepare(`
