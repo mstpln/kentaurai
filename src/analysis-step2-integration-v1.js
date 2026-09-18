@@ -266,11 +266,11 @@ function integrationMetadata(row, analysis, reused) {
   };
 }
 
-export async function importStep2AndOptimizeV1(env, payload, policyOptions = {}, options = {}) {
+export async function persistIntegratedStep2V1(env, payload, parents, gameType, policyOptions = {}, options = {}) {
   if (!env?.DB?.batch) throw new Error('DB batch support is required for atomic E3 integration');
-  const marketOptions = marketOptionsFromPayload(payload);
-  const parents = await loadDecisionParentsV1(env, requiredText(payload.round_id, 'round_id', 200), marketOptions);
   const step2 = await normalizeStep2ResultV1(payload, parents);
+  const authoritativeGameType = requiredText(gameType, 'game_type', 20);
+  if (!['V85','V86'].includes(authoritativeGameType)) throw new Error('V85/V86 round was not found');
 
   const existingStep2 = await env.DB.prepare('SELECT * FROM analysis_step2_results WHERE id=? LIMIT 1').bind(step2.result_id).first();
   if (existingStep2 && existingStep2.result_fingerprint !== step2.result_fingerprint) {
@@ -284,13 +284,11 @@ export async function importStep2AndOptimizeV1(env, payload, policyOptions = {},
   const decisionExisting = await existingDecisionRow(env, decision);
   const decisionRunId = decisionExisting?.id ?? idFromFingerprint('decision', decision.decision_fingerprint);
 
-  const roundRow = await env.DB.prepare('SELECT game_type FROM game_rounds WHERE id=? LIMIT 1').bind(step2.round_id).first();
-  if (!roundRow || !['V85','V86'].includes(roundRow.game_type)) throw new Error('V85/V86 round was not found');
   const policy = normalizeOptimizerPolicyV1(policyOptions);
   const optimizer = await buildCanonicalOptimizerV1({
     decision,
     decisionRunId,
-    gameType: roundRow.game_type,
+    gameType: authoritativeGameType,
     policy,
     generatedAt: options.generatedAt ?? new Date().toISOString()
   });
@@ -435,6 +433,18 @@ export async function importStep2AndOptimizeV1(env, payload, policyOptions = {},
   const inserted = await env.DB.prepare('SELECT * FROM analysis_v3_runs WHERE id=? LIMIT 1').bind(analysisId).first();
   if (!inserted) throw new Error('integrated E3 analysis could not be read after atomic insert');
   return integrationMetadata(inserted, analysis, false);
+}
+
+export async function importStep2AndOptimizeV1(env, payload, policyOptions = {}, options = {}) {
+  if (!env?.DB?.batch) throw new Error('DB batch support is required for atomic E3 integration');
+  const roundId = requiredText(payload?.round_id, 'round_id', 200);
+  const marketOptions = marketOptionsFromPayload(payload);
+  const [parents, roundRow] = await Promise.all([
+    loadDecisionParentsV1(env, roundId, marketOptions),
+    env.DB.prepare('SELECT game_type FROM game_rounds WHERE id=? LIMIT 1').bind(roundId).first()
+  ]);
+  if (!roundRow || !['V85','V86'].includes(roundRow.game_type)) throw new Error('V85/V86 round was not found');
+  return persistIntegratedStep2V1(env, payload, parents, roundRow.game_type, policyOptions, options);
 }
 
 export async function getAnalysisV3(env, id) {
