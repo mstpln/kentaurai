@@ -26,18 +26,21 @@ async function requireSession(request, env) {
   return null;
 }
 
-function removeLegacyAnalysisExportUi(html) {
-  return String(html).replace(
-    /<script id="kentaurai-analysis-export-download-fix">[\s\S]*?<\/script>/,
+function removeLegacyAnalysisUiScripts(html) {
+  return [
+    'kentaurai-analysis-export-download-fix',
+    'kentaurai-analysis-step1-lock-v3-overlay'
+  ].reduce((source, id) => source.replace(
+    new RegExp(`<script id="${id}">[\\s\\S]*?<\\/script>`),
     ''
-  );
+  ), String(html));
 }
 
 async function enhancedAppResponse(request, response) {
   if (request.method !== 'GET' || new URL(request.url).pathname !== '/app/') return response;
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('text/html')) return response;
-  const body = enhanceF3PrivateUiHtml(removeLegacyAnalysisExportUi(await response.text()));
+  const body = enhanceF3PrivateUiHtml(removeLegacyAnalysisUiScripts(await response.text()));
   const headers = new Headers(response.headers);
   headers.delete('content-length');
   return new Response(body, { status: response.status, statusText: response.statusText, headers });
