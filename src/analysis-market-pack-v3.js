@@ -2,6 +2,7 @@ import { stableFeatureJson } from './analysis-v3-foundations.js';
 import { createPreMarketAnalysisPackV3 } from './analysis-pack-v3.js';
 import { assertAnalysisPackReplaySafe } from './analysis-pack-v3-asof-guard.js';
 import { canonicalLegsFromAnalysisPack, requireLatestStep1LockV1 } from './analysis-step1-revision-v1.js';
+import { canonicalOptimizerPolicyForRound } from './analysis-optimizer-policy-config.js';
 
 export const ANALYSIS_MARKET_PACK_V3_CONTRACT = 'kentaurai-market-pack-v3';
 export const ANALYSIS_MARKET_PACK_V3_VERSION = 'market-pack-v3-d4';
