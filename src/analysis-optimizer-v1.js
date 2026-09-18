@@ -427,13 +427,14 @@ export async function persistCanonicalOptimizerV1(env, optimizer, decision, opti
       INSERT INTO analysis_optimizer_runs (
         id,game_round_id,decision_run_id,decision_fingerprint,contract_version,optimizer_version,policy_version,
         line_price_sek,target_budget_min_sek,max_budget_sek,spike_count,row_count,cost_sek,estimated_p8,
-        optimizer_json,optimizer_fingerprint,created_at
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        policy_json,metrics_json,optimizer_json,optimizer_fingerprint,created_at
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).bind(
       id, optimizer.round_id, optimizer.decision_run_id, optimizer.decision_fingerprint,
       optimizer.contract_version, optimizer.optimizer_version, optimizer.policy_version,
       optimizer.system.line_price_sek, optimizer.system.target_budget_min_sek, optimizer.system.max_budget_sek,
       optimizer.system.spike_count, optimizer.system.row_count, optimizer.system.cost_sek, optimizer.system.estimated_p8,
+      stableFeatureJson(optimizer.policy), stableFeatureJson(optimizer.metrics),
       stableFeatureJson(optimizer), optimizer.optimizer_fingerprint, createdAt
     )
   ];
