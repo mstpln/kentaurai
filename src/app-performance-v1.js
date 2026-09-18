@@ -39,13 +39,13 @@ function performanceClient() {
   document.addEventListener('pointerover',event=>{
     const target=event.target instanceof Element?event.target:null;
     const row=target?.closest('.entity-row[data-id]');
-    if(row&&['trainers','horses','drivers'].includes(state.page)) warm('/entities/'+state.page+'/'+encodeURIComponent(row.dataset.id));
+    if(row&&['trainers','horses','drivers'].includes(state.page)){ warm('/entities/'+state.page+'/'+encodeURIComponent(row.dataset.id)); const name=row.querySelector('.entity-name')?.textContent?.trim(); if(name&&(state.page==='trainers'||state.page==='drivers')) warm('/search?q='+encodeURIComponent(name)+'&limit=40'); }
     const track=target?.closest('[data-track-id]'); if(track) warm('/tracks/'+encodeURIComponent(track.dataset.trackId));
     const nav=target?.closest('.nav-item[data-page]'); if(nav) warm(listPath(nav.dataset.page));
   },{passive:true});
   document.addEventListener('focusin',event=>{
     const target=event.target instanceof Element?event.target:null;
-    const row=target?.closest('.entity-row[data-id]'); if(row&&['trainers','horses','drivers'].includes(state.page)) warm('/entities/'+state.page+'/'+encodeURIComponent(row.dataset.id));
+    const row=target?.closest('.entity-row[data-id]'); if(row&&['trainers','horses','drivers'].includes(state.page)){ warm('/entities/'+state.page+'/'+encodeURIComponent(row.dataset.id)); const name=row.querySelector('.entity-name')?.textContent?.trim(); if(name&&(state.page==='trainers'||state.page==='drivers')) warm('/search?q='+encodeURIComponent(name)+'&limit=40'); }
     const track=target?.closest('[data-track-id]'); if(track) warm('/tracks/'+encodeURIComponent(track.dataset.trackId));
   });
   const idle=window.requestIdleCallback||((fn)=>setTimeout(fn,250));
