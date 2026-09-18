@@ -14,6 +14,16 @@ Updated: 2026-09-18
 - F1 replay/calibration, F2 post-race learning diagnostics, F3 private workflow/observability, F4 v3 cutover and the private-app navigation performance layer are production-live.
 - Historical official/X-Labs jobs keep their durable cursors. The round-picker release did not reset, recreate or resume stopped historical work.
 
+## External analysis workflow correction - source candidate
+- The next source change replaces the primary private analysis UI with the approved external-AI workflow without changing the production database schema.
+- Analysis flow: select one round + AI -> Step 1 market-blind export/instruction -> Step 2 verified market export/instruction in the same external AI conversation.
+- Step 1 is not imported or server-sealed in the normal UI path and the normal UI does not invoke the canonical optimizer.
+- System registration is separate: select a round later -> download round/entry import context -> copy registration instruction -> import the AI-generated JSON.
+- Registration validates canonical identities and exactly three singleton spike legs, then KentaurAI derives row count, line-price cost, stored probabilities/market fields and persistence metadata.
+- Existing sealed-v3 lock/decision/optimizer code and historical artifacts remain available for compatibility/history but are not the intended primary workflow after this change.
+- No new migration is required; the existing analysis/system tables are reused.
+- This section describes the pending source candidate only. Production release #62 remains the deployed baseline until a reviewed release is explicitly authorized and completed.
+
 ## App performance live
 - `worker-v077` adds only the private-app HTML performance layer; racing/analysis semantics and auth boundaries are unchanged.
 - The browser uses short-lived in-memory GET caching and in-flight request de-duplication only; no private API payloads are persisted to localStorage.
