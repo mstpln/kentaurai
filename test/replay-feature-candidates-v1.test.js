@@ -107,7 +107,7 @@ test('F1 position evidence uses only historical reconstruction sources captured 
         id,race_entry_id,source_record_id,total_frame_count,observed_frame_count,frame_coverage,
         checkpoint_count,ranked_checkpoint_count,lateral_checkpoint_count,episode_count,
         longitudinal_confidence,lateral_confidence,reconstruction_status,reconstruction_version
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       `summary-${sourceId}`,'history-a',sourceId,100,Math.round(coverage*100),coverage,
       2,2,2,0,coverage,coverage,'usable',XLABS_POSITION_RECONSTRUCTION_VERSION
