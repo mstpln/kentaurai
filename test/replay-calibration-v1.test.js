@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { webcrypto } from 'node:crypto';
+import { createHash, webcrypto } from 'node:crypto';
 import { createTestEnv } from './helpers/d1.js';
+import { stableFeatureJson } from '../src/analysis-v3-foundations.js';
 import {
   REPLAY_CONTRACT_VERSION,
   REPLAY_VERSION,
@@ -218,24 +219,52 @@ function seedDecisionRound(db, index) {
       entries.push({
         race_entry_id: entryId,
         blind_probability: suffix === 'a' ? 0.6 : 0.4,
-        decision_probability: suffix === 'a' ? 0.65 : 0.35
+        public_win_probability_proxy: null,
+        public_proxy_quality: 'unavailable_incomplete_winner_odds',
+        decision_probability: suffix === 'a' ? 0.6 : 0.4
       });
     }
-    decisionLegs.push({ leg_number: leg, race_id: raceId, entries });
+    decisionLegs.push({
+      leg_number: leg,
+      race_id: raceId,
+      public_proxy_quality: 'unavailable_incomplete_winner_odds',
+      public_proxy_method: null,
+      context_reliability: {
+        proxy_available: false,
+        proxy_quality: 'unavailable_incomplete_winner_odds',
+        proxy_method: null,
+        ownership_observation_count_min: null,
+        snapshot_age_minutes_max: null,
+        trend_semantics_verified: false,
+        blend_applied: false
+      },
+      entries
+    });
   }
 
-  const decisionFingerprint = `sha256:${String(index + 6).repeat(64).slice(0,64)}`;
-  const decision = {
+  const policy = {
+    decision_source: 'blind_probability',
+    market_blend_applied: false,
+    ownership_used_as_win_probability: false,
+    calibration_status: 'foundation_only_not_fitted'
+  };
+  const decisionBase = {
     contract_version: 'kentaurai-decision-probability-v1',
-    decision_probability_version: 'decision-probability-synthetic-blend-v1',
-    policy_version: 'synthetic-blend-v1',
+    decision_probability_version: 'decision-probability-v1-e1',
+    policy_version: 'decision-blind-v1',
     round_id: roundId,
     lock_id: lockId,
     lock_hash: lockHash,
     market_fingerprint: marketFingerprint,
     market_cutoff: marketCutoff,
-    decision_fingerprint: decisionFingerprint,
+    policy,
     legs: decisionLegs
+  };
+  const decisionFingerprint = `sha256:${createHash('sha256').update(stableFeatureJson(decisionBase)).digest('hex')}`;
+  const decision = {
+    ...decisionBase,
+    generated_at: `${roundDate}T10:00:30.000Z`,
+    decision_fingerprint: decisionFingerprint
   };
   db.prepare(`
     INSERT INTO analysis_decision_runs (
@@ -245,7 +274,7 @@ function seedDecisionRound(db, index) {
     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
     `decision-run-${index}`,roundId,lockId,lockHash,marketFingerprint,marketCutoff,
-    'kentaurai-decision-probability-v1','decision-probability-synthetic-blend-v1','synthetic-blend-v1','[]','[]',
+    'kentaurai-decision-probability-v1','decision-probability-v1-e1','decision-blind-v1','[]','[]',
     JSON.stringify(decision),decisionFingerprint,`${roundDate}T10:01:00.000Z`
   );
 
@@ -254,7 +283,7 @@ function seedDecisionRound(db, index) {
     spike_count: 3,
     row_count: 32,
     cost_sek: 16,
-    estimated_p8: 0.274625,
+    estimated_p8: 0.216,
     legs: decisionLegs.map((leg) => ({
       leg_number: leg.leg_number,
       is_spike: leg.leg_number <= 3,
@@ -281,7 +310,7 @@ function seedDecisionRound(db, index) {
     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
   `).run(
     `optimizer-run-${index}`,roundId,`decision-run-${index}`,decisionFingerprint,'kentaurai-optimizer-v1',
-    'optimizer-p8-exact3-v1-e2','v85-v86-exact3-main-v1',0.5,150,250,3,32,16,0.274625,
+    'optimizer-p8-exact3-v1-e2','v85-v86-exact3-main-v1',0.5,150,250,3,32,16,0.216,
     '{}','{}',JSON.stringify(optimizerDocument),optimizerFingerprint,`${roundDate}T10:02:00.000Z`
   );
 
@@ -307,7 +336,7 @@ function seedDecisionRound(db, index) {
   `).run(
     `analysis-v3-${index}`,roundId,lockId,lockHash,marketFingerprint,marketCutoff,`step2-result-${index}`,
     `decision-run-${index}`,`optimizer-run-${index}`,'kentaurai-analysis-v3','analysis-v3-e3','step2-result-v1-e3',
-    'decision-probability-synthetic-blend-v1','optimizer-p8-exact3-v1-e2',step2Fingerprint,decisionFingerprint,
+    'decision-probability-v1-e1','optimizer-p8-exact3-v1-e2',step2Fingerprint,decisionFingerprint,
     optimizerFingerprint,'{}',analysisFingerprint,`${roundDate}T10:04:00.000Z`
   );
 }
@@ -319,7 +348,7 @@ test('F1 V85/V86 decision replay is reproducible, walk-forward and persists exac
   const config = {
     from: '2099-02-01T00:00:00Z',
     to: '2099-02-03T23:59:59Z',
-    decision_probability_version: 'decision-probability-synthetic-blend-v1',
+    decision_probability_version: 'decision-probability-v1-e1',
     walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
   };
   const first = await runDecisionReplayV1(env, config);
@@ -328,8 +357,10 @@ test('F1 V85/V86 decision replay is reproducible, walk-forward and persists exac
   assert.deepEqual(first.decision_summary, second.decision_summary);
   assert.equal(first.fold_count, 1);
   assert.equal(first.decision_summary.target_count, 8);
-  assert.ok(first.decision_summary.mean_log_loss < first.blind_summary.mean_log_loss);
-  assert.ok(first.decision_summary.mean_brier_score < first.blind_summary.mean_brier_score);
+  assert.equal(first.decision_summary.mean_log_loss, first.blind_summary.mean_log_loss);
+  assert.equal(first.decision_summary.mean_brier_score, first.blind_summary.mean_brier_score);
+  assert.equal(first.decision_minus_blind.delta_log_loss, 0);
+  assert.equal(first.decision_minus_blind.delta_brier, 0);
   assert.equal(first.system_summary.system_count, 1);
   assert.equal(first.system_summary.observed_p8_rate, 1);
   assert.equal(first.system_summary.spike_miss_rate, 0);
@@ -350,23 +381,18 @@ test('F1 V85/V86 decision replay is reproducible, walk-forward and persists exac
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM replay_runs').get().n, 1);
 });
 
-test('F1 rejects a decision replay whose market cutoff is after race start', async () => {
+test('F1 excludes a decision snapshot whose market cutoff is after race start', async () => {
   const { db, env } = createTestEnv();
   seedDecisionRound(db, 1);
-  const row = db.prepare("SELECT decision_json FROM analysis_decision_runs WHERE id='decision-run-1'").get();
-  const decision = JSON.parse(row.decision_json);
-  decision.market_cutoff = '2099-02-01T13:00:00.000Z';
-  db.prepare("UPDATE analysis_decision_runs SET market_cutoff=?,decision_json=? WHERE id='decision-run-1'")
-    .run('2099-02-01T13:00:00.000Z', JSON.stringify(decision));
+  db.prepare("UPDATE analysis_decision_runs SET market_cutoff='2099-02-01T13:00:00.000Z' WHERE id='decision-run-1'").run();
 
-  await assert.rejects(
-    () => runDecisionReplayV1(env, {
-      from: '2099-02-01T00:00:00Z',
-      to: '2099-02-01T23:59:59Z',
-      walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
-    }),
-    /market cutoff is after race start/
-  );
+  const result = await runDecisionReplayV1(env, {
+    from: '2099-02-01T00:00:00Z',
+    to: '2099-02-01T23:59:59Z',
+    walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
+  });
+  assert.equal(result.target_count, 0);
+  assert.equal(result.status, 'insufficient_evidence');
 });
 
 
@@ -377,7 +403,7 @@ test('F1 keeps a designated regression-only round outside promotion evidence', a
   const result = await runDecisionReplayV1(env, {
     from: '2099-02-01T00:00:00Z',
     to: '2099-02-04T23:59:59Z',
-    decision_probability_version: 'decision-probability-synthetic-blend-v1',
+    decision_probability_version: 'decision-probability-v1-e1',
     regression_only_round_ids: ['decision-round-1'],
     walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
   });
@@ -392,14 +418,15 @@ test('F1 keeps a designated regression-only round outside promotion evidence', a
   assert.ok(!result.walk_forward.folds.flatMap((fold) => fold.test_group_ids).includes('decision-round-1'));
 });
 
-test('F1 rejects a stored decision that violates the declared decision-blind policy', async () => {
+test('F1 rejects tampered canonical E1 decision content', async () => {
   const { db, env } = createTestEnv();
   seedDecisionRound(db, 1);
   const row = db.prepare("SELECT decision_json FROM analysis_decision_runs WHERE id='decision-run-1'").get();
   const decision = JSON.parse(row.decision_json);
-  decision.policy_version = 'decision-blind-v1';
-  db.prepare("UPDATE analysis_decision_runs SET policy_version=?,decision_json=? WHERE id='decision-run-1'")
-    .run('decision-blind-v1', JSON.stringify(decision));
+  decision.legs[0].entries[0].decision_probability = 0.65;
+  decision.legs[0].entries[1].decision_probability = 0.35;
+  db.prepare("UPDATE analysis_decision_runs SET decision_json=? WHERE id='decision-run-1'")
+    .run(JSON.stringify(decision));
 
   await assert.rejects(
     () => runDecisionReplayV1(env, {
@@ -407,7 +434,7 @@ test('F1 rejects a stored decision that violates the declared decision-blind pol
       to: '2099-02-01T23:59:59Z',
       walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
     }),
-    /violates decision-blind-v1 policy/
+    /decision_probability must equal blind_probability|decision_fingerprint does not match/
   );
 });
 
@@ -417,7 +444,7 @@ test('F1 persistence rejects tampered evaluation scores before writing', async (
   const result = await runDecisionReplayV1(env, {
     from: '2099-02-01T00:00:00Z',
     to: '2099-02-03T23:59:59Z',
-    decision_probability_version: 'decision-probability-synthetic-blend-v1',
+    decision_probability_version: 'decision-probability-v1-e1',
     walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
   });
   result.evaluations[0].log_loss += 0.01;
@@ -440,7 +467,7 @@ test('F1 excludes post-start optimizer and integration rows from system evidence
   const result = await runDecisionReplayV1(env, {
     from: '2099-02-01T00:00:00Z',
     to: '2099-02-03T23:59:59Z',
-    decision_probability_version: 'decision-probability-synthetic-blend-v1',
+    decision_probability_version: 'decision-probability-v1-e1',
     walk_forward: { min_train_groups: 1, calibration_groups: 1, test_groups: 1, step_groups: 1 }
   });
 
