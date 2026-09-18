@@ -233,6 +233,11 @@ function f3PrivateUiClient() {
     const existingAi = document.getElementById('sealedStep1V3Card') || layout.querySelector('.settings-section');
     const card = workflowCard();
     layout.insertBefore(card, existingAi || layout.firstChild);
+    const legacyIntro = layout.querySelector(':scope > .analysis-workflow-intro');
+    if (legacyIntro) {
+      legacyIntro.dataset.f3LegacyUi = 'hidden';
+      legacyIntro.style.display = 'none';
+    }
     [...layout.querySelectorAll(':scope > .settings-section')].forEach((section) => {
       if (section !== card && !section.classList.contains('data-coverage-card')) {
         section.dataset.f3LegacyUi = 'hidden';
