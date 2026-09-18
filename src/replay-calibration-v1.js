@@ -71,6 +71,12 @@ function replayTargetLimit(value) {
   return positiveInteger(value, 'max_targets', MAX_REPLAY_TARGETS);
 }
 
+function normalizeIdList(value, field, maxItems = 200) {
+  if (value == null) return [];
+  if (!Array.isArray(value) || value.length > maxItems) throw new Error(`${field} must be an array with at most ${maxItems} items`);
+  return [...new Set(value.map((item, index) => requiredText(item, `${field}[${index}]`, 200)))].sort(compareId);
+}
+
 function finiteProbability(value, field) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
     throw new Error(`${field} must be a probability between 0 and 1`);
@@ -594,6 +600,8 @@ export async function runSportsFeatureReplayV1(env, config = {}, forecastProduce
     cohort_fingerprint: cohortFingerprint,
     evaluation_fingerprint: evaluationFingerprint,
     target_count: targets.length,
+    evidence_target_count: evidenceTargets.length,
+    regression_only_target_count: regressionTargets.length,
     fold_count: walkForward.folds.length,
     walk_forward: walkForward,
     baseline_summary: comparisons.baseline_summary,
@@ -909,7 +917,14 @@ export async function runDecisionReplayV1(env, config = {}) {
   if (!env?.DB) throw new Error('DB is not configured');
   const loaded = await loadDecisionTargets(env, config);
   const targets = loaded.targets;
-  const walkForward = buildWalkForwardFoldsV1(targets, config.walk_forward ?? config.walkForward ?? {});
+  const regressionOnlyRoundIds = normalizeIdList(
+    config.regression_only_round_ids ?? config.regressionOnlyRoundIds,
+    'regression_only_round_ids'
+  );
+  const regressionOnly = new Set(regressionOnlyRoundIds);
+  const evidenceTargets = targets.filter((target) => !regressionOnly.has(target.target_group_id));
+  const regressionTargets = targets.filter((target) => regressionOnly.has(target.target_group_id));
+  const walkForward = buildWalkForwardFoldsV1(evidenceTargets, config.walk_forward ?? config.walkForward ?? {});
   const testGroups = testGroupSet(walkForward.folds);
   const blindScores = [];
   const decisionScores = [];
@@ -933,8 +948,24 @@ export async function runDecisionReplayV1(env, config = {}) {
   }
   const blindSummary = summarizeScores(blindScores);
   const decisionSummary = summarizeScores(decisionScores);
+  const regressionBlindSummary = summarizeScores(regressionTargets.map((target) => ({
+    ...target.variants.blind,
+    target_id: target.target_id,
+    target_group_id: target.target_group_id,
+    target_at: target.target_at,
+    forecast_variant: 'blind'
+  })));
+  const regressionDecisionSummary = summarizeScores(regressionTargets.map((target) => ({
+    ...target.variants.decision,
+    target_id: target.target_id,
+    target_group_id: target.target_group_id,
+    target_at: target.target_at,
+    forecast_variant: 'decision'
+  })));
   const testSystemDiagnostics = loaded.systemDiagnostics.filter((item) => testGroups.has(item.target_group_id));
+  const regressionSystemDiagnostics = loaded.systemDiagnostics.filter((item) => regressionOnly.has(item.target_group_id));
   const systemSummary = summarizeSystems(testSystemDiagnostics);
+  const regressionSystemSummary = summarizeSystems(regressionSystemDiagnostics);
   const evaluationFingerprint = await evaluationFingerprintV1(evaluations);
   const decisionLineages = uniqueDecisionLineages(targets);
   const cohortFingerprint = await sha256Text(stableFeatureJson(targets.map((target) => ({
@@ -955,6 +986,7 @@ export async function runDecisionReplayV1(env, config = {}) {
       to: exactIso(config.to, 'to'),
       max_targets: replayTargetLimit(config.max_targets ?? config.maxTargets),
       decision_probability_version: config.decision_probability_version ?? null,
+      regression_only_round_ids: regressionOnlyRoundIds,
       walk_forward: walkForward.policy
     },
     version_metadata: {
@@ -971,6 +1003,12 @@ export async function runDecisionReplayV1(env, config = {}) {
     decision_summary: decisionSummary,
     system_summary: systemSummary,
     system_diagnostics: testSystemDiagnostics,
+    regression_only_summary: {
+      blind: regressionBlindSummary,
+      decision: regressionDecisionSummary,
+      systems: regressionSystemSummary,
+      system_diagnostics: regressionSystemDiagnostics
+    },
     decision_minus_blind: {
       delta_log_loss: blindSummary.mean_log_loss == null || decisionSummary.mean_log_loss == null
         ? null : round(decisionSummary.mean_log_loss - blindSummary.mean_log_loss),
