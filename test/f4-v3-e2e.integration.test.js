@@ -17,8 +17,9 @@ import { createF4Step2Bundle } from '../src/f4-step2-bundle.js';
 globalThis.crypto ??= webcrypto;
 
 const ROUND_ID = 'f4-e2e-round';
-const PACK_AS_OF = '2099-08-01T10:00:00.000Z';
-const LOCK_AT = '2099-08-01T10:05:00.000Z';
+const PACK_AS_OF = '2099-08-01T10:05:00.000Z';
+const LOCK_AT = PACK_AS_OF;
+const MARKET_CUTOFF = PACK_AS_OF;
 const MARKET_AT = '2099-08-01T09:59:00.000Z';
 const BET_STOP = '2099-08-01T10:30:00.000Z';
 
@@ -188,11 +189,11 @@ test('F4 synthetic round completes pack -> sealed lock -> self-contained Step2 -
   assert.equal(lock.sealed,true);
 
   const market = await createMarketPackV3(env,ROUND_ID,{
-    lockId:lock.lock_id,lockHash:lock.lock_hash,asOf:BET_STOP,generatedAt:BET_STOP
+    lockId:lock.lock_id,lockHash:lock.lock_hash,asOf:MARKET_CUTOFF,generatedAt:MARKET_CUTOFF
   });
   assert.equal(market.manifest.lock.lock_hash,lock.lock_hash);
 
-  const bundle = await createF4Step2Bundle(env,ROUND_ID,{asOf:BET_STOP});
+  const bundle = await createF4Step2Bundle(env,ROUND_ID,{asOf:MARKET_CUTOFF});
   assert.equal(bundle.instructions.conversation_memory_required,false);
   assert.equal(bundle.sealed_step1.lock_id,lock.lock_id);
   assert.equal(bundle.market_manifest.market_fingerprint,market.manifest.market_fingerprint);
