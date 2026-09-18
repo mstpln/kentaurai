@@ -743,7 +743,11 @@ export async function runSportsFeatureReplayV1(env, config = {}, forecastProduce
     fold_count: walkForward.folds.length,
     walk_forward: walkForward,
     baseline_summary: comparisons.baseline_summary,
-    ablations: comparisons.ablations
+    ablations: comparisons.ablations,
+    scenario_summary: {
+      status: 'unavailable_no_canonical_scenario_contract',
+      scored_target_count: 0
+    }
   };
   const resultFingerprint = await sha256Text(stableFeatureJson(resultBase));
   return { ...resultBase, result_fingerprint: resultFingerprint, evaluations: allScores };
@@ -1262,6 +1266,10 @@ export async function runDecisionReplayV1(env, config = {}) {
         ? null : round(decisionSummary.mean_log_loss - blindSummary.mean_log_loss),
       delta_brier: blindSummary.mean_brier_score == null || decisionSummary.mean_brier_score == null
         ? null : round(decisionSummary.mean_brier_score - blindSummary.mean_brier_score)
+    },
+    scenario_summary: {
+      status: 'unavailable_no_canonical_scenario_contract',
+      scored_target_count: 0
     }
   };
   const resultFingerprint = await sha256Text(stableFeatureJson(resultBase));
