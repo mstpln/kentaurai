@@ -5,7 +5,7 @@ Private V85/V86 data, analysis backend and read-only intelligence interface with
 ## Current build
 Version 0.6.0 contains the verified official/X-Labs data foundation, resumable history pipelines, the full sealed v3 V85/V86 analysis stack, replay/calibration, post-race learning diagnostics, private workflow/coverage observability and the read-only PWA. Real provider payloads and private reference/editorial/contact data remain outside the public repository; GitHub contains code, migrations, tests, documentation and synthetic fixtures only.
 
-F4 is the final v3 cutover candidate. Source default is `ANALYSIS_WORKFLOW_MODE=v3` through `src/worker-v076.js`; the last production release before F4 uses `worker-v075.js`. F4 keeps historical v1/v2 analysis reads but disables new legacy creation in v3 mode. `legacy_v2` exists only as a controlled release rollback value.
+F4 is production-live. The default analysis workflow is `ANALYSIS_WORKFLOW_MODE=v3` through `src/worker-v076.js`. Production release #59 completed the v3 cutover: historical v1/v2 analysis reads remain available, new legacy creation is disabled in v3 mode, and `legacy_v2` exists only as a controlled release rollback value.
 
 ### Default v3 analysis workflow
 1. KentaurAI generates a deterministic round-scoped pre-market analysis pack with no current market.
