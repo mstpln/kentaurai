@@ -964,14 +964,20 @@ export async function persistReplayResultV1(env, result, options = {}) {
     throw new Error('result_fingerprint does not match canonical replay content');
   }
   const id = replayIdFromFingerprint(result.result_fingerprint);
-  const existing = await env.DB.prepare('SELECT * FROM replay_runs WHERE id=? LIMIT 1').bind(id).first();
-  if (existing) {
-    if (existing.result_fingerprint !== result.result_fingerprint) throw new Error('replay id collision');
-    return storedReplayMetadata(existing, parseJson(existing.result_json, 'result_json'), true);
-  }
-  const createdAt = exactIso(options.createdAt ?? new Date().toISOString(), 'created_at');
   const resultForStorage = { ...result };
   delete resultForStorage.evaluations;
+  const existing = await env.DB.prepare('SELECT * FROM replay_runs WHERE id=? LIMIT 1').bind(id).first();
+  if (existing) {
+    if (existing.result_fingerprint !== result.result_fingerprint || existing.evaluation_fingerprint !== result.evaluation_fingerprint) {
+      throw new Error('replay id collision');
+    }
+    const stored = parseJson(existing.result_json, 'result_json');
+    if (stableFeatureJson(stored) !== stableFeatureJson(resultForStorage)) {
+      throw new Error('stored replay content does not match canonical result');
+    }
+    return storedReplayMetadata(existing, stored, true);
+  }
+  const createdAt = exactIso(options.createdAt ?? new Date().toISOString(), 'created_at');
   const statements = [
     env.DB.prepare(`
       INSERT INTO replay_runs (
@@ -1010,7 +1016,21 @@ export async function persistReplayResultV1(env, result, options = {}) {
       stableFeatureJson(ablation)
     ));
   }
-  await env.DB.batch(statements);
+  try {
+    await env.DB.batch(statements);
+  } catch (error) {
+    const raced = await env.DB.prepare('SELECT * FROM replay_runs WHERE id=? LIMIT 1').bind(id).first();
+    if (raced
+      && raced.result_fingerprint === result.result_fingerprint
+      && raced.evaluation_fingerprint === result.evaluation_fingerprint) {
+      const stored = parseJson(raced.result_json, 'result_json');
+      if (stableFeatureJson(stored) !== stableFeatureJson(resultForStorage)) {
+        throw new Error('concurrent replay write stored different canonical content');
+      }
+      return storedReplayMetadata(raced, stored, true);
+    }
+    throw error;
+  }
   const row = await env.DB.prepare('SELECT * FROM replay_runs WHERE id=? LIMIT 1').bind(id).first();
   if (!row) throw new Error('replay run could not be read after persistence');
   return storedReplayMetadata(row, resultForStorage, false);
