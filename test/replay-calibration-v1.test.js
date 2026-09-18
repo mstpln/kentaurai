@@ -282,6 +282,32 @@ function seedDecisionRound(db, index) {
     'optimizer-p8-exact3-v1-e2','v85-v86-exact3-main-v1',0.5,150,250,3,32,16,0.274625,
     '{}','{}',JSON.stringify(optimizerDocument),optimizerFingerprint,`${roundDate}T10:02:00.000Z`
   );
+
+  const step2Fingerprint = `sha256:${String(index + 12).repeat(64).slice(0,64)}`;
+  db.prepare(`
+    INSERT INTO analysis_step2_results (
+      id,game_round_id,lock_id,lock_hash,market_fingerprint,market_cutoff,contract_version,step2_version,
+      prompt_version,provider,model,result_json,result_fingerprint,created_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    `step2-result-${index}`,roundId,lockId,lockHash,marketFingerprint,marketCutoff,
+    'kentaurai-step2-result-v1','step2-result-v1-e3','step2-prompt-v3-e3','openai','synthetic','{}',
+    step2Fingerprint,`${roundDate}T10:03:00.000Z`
+  );
+
+  const analysisFingerprint = `sha256:${String(index + 15).repeat(64).slice(0,64)}`;
+  db.prepare(`
+    INSERT INTO analysis_v3_runs (
+      id,game_round_id,lock_id,lock_hash,market_fingerprint,market_cutoff,step2_result_id,decision_run_id,
+      optimizer_run_id,contract_version,analysis_version,step2_version,decision_probability_version,optimizer_version,
+      step2_fingerprint,decision_fingerprint,optimizer_fingerprint,analysis_json,analysis_fingerprint,created_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    `analysis-v3-${index}`,roundId,lockId,lockHash,marketFingerprint,marketCutoff,`step2-result-${index}`,
+    `decision-run-${index}`,`optimizer-run-${index}`,'kentaurai-analysis-v3','analysis-v3-e3','step2-result-v1-e3',
+    'decision-probability-synthetic-blend-v1','optimizer-p8-exact3-v1-e2',step2Fingerprint,decisionFingerprint,
+    optimizerFingerprint,'{}',analysisFingerprint,`${roundDate}T10:04:00.000Z`
+  );
 }
 
 test('F1 V85/V86 decision replay is reproducible, walk-forward and persists exact version metadata', async () => {
@@ -308,6 +334,8 @@ test('F1 V85/V86 decision replay is reproducible, walk-forward and persists exac
   assert.equal(first.version_metadata.decision_lineages.length, 3);
   assert.equal(first.version_metadata.decision_lineages[0].version_metadata.step1_prompt_version, 'step1-prompt-v3-d2');
   assert.equal(first.version_metadata.decision_lineages[0].version_metadata.optimizer_lineage[0].optimizer_version, 'optimizer-p8-exact3-v1-e2');
+  assert.equal(first.version_metadata.decision_lineages[0].version_metadata.integrated_lineage[0].analysis_version, 'analysis-v3-e3');
+  assert.equal(first.version_metadata.decision_lineages[0].version_metadata.integrated_lineage[0].step2_prompt_version, 'step2-prompt-v3-e3');
 
   const saved = await persistReplayResultV1(env, first, { createdAt: '2099-03-01T00:00:00Z' });
   assert.equal(saved.reused, false);
