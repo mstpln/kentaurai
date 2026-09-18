@@ -222,7 +222,7 @@ export function getExternalAnalysisStep1Prompt(provider = 'openai') {
   const key = providerKey(provider);
   const label = key === 'openai' ? 'ChatGPT' : 'Claude';
   return [
-    '# KentaurAI - Steg 1: marknadsblind analys',
+    '# KentaurAI - Steg 1: Marknadsblind analys',
     '',
     'Du är ' + label + ' och ska analysera den uppladdade KentaurAI-filen för den valda V85/V86-omgången.',
     '',
