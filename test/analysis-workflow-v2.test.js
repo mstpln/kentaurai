@@ -23,14 +23,18 @@ const promptContext = {
   }
 };
 
-test('v2 workflow exposes the canonical final A1 and A2 prompts unchanged', () => {
+test('legacy workflow prompt router exposes E3 Step 2 interpretation instead of AI system construction', () => {
   assert.equal(getAnalysisMethodPrompt(1), ANALYSIS_STEP_1_PROMPT);
   assert.equal(getAnalysisMethodPrompt(2), ANALYSIS_STEP_2_PROMPT);
   assert.match(ANALYSIS_STEP_1_PROMPT, /Importfilen till KentaurAI skapas först när både analysen och systemet är färdiga — inte nu\./);
-  assert.match(ANALYSIS_STEP_2_PROMPT, /Huvudsystem, 700 kr/);
-  assert.match(ANALYSIS_STEP_2_PROMPT, /Två spikar är tillåtet/);
-  assert.match(ANALYSIS_STEP_2_PROMPT, /Skriv dessutom in motiveringen i systemets \*\*`notes`\*\*/);
-  assert.match(ANALYSIS_STEP_2_PROMPT, /max 144 kr/);
+  assert.match(ANALYSIS_STEP_2_PROMPT, /kentaurai-step2-result-v1/);
+  assert.match(ANALYSIS_STEP_2_PROMPT, /blind_probability is immutable/i);
+  assert.match(ANALYSIS_STEP_2_PROMPT, /ABCD is immutable/i);
+  assert.match(ANALYSIS_STEP_2_PROMPT, /code optimizer will build the authoritative system/i);
+  assert.doesNotMatch(ANALYSIS_STEP_2_PROMPT, /700\s*kr/i);
+  assert.doesNotMatch(ANALYSIS_STEP_2_PROMPT, /Två spikar är tillåtet/i);
+  assert.doesNotMatch(ANALYSIS_STEP_2_PROMPT, /minst\s*7\s*%/i);
+  assert.doesNotMatch(ANALYSIS_STEP_2_PROMPT, /personligt system/i);
 });
 
 test('combined export prompt encodes the locked one-import workflow and contextual spike rules', () => {
