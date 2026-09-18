@@ -1,5 +1,7 @@
 # KentaurAI analysis exchange
 
+> **Legacy compatibility document.** This describes a historical v1/v2 workflow and is not the default creation path after F4. In `ANALYSIS_WORKFLOW_MODE=v3`, new legacy analysis creation is disabled; these contracts remain only for historical reads and controlled rollback compatibility. The live workflow is the sealed v3 pack -> Step 1 lock/revision -> self-contained Step 2 bundle -> canonical decision -> exact-three-spike optimizer path documented in `README.md` and `docs/V3_CUTOVER_RUNBOOK.md`.
+
 KentaurAI is the factual database, deterministic calculation and persistence layer. The interpretation layer is replaceable: ChatGPT, Claude or another authorized AI client may analyze the same structured context and store its own independent submission.
 
 ## Contract
