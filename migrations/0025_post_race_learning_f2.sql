@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS post_race_reviews_v2 (
   failure_class TEXT CHECK(failure_class IS NULL OR failure_class IN (
     'ranking','probability','scenario','system_allocation','spike','incident','data_gap'
   )),
+  learning_eligible INTEGER NOT NULL CHECK(learning_eligible IN (0,1)),
   learning_classification TEXT NOT NULL CHECK(learning_classification IN ('no_change','candidate_learning','confirmed_learning')),
   diagnostics_json TEXT NOT NULL,
   created_at TEXT NOT NULL,
