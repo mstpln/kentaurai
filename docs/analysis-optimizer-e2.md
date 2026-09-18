@@ -17,6 +17,8 @@ E2 does not change Step 1, the sealed lock, market data or canonical decision pr
 The optimizer fails closed unless:
 
 - the parent is a persisted E1 decision run for the requested V85/V86 round
+- the decision still points to the newest sealed Step 1 lock and matching lock hash
+- the current active race-entry field still exactly matches the persisted decision; scratches/additions/removals require a new Step 1/market/decision lineage
 - exactly eight ordered legs exist
 - every leg has at least one active eligible entry
 - every `decision_probability` is finite and between 0 and 1
