@@ -615,11 +615,42 @@ function assertReplayAggregateConsistency(result, evaluations) {
     if (stableFeatureJson(summarizeScores(baseline)) !== stableFeatureJson(result.baseline_summary)) {
       throw new Error('sports replay baseline summary does not match held-out evaluations');
     }
+    const configAblations = new Map((result.config?.ablations || []).map((item) => [item.id, item]));
+    if ((result.ablations || []).length !== configAblations.size) {
+      throw new Error('sports replay ablation result count does not match config');
+    }
+    const baselineSummary = summarizeScores(baseline);
     for (const ablation of result.ablations || []) {
+      const definition = configAblations.get(ablation.ablation_id);
+      if (!definition
+        || definition.feature_family !== ablation.feature_family
+        || definition.mode !== ablation.mode
+        || ablation.baseline_variant !== 'baseline'
+        || ablation.candidate_variant !== ablation.ablation_id) {
+        throw new Error(`ablation ${ablation.ablation_id} metadata is inconsistent`);
+      }
       const candidate = evaluations.filter((item) => item.forecast_variant === ablation.candidate_variant && testGroups.has(item.target_group_id));
       const candidateSummary = summarizeScores(candidate);
-      if (stableFeatureJson(candidateSummary) !== stableFeatureJson(ablation.candidate_summary)) {
-        throw new Error(`ablation ${ablation.ablation_id} candidate summary is inconsistent`);
+      const expected = {
+        ablation_id: ablation.ablation_id,
+        feature_family: definition.feature_family,
+        mode: definition.mode,
+        baseline_variant: 'baseline',
+        candidate_variant: ablation.ablation_id,
+        target_count: Math.min(baselineSummary.target_count, candidateSummary.target_count),
+        baseline_log_loss: baselineSummary.mean_log_loss,
+        candidate_log_loss: candidateSummary.mean_log_loss,
+        delta_log_loss: baselineSummary.mean_log_loss == null || candidateSummary.mean_log_loss == null
+          ? null : round(candidateSummary.mean_log_loss - baselineSummary.mean_log_loss),
+        baseline_brier: baselineSummary.mean_brier_score,
+        candidate_brier: candidateSummary.mean_brier_score,
+        delta_brier: baselineSummary.mean_brier_score == null || candidateSummary.mean_brier_score == null
+          ? null : round(candidateSummary.mean_brier_score - baselineSummary.mean_brier_score),
+        baseline_summary: baselineSummary,
+        candidate_summary: candidateSummary
+      };
+      if (stableFeatureJson(expected) !== stableFeatureJson(ablation)) {
+        throw new Error(`ablation ${ablation.ablation_id} result is inconsistent with held-out evaluations`);
       }
     }
   }
