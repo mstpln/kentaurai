@@ -233,9 +233,9 @@ function storedRunMetadata(row, decision, reused) {
   };
 }
 
-export async function persistDecisionProbabilityV1(env, roundId, options = {}) {
+export async function persistCanonicalDecisionProbabilityV1(env, decision, options = {}) {
   if (!env?.DB) throw new Error('DB is not configured');
-  const decision = await createDecisionProbabilityV1(env, roundId, options);
+  if (!decision || decision.contract_version !== ANALYSIS_DECISION_PROBABILITY_CONTRACT) throw new Error('canonical E1 decision is required');
   const id = decisionIdFromFingerprint(decision.decision_fingerprint);
   const decisionJson = stableFeatureJson(decision);
   const existing = await env.DB.prepare('SELECT * FROM analysis_decision_runs WHERE id=? LIMIT 1').bind(id).first();
@@ -291,6 +291,11 @@ export async function persistDecisionProbabilityV1(env, roundId, options = {}) {
   const inserted = await env.DB.prepare('SELECT * FROM analysis_decision_runs WHERE id=? LIMIT 1').bind(id).first();
   if (!inserted) throw new Error('decision run could not be read after insert');
   return storedRunMetadata(inserted, decision, false);
+}
+
+export async function persistDecisionProbabilityV1(env, roundId, options = {}) {
+  const decision = await createDecisionProbabilityV1(env, roundId, options);
+  return persistCanonicalDecisionProbabilityV1(env, decision, options);
 }
 
 export async function getDecisionProbabilityV1(env, { roundId, id = null } = {}) {
