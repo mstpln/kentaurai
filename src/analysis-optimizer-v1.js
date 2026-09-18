@@ -97,6 +97,7 @@ export function normalizeOptimizerPolicyV1(options = {}) {
     target_budget_min_sek: moneyFromScaled(targetMinScaled),
     max_budget_sek: moneyFromScaled(maxBudgetScaled),
     line_price_sek: moneyFromScaled(linePriceScaled),
+    line_price_source: 'explicit_policy_config',
     exact_spike_count: ANALYSIS_OPTIMIZER_EXACT_SPIKES,
     primary_objective: 'maximize_estimated_p8_under_max_budget',
     secondary_tie_break: SECONDARY_TIE_BREAK,
@@ -342,6 +343,30 @@ export async function buildCanonicalOptimizerV1({
   };
 }
 
+async function assertCurrentDecisionFieldV1(env, roundId, decision) {
+  const rows = await env.DB.prepare(`
+    SELECT gl.leg_number,re.id AS race_entry_id,re.scratched
+    FROM game_legs gl
+    JOIN race_entries re ON re.race_id=gl.race_id
+    WHERE gl.game_round_id=?
+    ORDER BY gl.leg_number,re.id
+  `).bind(roundId).all();
+  const current = Array.isArray(rows?.results) ? rows.results : [];
+  const expected = [];
+  for (const leg of decision?.legs || []) {
+    for (const entry of leg?.entries || []) {
+      expected.push({ leg_number: Number(leg.leg_number), race_entry_id: String(entry.race_entry_id || '') });
+    }
+  }
+  const active = current
+    .filter((row) => Number(row.scratched) !== 1)
+    .map((row) => ({ leg_number: Number(row.leg_number), race_entry_id: String(row.race_entry_id || '') }));
+  if (stableFeatureJson(active) !== stableFeatureJson(expected)) {
+    throw new Error('current active field no longer matches the persisted decision; create a new Step 1/market/decision lineage before optimizing');
+  }
+  return true;
+}
+
 export async function loadOptimizerParentsV1(env, roundId, options = {}) {
   const round = requiredText(roundId, 'round_id');
   const decisionRunId = requiredText(options.decision_run_id ?? options.decisionRunId, 'decision_run_id', 160);
@@ -360,6 +385,7 @@ export async function loadOptimizerParentsV1(env, roundId, options = {}) {
   if (latestLock.lock_hash !== stored.lock_hash || stored.decision?.lock_id !== stored.lock_id || stored.decision?.lock_hash !== stored.lock_hash) {
     throw new Error('decision run is not bound to the newest sealed Step 1 lock');
   }
+  await assertCurrentDecisionFieldV1(env, round, stored.decision);
   return {
     decision: stored.decision,
     decisionRunId: stored.id,
