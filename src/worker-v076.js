@@ -2,6 +2,7 @@ import workerV3 from './worker-v075.js';
 import workerLegacy from './worker-v074.js';
 import { requireAdmin } from './auth.js';
 import { appAuthConfigured, hasValidAppSession } from './app-auth.js';
+import { createF4Step2BundleResponse } from './f4-step2-bundle.js';
 
 export const F4_CUTOVER_VERSION = 'analysis-v3-default-f4';
 export const F4_DEFAULT_MODE = 'v3';
@@ -105,6 +106,19 @@ export default {
 
     if (mode === F4_ROLLBACK_MODE) {
       return workerLegacy.fetch(request, env, ctx);
+    }
+
+    if (request.method === 'GET' && path === '/app/api/settings/f4-step2-bundle') {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        const roundId = String(url.searchParams.get('round_id') || '').trim();
+        if (!roundId) throw new Error('round_id is required');
+        return await createF4Step2BundleResponse(env, roundId, { asOf: url.searchParams.get('as_of') || null });
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
     }
 
     const legacyAdminWrite = path.match(/^\/v1\/analysis\/rounds\/[^/]+\/submissions$/);
