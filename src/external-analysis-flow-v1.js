@@ -476,6 +476,9 @@ function normalizeSystems(payloadSystems, expectedLegs, predictionMap, policy) {
     if (singletonLegs !== 3) throw new Error('every V85/V86 system must contain exactly three one-horse spike legs');
     const rowCount = [...byLeg.values()].reduce((rows, items) => rows * items.length, 1);
     const costSek = Math.round(rowCount * policy.line_price_sek * 100) / 100;
+    if (costSek > policy.max_budget_sek + 0.009) {
+      throw new Error('system cost exceeds configured max budget');
+    }
     const coverageByLeg = [...byLeg.entries()].map(([leg, items]) => ({
       leg,
       probability: items.reduce((sum, item) => sum + Number(predictionMap.get(item.raceEntryId)?.winProbability || 0), 0)
@@ -533,6 +536,10 @@ export async function importRecordedSystem(env, payload) {
   const recommendations = boundedJson(payload.recommendations, 'recommendations', MAX_JSON_TEXT);
 
   const identity = await loadRoundIdentity(env, roundId);
+  const marketDeadline = identity.round.bet_stop_at || identity.round.scheduled_start_at;
+  if (validIso(marketDeadline) && Date.parse(analysisAsOf) > Date.parse(marketDeadline)) {
+    throw new Error('analysis_as_of must not be after the round market deadline');
+  }
   if (!Array.isArray(payload.legs) || payload.legs.length !== 8) throw new Error('legs must contain exactly eight legs');
   const legs = payload.legs.map((leg, index) => normalizePredictions(leg, identity.legs[index], index));
   const predictionMap = new Map(legs.flatMap((leg) => leg.predictions.map((prediction) => [prediction.raceEntryId, prediction])));
