@@ -64,8 +64,8 @@ function safeWebsiteUrl(value) {
   }
 }
 
-export async function getTrackDetailV064(env, id) {
-  const detail = await getTrackDetail(env, id);
+export async function getTrackDetailV064(env, id, options = {}) {
+  const detail = await getTrackDetail(env, id, options);
   if (!detail) return null;
   const metadata = await env.DB.prepare(`
     SELECT street_address, postal_code, website_url
