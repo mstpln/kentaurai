@@ -344,7 +344,7 @@ export async function buildCanonicalOptimizerV1({
   };
 }
 
-async function assertCurrentDecisionFieldV1(env, roundId, decision) {
+export async function assertCurrentDecisionFieldV1(env, roundId, decision) {
   const rows = await env.DB.prepare(`
     SELECT gl.leg_number,re.id AS race_entry_id,re.scratched
     FROM game_legs gl
