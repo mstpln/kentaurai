@@ -36,6 +36,8 @@ test('F1 multiclass log loss, Brier and calibration are deterministic', () => {
   assert.deepEqual(first, second);
   assert.equal(first.winner_rank, 1);
   assert.equal(first.top1_hit, true);
+  assert.equal(first.top2_hit, true);
+  assert.equal(first.top3_hit, true);
   assert.ok(Math.abs(first.log_loss - (-Math.log(0.7))) < 1e-10);
   assert.ok(Math.abs(first.brier_score - 0.18) < 1e-10);
 
