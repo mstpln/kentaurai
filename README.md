@@ -3,18 +3,18 @@
 Private V85/V86 data, analysis backend and read-only intelligence interface with a public codebase.
 
 ## Current build
-Version 0.6.0 contains the verified official/X-Labs data foundation, resumable history pipelines, the full sealed v3 V85/V86 analysis stack, replay/calibration, post-race learning diagnostics, private workflow/coverage observability and the read-only PWA. Real provider payloads and private reference/editorial/contact data remain outside the public repository; GitHub contains code, migrations, tests, documentation and synthetic fixtures only.
+Version 0.6.0 contains the verified official/X-Labs data foundation, resumable history pipelines, the external two-step V85/V86 analysis workflow, the historical sealed-v3 stack, replay/calibration, post-race learning diagnostics, private workflow/coverage observability and the read-only PWA. Real provider payloads and private reference/editorial/contact data remain outside the public repository; GitHub contains code, migrations, tests, documentation and synthetic fixtures only.
 
 F4 is production-live. The default analysis workflow remains `ANALYSIS_WORKFLOW_MODE=v3`; the production entrypoint is `src/worker-v077.js`, a private-app performance wrapper around the F4 `worker-v076.js` cutover layer. Production release #62 is the currently deployed baseline. It keeps the release #61 performance layer and fixes the private v3 analysis round picker by removing the two legacy analysis UI scripts from the default v3 app rendering. The app now uses the v3 `/app/api/settings/f3-rounds` picker path while legacy generation routes remain intentionally disabled. Historical v1/v2 analysis reads remain available, new legacy creation is disabled in v3 mode, and `legacy_v2` exists only as a controlled release rollback value.
 
-### Default v3 analysis workflow
-1. KentaurAI generates a deterministic round-scoped pre-market analysis pack with no current market.
-2. The external AI performs Step 1 and KentaurAI validates and server-seals the result.
-3. New pre-market facts after sealing require a versioned Step 1 revision before market exposure.
-4. KentaurAI generates a self-contained Step 2 bundle containing the exact persisted sealed Step 1 plus the verified market pack. Step 2 does not rely on conversation memory.
-5. The external AI interprets market disagreement/value confidence only. It cannot submit canonical decision probabilities or system construction.
-6. KentaurAI persists the versioned canonical decision and the deterministic optimizer builds the authoritative system with exactly three spikes.
-7. Default optimizer policy targets 150-250 SEK with the game-specific line price; it may spend less when added rows provide no additional P(8) coverage.
+### Default external AI analysis workflow
+1. Select one complete V85/V86 round and AI provider in the private app.
+2. Step 1 exports a deterministic market-blind analysis pack. The user uploads it to ChatGPT or Claude together with the Step 1 instruction and performs the full blind strength/scenario/probability analysis there.
+3. Step 2 exports verified current market data plus the round's system policy for the same selected round. The user uploads it in the same AI conversation and the AI completes value analysis and builds the final system.
+4. Step 1 is not imported or server-sealed during the normal analysis workflow. Once Step 2 market data is visible, the blind probabilities/ranking/ABCD remain the baseline rather than being silently rewritten by the market.
+5. System registration is separate and may happen later. The user selects the round again, downloads an import context, copies the registration instruction into the AI conversation, and imports the generated JSON.
+6. KentaurAI validates canonical identities and exactly three singleton spike legs, then deterministically calculates row count and cost from selections and the configured line price before persistence.
+7. Registered analysis/system data feeds the existing Spel, post-race and performance tracking paths. The older sealed lock/decision/optimizer stack remains historical/compatibility code rather than the primary UI path.
 
 C4 named X-Labs trip labels remain optional/gated; the v3 workflow uses only validated continuous evidence while unsupported labels remain null.
 
@@ -40,7 +40,7 @@ The current build contains:
 - Spel area with Översikt / V85 / V86 plus saved-round post-race detail
 - F1 replay/calibration and ablation evidence with chronological leakage guards
 - F2 v3 post-race probability/system diagnostics, with repeated misses recorded as candidate learning only and no automatic model changes
-- F3 guided private v3 workflow plus sanitized coverage/backfill observability
+- guided private external-AI workflow plus sanitized coverage/backfill observability
 - complete presentation of currently stored measurement families on entity/start detail, while internal provenance remains backend-only
 - verified X-Labs race-telemetry capture, normalization and raw-vs-normalized checks; exact payloads remain private
 - scheduled previous-day X-Labs catch-up for stored V85/V86 game legs
