@@ -1,5 +1,10 @@
 import { stableFeatureJson } from './analysis-v3-foundations.js';
-import { createMarketPackV3, normalizeMarketPackOptionsV3 } from './analysis-market-pack-v3.js';
+import {
+  ANALYSIS_MARKET_PACK_V3_CONTRACT,
+  ANALYSIS_MARKET_PACK_V3_VERSION,
+  createMarketPackV3,
+  normalizeMarketPackOptionsV3
+} from './analysis-market-pack-v3.js';
 
 export const ANALYSIS_DECISION_PROBABILITY_CONTRACT = 'kentaurai-decision-probability-v1';
 export const ANALYSIS_DECISION_PROBABILITY_VERSION = 'decision-probability-v1-e1';
@@ -66,6 +71,7 @@ function normalizePublicProxy(marketLeg, predictionIds) {
   }
 
   const complete = quality === 'verified_complete_winner_odds_v1';
+  if (complete && method !== 'normalized_inverse_decimal_winner_odds') throw new Error(`leg ${marketLeg.leg_number} verified public proxy method is unsupported`);
   let proxySum = 0;
   for (const id of predictionIds) {
     const raw = byId.get(id)?.market_win_probability_proxy;
@@ -100,6 +106,10 @@ function reliabilityForLeg(marketLeg, publicProxy) {
 export async function buildCanonicalDecisionProbabilityV1({ lockDocument, marketPack, generatedAt = new Date().toISOString() } = {}) {
   if (!lockDocument || typeof lockDocument !== 'object' || Array.isArray(lockDocument)) throw new Error('sealed Step 1 lock document is required');
   if (!marketPack?.manifest) throw new Error('D4 market pack is required');
+  if (lockDocument.contract_version !== 'kentaurai-step1-lock-v1') throw new Error('sealed Step 1 lock contract is unsupported');
+  if (marketPack.manifest.contract_version !== ANALYSIS_MARKET_PACK_V3_CONTRACT || marketPack.manifest.pack_version !== ANALYSIS_MARKET_PACK_V3_VERSION) {
+    throw new Error('D4 market pack contract/version is required');
+  }
 
   const roundId = requiredText(lockDocument.round_id, 'lock round_id');
   const lockId = requiredText(lockDocument.lock_id, 'lock_id', 160);
@@ -134,6 +144,9 @@ export async function buildCanonicalDecisionProbabilityV1({ lockDocument, market
 
     const marketLeg = marketLegs.get(legNumber);
     if (!marketLeg || marketLeg.race_id !== raceId) throw new Error(`leg ${legNumber} market race identity does not match the sealed Step 1 lock`);
+    if (marketLeg.round_id !== roundId || exactIso(marketLeg.cutoff, `leg ${legNumber} cutoff`) !== marketCutoff) {
+      throw new Error(`leg ${legNumber} market round/cutoff does not match the decision parent`);
+    }
     if (marketLeg.lock_id !== lockId || marketLeg.lock_hash !== lockHash || marketLeg.market_fingerprint !== marketFingerprint) {
       throw new Error(`leg ${legNumber} market binding does not match the decision parent`);
     }
@@ -233,9 +246,58 @@ function storedRunMetadata(row, decision, reused) {
   };
 }
 
+async function assertCanonicalDecisionForPersistenceV1(decision) {
+  if (!decision || decision.contract_version !== ANALYSIS_DECISION_PROBABILITY_CONTRACT) throw new Error('canonical E1 decision is required');
+  if (decision.decision_probability_version !== ANALYSIS_DECISION_PROBABILITY_VERSION || decision.policy_version !== ANALYSIS_DECISION_POLICY_VERSION) {
+    throw new Error('unsupported E1 decision/policy version');
+  }
+  if (decision.policy?.decision_source !== 'blind_probability'
+    || decision.policy?.market_blend_applied !== false
+    || decision.policy?.ownership_used_as_win_probability !== false) {
+    throw new Error('E1 v1 policy must remain decision=blind without ownership substitution');
+  }
+  if (!Array.isArray(decision.legs) || decision.legs.length !== 8) throw new Error('canonical E1 decision must contain exactly eight legs');
+  for (let index = 0; index < decision.legs.length; index += 1) {
+    const leg = decision.legs[index];
+    if (Number(leg?.leg_number) !== index + 1 || !Array.isArray(leg?.entries) || !leg.entries.length) {
+      throw new Error('canonical E1 decision legs must be ordered 1 through 8 with entries');
+    }
+    let sum = 0;
+    const ids = new Set();
+    for (const entry of leg.entries) {
+      const id = requiredText(entry?.race_entry_id, 'race_entry_id', 200);
+      if (ids.has(id)) throw new Error(`leg ${leg.leg_number} repeats race_entry_id ${id}`);
+      ids.add(id);
+      const blind = finiteProbability(entry.blind_probability, `leg ${leg.leg_number} blind_probability`);
+      const canonical = finiteProbability(entry.decision_probability, `leg ${leg.leg_number} decision_probability`);
+      if (canonical !== blind) throw new Error('E1 v1 decision_probability must equal blind_probability exactly');
+      if (leg.public_proxy_quality !== 'verified_complete_winner_odds_v1' && entry.public_win_probability_proxy != null) {
+        throw new Error('weak/unavailable public proxy must remain null');
+      }
+      if (entry.public_win_probability_proxy != null) finiteProbability(entry.public_win_probability_proxy, `leg ${leg.leg_number} public proxy`);
+      sum += canonical;
+    }
+    if (Math.abs(sum - 1) > PROBABILITY_TOLERANCE) throw new Error(`leg ${leg.leg_number} decision probabilities must sum to 1`);
+  }
+  const fingerprintInput = {
+    contract_version: decision.contract_version,
+    decision_probability_version: decision.decision_probability_version,
+    policy_version: decision.policy_version,
+    round_id: requiredText(decision.round_id, 'round_id'),
+    lock_id: requiredText(decision.lock_id, 'lock_id', 160),
+    lock_hash: requiredText(decision.lock_hash, 'lock_hash', 160),
+    market_fingerprint: requiredText(decision.market_fingerprint, 'market_fingerprint', 160),
+    market_cutoff: exactIso(decision.market_cutoff, 'market_cutoff'),
+    legs: decision.legs
+  };
+  const expected = await sha256Text(stableFeatureJson(fingerprintInput));
+  if (decision.decision_fingerprint !== expected) throw new Error('decision_fingerprint does not match canonical E1 content');
+  return true;
+}
+
 export async function persistCanonicalDecisionProbabilityV1(env, decision, options = {}) {
   if (!env?.DB) throw new Error('DB is not configured');
-  if (!decision || decision.contract_version !== ANALYSIS_DECISION_PROBABILITY_CONTRACT) throw new Error('canonical E1 decision is required');
+  await assertCanonicalDecisionForPersistenceV1(decision);
   const id = decisionIdFromFingerprint(decision.decision_fingerprint);
   const decisionJson = stableFeatureJson(decision);
   const existing = await env.DB.prepare('SELECT * FROM analysis_decision_runs WHERE id=? LIMIT 1').bind(id).first();
