@@ -12,20 +12,21 @@
 
 ## External AI analysis exchange
 1. KentaurAI is the factual database, deterministic calculation and persistence layer. The normal product does not run a separate autonomous AI model inside the Worker.
-2. The live default is the v3 exchange: round-scoped deterministic pre-market pack -> external AI Step 1 -> server-sealed Step 1 lock -> optional late-fact revision -> self-contained Step 2 bundle containing the exact sealed lock and verified market pack -> external AI Step 2 interpretation -> canonical decision persistence -> deterministic exact-three-spike optimizer.
-3. Step 1 is genuinely server-sealed before current market exposure. A v3 market pack is available only for the newest non-superseded lock and fails closed if later pre-market facts require revision.
-4. New Step 2 work must not depend on conversation memory. The F4 bundle carries the exact sealed Step 1 document plus the bound market files so the Step 2 interpretation is reproducible from persisted inputs.
-5. Step 2 is interpretation only. It may assess market disagreement, maturity, reliability and value confidence, but it cannot submit decision probability, market facts, system selections, spike choices, row counts or budgets.
-6. Canonical decision probability is explicitly versioned. In the current production policy no fitted market blend has passed its evidence gate, so decision probability remains equal to sealed blind probability.
-7. The canonical E2 optimizer is authoritative for all newly created V85/V86 systems. It creates exactly three singleton spike legs and calculates selections, rows, cost and estimated P(8) deterministically under the configured policy.
-8. The normal main-system policy targets 150-250 SEK with the game-specific line price. It may spend below the target band if additional rows add no probability coverage; the budget never relaxes the exact-three-spike rule.
-9. External rankings/editorial signals are read only after the own Step 1 + market synthesis and never rewrite Step 1.
-10. Stable IDs, fingerprints, as-of timestamps and explicit parent lineage bind pack, lock, market, decision, optimizer and integrated analysis. Exact retries are idempotent; changed content requires a new immutable identity.
-11. Legacy v1/v2 analyses, systems and routes remain readable for historical compatibility. New legacy creation through old combined/declared-unsealed submission routes is disabled in the v3 default.
-12. The old combined v2 process may remain in source/tests only as compatibility/rollback code. Its declared-unsealed blindness and historical two-spike V85-main allowance are not valid policies for newly created systems.
-13. Production default is ANALYSIS_WORKFLOW_MODE=v3. legacy_v2 is an explicit rollback mode requiring the normal reviewed production release process; it is not an automatic runtime fallback.
-14. OpenAI and Anthropic remain supported external analysis providers. Provider/model attribution is explicit and private analyses remain in private D1, never in public GitHub.
-15. F1 replay/calibration and F2 post-race diagnostics produce evidence. Model/rule changes still require repeated supporting evidence; one round never changes weights automatically.
+2. The normal live workflow uses two external-AI steps. Step 1 exports a deterministic market-blind pack for one selected round plus a provider-specific instruction; the user performs the blind analysis in ChatGPT or Claude.
+3. Step 2 exports verified current market data plus the server-owned system policy for that same selected round. It is loaded into the same AI conversation so the AI can compare its blind assessment with the market and build the final system.
+4. Step 1 probabilities, ranking and ABCD are the market-blind baseline. Once market data is shown, Step 2 may flag suspected mistakes but must not silently rewrite those fields because of the market.
+5. KentaurAI does not require Step 1 to be imported or server-sealed before Step 2 in the normal user workflow. The older sealed v3 lock/decision/optimizer stack remains historical/compatibility code, not the primary UI path.
+6. The external AI owns interpretation and final system selection. It may explain scenario, race shape, statistical evidence, value, spikes, covers and accepted risks.
+7. Every registered V85/V86 system must contain exactly three singleton spike legs in three different legs. Multi-selection legs are never spikes.
+8. System registration is a separate later workflow. The user selects the round again, downloads a round-scoped import context, copies the registration instruction into the AI conversation, and imports the generated JSON back into KentaurAI.
+9. KentaurAI validates canonical round/race/entry identities and recomputes spike count, row count and cost from the selections and configured line price. The AI must not submit those arithmetic fields as authoritative values.
+10. Registered blind probabilities, analysis text, systems and selections are persisted into the existing analysis/system tables so Spel, post-race review and performance tracking can use them.
+11. Exact retries are idempotent by stable submission identity and payload digest. Changed content requires a new submission id.
+12. Legacy v1/v2 and sealed-v3 artifacts remain readable for historical compatibility. Old combined/declared-unsealed creation paths are not the normal workflow.
+13. OpenAI and Anthropic remain supported external providers. Provider/model attribution is explicit and private analyses remain in private D1, never in public GitHub.
+14. External editorial/ranking signals are considered only after the own blind analysis and market comparison and never replace verified facts.
+15. F1 replay/calibration and F2 post-race diagnostics remain evidence layers. Model/rule changes still require repeated supporting evidence; one round never changes weights automatically.
+
 ## Interface direction
 1. Horse, trainer and driver remain primary detail entities, with V85/V86 system/performance history available in a dedicated Spel area.
 2. Bottom navigation is fixed as **Trend -> Tränare -> Hästar -> Kuskar -> Bana -> Spel**.
@@ -76,7 +77,7 @@
 18. A daily X-Labs job whose official live prerequisite never existed may close cleanly once its target date becomes older than yesterday. This closes stale orchestration work only; it does not claim that X-Labs telemetry was checked or unavailable.
 
 ## Spel and post-race analysis
-1. Newly created V85/V86 systems come only from the canonical v3 optimizer and always contain exactly three one-horse spikes in three different legs. Historical legacy systems remain readable even if an older policy allowed a different V85-main spike count.
+1. Newly registered V85/V86 systems may be selected by the external AI, but KentaurAI accepts them only after strict validation that they contain exactly three one-horse spikes in three different legs. Historical legacy systems remain readable even if an older policy allowed a different V85-main spike count.
 2. System row count equals the product of selections across all eight legs.
 3. ABCD represents relative winning strength, not value; value is assessed separately against market percentage.
 4. Saved main/alternative systems are preserved. Overview/list metrics use a deterministic primary system while round detail can inspect all saved proposals.
