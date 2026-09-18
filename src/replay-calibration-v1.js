@@ -415,6 +415,7 @@ async function loadSportsTargets(env, config) {
     targets.push({
       target_id: row.race_id,
       target_group_id: row.race_id,
+      target_group_at: exactIso(row.scheduled_start_at, 'race scheduled_start_at'),
       target_at: exactIso(row.scheduled_start_at, 'race scheduled_start_at'),
       race_id: row.race_id,
       winner_entry_id: winnerRows[0].race_entry_id,
