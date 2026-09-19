@@ -1,6 +1,6 @@
 import { stableId } from './ids.js';
 import { canonicalOptimizerPolicyForRound } from './analysis-optimizer-policy-config.js';
-import { loadExternalRankingsV3, loadMarketDeadlineV3, loadVerifiedMarketRowsV3 } from './analysis-market-pack-v3.js';
+import { loadMarketDeadlineV3, loadVerifiedMarketRowsV3 } from './analysis-market-pack-v3.js';
 
 export const EXTERNAL_ANALYSIS_FLOW_VERSION = 'external-analysis-v1';
 export const MARKET_INPUT_CONTRACT = 'kentaurai-market-input-v1';
@@ -222,8 +222,6 @@ export async function buildMarketInput(env, roundId, asOf = null) {
   const requestedAt = validIso(asOf) ? new Date(Date.parse(asOf)).toISOString() : new Date().toISOString();
   const deadline = await loadMarketDeadlineV3(env, roundId, requestedAt);
   const history = await loadVerifiedMarketRowsV3(env, roundId, deadline.cutoff);
-  const externalRankings = await loadExternalRankingsV3(env, roundId, deadline.cutoff);
-
   const latestBetting = new Map();
   for (const row of history.betting || []) latestBetting.set(row.race_entry_id, row);
   const latestOdds = new Map();
@@ -254,15 +252,12 @@ export async function buildMarketInput(env, roundId, asOf = null) {
     }))
   };
 
-  const policy = normalizePolicy(await canonicalOptimizerPolicyForRound(env, roundId));
   const fingerprintInput = {
     contract_version: MARKET_INPUT_CONTRACT,
     round_id: identity.round.id,
     game_type: identity.round.game_type,
-    system_policy: policy,
     market,
     market_history: history,
-    external_rankings: externalRankings,
     entry_identity: identity.legs.map((leg) => ({
       leg_number: leg.leg_number,
       race_id: leg.race_id,
@@ -277,10 +272,8 @@ export async function buildMarketInput(env, roundId, asOf = null) {
   return {
     contract_version: MARKET_INPUT_CONTRACT,
     round: identity.round,
-    system_policy: policy,
     market,
     market_history: history,
-    external_rankings: externalRankings,
     entry_map: identity.legs,
     generated_at: new Date().toISOString(),
     market_fingerprint: marketFingerprint,
