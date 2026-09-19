@@ -397,7 +397,10 @@ async function loadPropositionsAsOf(env, raceIds, asOf) {
 
 function editorialAllowed(row) {
   const combined = `${row.signal_type || ''} ${row.value_text || ''}`;
-  return !EDITORIAL_MARKET_RE.test(combined);
+  if (EDITORIAL_MARKET_RE.test(combined)) return false;
+  if (String(row.fact_or_opinion || '').toLowerCase() === 'fact') return true;
+  const role = String(row.speaker_role || '').trim().toLowerCase();
+  return role === 'trainer' || role === 'driver';
 }
 
 async function loadEditorialSignalsAsOf(env, rows, asOf) {
@@ -411,7 +414,7 @@ async function loadEditorialSignalsAsOf(env, rows, asOf) {
     const horseGroup = [...new Set(entryGroup.map((entryId) => entryToHorse.get(entryId)).filter(Boolean))];
     const horseClause = horseGroup.length ? ` OR ei.horse_id IN (${placeholders(horseGroup)})` : '';
     const { results } = await env.DB.prepare(`
-      SELECT ei.race_entry_id,ei.horse_id,ei.published_at,ei.rights_status,es.signal_type,es.value_text,
+      SELECT ei.race_entry_id,ei.horse_id,ei.published_at,ei.rights_status,ei.speaker_role,es.signal_type,es.value_text,
              es.polarity,es.strength,es.fact_or_opinion,es.confidence,sr.fetched_at
       FROM editorial_signals es
       JOIN editorial_items ei ON ei.id=es.editorial_item_id
