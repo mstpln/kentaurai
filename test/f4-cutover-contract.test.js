@@ -39,7 +39,7 @@ test('documentation agrees on the six-step external workflow, exact3 registratio
   assert.match(decisions, /Step 6 is system registration/i);
   assert.match(decisions, /registered separately in Step 5/i);
   assert.match(buildState, /older sealed-v3.*compatibility|sealed-v3.*compatibility/i);
-  assert.match(readme, /System registration is separate/i);
+  assert.match(readme, /System registration (?:is|remains) separate/i);
 });
 
 test('active external prompts keep Step 1 blind and Step 2 market-only', () => {
