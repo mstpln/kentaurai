@@ -778,13 +778,13 @@ export async function importRecordedSystem(env, payload) {
   statements.push(env.DB.prepare(
     'INSERT INTO analysis_external_runs ' +
     '(id,game_round_id,model_version_id,main_system_id,contract_version,flow_version,prompt_version,provider,model,' +
-    'step1_pack_id,step1_pack_as_of,step1_facts_fingerprint,step2_market_fingerprint,step2_market_cutoff,step2_generated_at,' +
+    'step1_pack_id,step1_pack_as_of,step1_generated_at,step1_facts_fingerprint,step2_market_fingerprint,step2_market_cutoff,step2_generated_at,' +
     'analysis_blindness,import_timing,learning_eligibility,payload_digest,supersedes_run_id,created_at) ' +
-    'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+    'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
   ).bind(
     externalRunId, roundId, modelVersionId, mainSystemId, EXTERNAL_ANALYSIS_RUN_CONTRACT,
     EXTERNAL_ANALYSIS_FLOW_VERSION, EXTERNAL_ANALYSIS_PROMPT_VERSION, producer.provider, producer.model,
-    step1.packId, step1.asOf, step1.factsFingerprint, step2.marketFingerprint, step2.cutoff,
+    step1.packId, step1.asOf, step1.generatedAt, step1.factsFingerprint, step2.marketFingerprint, step2.cutoff,
     step2.generatedAt, analysisBlindness, importTiming, learningEligibility, digest,
     previousRun?.id || null, createdAt
   ));
