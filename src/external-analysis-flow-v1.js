@@ -412,6 +412,7 @@ export function getRegistrationPrompt(provider = 'openai') {
     '- raw_rank ska vara unik 1..N och ABCD ska vara A/B/C/D.',
     '- Matcha hästar med startnummer + namn mot importunderlaget och kopiera race_entry_id exakt. Ingen fuzzy gissning.',
     '- systems måste innehålla minst ett main-system. Varje system ska täcka alla 8 avdelningar och ge exakt 3 singleton-avdelningar; KentaurAI räknar dessa som spikar.',
+    '- Registrera det faktiskt färdiga/spelade systemet även om dess beräknade kostnad ligger utanför KentaurAI:s normala målbudget; bygg inte om systemet för att passa målbudgeten.',
     '- Lägg INTE in row_count, budget_sek, cost_sek, line_price_sek, own_probability eller market_percent i systems/selections. KentaurAI räknar/hämtar dessa deterministiskt.',
     '- Om något inte kan mappas entydigt: skapa ingen partiell fil. Säg i chatten vad som blockerar.'
   ].join('\\n');
