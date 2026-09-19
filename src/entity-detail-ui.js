@@ -1,3 +1,24 @@
+import { enhanceEntityDetailStatisticsHtmlV2 } from './entity-detail-statistics-ui-v2.js';
+
+const SUCCESS_RENDER = "host.innerHTML=content(data,s,c)+'<div class=\"entity-detail-controls\">'+toolbar(s,c)+panel(s,c)+'</div>';bind(host,s,c)";
+const ORDERED_RENDER = "host.innerHTML=content(data,s,c)+'<div class=\"entity-detail-controls\">'+toolbar(s,c)+panel(s,c)+'</div>';const scoreNode=host.querySelector('.entity-detail-score');const controlsNode=host.querySelector('.entity-detail-controls');if(scoreNode&&controlsNode)scoreNode.after(controlsNode);bind(host,s,c)";
+const TRAINER_SPECIALS = "if(c.market)specials+=special('Resultat som favorit',data.favoriteResults,'Marknadsrank 1 vid sista giltiga snapshot före spelstopp')+special('Resultat som skräll',data.longshotResults,'Marknadsandel ≤ '+num(data.definitions?.longshotPercentMax??5)+'% vid spelstopp');return score(data,c)";
+const TRAINER_SPECIALS_WITH_HOME = "if(s.page==='trainers')specials+=special('Hemmabana',data.homeTrackResults,'Senaste verifierade officiella hemmabana')+special('Övriga banor',data.otherTrackResults,'Endast tränare med verifierad hemmabana');if(c.market)specials+=special('Resultat som favorit',data.favoriteResults,'Marknadsrank 1 vid sista giltiga snapshot före spelstopp')+special('Resultat som skräll',data.longshotResults,'Marknadsandel ≤ '+num(data.definitions?.longshotPercentMax??5)+'% vid spelstopp');return score(data,c)";
+const HORSE_AGE_OPTIONS = "if(!values.length&&s.options?.birthYears?.length){const y=new Date().getFullYear();values=[...new Set(s.options.birthYears.map(v=>y-Number(v)).filter(v=>v>=2&&v<=30))].sort((a,b)=>a-b)}";
+const HORSE_AGE_OPTIONS_FOR_YEAR = "if(!values.length&&s.options?.birthYears?.length){const y=Number(s.filters.year)||new Date().getFullYear();values=[...new Set(s.options.birthYears.map(v=>y-Number(v)).filter(v=>v>=2&&v<=30))].sort((a,b)=>a-b)}";
+const LEGACY_CLEANUP = "function cleanup(page,s){document.getElementById('trainerDetailStatisticsV2')?.remove();document.getElementById('trainerStatsBuildD')?.remove();document.getElementById('driverStatsBuildC')?.remove();if(page==='horses'){captureHorseExtra(s);document.getElementById('horseStatsBuildB')?.remove()}if(page==='trainers')document.querySelector('.entity-stat-filter-shell')?.remove();if(page==='drivers'){document.querySelector('.grid.grid-3')?.remove();document.querySelector('.breakdown-grid.stat-section')?.remove()}}";
+const COMPLETE_CLEANUP = "function cleanup(page,s){document.getElementById('trainerDetailStatisticsV2')?.remove();document.getElementById('trainerStatsBuildD')?.remove();document.getElementById('driverStatsBuildC')?.remove();if(page==='horses'){captureHorseExtra(s);document.getElementById('horseStatsBuildB')?.remove()}if(page==='trainers')document.querySelector('.entity-stat-filter-shell')?.remove();if(page==='drivers'){document.querySelector('.grid.grid-3')?.remove();document.querySelector('.breakdown-grid.stat-section')?.remove()}app.querySelector(':scope > .data-groups')?.remove()}";
+
+
+const canonicalDetailCss = '<style id="kentaurai-entity-detail-canonical-style">' +
+'#horseStatsBuildB,#trainerStatsBuildD,#driverStatsBuildC{display:none!important}' +
+'</style>';
+
+const externalEvidenceCss = '<style id="kentaurai-external-evidence-ui-style">' +
+'.external-evidence-groups,.external-interview-list{display:grid;gap:14px}.external-evidence-section{overflow:hidden}.external-evidence-table-wrap{overflow-x:auto}.external-evidence-table{width:100%;border-collapse:collapse}.external-evidence-table th,.external-evidence-table td{padding:10px 12px;border-bottom:1px solid var(--line-soft);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}.external-evidence-table th:first-child,.external-evidence-table td:first-child{text-align:left}.external-evidence-table th{font-size:9px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);background:#10100f}.external-evidence-table td{font-size:12px}.external-evidence-table tr:last-child td{border-bottom:0}.external-interview-card{overflow:hidden}.external-interview-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.external-interview-head>span{font-size:10px;color:var(--muted);white-space:nowrap}.external-interview-horse{font-size:10px;color:var(--accent-soft);margin-bottom:2px}.external-interview-summary{font-size:12px;line-height:1.55;color:#c7c0b6;margin-top:10px}.external-signal-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}.external-signal{border:1px solid var(--line-soft);border-radius:9px;padding:9px 10px;font-size:11px;line-height:1.45}.external-signal-head{display:flex;justify-content:space-between;gap:8px;margin-bottom:4px}.external-signal-head span{font-size:9px;color:var(--muted)}.external-signal-evidence{margin-top:4px;color:var(--muted);font-size:10px}' +
+'@media(max-width:620px){.external-signal-grid{grid-template-columns:1fr}.external-evidence-table th,.external-evidence-table td{padding:9px 7px;font-size:9px}.external-evidence-table th{font-size:7px}}' +
+'</style>';
+
 function runtimeClient() {
   function evidenceDate(value) {
     if (!value) return '—';
@@ -125,9 +146,27 @@ function runtimeClient() {
   };
 }
 
-export function enhanceEntityDetailRuntimeFinalHtml(html) {
-  const text = String(html);
-  if (text.includes('kentaurai-entity-detail-runtime-final')) return text;
-  const script = '<script id="kentaurai-entity-detail-runtime-final">(' + runtimeClient.toString() + ')();</script>';
-  return text.replace('</body>', script + '</body>');
+export function enhanceEntityDetailUiHtml(html) {
+  const source = String(html);
+  if (source.includes('kentaurai-entity-detail-ui-runtime') && source.includes('kentaurai-entity-detail-canonical-style')) return source;
+  let enhanced = enhanceEntityDetailStatisticsHtmlV2(source);
+  if (!enhanced.includes(SUCCESS_RENDER)) throw new Error('entity detail UI composition target is missing');
+  if (!enhanced.includes(TRAINER_SPECIALS)) throw new Error('trainer detail specialist target is missing');
+  if (!enhanced.includes(HORSE_AGE_OPTIONS)) throw new Error('horse detail age-option target is missing');
+  if (!enhanced.includes(LEGACY_CLEANUP)) throw new Error('legacy detail cleanup target is missing');
+  enhanced = enhanced.replace(TRAINER_SPECIALS, TRAINER_SPECIALS_WITH_HOME);
+  enhanced = enhanced.replace(HORSE_AGE_OPTIONS, HORSE_AGE_OPTIONS_FOR_YEAR);
+  enhanced = enhanced.replace(LEGACY_CLEANUP, COMPLETE_CLEANUP);
+  enhanced = enhanced.replace(SUCCESS_RENDER, ORDERED_RENDER);
+  if (!enhanced.includes('kentaurai-entity-detail-canonical-style')) {
+    enhanced = enhanced.replace('</head>', canonicalDetailCss + '</head>');
+  }
+  if (!enhanced.includes('kentaurai-external-evidence-ui-style')) {
+    enhanced = enhanced.replace('</head>', externalEvidenceCss + '</head>');
+  }
+  if (!enhanced.includes('kentaurai-entity-detail-ui-runtime')) {
+    const finalScript = '<script id="kentaurai-entity-detail-ui-runtime">(' + runtimeClient.toString() + ')();</script>';
+    enhanced = enhanced.replace('</body>', finalScript + '</body>');
+  }
+  return enhanced;
 }
