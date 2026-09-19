@@ -509,7 +509,9 @@ test('recorded-system import reproduces audited Step 2 exports created with the 
 
   const result = await importRecordedSystem(env, payload);
   assert.equal(result.reused, false);
-  assert.equal(result.step2MarketFingerprint, legacyFingerprint);
+  const stored = db.prepare("SELECT config_json FROM model_versions WHERE id=?").get(result.modelVersionId);
+  const config = JSON.parse(stored.config_json);
+  assert.equal(config.recordedSystem.step2_market_fingerprint, legacyFingerprint);
 });
 
 test('later registration can reproduce Step 1/2 provenance after round status changes', async () => {
