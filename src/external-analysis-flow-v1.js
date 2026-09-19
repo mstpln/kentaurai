@@ -549,9 +549,6 @@ function normalizeSystems(payloadSystems, expectedLegs, predictionMap, policy) {
     const rowCount = [...byLeg.values()].reduce((rows, items) => rows * items.length, 1);
     if (!Number.isSafeInteger(rowCount) || rowCount < 1) throw new Error('system row count is not a safe positive integer');
     const costSek = Math.round(rowCount * policy.line_price_sek * 100) / 100;
-    if (costSek > policy.max_budget_sek + 0.009) {
-      throw new Error('system cost exceeds configured max budget');
-    }
     const coverageByLeg = [...byLeg.entries()].map(([leg, items]) => ({
       leg,
       probability: items.reduce((sum, item) => sum + Number(predictionMap.get(item.raceEntryId)?.winProbability || 0), 0)
