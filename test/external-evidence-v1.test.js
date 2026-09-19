@@ -97,6 +97,22 @@ test('external evidence import is append-only, idempotent and links one intervie
   assert.equal(step3.trainers.find((row)=>row.trainer_id==='trainer_1').interview_history.length,1);
 });
 
+test('Step 3 current equipment context excludes updates captured after the round deadline', async () => {
+  const {env,db}=createTestEnv();seedRound(db);
+  db.prepare("INSERT INTO source_records (id,source_type,external_id,fetched_at,quality_status) VALUES ('official_late','official_provider','late','2099-03-01T12:58:00Z','normalized_verified_subset')").run();
+  db.prepare("INSERT INTO equipment (id,race_entry_id,shoes_front,shoes_rear,barefoot_front,barefoot_rear,sulky_type,source_record_id) VALUES ('eq_late','entry_1','shod','shod',0,0,'regular','official_late')").run();
+
+  const registrationContext=await buildExternalEvidenceImportContext(env,'round_x');
+  const registrationEntry=registrationContext.entries.find((row)=>row.race_entry_id==='entry_1');
+  assert.equal(registrationEntry.external_stat_context.current_balance.label,'Skor runt om');
+  assert.equal(registrationEntry.external_stat_context.current_wagon.label,'Vanlig vagn');
+
+  const step3=await buildStep3Context(env,'round_x');
+  const step3Horse=step3.horses.find((row)=>row.horse_id==='horse_1');
+  assert.equal(step3Horse.current_round_context.current_balance.label,'Barfota runt om');
+  assert.equal(step3Horse.current_round_context.current_wagon.label,'Amerikansk vagn');
+});
+
 test('Step 3 historical context excludes evidence that became available after the round deadline', async () => {
   const {env,db}=createTestEnv();seedRound(db);
   await importExternalEvidence(env,payload());
