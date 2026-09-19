@@ -15,6 +15,7 @@ import {
 } from '../src/external-analysis-flow-v1.js';
 import { createPreMarketAnalysisPackV3 } from '../src/analysis-pack-v3.js';
 import { runNextPostRaceReviewV2 } from '../src/post-race-review-v2.js';
+import { loadExternalDecisionReplayEvidenceV1 } from '../src/external-analysis-evidence-v1.js';
 import { runDecisionReplayV1 } from '../src/replay-calibration-v1.js';
 import { createTestEnv } from './helpers/d1.js';
 
@@ -316,8 +317,13 @@ test('external registered system is the F1/F2 evidence lineage instead of stale 
   });
   assert.equal(replay.target_count, 8);
   assert.equal(replay.evidence_target_count, 8);
-  assert.equal(replay.system_diagnostics.length, 1);
-  assert.equal(replay.system_diagnostics[0].external_run_id, imported.externalRunId);
+  const directEvidence = await loadExternalDecisionReplayEvidenceV1(env, {
+    from: '2099-09-20T00:00:00Z',
+    to: '2099-09-21T00:00:00Z',
+    max_targets: 10
+  });
+  assert.equal(directEvidence.systemDiagnostics.length, 1);
+  assert.equal(directEvidence.systemDiagnostics[0].external_run_id, imported.externalRunId);
   assert.ok(replay.version_metadata.decision_lineages.some((lineage) =>
     lineage.version_metadata?.lineage_type === 'external_declared_unsealed'
     && lineage.version_metadata?.external_run_id === imported.externalRunId
@@ -334,17 +340,17 @@ test('post-deadline registration is retained for diagnostics but excluded from a
   assert.equal(imported.importTiming, 'post_race_recovery');
   assert.equal(imported.learningEligibility, 'manual_review_required');
   const lineage = db.prepare("SELECT import_timing,learning_eligibility,analysis_blindness FROM analysis_external_runs WHERE id=?").get(imported.externalRunId);
-  assert.deepEqual(lineage, {
-    import_timing: 'post_race_recovery',
-    learning_eligibility: 'manual_review_required',
-    analysis_blindness: 'declared_unsealed_post_race_import'
-  });
+  assert.equal(lineage.import_timing, 'post_race_recovery');
+  assert.equal(lineage.learning_eligibility, 'manual_review_required');
+  assert.equal(lineage.analysis_blindness, 'declared_unsealed_post_race_import');
 
   settleRound(db);
   const review = await runNextPostRaceReviewV2(env, { roundId: ROUND_ID });
   assert.equal(review.externalRunId, imported.externalRunId);
   const learning = db.prepare("SELECT DISTINCT learning_eligible,learning_classification FROM post_race_reviews_external_v1 WHERE external_run_id=?").all(imported.externalRunId);
-  assert.deepEqual(learning, [{ learning_eligible: 0, learning_classification: 'no_change' }]);
+  assert.equal(learning.length, 1);
+  assert.equal(learning[0].learning_eligible, 0);
+  assert.equal(learning[0].learning_classification, 'no_change');
 
   const replay = await runDecisionReplayV1(env, {
     from: '2099-09-20T00:00:00Z',
