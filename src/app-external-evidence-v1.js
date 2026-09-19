@@ -1,7 +1,7 @@
 function evidenceUiClient(){
   function e(value){return String(value==null?'':value).replace(/[&<>"']/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]})}
   async function jf(url,options){const o=options||{};o.headers=Object.assign({accept:'application/json'},o.headers||{});const r=await fetch(url,o);const d=await r.json().catch(function(){return {}});if(!r.ok)throw new Error(d.message||d.error||'Begäran misslyckades');return d}
-  async function copy(button,url){const old=button.textContent;button.disabled=true;try{const d=await jf(url);if(!d.prompt)throw new Error('Instruktionen saknas');await navigator.clipboard.writeText(d.prompt);button.textContent='✓ Kopierat'}catch{button.textContent='Kunde inte kopiera'}finally{setTimeout(function(){button.textContent=old;button.disabled=false},1500)}}
+  async function copy(button,url){const old=button.textContent;button.disabled=true;try{const d=await jf(url);if(!d.prompt)throw new Error('Instruktionen saknas');if(navigator.clipboard&&navigator.clipboard.writeText)await navigator.clipboard.writeText(d.prompt);else{const area=document.createElement('textarea');area.value=d.prompt;area.style.position='fixed';area.style.opacity='0';document.body.appendChild(area);area.select();document.execCommand('copy');area.remove()}button.textContent='✓ Kopierat'}catch{button.textContent='Kunde inte kopiera'}finally{setTimeout(function(){button.textContent=old;button.disabled=false},1500)}}
   function dl(url){window.location.href=url}
   function val(id){return document.getElementById(id)?.value||''}
   function provider(){return val('evidenceProvider')||'openai'}
