@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import worker, {
   F4_CUTOVER_VERSION,
+  ANALYSIS_UI_VERSION,
   F4_DEFAULT_MODE,
   F4_ROLLBACK_MODE
 } from '../src/worker-v076.js';
@@ -27,6 +28,7 @@ test('F4 health exposes v3 as the default cutover mode and rollback state explic
   let body = await response.json();
   assert.equal(body.analysisWorkflow, F4_DEFAULT_MODE);
   assert.equal(body.analysisCutoverVersion, F4_CUTOVER_VERSION);
+  assert.equal(body.analysisUiVersion, ANALYSIS_UI_VERSION);
   assert.equal(body.legacyAnalysisCreationEnabled, false);
 
   response = await worker.fetch(new Request('https://example.test/health'), {
@@ -106,7 +108,8 @@ test('F4 default private app renders the v3 workflow while rollback preserves th
   let response = await worker.fetch(new Request('https://example.test/app/', { headers: { cookie } }), env, {});
   assert.equal(response.status, 200);
   let html = await response.text();
-  assert.match(html, /kentaurai-external-analysis-ui-script/);
+  assert.doesNotMatch(html, /kentaurai-external-analysis-ui-script/);
+  assert.match(html, /canonicalAnalysisWorkflow/);
   assert.match(html, /Analysera omgång/);
   assert.match(html, /Hämta marknadsdata/);
   assert.match(html, /Registrera system/);

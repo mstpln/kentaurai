@@ -146,7 +146,7 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --retry 5 --retry-delay 2 "$WORKER_URL/health" > /tmp/health.json
-          node -e "const fs=require('fs'); const h=JSON.parse(fs.readFileSync('/tmp/health.json','utf8')); if(h.ok!==true||h.service!=='kentaurai-api'||h.version!=='0.6.0'||h.analysisWorkflow!=='v3'||h.analysisCutoverVersion!=='analysis-v3-default-f4'||h.legacyAnalysisCreationEnabled!==false) process.exit(1);"
+          node -e "const fs=require('fs'); const h=JSON.parse(fs.readFileSync('/tmp/health.json','utf8')); if(h.ok!==true||h.service!=='kentaurai-api'||h.version!=='0.6.0'||h.analysisWorkflow!=='v3'||h.analysisCutoverVersion!=='analysis-v3-default-f4'||h.analysisUiVersion!=='external-analysis-canonical-v1'||h.legacyAnalysisCreationEnabled!==false) process.exit(1);"
 
       - name: Verify private app login remains available
         shell: bash
