@@ -283,33 +283,37 @@ test('recorded-system import fails closed on not-exactly-three spikes and client
 });
 
 
-test('recorded-system import rejects post-deadline analysis and systems above configured max budget', async () => {
-  {
-    const { env, db } = createTestEnv();
-    seedRound(db);
-    const payload = await withProvenance(env, validPayload());
-    payload.submission_id = 'external-test-late';
-    payload.step1.as_of = '2099-09-20T14:01:00Z';
-    payload.analysis_as_of = payload.step1.as_of;
-    await assert.rejects(
-      () => importRecordedSystem(env, payload),
-      /step1.as_of must not be after the authoritative round deadline/
-    );
-    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM systems WHERE game_round_id=?").get(ROUND_ID).n, 0);
-  }
+test('recorded-system import rejects analysis created after the authoritative round deadline', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  const payload = await withProvenance(env, validPayload());
+  payload.submission_id = 'external-test-late';
+  payload.step1.as_of = '2099-09-20T14:01:00Z';
+  payload.analysis_as_of = payload.step1.as_of;
+  await assert.rejects(
+    () => importRecordedSystem(env, payload),
+    /step1.as_of must not be after the authoritative round deadline/
+  );
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM systems WHERE game_round_id=?").get(ROUND_ID).n, 0);
+});
 
-  {
-    const { env, db } = createTestEnv();
-    seedRound(db);
-    env.V85_LINE_PRICE_SEK = '10';
-    const payload = await withProvenance(env, validPayload());
-    payload.submission_id = 'external-test-over-budget';
-    await assert.rejects(
-      () => importRecordedSystem(env, payload),
-      /system cost exceeds configured max budget/
-    );
-    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM systems WHERE game_round_id=?").get(ROUND_ID).n, 0);
-  }
+test('recorded-system import preserves an actually played system above the configured target budget', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  env.V85_LINE_PRICE_SEK = '10';
+  const payload = await withProvenance(env, validPayload());
+  payload.submission_id = 'external-test-over-budget';
+
+  const result = await importRecordedSystem(env, payload);
+  assert.equal(result.reused, false);
+  assert.equal(result.systems[0].cost_sek, 320);
+  assert.equal(result.systems[0].within_target_budget, false);
+
+  const stored = db.prepare("SELECT budget_sek,metrics_json FROM systems WHERE game_round_id=?").get(ROUND_ID);
+  assert.equal(stored.budget_sek, 320);
+  const metrics = JSON.parse(stored.metrics_json);
+  assert.equal(metrics.within_target_budget, false);
+  assert.equal(metrics.max_budget_sek, 250);
 });
 
 
