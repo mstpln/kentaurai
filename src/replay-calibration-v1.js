@@ -1400,10 +1400,12 @@ export async function runDecisionReplayV1(env, config = {}) {
     'regression_only_round_ids'
   );
   const regressionOnly = new Set(regressionOnlyRoundIds);
+  const automaticRegressionOnly = new Set();
   for (const target of targets) {
     if (target.version_metadata?.learning_eligibility
       && target.version_metadata.learning_eligibility !== 'eligible_by_timing') {
       regressionOnly.add(target.target_group_id);
+      automaticRegressionOnly.add(target.target_group_id);
     }
   }
   const evidenceTargets = targets.filter((target) => !regressionOnly.has(target.target_group_id));
@@ -1463,6 +1465,7 @@ export async function runDecisionReplayV1(env, config = {}) {
       max_targets: replayTargetLimit(config.max_targets ?? config.maxTargets),
       decision_probability_version: config.decision_probability_version ?? null,
       regression_only_round_ids: regressionOnlyRoundIds,
+      automatic_regression_only_round_ids: [...automaticRegressionOnly].sort(compareId),
       walk_forward: walkForward.policy
     },
     version_metadata: {
