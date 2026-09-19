@@ -26,7 +26,7 @@ test('canonical detail enhancer composes the shared statistics UI, evidence styl
   assert.match(html, /kentaurai-entity-detail-canonical-style/);
   assert.match(html, /kentaurai-external-evidence-ui-style/);
   assert.match(html, /kentaurai-entity-detail-ui-runtime/);
-  assert.match(html, /#horseStatsBuildB,#trainerStatsBuildD,#driverStatsBuildC\{display:none!important\}/);
+  assert.doesNotMatch(html, /#horseStatsBuildB,#trainerStatsBuildD,#driverStatsBuildC\{display:none!important\}/);
   assert.match(html, /external-evidence-table/);
   assert.match(html, /external-interview-card/);
   assert.doesNotThrow(() => new vm.Script(statsScriptFrom(html)));
@@ -73,7 +73,8 @@ test('final runtime owns horse and trainer evidence tabs and leaves drivers unch
     Array.from(context.detailTabs('driver'), (row) => Array.from(row)),
     [['stats','Statistik'],['starts','Starter'],['horses','Hästar'],['data','Data']]
   );
-  assert.match(context.statsView({}), /entity-detail-bootstrap-skeleton/);
+  assert.equal(context.statsView({}), '<div>legacy</div>');
+  assert.match(script, /if \(!\['stats','external_stats','interviews'\]\.includes\(requestedTab\)\) return legacyRenderDetail\(\)/);
 });
 
 test('shared detail enhancement composes valid runtime for trainer, driver and horse pages only', () => {
@@ -89,10 +90,11 @@ test('scorecard win percentage uses a restrained font weight', () => {
   assert.match(enhanced(), /\.entity-detail-win\{[^}]*font-weight:600/);
 });
 
-test('shared detail enhancement removes legacy statistics immediately after base detail render', () => {
+test('canonical statistics mount is exposed without wrapping the legacy detail renderer', () => {
   const script = statsScriptFrom(enhanced());
-  assert.match(script, /await previousRenderDetail\(\);[^;]*document\.getElementById\('entityDetailStatisticsV2'\)\?\.remove\(\);/);
-  assert.match(script, /if\(c&&state\.tab==='stats'&&id\)\{const s=detailState\(page,id\);cleanup\(page,s\)\}await mount\(\)/);
+  assert.match(script, /window\.__kentauraiEntityDetailStatistics=\{mount/);
+  assert.doesNotMatch(script, /previousRenderDetail/);
+  assert.doesNotMatch(script, /renderDetail=async function/);
 });
 
 test('detail pages reuse the exact start-page sliders icon and year-based selector', () => {
@@ -129,14 +131,12 @@ test('filter controls are placed directly below the scorecard before detail tabl
   assert.match(script, /scoreNode\.after\(controlsNode\)/);
 });
 
-test('legacy base detail statistics are removed before the shared scorecard is appended', () => {
-  const script = statsScriptFrom(enhanced());
-  const cleanup = "app.querySelector(':scope > .data-groups')?.remove()";
-  assert.ok(script.includes(cleanup));
-  const cleanupIndex = script.indexOf(cleanup);
-  const appendIndex = script.indexOf('app.appendChild(host)');
-  assert.ok(cleanupIndex >= 0);
-  assert.ok(appendIndex > cleanupIndex);
+test('canonical runtime intercepts statistics before delegating any legacy detail render', () => {
+  const script = runtimeScriptFrom(enhanced());
+  const intercept = "if (!['stats','external_stats','interviews'].includes(requestedTab)) return legacyRenderDetail();";
+  assert.ok(script.includes(intercept));
+  assert.match(script, /if \(requestedTab === 'stats'\) \{[\s\S]*__kentauraiEntityDetailStatistics\.mount\(\)/);
+  assert.doesNotMatch(script, /await legacyRenderDetail\(\)[\s\S]*requestedTab === 'stats'/);
 });
 
 test('detail layout explicitly supports narrow mobile widths and scrollable tables', () => {
@@ -151,14 +151,15 @@ test('detail layout explicitly supports narrow mobile widths and scrollable tabl
   assert.match(html, /@media\(max-width:650px\)\{\.entity-detail-score-main\{grid-template-columns:1fr\}/);
 });
 
-test('horse-specific verified start-point and pattern sections are preserved while duplicate legacy blocks are hidden', () => {
+test('horse-specific verified start-point and pattern sections render directly from canonical data', () => {
   const html = enhanced();
   const script = statsScriptFrom(html);
-  assert.match(script, /captureHorseExtra/);
+  assert.match(script, /currentStartPoints/);
+  assert.match(script, /relevantPatterns/);
   assert.match(script, /horse-special-grid/);
   assert.match(script, /horse-pattern-section/);
-  assert.match(html, /horse-special:nth-child\(-n\+2\)\{display:none!important\}/);
-  assert.match(script, /s\.horseExtra/);
+  assert.match(script, /api\('\/horses\/'\+encodeURIComponent\(s\.id\)\+'\/statistics'\)/);
+  assert.doesNotMatch(script, /captureHorseExtra|horseStatsBuildB/);
 });
 
 test('trainer-specific verified home-track summaries remain visible after shared redesign', () => {

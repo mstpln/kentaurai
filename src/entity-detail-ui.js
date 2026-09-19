@@ -1,17 +1,7 @@
 import { enhanceEntityDetailStatisticsHtmlV2 } from './entity-detail-statistics-ui-v2.js';
 
-const SUCCESS_RENDER = "host.innerHTML=content(data,s,c)+'<div class=\"entity-detail-controls\">'+toolbar(s,c)+panel(s,c)+'</div>';bind(host,s,c)";
-const ORDERED_RENDER = "host.innerHTML=content(data,s,c)+'<div class=\"entity-detail-controls\">'+toolbar(s,c)+panel(s,c)+'</div>';const scoreNode=host.querySelector('.entity-detail-score');const controlsNode=host.querySelector('.entity-detail-controls');if(scoreNode&&controlsNode)scoreNode.after(controlsNode);bind(host,s,c)";
-const TRAINER_SPECIALS = "if(c.market)specials+=special('Resultat som favorit',data.favoriteResults,'Marknadsrank 1 vid sista giltiga snapshot före spelstopp')+special('Resultat som skräll',data.longshotResults,'Marknadsandel ≤ '+num(data.definitions?.longshotPercentMax??5)+'% vid spelstopp');return score(data,c)";
-const TRAINER_SPECIALS_WITH_HOME = "if(s.page==='trainers')specials+=special('Hemmabana',data.homeTrackResults,'Senaste verifierade officiella hemmabana')+special('Övriga banor',data.otherTrackResults,'Endast tränare med verifierad hemmabana');if(c.market)specials+=special('Resultat som favorit',data.favoriteResults,'Marknadsrank 1 vid sista giltiga snapshot före spelstopp')+special('Resultat som skräll',data.longshotResults,'Marknadsandel ≤ '+num(data.definitions?.longshotPercentMax??5)+'% vid spelstopp');return score(data,c)";
-const HORSE_AGE_OPTIONS = "if(!values.length&&s.options?.birthYears?.length){const y=new Date().getFullYear();values=[...new Set(s.options.birthYears.map(v=>y-Number(v)).filter(v=>v>=2&&v<=30))].sort((a,b)=>a-b)}";
-const HORSE_AGE_OPTIONS_FOR_YEAR = "if(!values.length&&s.options?.birthYears?.length){const y=Number(s.filters.year)||new Date().getFullYear();values=[...new Set(s.options.birthYears.map(v=>y-Number(v)).filter(v=>v>=2&&v<=30))].sort((a,b)=>a-b)}";
-const LEGACY_CLEANUP = "function cleanup(page,s){document.getElementById('trainerDetailStatisticsV2')?.remove();document.getElementById('trainerStatsBuildD')?.remove();document.getElementById('driverStatsBuildC')?.remove();if(page==='horses'){captureHorseExtra(s);document.getElementById('horseStatsBuildB')?.remove()}if(page==='trainers')document.querySelector('.entity-stat-filter-shell')?.remove();if(page==='drivers'){document.querySelector('.grid.grid-3')?.remove();document.querySelector('.breakdown-grid.stat-section')?.remove()}}";
-const COMPLETE_CLEANUP = "function cleanup(page,s){document.getElementById('trainerDetailStatisticsV2')?.remove();document.getElementById('trainerStatsBuildD')?.remove();document.getElementById('driverStatsBuildC')?.remove();if(page==='horses'){captureHorseExtra(s);document.getElementById('horseStatsBuildB')?.remove()}if(page==='trainers')document.querySelector('.entity-stat-filter-shell')?.remove();if(page==='drivers'){document.querySelector('.grid.grid-3')?.remove();document.querySelector('.breakdown-grid.stat-section')?.remove()}app.querySelector(':scope > .data-groups')?.remove()}";
-
-
 const canonicalDetailCss = '<style id="kentaurai-entity-detail-canonical-style">' +
-'#horseStatsBuildB,#trainerStatsBuildD,#driverStatsBuildC{display:none!important}' +
+'.entity-detail-bootstrap-skeleton{margin-top:14px}' +
 '</style>';
 
 const externalEvidenceCss = '<style id="kentaurai-external-evidence-ui-style">' +
@@ -81,68 +71,74 @@ function runtimeClient() {
         '</div></section>';
     }).join('') + '</div>';
   }
-  function renderEvidenceBody(html) {
-    const tabBar = app.querySelector(':scope > .tabs');
-    if (!tabBar) return;
-    let node = tabBar.nextSibling;
-    while (node) {
-      const next = node.nextSibling;
-      node.remove();
-      node = next;
-    }
-    tabBar.insertAdjacentHTML('afterend', html);
-  }
-
-  const priorDetailTabs = detailTabs;
   detailTabs = function(type) {
-    const base = priorDetailTabs(type).map((row) => [...row]);
-    const withoutEvidence = base.filter((row) => row[0] !== 'external_stats' && row[0] !== 'interviews');
-    const statsIndex = Math.max(0, withoutEvidence.findIndex((row) => row[0] === 'stats'));
-    if (type === 'horse') withoutEvidence.splice(statsIndex + 1, 0, ['external_stats','Extern statistik'], ['interviews','Intervjuer']);
-    if (type === 'trainer') withoutEvidence.splice(statsIndex + 1, 0, ['interviews','Intervjuer']);
-    return withoutEvidence;
+    if (type === 'horse') return [['stats','Statistik'],['external_stats','Extern statistik'],['interviews','Intervjuer'],['starts','Starter'],['data','Data']];
+    if (type === 'trainer') return [['stats','Statistik'],['interviews','Intervjuer'],['starts','Starter'],['horses','Hästar'],['data','Data']];
+    return [['stats','Statistik'],['starts','Starter'],['horses','Hästar'],['data','Data']];
   };
 
-  const priorStatsView = statsView;
-  statsView = function(detail) {
-    const page = state.detail?.page;
-    if (state.tab === 'stats' && ['horses','trainers','drivers'].includes(page)) {
-      return '<div class="data-groups entity-detail-bootstrap-skeleton"><div class="skeleton"></div></div>';
-    }
-    return priorStatsView(detail);
-  };
-
-  const priorRenderDetail = renderDetail;
+  function current(page,id,tab) {
+    return Boolean(state.detail && state.detail.page === page && state.detail.id === id && state.tab === tab);
+  }
+  function bindCanonicalShell(page,detail) {
+    document.getElementById('backBtn').onclick=()=>{state.detail=null;state.tab='list';renderEntityList(page)};
+    bindTabs(renderDetail);
+    bindRoleLinks();
+    document.querySelectorAll('[data-horse]').forEach(x=>x.onclick=()=>openDetail('horses',x.dataset.horse));
+    if(state.tab==='starts'||state.tab==='equipment')bindHorseLinks(state.tab==='equipment'?{...detail,starts:(detail.starts||[]).filter(r=>r.equipment)}:detail);
+  }
+  async function renderCanonicalShell(page,id,tab) {
+    const detail=await api('/entities/'+page+'/'+encodeURIComponent(id));
+    if(!current(page,id,tab))return null;
+    const e=detail.entity,type=detail.type,roles=await roleLine(type,e);
+    if(!current(page,id,tab))return null;
+    let body='';
+    if(tab==='stats')body='<div id="entityDetailStatisticsV2" class="entity-detail-v2 entity-detail-bootstrap-skeleton"><div class="skeleton"></div></div>';
+    if(tab==='external_stats'||tab==='interviews')body='<div id="entityDetailEvidenceBody" class="entity-detail-bootstrap-skeleton"><div class="skeleton"></div></div>';
+    app.innerHTML='<button class="back" id="backBtn">'+FINAL_ICONS.back+'<span>'+esc(labels[page])+'</span></button><div class="detail-head"><div class="avatar">'+esc(initials(e.name))+'</div><div><div class="detail-name">'+esc(e.name)+'</div>'+roles+(e.country_code?'<div class="detail-location">'+esc(e.country_code)+'</div>':'')+'</div></div>'+tabs(detailTabs(type),tab)+body;
+    bindCanonicalShell(page,detail);
+    return detail;
+  }
+  const legacyRenderDetail = renderDetail;
   renderDetail = async function() {
     const requestedTab = state.tab;
     const page = state.detail?.page;
     const id = state.detail?.id;
-    await priorRenderDetail();
-    if (!id || !state.detail || state.detail.id !== id || state.tab !== requestedTab) return;
+    if (!id) return;
+    if (!['stats','external_stats','interviews'].includes(requestedTab)) return legacyRenderDetail();
+    const detail=await renderCanonicalShell(page,id,requestedTab);
+    if(!detail||!current(page,id,requestedTab))return;
+
+    if (requestedTab === 'stats') {
+      await window.__kentauraiEntityDetailStatistics.mount();
+      return;
+    }
 
     if (requestedTab === 'external_stats' && page === 'horses') {
-      renderEvidenceBody('<div class="skeleton"></div>');
+      const host=document.getElementById('entityDetailEvidenceBody');
       try {
         const data = await api('/horses/' + encodeURIComponent(id) + '/external-statistics');
-        if (!state.detail || state.detail.id !== id || state.tab !== requestedTab) return;
-        renderEvidenceBody(statsViewExternal(data));
+        if (!host || !current(page,id,requestedTab)) return;
+        host.innerHTML=statsViewExternal(data);
       } catch (error) {
-        renderEvidenceBody('<div class="notice">Kunde inte läsa extern statistik: ' + esc(error.message) + '</div>');
+        if(host)host.innerHTML='<div class="notice">Kunde inte läsa extern statistik: ' + esc(error.message) + '</div>';
       }
       return;
     }
 
     if (requestedTab === 'interviews' && (page === 'horses' || page === 'trainers')) {
-      renderEvidenceBody('<div class="skeleton"></div>');
+      const host=document.getElementById('entityDetailEvidenceBody');
       try {
         const endpoint = page === 'horses' ? '/horses/' : '/trainers/';
         const data = await api(endpoint + encodeURIComponent(id) + '/interviews');
-        if (!state.detail || state.detail.id !== id || state.tab !== requestedTab) return;
-        renderEvidenceBody(interviewsViewExternal(data, page));
+        if (!host || !current(page,id,requestedTab)) return;
+        host.innerHTML=interviewsViewExternal(data, page);
       } catch (error) {
-        renderEvidenceBody('<div class="notice">Kunde inte läsa intervjuer: ' + esc(error.message) + '</div>');
+        if(host)host.innerHTML='<div class="notice">Kunde inte läsa intervjuer: ' + esc(error.message) + '</div>';
       }
+      return;
     }
+    return legacyRenderDetail();
   };
 }
 
@@ -150,14 +146,6 @@ export function enhanceEntityDetailUiHtml(html) {
   const source = String(html);
   if (source.includes('kentaurai-entity-detail-ui-runtime') && source.includes('kentaurai-entity-detail-canonical-style')) return source;
   let enhanced = enhanceEntityDetailStatisticsHtmlV2(source);
-  if (!enhanced.includes(SUCCESS_RENDER)) throw new Error('entity detail UI composition target is missing');
-  if (!enhanced.includes(TRAINER_SPECIALS)) throw new Error('trainer detail specialist target is missing');
-  if (!enhanced.includes(HORSE_AGE_OPTIONS)) throw new Error('horse detail age-option target is missing');
-  if (!enhanced.includes(LEGACY_CLEANUP)) throw new Error('legacy detail cleanup target is missing');
-  enhanced = enhanced.replace(TRAINER_SPECIALS, TRAINER_SPECIALS_WITH_HOME);
-  enhanced = enhanced.replace(HORSE_AGE_OPTIONS, HORSE_AGE_OPTIONS_FOR_YEAR);
-  enhanced = enhanced.replace(LEGACY_CLEANUP, COMPLETE_CLEANUP);
-  enhanced = enhanced.replace(SUCCESS_RENDER, ORDERED_RENDER);
   if (!enhanced.includes('kentaurai-entity-detail-canonical-style')) {
     enhanced = enhanced.replace('</head>', canonicalDetailCss + '</head>');
   }
