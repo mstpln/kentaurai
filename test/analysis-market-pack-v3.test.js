@@ -10,6 +10,7 @@ import {
   buildMarketPackV3Files,
   loadMarketDeadlineV3,
   loadVerifiedMarketRowsV3,
+  loadExternalRankingsV3,
   marketMaturityV3,
   normalizeMarketPackOptionsV3,
   sanitizeExternalRankingSignalV3
@@ -126,8 +127,14 @@ test('D4 deadline prefers bet stop, clamps after-stop requests, and documents sc
   assert.equal(fallback.deadline_source, 'round_scheduled_start_at');
   assert.equal(fallback.deadline_quality, 'conservative_proxy');
 
+  db.prepare("INSERT INTO tracks (id,canonical_name) VALUES ('deadline-track','Deadline Track')").run();
+  db.prepare("INSERT INTO races (id,track_id,race_date,race_number,scheduled_start_at) VALUES ('deadline-race','deadline-track','2099-05-01',1,'2099-05-01T14:01:00Z')").run();
+  db.prepare("INSERT INTO game_legs (game_round_id,leg_number,race_id) VALUES ('round-d4',1,'deadline-race')").run();
   db.prepare("UPDATE game_rounds SET scheduled_start_at=NULL WHERE id='round-d4'").run();
-  await assert.rejects(() => loadMarketDeadlineV3(env, 'round-d4', '2099-05-01T13:00:00Z'), /verified betting stop or round start/);
+  const firstLeg = await loadMarketDeadlineV3(env, 'round-d4', '2099-05-01T14:03:21Z');
+  assert.equal(firstLeg.cutoff, '2099-05-01T14:01:00.000Z');
+  assert.equal(firstLeg.deadline_source, 'first_leg_start');
+  assert.equal(firstLeg.deadline_quality, 'conservative_proxy');
 });
 
 test('D4 refuses a market cutoff before the newest sealed Step 1 lock', () => {
@@ -159,9 +166,9 @@ test('D4 verified market loader excludes post-cutoff, unnormalized and cross-rou
   db.prepare("INSERT INTO game_legs (game_round_id,leg_number,race_id) VALUES ('round-d4',1,'race-d4'),('round-other',1,'race-other')").run();
   db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('horse-d4','Horse D4'),('horse-other','Horse Other')").run();
   db.prepare("INSERT INTO race_entries (id,race_id,horse_id,start_number) VALUES ('entry-d4','race-d4','horse-d4',1),('entry-other','race-other','horse-other',1)").run();
-  db.prepare("INSERT INTO source_records (id,source_type,fetched_at,quality_status) VALUES ('source-ok','official_provider','2099-05-01T13:50:00Z','normalized_verified_subset'),('source-unverified','official_provider','2099-05-01T13:50:00Z','captured_unmapped')").run();
-  db.prepare("INSERT INTO betting_snapshots (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id) VALUES ('ok','round-d4',1,'entry-d4','2099-05-01T13:54:00Z',35,1,'source-ok'),('after','round-d4',1,'entry-d4','2099-05-01T13:56:00Z',80,1,'source-ok'),('bad-quality','round-d4',1,'entry-d4','2099-05-01T13:53:00Z',70,1,'source-unverified'),('other','round-other',1,'entry-other','2099-05-01T13:54:00Z',90,1,'source-ok')").run();
-  db.prepare("INSERT INTO odds_snapshots (id,race_entry_id,captured_at,market_type,odds,source_record_id) VALUES ('win-ok','entry-d4','2099-05-01T13:54:30Z','win',3.5,'source-ok'),('win-after','entry-d4','2099-05-01T13:56:30Z','win',1.2,'source-ok'),('place-bad','entry-d4','2099-05-01T13:54:00Z','place',1.4,'source-unverified'),('other-win','entry-other','2099-05-01T13:54:00Z','win',2.0,'source-ok')").run();
+  db.prepare("INSERT INTO source_records (id,source_type,fetched_at,quality_status) VALUES ('source-ok','official_provider','2099-05-01T13:50:00Z','normalized_verified_subset'),('source-unverified','official_provider','2099-05-01T13:50:00Z','captured_unmapped'),('source-late','official_provider','2099-05-01T13:56:00Z','normalized_verified_subset')").run();
+  db.prepare("INSERT INTO betting_snapshots (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id) VALUES ('ok','round-d4',1,'entry-d4','2099-05-01T13:54:00Z',35,1,'source-ok'),('after','round-d4',1,'entry-d4','2099-05-01T13:56:00Z',80,1,'source-ok'),('bad-quality','round-d4',1,'entry-d4','2099-05-01T13:53:00Z',70,1,'source-unverified'),('late-fetched','round-d4',1,'entry-d4','2099-05-01T13:54:30Z',75,1,'source-late'),('other','round-other',1,'entry-other','2099-05-01T13:54:00Z',90,1,'source-ok')").run();
+  db.prepare("INSERT INTO odds_snapshots (id,race_entry_id,captured_at,market_type,odds,source_record_id) VALUES ('win-ok','entry-d4','2099-05-01T13:54:30Z','win',3.5,'source-ok'),('win-after','entry-d4','2099-05-01T13:56:30Z','win',1.2,'source-ok'),('place-bad','entry-d4','2099-05-01T13:54:00Z','place',1.4,'source-unverified'),('late-fetched-win','entry-d4','2099-05-01T13:54:45Z','win',1.1,'source-late'),('other-win','entry-other','2099-05-01T13:54:00Z','win',2.0,'source-ok')").run();
 
   const result = await loadVerifiedMarketRowsV3(env, 'round-d4', '2099-05-01T13:55:00Z');
   assert.equal(result.betting.length, 1);
@@ -309,4 +316,26 @@ test('D4 pack is market-only, deterministic by market state and input order, odd
   assert.equal(incompleteLeg1.proxy_quality, 'unavailable_incomplete_winner_odds');
   assert.equal(incompleteLeg1.entries[0].market_win_probability_proxy, null);
   assert.equal(incompleteLeg1.entries[1].market_win_probability_proxy, null);
+});
+
+
+test('D4 external rankings require cutoff-safe manual structured provenance', async () => {
+  const { db, env } = createTestEnv();
+  db.prepare("INSERT INTO tracks (id,canonical_name) VALUES ('rank-track','Rank Track')").run();
+  db.prepare("INSERT INTO game_rounds (id,game_type,round_date) VALUES ('rank-round','V85','2099-05-01')").run();
+  db.prepare("INSERT INTO races (id,track_id,race_date,race_number) VALUES ('rank-race','rank-track','2099-05-01',1)").run();
+  db.prepare("INSERT INTO game_legs (game_round_id,leg_number,race_id) VALUES ('rank-round',1,'rank-race')").run();
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('rank-horse','Rank Horse')").run();
+  db.prepare("INSERT INTO race_entries (id,race_id,horse_id,start_number) VALUES ('rank-entry','rank-race','rank-horse',1)").run();
+  db.prepare("INSERT INTO source_records (id,source_type,fetched_at,quality_status) VALUES ('rank-ok','editorial_manual','2099-05-01T13:50:00Z','manual_structured'),('rank-late','editorial_manual','2099-05-01T13:56:00Z','manual_structured'),('rank-bad','editorial_manual','2099-05-01T13:50:00Z','captured_unmapped')").run();
+  for (const [id, source] of [['ok','rank-ok'],['late','rank-late'],['bad','rank-bad']]) {
+    db.prepare("INSERT INTO editorial_items (id,race_entry_id,horse_id,published_at,source_name,rights_status,source_record_id) VALUES (?,?,?,'2099-05-01T13:53:00Z','Synthetic','structured_only',?)")
+      .run('rank-item-' + id,'rank-entry','rank-horse',source);
+    db.prepare("INSERT INTO editorial_signals (id,editorial_item_id,signal_type,value_text,fact_or_opinion) VALUES (?,?,'external_ranking','1','opinion')")
+      .run('rank-signal-' + id,'rank-item-' + id);
+  }
+  const rows = await loadExternalRankingsV3(env,'rank-round','2099-05-01T13:55:00Z');
+  assert.equal(rows.length,1);
+  assert.equal(rows[0].race_entry_id,'rank-entry');
+  assert.equal(rows[0].rank,1);
 });
