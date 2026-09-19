@@ -17,8 +17,8 @@ const settingsCss = `
 .settings-button{justify-self:end;width:42px;height:42px;border:1px solid var(--line);border-radius:11px;background:#121210;color:#9c958b;display:grid;place-items:center;cursor:pointer;padding:9px}.settings-button:hover,.settings-button.active{color:var(--accent-soft);border-color:#5b4933;background:#1a1712}.settings-button svg{width:21px;height:21px;display:block}
 .settings-layout{max-width:920px}.settings-tabs{margin-bottom:22px}.settings-section{margin-top:16px}.settings-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}.settings-card-head{padding:18px 20px;border-bottom:1px solid var(--line-soft)}.settings-card-head h2{font-size:16px;font-weight:600;margin:0}.settings-card-head p{font-size:12px;line-height:1.55;color:var(--muted);margin:6px 0 0;max-width:720px}.settings-card-body{padding:20px}.settings-actions{display:flex;gap:10px;align-items:end;flex-wrap:wrap}.settings-field{display:grid;gap:7px;min-width:210px}.settings-field label{font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);font-weight:650}.settings-select,.settings-file{min-height:42px;border:1px solid var(--line);background:#10100f;color:var(--text);border-radius:10px;padding:9px 11px}.settings-file{padding:8px;max-width:100%}.settings-primary,.settings-secondary{min-height:42px;border-radius:10px;padding:10px 15px;cursor:pointer;font-weight:600}.settings-primary{border:1px solid var(--accent);background:var(--accent);color:#17120d}.settings-secondary{border:1px solid var(--line);background:#121210;color:var(--text)}.settings-primary:disabled,.settings-secondary:disabled{opacity:.5;cursor:default}.settings-help{font-size:12px;color:var(--muted);line-height:1.55;margin-top:12px}.settings-code{font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;color:#bbb3a8;background:#0d0d0c;border:1px solid var(--line-soft);border-radius:9px;padding:9px 11px;margin-top:9px;overflow-wrap:anywhere}.settings-result{display:none;margin-top:12px;padding:10px 12px;border-radius:10px;font-size:12px}.settings-result.show{display:block}.settings-result.success{border:1px solid #455743;background:#151c14;color:#a8bda4}.settings-result.error{border:1px solid #66413a;background:#211512;color:#d4a49a}
 .settings-counts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.settings-count{border:1px solid var(--line-soft);background:#10100f;border-radius:11px;padding:14px}.settings-count strong{font-size:24px;font-weight:650;display:block}.settings-count span{display:block;color:var(--muted);font-size:11px;margin-top:3px}.settings-list{display:grid}.settings-row{display:grid;grid-template-columns:minmax(140px,1fr) minmax(0,2fr) auto;gap:14px;align-items:center;padding:13px 0;border-bottom:1px solid var(--line-soft)}.settings-row:last-child{border-bottom:0}.settings-row-title{font-size:13px;font-weight:550}.settings-row-meta{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.45}.settings-row-output{font-size:11px;color:#aaa39a}.status-pill{font-size:10px;font-weight:650;text-transform:uppercase;letter-spacing:.06em;border:1px solid var(--line);border-radius:999px;padding:5px 8px;white-space:nowrap}.status-pill.working,.status-pill.success{color:#a8bda4;border-color:#455743}.status-pill.warning,.status-pill.running,.status-pill.unknown{color:#d0b178;border-color:#665536}.status-pill.error{color:#d4a49a;border-color:#66413a}.settings-footer{margin-top:26px;padding-top:16px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px;color:var(--muted);font-size:11px}.settings-footer form{margin:0}.settings-logout{border:0;background:transparent;color:#aaa39a;padding:7px 0;cursor:pointer}.settings-logout:hover{color:var(--text)}
-.analysis-workflow-intro{padding:16px 18px;border:1px solid var(--line);border-radius:var(--radius);background:#10100f}.analysis-workflow-intro .settings-actions{align-items:center}.analysis-step-number{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--accent-soft);font-weight:700;margin-bottom:5px}.analysis-prompt-guide{margin-top:16px;padding-top:15px;border-top:1px solid var(--line-soft)}.analysis-prompt-guide h3{font-size:14px;font-weight:650;margin:0 0 6px}.analysis-prompt-guide p{font-size:12px;line-height:1.55;color:var(--muted);margin:0 0 12px}.analysis-prompt-copy{width:auto}
-@media(max-width:760px){.top-inner{position:relative}.settings-button{position:absolute;right:12px;top:10px;width:38px;height:38px}.brand{padding-right:48px}.settings-counts{grid-template-columns:1fr 1fr}.settings-row{grid-template-columns:1fr auto}.settings-row-output{grid-column:1/-1}.settings-layout{max-width:none}}
+.analysis-section-title{font-size:18px;font-weight:650;margin:18px 0 10px}.analysis-card{border-color:#3a3125}.analysis-context{display:flex;gap:12px;flex-wrap:wrap;align-items:end;padding:16px 18px;border-bottom:1px solid var(--line-soft)}.analysis-context .settings-field{min-width:230px}.analysis-card-body{padding:18px}.analysis-timeline{display:grid;grid-template-columns:34px minmax(0,1fr);gap:0 14px}.analysis-node{position:relative}.analysis-node span{width:30px;height:30px;border:1px solid #a77f49;border-radius:50%;display:grid;place-items:center;color:#d0b178;font-size:12px;font-weight:700}.analysis-node:not(.analysis-last)::after{content:"";position:absolute;top:31px;left:14px;bottom:-18px;width:1px;background:var(--line-soft)}.analysis-step{padding:2px 0 22px}.analysis-step h3{font-size:14px;margin:4px 0 10px}.analysis-import{margin-top:12px;align-items:end}.analysis-import .settings-field{min-width:260px}
+@media(max-width:760px){.top-inner{position:relative}.settings-button{position:absolute;right:12px;top:10px;width:38px;height:38px}.brand{padding-right:48px}.settings-counts{grid-template-columns:1fr 1fr}.settings-row{grid-template-columns:1fr auto}.settings-row-output{grid-column:1/-1}.settings-layout{max-width:none}.analysis-context{display:grid}.analysis-context .settings-field,.analysis-import .settings-field{min-width:0;width:100%}.analysis-step .settings-actions,.analysis-import{display:grid}.analysis-step .settings-primary,.analysis-step .settings-secondary,.analysis-step .settings-file{width:100%;max-width:none}}
 @media(max-width:430px){.settings-card-body,.settings-card-head{padding:16px}.settings-counts{grid-template-columns:1fr 1fr}.settings-actions{display:grid}.settings-field{min-width:0}.settings-primary,.settings-secondary{width:100%}}
 </style>`;
 
@@ -35,21 +35,83 @@ function statusText(status){return ({working:'Fungerar',success:'Klar',warning:'
 function dateTimeSv(value){if(!value)return '—';const d=new Date(value);if(Number.isNaN(d.getTime()))return value;return new Intl.DateTimeFormat('sv-SE',{dateStyle:'short',timeStyle:'short'}).format(d)}
 function settingsFooter(version){return '<div class="settings-footer"><span>KentaurAI v'+esc(version||'—')+'</span><form method="post" action="/app/logout"><button class="settings-logout" type="submit">Logga ut</button></form></div>'}
 async function copyPrompt(button,url){const old=button.textContent;button.disabled=true;try{const r=await fetch(url,{headers:{accept:'application/json'}});const data=await r.json();if(!r.ok||!data.prompt)throw new Error(data.message||'Kunde inte läsa instruktionerna');if(navigator.clipboard?.writeText)await navigator.clipboard.writeText(data.prompt);else{const area=document.createElement('textarea');area.value=data.prompt;area.style.position='fixed';area.style.opacity='0';document.body.appendChild(area);area.select();document.execCommand('copy');area.remove()}button.textContent='✓ Kopierat';setTimeout(()=>{button.textContent=old},1800)}catch{button.textContent='Kunde inte kopiera';setTimeout(()=>{button.textContent=old},1800)}finally{button.disabled=false}}
-function selectedProvider(){return document.getElementById('exportProvider').value}
+function selectedProvider(){return document.getElementById('analysisProvider')?.value||state.analysisProvider||'openai'}
+function selectedAnalysisRound(){return document.getElementById('analysisRound')?.value||state.analysisRoundId||''}
+function selectedRegistrationRound(){return document.getElementById('registrationRound')?.value||state.registrationRoundId||''}
+function downloadSettingsFile(url){window.location.href=url}
+async function loadExternalRounds(scope,selectId,stateKey){
+ const select=document.getElementById(selectId);if(!select)return;
+ try{
+  const data=await api('/settings/external-rounds?scope='+encodeURIComponent(scope));
+  const rounds=data.rounds||[];
+  select.innerHTML=rounds.length?rounds.map(r=>'<option value="'+esc(r.id)+'">'+esc(r.gameType)+' '+esc(r.roundDate)+(r.hasRecordedSystem?' · registrerad':'')+'</option>').join(''):'<option value="">Ingen komplett V85/V86-omgång</option>';
+  const remembered=state[stateKey];
+  if(remembered&&rounds.some(r=>r.id===remembered))select.value=remembered;
+  state[stateKey]=select.value||'';
+  select.onchange=()=>{state[stateKey]=select.value||''};
+ }catch{
+  select.innerHTML='<option value="">Kunde inte läsa omgångar</option>';
+  state[stateKey]='';
+ }
+}
+async function importRecordedSystemFile(){
+ const button=document.getElementById('importRecordedSystem');
+ const input=document.getElementById('recordedSystemFile');
+ const box=document.getElementById('recordedSystemResult');
+ const file=input?.files?.[0];
+ const roundId=selectedRegistrationRound();
+ if(!roundId){box.className='settings-result show error';box.textContent='Välj en omgång först.';return}
+ if(!file){box.className='settings-result show error';box.textContent='Välj en JSON-fil först.';return}
+ button.disabled=true;box.className='settings-result';
+ try{
+  const r=await fetch('/app/api/settings/system-import?round_id='+encodeURIComponent(roundId),{method:'POST',headers:{accept:'application/json','content-type':'application/json'},body:await file.text()});
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(data.message||data.error||'Importen misslyckades');
+  const system=data.systems?.[0];
+  box.className='settings-result show success';
+  box.textContent=system?'Systemet är sparat: '+system.spike_count+' spikar · '+system.row_count+' rader · '+system.cost_sek+' kr.':'Systemet är validerat och sparat.';
+  await loadExternalRounds('registration','registrationRound','registrationRoundId');
+ }catch(err){box.className='settings-result show error';box.textContent='Kunde inte importera systemet: '+err.message}
+ finally{button.disabled=false}
+}
 function renderAi(version){
  app.innerHTML=heading('Inställningar','Hantera AI-utbyte och appdata')+tabs([['ai','AI'],['data','Data']],state.settingsTab)+'<div class="settings-layout">'+
- '<div class="analysis-workflow-intro"><div class="settings-actions"><div class="settings-field"><label for="exportProvider">AI</label><select class="settings-select" id="exportProvider"><option value="openai">ChatGPT</option><option value="anthropic">Claude</option></select></div><div class="settings-help" style="margin:0">Använd samma AI-konversation genom steg 1 och 2. Importera tillbaka till KentaurAI först när analysen och systemet är helt klara.</div></div></div>'+
- '<section class="settings-section settings-card"><div class="settings-card-head"><div class="analysis-step-number">Steg 1</div><h2>Analysera omgången utan marknad</h2><p>Gör en oberoende styrkeanalys av alla 8 avdelningar utan streck eller odds. AI:n bedömer kapacitet, form, loppbild, sannolikheter, ranking och ABCD.</p></div><div class="settings-card-body"><div class="settings-actions"><button class="settings-primary" id="exportStep1">Exportera marknadsblind data</button><button class="settings-secondary" id="copyStep1Prompt">Kopiera analysinstruktion</button></div><div class="settings-help">Ladda upp exportfilen i en ny ChatGPT- eller Claude-konversation och klistra därefter in analysinstruktionen. Bygg inget system ännu.</div></div></section>'+
- '<section class="settings-section settings-card"><div class="settings-card-head"><div class="analysis-step-number">Steg 2</div><h2>Värdera marknaden och bygg system</h2><p>Fortsätt i samma AI-konversation med aktuell marknadsdata. AI:n jämför egna sannolikheter mot streck och odds, hittar värde, väljer spikar och bygger slutligt V85/V86-system.</p></div><div class="settings-card-body"><div class="settings-actions"><button class="settings-primary" id="exportStep2">Exportera marknadsdata</button><button class="settings-secondary" id="copyStep2Prompt">Kopiera systeminstruktion</button></div><div class="settings-help">Ladda upp marknadsexporten i samma konversation där steg 1 redan finns. Steg 1 ska därefter förbli oförändrat.</div></div></section>'+
- '<section class="settings-section settings-card"><div class="settings-card-head"><div class="analysis-step-number">Steg 3</div><h2>Skapa importfil till KentaurAI</h2><p>När analys och system är klara skapas en strukturerad JSON-fil som importeras tillbaka till KentaurAI för lagring och uppföljning.</p></div><div class="settings-card-body"><div class="settings-actions"><button type="button" class="settings-primary" id="copyAnalysisPrompt">Kopiera exportinstruktion</button></div><div class="settings-help">Klistra in exportinstruktionen i samma AI-konversation. Den skapar en <strong>combined</strong>-fil med den låsta analysen från steg 1 och systemen från steg 2.</div><div class="analysis-prompt-guide"><h3>Importera färdig fil</h3><p>Ladda upp JSON-filen som AI:n skapade. KentaurAI validerar identiteter, sannolikheter, ranking, ABCD, spikar och system innan något sparas.</p><div class="settings-actions"><div class="settings-field"><label for="analysisFile">Analysfil</label><input class="settings-file" id="analysisFile" type="file" accept="application/json,.json"></div><button class="settings-secondary" id="importAnalysis">Importera analys</button></div><div class="settings-help">Format: <strong>kentaurai-analysis-v2</strong>.</div></div><div id="analysisImportResult" class="settings-result"></div></div></section>'+
+ '<h2 class="analysis-section-title">Analysera omgång</h2>'+
+ '<section id="canonicalAnalysisWorkflow" class="settings-section settings-card analysis-card">'+
+  '<div class="analysis-context">'+
+   '<div class="settings-field"><label for="analysisRound">Omgång</label><select id="analysisRound" class="settings-select"><option>Läser…</option></select></div>'+
+   '<div class="settings-field"><label for="analysisProvider">AI</label><select id="analysisProvider" class="settings-select"><option value="openai">ChatGPT</option><option value="anthropic">Claude</option></select></div>'+
+  '</div>'+
+  '<div class="analysis-card-body"><div class="analysis-timeline">'+
+   '<div class="analysis-node"><span>1</span></div><div class="analysis-step"><h3>Marknadsblind analys</h3><div class="settings-actions"><button id="downloadAnalysisData" class="settings-primary" type="button">Hämta analysdata</button><button id="copyStep1Prompt" class="settings-secondary" type="button">Kopiera instruktion</button></div></div>'+
+   '<div class="analysis-node analysis-last"><span>2</span></div><div class="analysis-step"><h3>Marknad och system</h3><div class="settings-actions"><button id="downloadMarketData" class="settings-primary" type="button">Hämta marknadsdata</button><button id="copyStep2Prompt" class="settings-secondary" type="button">Kopiera instruktion</button></div></div>'+
+  '</div></div>'+
+ '</section>'+
+ '<h2 class="analysis-section-title">Registrera system</h2>'+
+ '<section class="settings-section settings-card analysis-card">'+
+  '<div class="analysis-context"><div class="settings-field"><label for="registrationRound">Omgång</label><select id="registrationRound" class="settings-select"><option>Läser…</option></select></div></div>'+
+  '<div class="analysis-card-body"><div class="analysis-timeline">'+
+   '<div class="analysis-node analysis-last"><span>3</span></div><div class="analysis-step"><h3>Registrera färdigt system</h3>'+
+    '<div class="settings-actions"><button id="downloadImportContext" class="settings-primary" type="button">Hämta importunderlag</button><button id="copyImportPrompt" class="settings-secondary" type="button">Kopiera importinstruktion</button></div>'+
+    '<div class="settings-actions analysis-import"><div class="settings-field"><label for="recordedSystemFile">Systemfil</label><input id="recordedSystemFile" class="settings-file" type="file" accept="application/json,.json"></div><button id="importRecordedSystem" class="settings-secondary" type="button">Importera system</button></div>'+
+    '<div id="recordedSystemResult" class="settings-result"></div>'+
+   '</div>'+
+  '</div></div>'+
+ '</section>'+
  settingsFooter(version)+'</div>';
  bindSettingsTabs();
- document.getElementById('exportStep1').onclick=()=>{window.location.href='/app/api/settings/export?provider='+encodeURIComponent(selectedProvider())+'&stage=pre_market'};
- document.getElementById('exportStep2').onclick=()=>{window.location.href='/app/api/settings/export?provider='+encodeURIComponent(selectedProvider())+'&stage=market'};
- document.getElementById('copyStep1Prompt').onclick=(event)=>copyPrompt(event.currentTarget,'/app/api/settings/analysis-method-prompt?step=1');
- document.getElementById('copyStep2Prompt').onclick=(event)=>copyPrompt(event.currentTarget,'/app/api/settings/analysis-method-prompt?step=2');
- document.getElementById('copyAnalysisPrompt').onclick=(event)=>copyPrompt(event.currentTarget,'/app/api/settings/analysis-prompt?provider='+encodeURIComponent(selectedProvider()));
- document.getElementById('importAnalysis').onclick=async()=>{const button=document.getElementById('importAnalysis');const file=document.getElementById('analysisFile').files[0];const box=document.getElementById('analysisImportResult');if(!file){box.className='settings-result show error';box.textContent='Välj en JSON-fil först.';return}button.disabled=true;box.className='settings-result';try{const form=new FormData();form.append('analysis_file',file);const r=await fetch('/app/api/settings/import-analysis',{method:'POST',body:form,headers:{accept:'application/json'}});const data=await r.json();if(!r.ok)throw new Error(data.message||data.error||'Importen misslyckades');box.className='settings-result show success';box.textContent='Analysen är validerad och sparad: '+data.stage+' · '+data.submissionId;}catch(err){box.className='settings-result show error';box.textContent='Kunde inte importera analysen: '+err.message}finally{button.disabled=false}};
+ const providerSelect=document.getElementById('analysisProvider');
+ providerSelect.value=state.analysisProvider||'openai';
+ providerSelect.onchange=()=>{state.analysisProvider=providerSelect.value};
+ document.getElementById('downloadAnalysisData').onclick=()=>{const id=selectedAnalysisRound();if(id)downloadSettingsFile('/app/api/settings/f3-analysis-pack?round_id='+encodeURIComponent(id))};
+ document.getElementById('copyStep1Prompt').onclick=(event)=>copyPrompt(event.currentTarget,'/app/api/settings/external-step1-prompt?provider='+encodeURIComponent(selectedProvider()));
+ document.getElementById('downloadMarketData').onclick=()=>{const id=selectedAnalysisRound();if(id)downloadSettingsFile('/app/api/settings/external-market?round_id='+encodeURIComponent(id))};
+ document.getElementById('copyStep2Prompt').onclick=(event)=>copyPrompt(event.currentTarget,'/app/api/settings/external-step2-prompt?provider='+encodeURIComponent(selectedProvider()));
+ document.getElementById('downloadImportContext').onclick=()=>{const id=selectedRegistrationRound();if(id)downloadSettingsFile('/app/api/settings/system-import-context?round_id='+encodeURIComponent(id))};
+ document.getElementById('copyImportPrompt').onclick=(event)=>copyPrompt(event.currentTarget,'/app/api/settings/system-import-prompt?provider='+encodeURIComponent(selectedProvider()));
+ document.getElementById('importRecordedSystem').onclick=importRecordedSystemFile;
+ loadExternalRounds('analysis','analysisRound','analysisRoundId');
+ loadExternalRounds('registration','registrationRound','registrationRoundId');
 }
 async function renderData(){
  app.innerHTML=heading('Inställningar','Hantera AI-utbyte och appdata')+tabs([['ai','AI'],['data','Data']],state.settingsTab)+'<div class="settings-layout"><div class="skeleton"></div></div>';
