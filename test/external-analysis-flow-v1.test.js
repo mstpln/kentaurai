@@ -380,3 +380,40 @@ test('later registration can reproduce Step 1/2 provenance after round status ch
   assert.equal(result.learningEligibility, 'manual_review_required');
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM analysis_external_runs WHERE id=?").get(result.externalRunId).n, 1);
 });
+
+
+test('submission identity is idempotent and changed content under the same id fails closed', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  const payload = await withProvenance(env, validPayload());
+  payload.submission_id = 'external-idempotent';
+  const first = await importRecordedSystem(env, payload);
+  const retry = await importRecordedSystem(env, structuredClone(payload));
+  assert.equal(retry.reused, true);
+  assert.equal(retry.externalRunId, first.externalRunId);
+
+  const changed = structuredClone(payload);
+  changed.round_summary = 'Changed content under same submission id.';
+  await assert.rejects(
+    () => importRecordedSystem(env, changed),
+    /submission_id already exists with different content/
+  );
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM analysis_external_runs WHERE game_round_id=?").get(ROUND_ID).n, 1);
+});
+
+test('a later external registration explicitly supersedes the prior external run', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  const firstPayload = await withProvenance(env, validPayload());
+  firstPayload.submission_id = 'external-first';
+  const first = await importRecordedSystem(env, firstPayload);
+
+  const secondPayload = await withProvenance(env, validPayload());
+  secondPayload.submission_id = 'external-second';
+  secondPayload.round_summary = 'Second explicit registration.';
+  const second = await importRecordedSystem(env, secondPayload);
+
+  const lineage = db.prepare("SELECT id,supersedes_run_id FROM analysis_external_runs WHERE id=?").get(second.externalRunId);
+  assert.equal(lineage.supersedes_run_id, first.externalRunId);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM analysis_external_runs WHERE game_round_id=?").get(ROUND_ID).n, 2);
+});
