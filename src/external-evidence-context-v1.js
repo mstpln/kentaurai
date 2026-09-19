@@ -25,15 +25,16 @@ function parseJson(value) {
   try { return JSON.parse(value); } catch { return null; }
 }
 
-async function loadStatistics(env, horseIds) {
+async function loadStatistics(env, horseIds, asOf = null) {
   const out = new Map(horseIds.map((id) => [id, []]));
   for (const group of chunks(horseIds)) {
     const { results } = await env.DB.prepare(
       'SELECT * FROM (' +
       ' SELECT s.*,ROW_NUMBER() OVER (PARTITION BY s.horse_id,s.context_type,s.context_key ORDER BY datetime(s.available_at) DESC,s.id DESC) AS rn' +
       ' FROM external_horse_stat_snapshots s WHERE s.horse_id IN (' + ph(group) + ')' +
+      (asOf ? ' AND datetime(s.available_at)<=datetime(?)' : '') +
       ') WHERE rn<=5 ORDER BY horse_id,context_type,context_key,datetime(available_at) DESC,id DESC'
-    ).bind(...group).all();
+    ).bind(...group,...(asOf?[asOf]:[])).all();
     for (const row of results || []) out.get(row.horse_id)?.push({
       context_type:row.context_type,
       context_key:row.context_key || '',
@@ -53,15 +54,16 @@ async function loadStatistics(env, horseIds) {
   return out;
 }
 
-async function loadInterviewRows(env, horseIds, trainerIds) {
+async function loadInterviewRows(env, horseIds, trainerIds, asOf = null) {
   const rows = new Map();
   for (const group of chunks(horseIds)) {
     const { results } = await env.DB.prepare(
       'SELECT * FROM (' +
       ' SELECT i.*,ROW_NUMBER() OVER (PARTITION BY i.horse_id ORDER BY datetime(COALESCE(i.published_at,i.available_at)) DESC,i.id DESC) AS rn' +
       ' FROM external_interviews i WHERE i.horse_id IN (' + ph(group) + ')' +
+      (asOf ? ' AND datetime(i.available_at)<=datetime(?)' : '') +
       ') WHERE rn<=12'
-    ).bind(...group).all();
+    ).bind(...group,...(asOf?[asOf]:[])).all();
     for (const row of results || []) rows.set(row.id,row);
   }
   for (const group of chunks(trainerIds)) {
@@ -69,8 +71,9 @@ async function loadInterviewRows(env, horseIds, trainerIds) {
       'SELECT * FROM (' +
       ' SELECT i.*,ROW_NUMBER() OVER (PARTITION BY i.trainer_id ORDER BY datetime(COALESCE(i.published_at,i.available_at)) DESC,i.id DESC) AS rn' +
       ' FROM external_interviews i WHERE i.trainer_id IN (' + ph(group) + ')' +
+      (asOf ? ' AND datetime(i.available_at)<=datetime(?)' : '') +
       ') WHERE rn<=20'
-    ).bind(...group).all();
+    ).bind(...group,...(asOf?[asOf]:[])).all();
     for (const row of results || []) rows.set(row.id,row);
   }
   const horseNames=new Map(),trainerNames=new Map();
@@ -111,9 +114,14 @@ export async function buildStep3Context(env, roundId) {
     buildExternalEvidenceImportContext(env,roundId)
   ]);
   const active=identity.entries.filter((row)=>!row.scratched);
+  const raceStarts=active.map((row)=>row.scheduled_start_at).filter(Boolean).sort();
+  const contextAsOf=identity.round.bet_stop_at||identity.round.scheduled_start_at||raceStarts[0]||new Date().toISOString();
   const horseIds=[...new Set(active.map((row)=>row.horse_id))];
   const trainerIds=[...new Set(active.map((row)=>row.trainer_id).filter(Boolean))];
-  const [stats,interviews]=await Promise.all([loadStatistics(env,horseIds),loadInterviewRows(env,horseIds,trainerIds)]);
+  const [stats,interviews]=await Promise.all([
+    loadStatistics(env,horseIds,contextAsOf),
+    loadInterviewRows(env,horseIds,trainerIds,contextAsOf)
+  ]);
   const byHorse=new Map(horseIds.map((id)=>[id,[]]));
   const byTrainer=new Map(trainerIds.map((id)=>[id,[]]));
   for(const item of interviews){
@@ -129,6 +137,7 @@ export async function buildStep3Context(env, roundId) {
     contract_version:STEP3_CONTEXT_CONTRACT,
     generated_at:new Date().toISOString(),
     round:identity.round,
+    context_as_of:contextAsOf,
     purpose:'historical_external_context_for_step3_only',
     horses:horseIds.map((id)=>({
       horse_id:id,horse_name:horseNames.get(id)||null,
