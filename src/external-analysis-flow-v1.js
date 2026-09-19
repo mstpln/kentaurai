@@ -393,8 +393,8 @@ export function getRegistrationPrompt(provider = 'openai') {
     '  "producer": {"provider": "' + key + '", "model": "<verklig modellbeteckning>"},',
     '  "step1": {"pack_id":"<manifest.pack_id>","facts_fingerprint":"<manifest.facts_fingerprint>","as_of":"<manifest.as_of>","generated_at":"<manifest.generated_at>"},',
     '  "step2": {"market_fingerprint":"<market_fingerprint från Steg 2-filen>","as_of":"<market_as_of>","cutoff":"<market_cutoff>","generated_at":"<generated_at från Steg 2-filen>"},',
-    '  "round_summary": "<Steg 1-sammanfattning>",',
-    '  "recommendations": "<kort Steg 2/systemsammanfattning>",',
+    '  "round_summary": "<senaste sportsliga sammanfattning efter Steg 3>",',
+    '  "recommendations": "<kort slutlig systemsammanfattning>",',
     '  "legs": [',
     '    {"leg_number":1,"race_id":"...","scenarios":null,"race_shape_summary":"...","conclusion":"...","data_quality":"...","predictions":[',
     '      {"race_entry_id":"...","win_probability":0.0,"uncertainty_low":null,"uncertainty_high":null,"raw_rank":1,"abcd_group":"A","scenario_robustness":null,"reasoning":"..."}',
@@ -410,8 +410,8 @@ export function getRegistrationPrompt(provider = 'openai') {
     'REGLER:',
     '- Kopiera step1.pack_id, step1.facts_fingerprint, step1.as_of och step1.generated_at exakt från Steg 1-filens manifest.',
     '- Kopiera step2.market_fingerprint, step2.as_of, step2.cutoff och step2.generated_at exakt från Steg 2-filen. Hitta inte på dessa värden.',
-    '- legs ska innehålla exakt 8 avdelningar och Steg 1-bedömningen ska återges utan marknadsfärgning.',
-    '- win_probability ska vara JSON-tal 0-1 och summera till 1 per avdelning.',
+    '- legs ska innehålla exakt 8 avdelningar och återge den senaste sportsliga bedömningen efter Steg 3. Om Steg 3 inte ändrade något är detta samma sannolikheter som Steg 1.',
+    '- Marknaden i Steg 2 får aldrig i sig ändra win_probability. Endast ny sportslig fakta/statistik i Steg 3 får motivera en dagsjustering.\n    - win_probability ska vara JSON-tal 0-1 och summera till 1 per avdelning.',
     '- raw_rank ska vara unik 1..N och ABCD ska vara A/B/C/D.',
     '- Matcha hästar med startnummer + namn mot importunderlaget och kopiera race_entry_id exakt. Ingen fuzzy gissning.',
     '- systems måste innehålla minst ett main-system. Varje system ska täcka alla 8 avdelningar och ge exakt 3 singleton-avdelningar; KentaurAI räknar dessa som spikar.',
@@ -532,7 +532,7 @@ function normalizeSystems(payloadSystems, expectedLegs, predictionMap, policy) {
       const leg = jsonInteger(selection.leg_number, 'selection.leg_number', { min: 1, max: 8 });
       const entryId = requiredText(selection.race_entry_id, 'selection.race_entry_id', 200);
       if (!allowedByLeg.get(leg)?.has(entryId)) throw new Error('system selection ' + entryId + ' was not active in the audited Step 2 export for leg ' + leg);
-      if (!predictionMap.has(entryId)) throw new Error('system selection ' + entryId + ' has no Step 1 blind prediction');
+      if (!predictionMap.has(entryId)) throw new Error('system selection ' + entryId + ' has no current sports prediction');
       const key = leg + '|' + entryId;
       if (seen.has(key)) throw new Error('system contains a duplicate selection in leg ' + leg);
       seen.add(key);
