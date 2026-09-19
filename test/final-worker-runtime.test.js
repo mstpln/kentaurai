@@ -47,10 +47,18 @@ test('F4 actual Wrangler worker runs the canonical external-analysis Settings wo
     ['analysisProvider', { value: 'openai', onchange: null }],
     ['analysisRound', { value: 'synthetic-round', innerHTML: '', onchange: null }],
     ['registrationRound', { value: 'synthetic-round', innerHTML: '', onchange: null }],
+    ['evidenceRegistrationRound', { value: 'synthetic-round', innerHTML: '', onchange: null }],
     ['downloadAnalysisData', { onclick: null }],
     ['copyStep1Prompt', { onclick: null, disabled: false, textContent: 'Kopiera instruktion' }],
     ['downloadMarketData', { onclick: null }],
     ['copyStep2Prompt', { onclick: null, disabled: false, textContent: 'Kopiera instruktion' }],
+    ['downloadExternalContext', { onclick: null }],
+    ['copyStep3Prompt', { onclick: null, disabled: false, textContent: 'Kopiera instruktion' }],
+    ['downloadEvidenceImportContext', { onclick: null }],
+    ['copyEvidenceImportPrompt', { onclick: null, disabled: false, textContent: 'Kopiera importinstruktion' }],
+    ['externalEvidenceFile', { files: [] }],
+    ['importExternalEvidence', { onclick: null, disabled: false }],
+    ['externalEvidenceResult', { className: '', textContent: '' }],
     ['downloadImportContext', { onclick: null }],
     ['copyImportPrompt', { onclick: null, disabled: false, textContent: 'Kopiera importinstruktion' }],
     ['recordedSystemFile', { files: [] }],
@@ -104,26 +112,36 @@ test('F4 actual Wrangler worker runs the canonical external-analysis Settings wo
   assert.match(app.innerHTML, /Analysera omgång/);
   assert.match(app.innerHTML, /Marknadsblind analys/);
   assert.match(app.innerHTML, /Hämta analysdata/);
-  assert.match(app.innerHTML, /Marknad och system/);
+  assert.match(app.innerHTML, /Marknadsanalys/);
   assert.match(app.innerHTML, /Hämta marknadsdata/);
+  assert.match(app.innerHTML, /Intervjuer & extern statistik/);
+  assert.match(app.innerHTML, /Bygg färdigt system/);
+  assert.match(app.innerHTML, /Registrera extern statistik & intervjuer/);
+  assert.match(app.innerHTML, /Skapa och importera extern data/);
   assert.match(app.innerHTML, /Registrera system/);
   assert.match(app.innerHTML, /Hämta importunderlag/);
   assert.match(app.innerHTML, /Importera system/);
 
   assert.equal(typeof elements.get('copyStep1Prompt').onclick, 'function');
   assert.equal(typeof elements.get('copyStep2Prompt').onclick, 'function');
+  assert.equal(typeof elements.get('copyStep3Prompt').onclick, 'function');
+  assert.equal(typeof elements.get('copyEvidenceImportPrompt').onclick, 'function');
   assert.equal(typeof elements.get('copyImportPrompt').onclick, 'function');
 
   await elements.get('copyStep1Prompt').onclick({ currentTarget: elements.get('copyStep1Prompt') });
   await elements.get('copyStep2Prompt').onclick({ currentTarget: elements.get('copyStep2Prompt') });
+  await elements.get('copyStep3Prompt').onclick({ currentTarget: elements.get('copyStep3Prompt') });
+  await elements.get('copyEvidenceImportPrompt').onclick({ currentTarget: elements.get('copyEvidenceImportPrompt') });
   await elements.get('copyImportPrompt').onclick({ currentTarget: elements.get('copyImportPrompt') });
 
-  assert.deepEqual(requested.slice(-3), [
+  assert.deepEqual(requested.slice(-5), [
     '/app/api/settings/external-step1-prompt?provider=openai',
     '/app/api/settings/external-step2-prompt?provider=openai',
+    '/app/api/settings/external-step3-prompt?provider=openai',
+    '/app/api/settings/external-evidence-import-prompt?provider=openai',
     '/app/api/settings/system-import-prompt?provider=openai'
   ]);
-  assert.equal(copied.length, 3);
+  assert.equal(copied.length, 5);
 });
 
 test('final composed statistics runtime replaces the loader and issues the breakdown request', async () => {
