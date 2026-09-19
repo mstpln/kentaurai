@@ -33,7 +33,7 @@ async function loadStatistics(env, horseIds, asOf = null) {
       ' SELECT s.*,ROW_NUMBER() OVER (PARTITION BY s.horse_id,s.context_type,s.context_key ORDER BY datetime(s.available_at) DESC,s.id DESC) AS rn' +
       ' FROM external_horse_stat_snapshots s WHERE s.horse_id IN (' + ph(group) + ')' +
       (asOf ? ' AND datetime(s.available_at)<=datetime(?)' : '') +
-      ') WHERE rn<=5 ORDER BY horse_id,context_type,context_key,datetime(available_at) DESC,id DESC'
+      ') WHERE rn<=3 ORDER BY horse_id,context_type,context_key,datetime(available_at) DESC,id DESC'
     ).bind(...group,...(asOf?[asOf]:[])).all();
     for (const row of results || []) out.get(row.horse_id)?.push({
       context_type:row.context_type,
@@ -62,7 +62,7 @@ async function loadInterviewRows(env, horseIds, trainerIds, asOf = null) {
       ' SELECT i.*,ROW_NUMBER() OVER (PARTITION BY i.horse_id ORDER BY datetime(COALESCE(i.published_at,i.available_at)) DESC,i.id DESC) AS rn' +
       ' FROM external_interviews i WHERE i.horse_id IN (' + ph(group) + ')' +
       (asOf ? ' AND datetime(i.available_at)<=datetime(?)' : '') +
-      ') WHERE rn<=12'
+      ') WHERE rn<=5'
     ).bind(...group,...(asOf?[asOf]:[])).all();
     for (const row of results || []) rows.set(row.id,row);
   }
@@ -72,7 +72,7 @@ async function loadInterviewRows(env, horseIds, trainerIds, asOf = null) {
       ' SELECT i.*,ROW_NUMBER() OVER (PARTITION BY i.trainer_id ORDER BY datetime(COALESCE(i.published_at,i.available_at)) DESC,i.id DESC) AS rn' +
       ' FROM external_interviews i WHERE i.trainer_id IN (' + ph(group) + ')' +
       (asOf ? ' AND datetime(i.available_at)<=datetime(?)' : '') +
-      ') WHERE rn<=20'
+      ') WHERE rn<=5'
     ).bind(...group,...(asOf?[asOf]:[])).all();
     for (const row of results || []) rows.set(row.id,row);
   }
@@ -123,8 +123,8 @@ export async function buildStep3Context(env, roundId) {
   const byHorse=new Map(horseIds.map((id)=>[id,[]]));
   const byTrainer=new Map(trainerIds.map((id)=>[id,[]]));
   for(const item of interviews){
-    if(byHorse.has(item.horse_id)&&byHorse.get(item.horse_id).length<12) byHorse.get(item.horse_id).push(item.id);
-    if(item.trainer_id&&byTrainer.has(item.trainer_id)&&byTrainer.get(item.trainer_id).length<20) byTrainer.get(item.trainer_id).push(item.id);
+    if(byHorse.has(item.horse_id)&&byHorse.get(item.horse_id).length<5) byHorse.get(item.horse_id).push(item.id);
+    if(item.trainer_id&&byTrainer.has(item.trainer_id)&&byTrainer.get(item.trainer_id).length<5) byTrainer.get(item.trainer_id).push(item.id);
   }
   const horseNames=new Map(active.map((row)=>[row.horse_id,row.horse_name]));
   const trainerNames=new Map(active.filter((row)=>row.trainer_id).map((row)=>[row.trainer_id,row.trainer_name]));
