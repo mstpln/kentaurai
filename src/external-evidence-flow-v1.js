@@ -86,7 +86,7 @@ function wagonDescriptor(row) {
   return { key: 'wagon:' + normalized, label };
 }
 
-async function roundIdentity(env, roundId) {
+async function roundIdentity(env, roundId, { equipmentAsOf = null } = {}) {
   const id = requiredText(roundId, 'round_id', 200);
   const round = await env.DB.prepare(
     "SELECT id,game_type,round_date,scheduled_start_at,bet_stop_at,status FROM game_rounds WHERE id=? AND game_type IN ('V85','V86') LIMIT 1"
@@ -103,9 +103,11 @@ async function roundIdentity(env, roundId) {
     "LEFT JOIN trainers tr ON tr.id=re.trainer_id " +
     "LEFT JOIN equipment eq ON eq.id=(" +
       "SELECT e2.id FROM equipment e2 LEFT JOIN source_records sr2 ON sr2.id=e2.source_record_id " +
-      "WHERE e2.race_entry_id=re.id ORDER BY sr2.fetched_at DESC,e2.id DESC LIMIT 1" +
+      "WHERE e2.race_entry_id=re.id " +
+      (equipmentAsOf ? "AND julianday(sr2.fetched_at)<=julianday(?) " : "") +
+      "ORDER BY sr2.fetched_at DESC,e2.id DESC LIMIT 1" +
     ") WHERE gl.game_round_id=? ORDER BY gl.leg_number,COALESCE(re.start_number,999),re.id"
-  ).bind(id).all();
+  ).bind(...(equipmentAsOf ? [equipmentAsOf] : []), id).all();
 
   const entries = (results || []).map((row) => {
     const balance = balanceDescriptor(row);
@@ -251,13 +253,16 @@ async function loadInterviews(env, horseIds, trainerIds, asOf = null) {
 
 export async function buildExternalEvidenceContext(env, roundId, { purpose = 'analysis' } = {}) {
   if (!env?.DB) throw new Error('DB is not configured');
-  const identity = await roundIdentity(env, roundId);
+  let identity = await roundIdentity(env, roundId);
   const normalizedPurpose = purpose === 'import' ? 'import' : 'analysis';
   const generatedAt = new Date().toISOString();
   const deadline = identity.round.bet_stop_at || identity.round.scheduled_start_at || null;
   const analysisAsOf = deadline && Date.parse(deadline) < Date.parse(generatedAt)
     ? new Date(Date.parse(deadline)).toISOString()
     : generatedAt;
+  if (normalizedPurpose === 'analysis') {
+    identity = await roundIdentity(env, roundId, { equipmentAsOf: analysisAsOf });
+  }
   const stats = normalizedPurpose === 'analysis'
     ? await loadStats(env, identity.entries.map((row) => row.horse_id), analysisAsOf)
     : [];
