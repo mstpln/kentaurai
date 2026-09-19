@@ -162,6 +162,12 @@ test('external evidence import fails closed on mismatched context, trainer and f
   const { env, db } = createTestEnv();
   seed(env, db);
 
+  const impossibleCounts = payload('impossible-counts');
+  impossibleCounts.statistics = [impossibleCounts.statistics[0]];
+  impossibleCounts.statistics[0].starts = 2;
+  impossibleCounts.statistics[0].wins = 3;
+  await assert.rejects(() => importExternalEvidence(env, impossibleCounts), /cannot exceed starts/);
+
   const wrongContext = payload('wrong-context');
   wrongContext.statistics[1].context_key = 'balance:shod|shod';
   await assert.rejects(() => importExternalEvidence(env, wrongContext), /context is not allowed/);
