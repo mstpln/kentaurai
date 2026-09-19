@@ -16,7 +16,8 @@ import {
   getExternalAnalysisStep2Prompt,
   getRegistrationPrompt,
   importRecordedSystem,
-  listExternalAnalysisRounds
+  listExternalAnalysisRounds,
+  recordExternalAnalysisExport
 } from './external-analysis-flow-v1.js';
 
 function json(data, status = 200, headers = {}) {
@@ -108,6 +109,19 @@ export default {
         const roundId = String(url.searchParams.get('round_id') || '').trim();
         if (!roundId) throw new Error('round_id is required');
         const data = await buildMarketInput(env, roundId, url.searchParams.get('as_of') || null);
+        await recordExternalAnalysisExport(env, {
+          stage: 'step2',
+          roundId,
+          artifactId: data.market_fingerprint,
+          artifactFingerprint: data.market_fingerprint,
+          asOf: data.market_as_of,
+          cutoffAt: data.market_cutoff,
+          generatedAt: data.generated_at,
+          artifact: {
+            market_fingerprint: data.market_fingerprint,
+            market_cutoff: data.market_cutoff
+          }
+        });
         const safe = roundId.replace(/[^a-zA-Z0-9._-]+/g, '_');
         return attachmentJson(data, 'kentaurai-market_' + safe + '.json');
       } catch (error) {
