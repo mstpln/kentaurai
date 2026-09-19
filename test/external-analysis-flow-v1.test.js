@@ -11,7 +11,8 @@ import {
   getExternalAnalysisStep2Prompt,
   getRegistrationPrompt,
   importRecordedSystem,
-  listExternalAnalysisRounds
+  listExternalAnalysisRounds,
+  recordExternalAnalysisExport
 } from '../src/external-analysis-flow-v1.js';
 import { createPreMarketAnalysisPackV3 } from '../src/analysis-pack-v3.js';
 import { runNextPostRaceReviewV2 } from '../src/post-race-review-v2.js';
@@ -116,7 +117,37 @@ async function withProvenance(env, payload, {
   step2AsOf = '2099-09-20T11:00:00Z'
 } = {}) {
   const pack = await createPreMarketAnalysisPackV3(env, ROUND_ID, { asOf: step1AsOf });
+  const activeByLeg = new Map();
+  for (const file of pack.files || []) {
+    const legNumber = Number(file.payload?.leg_number);
+    if (!Number.isInteger(legNumber)) continue;
+    if (!activeByLeg.has(legNumber)) {
+      activeByLeg.set(legNumber, { leg_number:legNumber, race_id:file.payload?.race?.race_id || null, entry_ids:[] });
+    }
+    for (const entry of file.payload?.entries || []) {
+      if (entry?.current_facts?.analysis_eligible === true) activeByLeg.get(legNumber).entry_ids.push(entry.race_entry_id);
+    }
+  }
+  await recordExternalAnalysisExport(env, {
+    stage:'step1',
+    roundId:ROUND_ID,
+    artifactId:pack.manifest.pack_id,
+    artifactFingerprint:pack.manifest.facts_fingerprint,
+    asOf:pack.manifest.as_of,
+    generatedAt:pack.manifest.generated_at,
+    artifact:{ active_legs:[...activeByLeg.values()] }
+  });
   const market = await buildMarketInput(env, ROUND_ID, step2AsOf);
+  await recordExternalAnalysisExport(env, {
+    stage:'step2',
+    roundId:ROUND_ID,
+    artifactId:market.market_fingerprint,
+    artifactFingerprint:market.market_fingerprint,
+    asOf:market.market_as_of,
+    cutoffAt:market.market_cutoff,
+    generatedAt:market.generated_at,
+    artifact:{ market_fingerprint:market.market_fingerprint, market_cutoff:market.market_cutoff }
+  });
   payload.step1 = {
     pack_id: pack.manifest.pack_id,
     facts_fingerprint: pack.manifest.facts_fingerprint,
