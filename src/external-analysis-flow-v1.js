@@ -431,7 +431,7 @@ export function getRegistrationPrompt(provider = 'openai') {
   ].join('\\n');
 }
 
-function predictionLegsFromExportArtifact(artifact, identity) {
+function activeLegsFromExportArtifact(artifact, identity) {
   const activeLegs = Array.isArray(artifact?.active_legs) ? artifact.active_legs : [];
   const byLeg = new Map(activeLegs.map((leg) => [Number(leg?.leg_number), leg]));
   return identity.legs.map((leg) => {
@@ -542,7 +542,8 @@ function normalizeSystems(payloadSystems, expectedLegs, predictionMap, policy) {
       }
       const leg = jsonInteger(selection.leg_number, 'selection.leg_number', { min: 1, max: 8 });
       const entryId = requiredText(selection.race_entry_id, 'selection.race_entry_id', 200);
-      if (!allowedByLeg.get(leg)?.has(entryId)) throw new Error('system selection ' + entryId + ' is not active in leg ' + leg);
+      if (!allowedByLeg.get(leg)?.has(entryId)) throw new Error('system selection ' + entryId + ' was not active in the audited Step 2 export for leg ' + leg);
+      if (!predictionMap.has(entryId)) throw new Error('system selection ' + entryId + ' has no Step 1 blind prediction');
       const key = leg + '|' + entryId;
       if (seen.has(key)) throw new Error('system contains a duplicate selection in leg ' + leg);
       seen.add(key);
@@ -658,7 +659,7 @@ async function verifyExternalProvenance(env, roundId, step1, step2) {
     asOf: step1.asOf,
     generatedAt: step1.generatedAt
   });
-  await requireAuditedExport(env, {
+  const step2Artifact = await requireAuditedExport(env, {
     roundId,
     stage: 'step2',
     artifactId: step2.marketFingerprint,
@@ -675,7 +676,7 @@ async function verifyExternalProvenance(env, roundId, step1, step2) {
   if (Date.parse(step2.generatedAt) < Date.parse(step1.generatedAt)) {
     throw new Error('step2.generated_at cannot precede step1.generated_at');
   }
-  return { step1Artifact, marketInput };
+  return { step1Artifact, step2Artifact, marketInput };
 }
 
 export async function importRecordedSystem(env, payload, options = {}) {
@@ -707,11 +708,12 @@ export async function importRecordedSystem(env, payload, options = {}) {
   }
   const provenance = await verifyExternalProvenance(env, roundId, step1, step2);
   if (!Array.isArray(payload.legs) || payload.legs.length !== 8) throw new Error('legs must contain exactly eight legs');
-  const predictionLegs = predictionLegsFromExportArtifact(provenance.step1Artifact, identity);
+  const predictionLegs = activeLegsFromExportArtifact(provenance.step1Artifact, identity);
+  const systemLegs = activeLegsFromExportArtifact(provenance.step2Artifact, identity);
   const legs = payload.legs.map((leg, index) => normalizePredictions(leg, predictionLegs[index], index));
   const predictionMap = new Map(legs.flatMap((leg) => leg.predictions.map((prediction) => [prediction.raceEntryId, prediction])));
   const policy = normalizePolicy(await canonicalOptimizerPolicyForRound(env, roundId));
-  const systems = normalizeSystems(payload.systems, identity.legs, predictionMap, policy);
+  const systems = normalizeSystems(payload.systems, systemLegs, predictionMap, policy);
 
   const marketInput = provenance.marketInput;
   const market = marketInput.market;
