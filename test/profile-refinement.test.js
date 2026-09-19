@@ -12,7 +12,7 @@ test('profile refinement uses approved icons, initials and navigation order', ()
   assert.match(html, /INITIAL_STOP_WORDS/);
   assert.match(html, /slice\(0,3\)/);
   assert.match(html, /\['stats','Statistik'\],\['starts','Starter'\],\['horses','Hästar'\],\['data','Data'\]/);
-  assert.match(html, /\['stats','Statistik'\],\['starts','Starter'\],\['equipment','Utrustning'\],\['data','Data'\]/);
+  assert.match(html, /\['stats','Statistik'\],\['external_stats','Extern statistik'\],\['interviews','Intervjuer'\],\['starts','Starter'\],\['data','Data'\]/);
   assert.match(html, /Galopp %/);
   assert.match(html, /profile-horse-row/);
   assert.match(html, /detail-role-link/);

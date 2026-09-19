@@ -164,6 +164,15 @@ jobs:
           test "$status" = '200' || { echo "Expected /app/login 200, got $status"; exit 1; }
           test -s /tmp/login.html
 
+      - name: Verify deployed entity-detail app structure
+        shell: bash
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 "$WORKER_URL/health/entity-detail-ui" > /tmp/entity-detail-ui.json
+          node -e "const fs=require('fs'); const h=JSON.parse(fs.readFileSync('/tmp/entity-detail-ui.json','utf8')); if(h.ok!==true||h.service!=='kentaurai-api'||h.check!=='entity-detail-ui'||h.version!=='core-owner-v1'||!h.checks||Object.values(h.checks).some(v=>v!==true)) process.exit(1);"
+
       - name: Verify private analysis routes are deployed and protected
         shell: bash
         env:

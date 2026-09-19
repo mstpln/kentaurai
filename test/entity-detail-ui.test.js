@@ -14,68 +14,25 @@ function statsScriptFrom(html) {
   return match[1];
 }
 
-function runtimeScriptFrom(html) {
-  const match = html.match(/<script id="kentaurai-entity-detail-ui-runtime">([\s\S]*?)<\/script>/);
-  assert.ok(match);
-  return match[1];
-}
 
-test('canonical detail enhancer composes the shared statistics UI, evidence styles and final runtime exactly once', () => {
+test('canonical detail enhancer composes shared statistics and evidence presentation without owning detail runtime', () => {
   const html = enhanced();
   assert.match(html, /kentaurai-entity-detail-statistics-v2-script/);
   assert.match(html, /kentaurai-entity-detail-canonical-style/);
   assert.match(html, /kentaurai-external-evidence-ui-style/);
-  assert.match(html, /kentaurai-entity-detail-ui-runtime/);
-  assert.doesNotMatch(html, /#horseStatsBuildB,#trainerStatsBuildD,#driverStatsBuildC\{display:none!important\}/);
+  assert.doesNotMatch(html, /kentaurai-entity-detail-ui-runtime/);
+  assert.doesNotMatch(html, /legacyRenderDetail|renderCanonicalShell/);
   assert.match(html, /external-evidence-table/);
   assert.match(html, /external-interview-card/);
   assert.doesNotThrow(() => new vm.Script(statsScriptFrom(html)));
-  assert.doesNotThrow(() => new vm.Script(runtimeScriptFrom(html)));
 
   const twice = enhanceEntityDetailUiHtml(html);
   assert.equal((twice.match(/kentaurai-entity-detail-statistics-v2-script/g) || []).length, 1);
+  assert.equal((twice.match(/kentaurai-entity-detail-canonical-style/g) || []).length, 1);
   assert.equal((twice.match(/kentaurai-external-evidence-ui-style/g) || []).length, 1);
-  assert.equal((twice.match(/kentaurai-entity-detail-ui-runtime/g) || []).length, 1);
+  assert.equal((twice.match(/kentaurai-entity-detail-ui-runtime/g) || []).length, 0);
 });
 
-test('final runtime owns horse and trainer evidence tabs and leaves drivers unchanged', () => {
-  const script = runtimeScriptFrom(enhanced());
-  const context = vm.createContext({
-    state: { detail:{ page:'horses', id:'horse-1' }, tab:'stats' },
-    detailTabs(type) {
-      if (type === 'horse') return [['stats','Statistik'],['starts','Starter'],['data','Data']];
-      if (type === 'trainer') return [['stats','Statistik'],['starts','Starter'],['horses','Hästar'],['data','Data']];
-      return [['stats','Statistik'],['starts','Starter'],['horses','Hästar'],['data','Data']];
-    },
-    statsView() { return '<div>legacy</div>'; },
-    async renderDetail() {},
-    app: { querySelector() { return null; } },
-    api: async () => ({ items:[] }),
-    esc: (value) => String(value ?? ''),
-    Intl,
-    Date,
-    Number,
-    Map,
-    encodeURIComponent,
-    console
-  });
-  new vm.Script(script).runInContext(context);
-
-  assert.deepEqual(
-    Array.from(context.detailTabs('horse'), (row) => Array.from(row)),
-    [['stats','Statistik'],['external_stats','Extern statistik'],['interviews','Intervjuer'],['starts','Starter'],['data','Data']]
-  );
-  assert.deepEqual(
-    Array.from(context.detailTabs('trainer'), (row) => Array.from(row)),
-    [['stats','Statistik'],['interviews','Intervjuer'],['starts','Starter'],['horses','Hästar'],['data','Data']]
-  );
-  assert.deepEqual(
-    Array.from(context.detailTabs('driver'), (row) => Array.from(row)),
-    [['stats','Statistik'],['starts','Starter'],['horses','Hästar'],['data','Data']]
-  );
-  assert.equal(context.statsView({}), '<div>legacy</div>');
-  assert.match(script, /if \(!\['stats','external_stats','interviews'\]\.includes\(requestedTab\)\) return legacyRenderDetail\(\)/);
-});
 
 test('shared detail enhancement composes valid runtime for trainer, driver and horse pages only', () => {
   const script = statsScriptFrom(enhanced());
@@ -131,13 +88,6 @@ test('filter controls are placed directly below the scorecard before detail tabl
   assert.match(script, /scoreNode\.after\(controlsNode\)/);
 });
 
-test('canonical runtime intercepts statistics before delegating any legacy detail render', () => {
-  const script = runtimeScriptFrom(enhanced());
-  const intercept = "if (!['stats','external_stats','interviews'].includes(requestedTab)) return legacyRenderDetail();";
-  assert.ok(script.includes(intercept));
-  assert.match(script, /if \(requestedTab === 'stats'\) \{[\s\S]*__kentauraiEntityDetailStatistics\.mount\(\)/);
-  assert.doesNotMatch(script, /await legacyRenderDetail\(\)[\s\S]*requestedTab === 'stats'/);
-});
 
 test('detail layout explicitly supports narrow mobile widths and scrollable tables', () => {
   const html = enhanced();
