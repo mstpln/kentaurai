@@ -52,7 +52,7 @@ async function appendDetailStats(id,token){if(token!==detailToken||state.detail?
 const previousHorseEntityList=renderEntityList;
 renderEntityList=async function(page){if(page==='horses'&&state.tab==='stats')return renderHorseRankings();rankingToken++;return previousHorseEntityList(page)};
 const previousHorseRenderDetail=renderDetail;
-renderDetail=async function(){const token=++detailToken;await previousHorseRenderDetail();const id=state.detail?.id;if(state.detail?.page!=='horses'||state.tab!=='stats'||!id)return;await loadOptions();if(token!==detailToken||state.detail?.id!==id||state.tab!=='stats')return;document.querySelector('#horseStatsBuildB')?.remove();const oldStats=document.querySelector('.grid.grid-3');if(oldStats)oldStats.remove();const oldBreakdown=document.querySelector('.breakdown-grid.stat-section');if(oldBreakdown)oldBreakdown.remove();return appendDetailStats(id,token)};
+renderDetail=async function(){const token=++detailToken;await previousHorseRenderDetail();if(document.getElementById('entityDetailStatisticsV2'))return;const id=state.detail?.id;if(state.detail?.page!=='horses'||state.tab!=='stats'||!id)return;await loadOptions();if(token!==detailToken||state.detail?.id!==id||state.tab!=='stats')return;document.querySelector('#horseStatsBuildB')?.remove();const oldStats=document.querySelector('.grid.grid-3');if(oldStats)oldStats.remove();const oldBreakdown=document.querySelector('.breakdown-grid.stat-section');if(oldBreakdown)oldBreakdown.remove();return appendDetailStats(id,token)};
 })();
 </script>`;
 
