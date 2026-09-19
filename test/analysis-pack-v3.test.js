@@ -227,6 +227,49 @@ function seedWideStep1Round(db) {
         .run(`wide_editorial_signal_${serial}`,`wide_editorial_item_${serial}`);
     }
   }
+  for (let leg = 1; leg <= 8; leg += 1) {
+    const historyRace = `wide_history_race_${leg}`;
+    const officialSource = `wide_history_official_${leg}`;
+    const xlabsSource = `wide_history_xlabs_${leg}`;
+    db.prepare(`INSERT INTO source_records (id,source_type,external_id,fetched_at,content_hash,quality_status) VALUES (?,'official_provider',?,'2099-01-20T15:00:00Z',?,'normalized_verified_subset')`)
+      .run(officialSource,`history:${leg}`,`history-official-hash-${leg}`);
+    db.prepare(`INSERT INTO source_records (id,source_type,external_id,fetched_at,content_hash,quality_status) VALUES (?,'xlabs_race_json',?,'2099-01-20T15:05:00Z',?,'normalized_verified_subset')`)
+      .run(xlabsSource,`history-xlabs:${leg}`,`history-xlabs-hash-${leg}`);
+    db.prepare(`INSERT INTO races (id,track_id,race_date,race_number,scheduled_start_at,distance_m,start_method,field_size,race_name,main_class,status,source_quality) VALUES (?,'wide_track','2099-01-20',? ,?,2140,'auto',16,'Synthetic history','Klass I','result','normalized_verified_subset')`)
+      .run(historyRace,leg,`2099-01-20T13:${String(leg).padStart(2,'0')}:00Z`);
+
+    for (let start = 1; start <= 16; start += 1) {
+      const index = (leg - 1) * 16 + start;
+      const historyEntry = `wide_history_entry_${index}`;
+      db.prepare(`INSERT INTO race_entries (id,race_id,horse_id,driver_id,trainer_id,start_number,actual_lane,start_tier,handicap_m,actual_start_distance_m,scratched,data_quality) VALUES (?,?,?,?,?,?,?,?,?,?,0,'synthetic')`)
+        .run(historyEntry,historyRace,`wide_horse_${index}`,`wide_driver_${index}`,`wide_trainer_${index}`,start,start,1,0,2140);
+      db.prepare(`INSERT INTO race_results (race_entry_id,placing,gallop,disqualified,result_status,source_record_id) VALUES (?,?,?,?, 'official',?)`)
+        .run(historyEntry,start,start % 13 === 0 ? 1 : 0,0,officialSource);
+      db.prepare(`INSERT INTO equipment (id,race_entry_id,shoes_front,shoes_rear,barefoot_front,barefoot_rear,sulky_type,verification_status,source_record_id) VALUES (?,?, 'shod','shod',0,0,'standard','reported',?)`)
+        .run(`wide_history_equipment_${index}`,historyEntry,officialSource);
+      db.prepare(`INSERT INTO xlabs_intervals
+        (id,race_entry_id,source_record_id,interval_start_m,interval_end_m,elapsed_ms,km_pace_ms,
+         measured_distance_m,local_target_frame_count,local_window_frame_count,local_frame_coverage,
+         eligibility_status,mapper_version)
+        VALUES (?,?,?,0,100,7200,72000,100,11,11,1,'valid','xlabs-intervals-v2')`)
+        .run(`wide_history_interval_${index}`,historyEntry,xlabsSource);
+      db.prepare(`INSERT INTO xlabs_data (id,race_entry_id,first_200_time,last_400_time,actual_distance_m,extra_distance_m,quality_status,source_record_id)
+        VALUES (?,?,'1.12,0 min/km','1.11,0 min/km',2160,20,'xlabs-telemetry-v1',?)`)
+        .run(`wide_history_xlabs_data_${index}`,historyEntry,xlabsSource);
+      db.prepare(`INSERT INTO equipment (id,race_entry_id,shoes_front,shoes_rear,barefoot_front,barefoot_rear,sulky_type,verification_status,source_record_id) VALUES (?,?, 'shod','shod',0,0,'standard','reported','wide_official')`)
+        .run(`wide_current_equipment_${index}`,`wide_entry_${index}`);
+    }
+  }
+
+  db.prepare(`INSERT INTO source_records (id,source_type,external_id,fetched_at,content_hash,quality_status) VALUES ('wide_xlabs_future','xlabs_race_json','wide-future-xlabs','2099-02-01T12:00:00Z','wide-future-xlabs-hash','normalized_verified_subset')`).run();
+  db.prepare(`INSERT INTO equipment (id,race_entry_id,shoes_front,shoes_rear,barefoot_front,barefoot_rear,sulky_type,verification_status,source_record_id)
+    VALUES ('wide_future_equipment','wide_history_entry_1','barefoot','barefoot',1,1,'american','reported','wide_official_future')`).run();
+  db.prepare(`INSERT INTO xlabs_intervals
+    (id,race_entry_id,source_record_id,interval_start_m,interval_end_m,elapsed_ms,km_pace_ms,
+     measured_distance_m,local_target_frame_count,local_window_frame_count,local_frame_coverage,
+     eligibility_status,mapper_version)
+    VALUES ('wide_future_interval','wide_history_entry_1','wide_xlabs_future',0,100,6000,60000,100,11,11,1,'valid','xlabs-intervals-v2')`).run();
+
   db.prepare(`INSERT INTO normalized_observations (id,entity_type,entity_id,source_record_id,observed_at,fields_json,quality_status) VALUES ('wide_obs_entry_future', 'race_entry', 'wide_entry_1', 'wide_official_future','2099-02-01T12:00:00Z',?,'normalized_verified_subset')`)
     .run(JSON.stringify({ startNumber:1, postPosition:99, startTier:1, handicapM:0, actualStartDistanceM:2140, scratched:false, scratchSemanticsVerified:true }));
   assert.equal(serial,128);
@@ -247,6 +290,15 @@ test('D1 Step 1 handles a full 128-entry round without truncation, market leakag
   assert.equal(new Set(entries.map((entry) => entry.current_facts.trainer.id)).size,128);
   assert.equal(entries.filter((entry) => entry.current_signals?.some((signal) => signal.signal_type === 'tactics')).length,128);
   assert.equal(entries.find((entry) => entry.race_entry_id === 'wide_entry_1').current_facts.actual_lane,1);
+  assert.equal(entries.filter((entry) => entry.history_selection?.counts?.totalSafe === 1).length,128);
+  assert.equal(entries.filter((entry) => entry.relevant_history?.length === 1).length,128);
+  assert.equal(entries.filter((entry) => entry.xlabs?.evidence_profile?.features?.opening_100_km_pace_ms?.measurement_depth?.measured_starts === 1).length,128);
+  assert.equal(entries.filter((entry) => entry.features?.person_context?.driver?.baseline_365d?.starts === 1).length,128);
+  assert.equal(entries.filter((entry) => entry.features?.race_priors?.priors?.race_outcome?.win_rate?.sample_size > 0).length,128);
+  assert.equal(pack.manifest.source_family_coverage.relevant_history.observed,128);
+  assert.equal(pack.manifest.source_family_coverage.xlabs_measured_history.observed,128);
   assert.equal(pack.manifest.contains_current_market,false);
+  assert.equal(pack.files.some((file) => file.content.includes('wide_official_future')),false);
+  assert.equal(pack.files.some((file) => file.content.includes('wide_xlabs_future')),false);
   for (const file of pack.files) assert.equal(findAnalysisPackMarketLeaks(file.payload).length,0);
 });

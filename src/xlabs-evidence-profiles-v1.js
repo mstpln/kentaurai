@@ -664,16 +664,26 @@ async function loadHorseHistory(env, cutoff, horseIds) {
 
 async function loadPopulationAggregates(env, cutoff) {
   const sql = `${featureRowsCte()},
+    dimensions (dimension) AS (
+      VALUES ('overall'),('year'),('track'),('method'),('distance'),
+        ('method_distance'),('class'),('race_type'),('field_size')
+    ),
     expanded AS (
-      SELECT 'overall' AS dimension,'all' AS bucket,fr.* FROM feature_rows fr
-      UNION ALL SELECT 'year',COALESCE(NULLIF(SUBSTR(fr.race_date,1,4),''),'unknown'),fr.* FROM feature_rows fr
-      UNION ALL SELECT 'track',COALESCE(CAST(fr.track_id AS TEXT),'unknown'),fr.* FROM feature_rows fr
-      UNION ALL SELECT 'method',${methodSql('fr')},fr.* FROM feature_rows fr
-      UNION ALL SELECT 'distance',${distanceSql('fr')},fr.* FROM feature_rows fr
-      UNION ALL SELECT 'method_distance',${methodSql('fr')} || '|' || ${distanceSql('fr')},fr.* FROM feature_rows fr
-      UNION ALL SELECT 'class',COALESCE(NULLIF(fr.stl_class,''),NULLIF(fr.main_class,''),'unclassified'),fr.* FROM feature_rows fr
-      UNION ALL SELECT 'race_type',COALESCE(NULLIF(fr.race_types,''),'unclassified'),fr.* FROM feature_rows fr
-      UNION ALL SELECT 'field_size',${fieldSql('fr')},fr.* FROM feature_rows fr
+      SELECT d.dimension,
+        CASE d.dimension
+          WHEN 'overall' THEN 'all'
+          WHEN 'year' THEN COALESCE(NULLIF(SUBSTR(fr.race_date,1,4),''),'unknown')
+          WHEN 'track' THEN COALESCE(CAST(fr.track_id AS TEXT),'unknown')
+          WHEN 'method' THEN ${methodSql('fr')}
+          WHEN 'distance' THEN ${distanceSql('fr')}
+          WHEN 'method_distance' THEN ${methodSql('fr')} || '|' || ${distanceSql('fr')}
+          WHEN 'class' THEN COALESCE(NULLIF(fr.stl_class,''),NULLIF(fr.main_class,''),'unclassified')
+          WHEN 'race_type' THEN COALESCE(NULLIF(fr.race_types,''),'unclassified')
+          WHEN 'field_size' THEN ${fieldSql('fr')}
+        END AS bucket,
+        fr.*
+      FROM feature_rows fr
+      CROSS JOIN dimensions d
     )
     SELECT dimension,bucket,COUNT(*) AS eligible,
       SUM(CASE WHEN opening_100_km_pace_ms IS NOT NULL THEN 1 ELSE 0 END) AS opening_100_km_pace_ms_measured,

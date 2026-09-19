@@ -237,18 +237,41 @@ function baseCte() {
     )`;
 }
 
-function aggregateSelect(level, where) {
-  return `SELECT '${level}' AS level,
-    COUNT(*) AS starts,
-    COUNT(DISTINCT race_id) AS races,
-    SUM(CASE WHEN placing = 1 THEN 1 ELSE 0 END) AS wins,
-    SUM(CASE WHEN placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) AS top3,
-    SUM(CASE WHEN gallop IS NOT NULL THEN 1 ELSE 0 END) AS gallop_known,
-    SUM(CASE WHEN gallop = 1 THEN 1 ELSE 0 END) AS gallops,
-    COUNT(DISTINCT source_record_id) AS source_records,
-    MIN(source_observed_at) AS first_source_observed_at,
-    MAX(source_observed_at) AS last_source_observed_at
-  FROM eligible WHERE ${where}`;
+function hierarchyRow(level, context, ordinal) {
+  const row = { ordinal, level, trackId: null, method: null, distanceBucket: null, fieldBucket: null };
+  if (level.includes('track')) row.trackId = context.trackId;
+  if (level.includes('method')) row.method = context.method;
+  if (level.includes('distance')) row.distanceBucket = context.distanceBucket;
+  if (level.includes('field')) row.fieldBucket = context.fieldBucket;
+  return row;
+}
+
+function hierarchyCte(context) {
+  const rows = context.hierarchy.map((level, index) => hierarchyRow(level, context, index));
+  return {
+    sql: `context_levels (ordinal, level, track_id, method_key, distance_bucket, field_bucket) AS (
+      VALUES ${rows.map(() => '(?,?,?,?,?,?)').join(',')}
+    )`,
+    bindings: rows.flatMap((row) => [
+      row.ordinal, row.level, row.trackId, row.method, row.distanceBucket, row.fieldBucket
+    ])
+  };
+}
+
+const HIERARCHY_MATCH_SQL = `
+  (cl.track_id IS NULL OR e.track_id = cl.track_id)
+  AND (cl.method_key IS NULL OR e.method_key = cl.method_key)
+  AND (cl.distance_bucket IS NULL OR e.distance_bucket = cl.distance_bucket)
+  AND (cl.field_bucket IS NULL OR e.field_bucket = cl.field_bucket)
+`;
+
+function hierarchyQueryBase(context) {
+  const levels = hierarchyCte(context);
+  return {
+    sql: `${baseCte()},
+    ${levels.sql}`,
+    bindings: [context.cutoff, context.cutoff, context.raceId, ...levels.bindings]
+  };
 }
 
 function normalizeAggregate(row) {
@@ -274,14 +297,23 @@ function normalizeAggregate(row) {
 }
 
 async function loadAggregateLevels(env, context) {
-  const selectors = [];
-  const bindings = [context.cutoff, context.cutoff, context.raceId];
-  for (const level of context.hierarchy) {
-    const condition = levelCondition(level, context);
-    selectors.push(aggregateSelect(level, condition.where));
-    bindings.push(...condition.bindings);
-  }
-  const { results } = await env.DB.prepare(`${baseCte()}\n${selectors.join('\nUNION ALL\n')}`).bind(...bindings).all();
+  const query = hierarchyQueryBase(context);
+  const { results } = await env.DB.prepare(`${query.sql}
+    SELECT cl.level,
+      COUNT(e.race_id) AS starts,
+      COUNT(DISTINCT e.race_id) AS races,
+      SUM(CASE WHEN e.placing = 1 THEN 1 ELSE 0 END) AS wins,
+      SUM(CASE WHEN e.placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) AS top3,
+      SUM(CASE WHEN e.gallop IS NOT NULL THEN 1 ELSE 0 END) AS gallop_known,
+      SUM(CASE WHEN e.gallop = 1 THEN 1 ELSE 0 END) AS gallops,
+      COUNT(DISTINCT e.source_record_id) AS source_records,
+      MIN(e.source_observed_at) AS first_source_observed_at,
+      MAX(e.source_observed_at) AS last_source_observed_at
+    FROM context_levels cl
+    LEFT JOIN eligible e ON ${HIERARCHY_MATCH_SQL}
+    GROUP BY cl.ordinal, cl.level
+    ORDER BY cl.ordinal
+  `).bind(...query.bindings).all();
   return new Map(results.map((row) => [row.level, normalizeAggregate(row)]));
 }
 
@@ -305,37 +337,31 @@ function normalizedEntropy(values) {
   return entropy / Math.log(positive.length);
 }
 
-function shapeLaneSelect(level, where) {
-  return `SELECT '${level}' AS level, actual_lane, COUNT(*) AS winners
-    FROM eligible WHERE placing = 1 AND actual_lane IS NOT NULL AND ${where}
-    GROUP BY actual_lane`;
-}
-
-function shapeMetaSelect(level, where) {
-  return `SELECT '${level}' AS level,
-    COUNT(*) AS winners,
-    COUNT(DISTINCT race_id) AS races,
-    COUNT(DISTINCT source_record_id) AS source_records,
-    MIN(source_observed_at) AS first_source_observed_at,
-    MAX(source_observed_at) AS last_source_observed_at
-    FROM eligible WHERE placing = 1 AND actual_lane IS NOT NULL AND ${where}`;
-}
-
 async function loadShapeLevels(env, context) {
-  const laneSelectors = [];
-  const metaSelectors = [];
-  const laneBindings = [context.cutoff, context.cutoff, context.raceId];
-  const metaBindings = [context.cutoff, context.cutoff, context.raceId];
-  for (const level of context.hierarchy) {
-    const condition = levelCondition(level, context);
-    laneSelectors.push(shapeLaneSelect(level, condition.where));
-    metaSelectors.push(shapeMetaSelect(level, condition.where));
-    laneBindings.push(...condition.bindings);
-    metaBindings.push(...condition.bindings);
-  }
+  const laneQuery = hierarchyQueryBase(context);
+  const metaQuery = hierarchyQueryBase(context);
   const [laneResult, metaResult] = await Promise.all([
-    env.DB.prepare(`${baseCte()}\n${laneSelectors.join('\nUNION ALL\n')}`).bind(...laneBindings).all(),
-    env.DB.prepare(`${baseCte()}\n${metaSelectors.join('\nUNION ALL\n')}`).bind(...metaBindings).all()
+    env.DB.prepare(`${laneQuery.sql}
+      SELECT cl.level, e.actual_lane, COUNT(*) AS winners
+      FROM context_levels cl
+      JOIN eligible e ON ${HIERARCHY_MATCH_SQL}
+        AND e.placing = 1 AND e.actual_lane IS NOT NULL
+      GROUP BY cl.ordinal, cl.level, e.actual_lane
+      ORDER BY cl.ordinal, e.actual_lane
+    `).bind(...laneQuery.bindings).all(),
+    env.DB.prepare(`${metaQuery.sql}
+      SELECT cl.level,
+        COUNT(e.race_id) AS winners,
+        COUNT(DISTINCT e.race_id) AS races,
+        COUNT(DISTINCT e.source_record_id) AS source_records,
+        MIN(e.source_observed_at) AS first_source_observed_at,
+        MAX(e.source_observed_at) AS last_source_observed_at
+      FROM context_levels cl
+      LEFT JOIN eligible e ON ${HIERARCHY_MATCH_SQL}
+        AND e.placing = 1 AND e.actual_lane IS NOT NULL
+      GROUP BY cl.ordinal, cl.level
+      ORDER BY cl.ordinal
+    `).bind(...metaQuery.bindings).all()
   ]);
   const lanesByLevel = new Map(context.hierarchy.map((level) => [level, []]));
   for (const row of laneResult.results) lanesByLevel.get(row.level)?.push(Number(row.winners ?? 0));
