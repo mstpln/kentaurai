@@ -41,7 +41,7 @@ async function sessionCookie(env) {
   return (await createAppSessionCookie(env)).split(';')[0];
 }
 
-test('settings routes are private and settings UI includes the three-step AI workflow', async () => {
+test('settings routes are private and settings UI includes the six-step AI workflow', async () => {
   const { env } = createTestEnv();
   env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
 
@@ -61,8 +61,11 @@ test('settings routes are private and settings UI includes the three-step AI wor
   assert.match(html, /Analysera omgång/);
   assert.match(html, /Marknadsblind analys/);
   assert.match(html, /Hämta analysdata/);
-  assert.match(html, /Marknad och system/);
+  assert.match(html, /Marknadsanalys/);
   assert.match(html, /Hämta marknadsdata/);
+  assert.match(html, /Intervjuer & extern statistik/);
+  assert.match(html, /Bygg färdigt system/);
+  assert.match(html, /Registrera extern statistik & intervjuer/);
   assert.match(html, /Registrera system/);
   assert.match(html, /Hämta importunderlag/);
   assert.match(html, /Datamängd/);
