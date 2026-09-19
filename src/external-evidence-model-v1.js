@@ -53,19 +53,23 @@ function cleanRole(value) {
   return role;
 }
 function shoeState(value, barefoot) {
-  if (barefoot === 1 || barefoot === true) return 'barefoot';
-  if (barefoot === 0 || barefoot === false) return 'shod';
   const text = String(value || '').trim().toLowerCase();
-  if (!text) return null;
-  if (/(barefoot|barfota)/.test(text)) return 'barefoot';
-  if (/(shod|shoe|skor|with_shoes|med skor)/.test(text)) return 'shod';
-  return 'reported:' + text.slice(0, 60);
+  const textState = !text ? null
+    : /(barefoot|barfota)/.test(text) ? 'barefoot'
+      : /(shod|shoe|skor|with_shoes|med skor)/.test(text) ? 'shod'
+        : 'reported:' + text.slice(0, 60);
+  const boolState = barefoot === 1 || barefoot === true ? 'barefoot'
+    : barefoot === 0 || barefoot === false ? 'shod'
+      : null;
+  if (boolState && (textState === 'barefoot' || textState === 'shod') && boolState !== textState) return 'conflict';
+  return boolState || textState;
 }
 export function equipmentContexts(row) {
   if (!row) return { balance:null, wagon:null };
   const front = shoeState(row.shoes_front, row.barefoot_front);
   const rear = shoeState(row.shoes_rear, row.barefoot_rear);
   let balance = null;
+  if (front === 'conflict' || rear === 'conflict') return { balance:null, wagon:null };
   if (front || rear) {
     let label;
     if (front === 'barefoot' && rear === 'barefoot') label = 'Barfota runt om';
