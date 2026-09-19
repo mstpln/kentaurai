@@ -30,6 +30,15 @@ function seed(env, db) {
   db.prepare("INSERT INTO race_entries (id,race_id,horse_id,driver_id,trainer_id,start_number,actual_start_distance_m,scratched,data_quality) VALUES (?,'evidence-race',?,'evidence-driver',?,1,2140,0,'verified')").run(ENTRY_ID,HORSE_ID,TRAINER_ID);
   db.prepare("INSERT INTO source_records (id,source_type,fetched_at,quality_status) VALUES ('evidence-official-source','official_provider','2099-09-20T08:00:00Z','normalized_verified_subset')").run();
   db.prepare("INSERT INTO equipment (id,race_entry_id,shoes_front,shoes_rear,barefoot_front,barefoot_rear,sulky_type,verification_status,source_record_id) VALUES ('evidence-equipment',?,'barefoot','barefoot',1,1,'american','reported','evidence-official-source')").run(ENTRY_ID);
+  for (let leg = 2; leg <= 8; leg += 1) {
+    const raceId = 'evidence-race-' + leg;
+    const horseId = 'evidence-horse-' + leg;
+    const entryId = 'evidence-entry-' + leg;
+    db.prepare("INSERT INTO races (id,track_id,race_date,race_number,distance_m,start_method,status) VALUES (?,'evidence-track','2099-09-20',?,2140,'auto','upcoming')").run(raceId,leg);
+    db.prepare("INSERT INTO game_legs (game_round_id,leg_number,race_id) VALUES (?,?,?)").run(ROUND_ID,leg,raceId);
+    db.prepare("INSERT INTO horses (id,canonical_name) VALUES (?,?)").run(horseId,'Synthetic Horse ' + leg);
+    db.prepare("INSERT INTO race_entries (id,race_id,horse_id,start_number,actual_start_distance_m,scratched,data_quality) VALUES (?,?,?,1,2140,0,'verified')").run(entryId,raceId,horseId);
+  }
 }
 
 function payload(exportId = 'manual-export-1', exportedAt = '2099-09-20T11:00:00Z') {
@@ -78,7 +87,7 @@ test('Step 3 context exposes only horse external statistics and horse/trainer in
   seed(env, db);
   const context = await buildExternalEvidenceContext(env, ROUND_ID);
   assert.equal(context.contract_version, EXTERNAL_EVIDENCE_CONTEXT_CONTRACT);
-  assert.equal(context.entries.length, 1);
+  assert.equal(context.entries.length, 8);
   const entry = context.entries[0];
   assert.equal(entry.horse_id, HORSE_ID);
   assert.equal(entry.trainer_id, TRAINER_ID);
