@@ -146,7 +146,15 @@ async function withProvenance(env, payload, {
     asOf:market.market_as_of,
     cutoffAt:market.market_cutoff,
     generatedAt:market.generated_at,
-    artifact:{ market_fingerprint:market.market_fingerprint, market_cutoff:market.market_cutoff }
+    artifact:{
+      market_fingerprint:market.market_fingerprint,
+      market_cutoff:market.market_cutoff,
+      active_legs:(market.entry_map || []).map((leg) => ({
+        leg_number:leg.leg_number,
+        race_id:leg.race_id,
+        entry_ids:(leg.entries || []).filter((entry) => !entry.scratched).map((entry) => entry.race_entry_id)
+      }))
+    }
   });
   payload.step1 = {
     pack_id: pack.manifest.pack_id,
@@ -472,4 +480,22 @@ test('later scratch preserves the original Step 1 prediction population', async 
     "SELECT COUNT(*) AS n FROM system_selections WHERE system_id=? AND race_entry_id='external-entry-1-2'"
   ).get(externalRun.main_system_id);
   assert.equal(selected.n, 0);
+});
+
+
+test('later scratch of a Step 2 selected horse does not invalidate the recorded played system', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  const payload = await withProvenance(env, validPayload());
+  payload.submission_id = 'external-selected-late-scratch';
+
+  db.prepare("UPDATE race_entries SET scratched=1 WHERE id='external-entry-4-2'").run();
+
+  const result = await importRecordedSystem(env, payload, { now: '2099-09-20T16:30:00Z' });
+  assert.equal(result.reused, false);
+  const externalRun = db.prepare("SELECT main_system_id FROM analysis_external_runs WHERE id=?").get(result.externalRunId);
+  const selected = db.prepare(
+    "SELECT is_spike FROM system_selections WHERE system_id=? AND leg_number=4 AND race_entry_id='external-entry-4-2'"
+  ).get(externalRun.main_system_id);
+  assert.equal(selected.is_spike, 0);
 });
