@@ -252,10 +252,12 @@ export async function buildMarketInput(env, roundId, asOf = null) {
     }))
   };
 
+  const policy = normalizePolicy(await canonicalOptimizerPolicyForRound(env, roundId));
   const fingerprintInput = {
     contract_version: MARKET_INPUT_CONTRACT,
     round_id: identity.round.id,
     game_type: identity.round.game_type,
+    system_policy: policy,
     market,
     market_history: history,
     entry_identity: identity.legs.map((leg) => ({
@@ -272,6 +274,7 @@ export async function buildMarketInput(env, roundId, asOf = null) {
   return {
     contract_version: MARKET_INPUT_CONTRACT,
     round: identity.round,
+    system_policy: policy,
     market,
     market_history: history,
     entry_map: identity.legs,
