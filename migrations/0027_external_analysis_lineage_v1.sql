@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS analysis_external_exports (
   cutoff_at TEXT,
   generated_at TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  UNIQUE(stage, artifact_id, artifact_fingerprint)
+  UNIQUE(stage, artifact_id, artifact_fingerprint, generated_at)
 );
 
 CREATE INDEX IF NOT EXISTS idx_analysis_external_exports_round_stage
