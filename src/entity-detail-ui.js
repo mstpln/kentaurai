@@ -147,7 +147,9 @@ function runtimeClient() {
 }
 
 export function enhanceEntityDetailUiHtml(html) {
-  let enhanced = enhanceEntityDetailStatisticsHtmlV2(html);
+  const source = String(html);
+  if (source.includes('kentaurai-entity-detail-ui-runtime') && source.includes('kentaurai-entity-detail-canonical-style')) return source;
+  let enhanced = enhanceEntityDetailStatisticsHtmlV2(source);
   if (!enhanced.includes(SUCCESS_RENDER)) throw new Error('entity detail UI composition target is missing');
   if (!enhanced.includes(TRAINER_SPECIALS)) throw new Error('trainer detail specialist target is missing');
   if (!enhanced.includes(HORSE_AGE_OPTIONS)) throw new Error('horse detail age-option target is missing');
