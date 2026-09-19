@@ -226,16 +226,32 @@ export async function buildMarketInput(env, roundId, asOf = null) {
   const policy = normalizePolicy(await canonicalOptimizerPolicyForRound(env, roundId));
   const fingerprintInput = {
     contract_version: MARKET_INPUT_CONTRACT,
+    round_id: identity.round.id,
+    game_type: identity.round.game_type,
+    system_policy: policy,
+    market,
+    market_history: history,
+    external_rankings: externalRankings,
+    entry_identity: identity.legs.map((leg) => ({
+      leg_number: leg.leg_number,
+      race_id: leg.race_id,
+      entries: leg.entries.map((entry) => ({
+        race_entry_id: entry.race_entry_id,
+        start_number: entry.start_number,
+        horse_id: entry.horse_id,
+        scratched: entry.scratched
+      }))
+    }))
+  };
+  const marketFingerprint = await sha256(fingerprintInput);
+  return {
+    contract_version: MARKET_INPUT_CONTRACT,
     round: identity.round,
     system_policy: policy,
     market,
     market_history: history,
     external_rankings: externalRankings,
-    entry_map: identity.legs
-  };
-  const marketFingerprint = await sha256(fingerprintInput);
-  return {
-    ...fingerprintInput,
+    entry_map: identity.legs,
     generated_at: new Date().toISOString(),
     market_fingerprint: marketFingerprint,
     market_as_of: deadline.requested_as_of,
