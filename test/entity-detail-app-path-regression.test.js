@@ -34,4 +34,8 @@ test('production /app/ contains the canonical entity-detail stack exactly once',
   assert.match(html, /app\.querySelector\(':scope > \.data-groups'\)\?\.remove\(\)/);
   assert.match(html, /\['external_stats','Extern statistik'\]/);
   assert.match(html, /\['interviews','Intervjuer'\]/);
+  const performanceIndex = html.indexOf('id="kentaurai-performance-v1-script"');
+  const scorecardIndex = html.indexOf('id="kentaurai-entity-detail-statistics-v2-script"');
+  const runtimeIndex = html.indexOf('id="kentaurai-entity-detail-ui-runtime"');
+  assert.ok(performanceIndex >= 0 && scorecardIndex > performanceIndex && runtimeIndex > scorecardIndex);
 });
