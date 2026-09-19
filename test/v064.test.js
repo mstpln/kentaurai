@@ -184,12 +184,12 @@ test('actual Wrangler worker serves the canonical completion UI after browser lo
   assert.equal(response.status, 200);
   const html = await response.text();
   for (const label of ['Trend', 'Tränare', 'Hästar', 'Kuskar', 'Bana', 'Spel', 'AI', 'Data',
-    'Analysera omgången utan marknad', 'Exportera marknadsblind data', 'Värdera marknaden och bygg system',
-    'Exportera marknadsdata', 'Skapa importfil till KentaurAI', 'Kopiera exportinstruktion', 'V85/V86-omgångar',
+    'Analysera omgång', 'Marknadsblind analys', 'Hämta analysdata', 'Marknad och system',
+    'Hämta marknadsdata', 'Registrera system', 'Hämta importunderlag', 'Kopiera importinstruktion',
     'All data', 'Loppnivå', 'Högre prissumma', 'Vardagstrav', 'Översikt', 'Spårstatistik', 'Hemmatränare',
     'Startmetod', 'STL-klass', 'Lopptyp', 'Sverige']) assert.match(html, new RegExp(label.replace('/', '\\/')));
   assert.doesNotMatch(html, /STL-lopp/);
-  assert.match(html, /kentaurai-analysis-v2/);
+  assert.doesNotMatch(html, /kentaurai-analysis-v2/);
   assert.match(html, /startMethod:'all',raceScope:'all'/);
   assert.match(html, /selected===false\?'Fel':'Ej rättad'/);
   assert.doesNotMatch(html, /selected===false\?'Miss':'Ej rättad'/);
