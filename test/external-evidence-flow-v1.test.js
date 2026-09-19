@@ -140,6 +140,14 @@ test('Step 3 historical context excludes evidence unavailable at the round cutof
   before.statistics = [before.statistics[0]];
   await importExternalEvidence(env, before);
 
+  const lateRegistered = payload('late-registered','2026-09-20T09:00:00Z');
+  lateRegistered.statistics = [lateRegistered.statistics[0]];
+  lateRegistered.statistics[0].starts = 24;
+  lateRegistered.statistics[0].observed_at = '2026-09-19T13:00:00Z';
+  lateRegistered.interviews[0].published_at = '2026-09-19T13:00:00Z';
+  lateRegistered.interviews[0].summary = 'Syntetisk information som publicerades före spelstopp men registrerades senare.';
+  await importExternalEvidence(env, lateRegistered);
+
   const after = payload('after-cutoff','2026-09-19T16:00:00Z');
   after.statistics = [after.statistics[0]];
   after.statistics[0].starts = 26;
@@ -148,10 +156,13 @@ test('Step 3 historical context excludes evidence unavailable at the round cutof
 
   const context = await buildExternalEvidenceContext(env, ROUND_ID);
   assert.equal(context.analysis_as_of, '2026-09-19T14:55:00.000Z');
-  assert.equal(context.historical_external_statistics.length, 1);
-  assert.equal(context.historical_external_statistics[0].starts, 25);
-  assert.equal(context.historical_interviews.length, 1);
-  assert.equal(context.historical_interviews[0].published_at, '2026-09-19T12:00:00.000Z');
+  assert.equal(context.historical_external_statistics.length, 2);
+  assert.deepEqual(context.historical_external_statistics.map((row) => row.starts), [24,25]);
+  assert.equal(context.historical_interviews.length, 2);
+  assert.deepEqual(context.historical_interviews.map((row) => row.published_at), [
+    '2026-09-19T13:00:00.000Z',
+    '2026-09-19T12:00:00.000Z'
+  ]);
 
   const importContext = await buildExternalEvidenceContext(env, ROUND_ID, { purpose:'import' });
   assert.deepEqual(importContext.historical_external_statistics, []);
