@@ -12,23 +12,22 @@
 
 ## External AI analysis exchange
 1. KentaurAI is the factual database, deterministic calculation and persistence layer. The normal product does not run a separate autonomous AI model inside the Worker.
-2. The normal live workflow uses two external-AI steps. Step 1 exports a deterministic market-blind pack for one selected round plus a provider-specific instruction; the user performs the blind analysis in ChatGPT or Claude.
-3. Step 2 exports verified current market data plus the server-owned system policy for that same selected round. It is loaded into the same AI conversation so the AI can compare its blind assessment with the market and build the final system.
-4. Step 1 probabilities, ranking and ABCD are the market-blind baseline. Once market data is shown, Step 2 may flag suspected mistakes but must not silently rewrite those fields because of the market.
-5. KentaurAI does not require Step 1 to be imported or server-sealed before Step 2 in the normal user workflow. The older sealed v3 lock/decision/optimizer stack remains historical/compatibility code, not the primary UI path.
-6. The external AI owns interpretation and final system selection. It may explain scenario, race shape, statistical evidence, value, spikes, covers and accepted risks.
-7. Every registered V85/V86 system must contain exactly three singleton spike legs in three different legs. Multi-selection legs are never spikes.
-8. System registration is a separate later workflow. The user selects the round again, downloads a round-scoped import context, copies the registration instruction into the AI conversation, and imports the generated JSON back into KentaurAI.
-9. KentaurAI validates canonical round/race/entry identities and recomputes spike count, row count and cost from the selections and configured line price. The AI must not submit those arithmetic fields as authoritative values.
-10. Registered blind probabilities, analysis text, systems and selections are persisted into the generic analysis/system tables plus a versioned `analysis_external_runs` lineage. Spel, F1 replay and F2 post-race diagnostics use that external lineage directly; old sealed locks/decision/optimizer rows are never fabricated.
-11. External blindness is recorded as `declared_unsealed`, not server-proven. Registration must bind to a reproducible Step 1 pack/facts fingerprint and Step 2 market fingerprint/cutoff, while server time determines import timing.
-12. Registrations at or after the authoritative deadline are preserved for bookkeeping/diagnostics as `post_race_recovery` and `manual_review_required`; they cannot become automatic learning evidence.
-13. Missing market percentages remain null all the way through selection ownership/value metrics. Null is never coerced to zero.
-14. Exact retries are idempotent by stable submission identity and payload digest. Changed content requires a new submission id. A later distinct registration explicitly supersedes the prior external run.
-15. Historical v1/v2 and sealed-v3 artifacts remain readable for compatibility, but their mutation routes are disabled in the default mode so one round cannot accumulate competing new workflow lineages through the normal runtime.
-16. OpenAI and Anthropic remain supported external providers. Provider/model attribution is explicit and private analyses remain in private D1, never in public GitHub.
-17. External editorial/ranking signals are considered only after the own blind analysis and market comparison and never replace verified facts. Step 1 permits factual signals and direct trainer/driver interview context but fails closed on generic editorial opinion/tip contamination.
-18. F1 replay/calibration and F2 post-race diagnostics remain evidence layers. Model/rule changes still require repeated supporting evidence; one round never changes weights automatically.
+2. Step 1 exports a deterministic market-blind pack for one selected round. Editorial/interview material is excluded from that pack.
+3. Step 2 exports verified current market data for the same round. It is market analysis only: market data may expose disagreements or information gaps but never rewrites Step 1 probabilities/ranking/ABCD and no system is built yet.
+4. Step 3 exports relevant previously stored external horse statistics and horse/trainer interview context. The user can manually add current private PDFs/screenshots in the same AI conversation. New sports facts/statistical evidence may justify an explicitly explained day adjustment; market disagreement alone may not.
+5. Step 4 is system construction through user/AI dialogue. Exactly three singleton spike legs remain mandatory and KentaurAI owns row/cost arithmetic.
+6. External statistics/interviews are registered separately in Step 5 through a round-scoped import-context -> AI structured JSON -> private import flow. Registration can happen after betting or after the round without changing when the analysis information originally became available.
+7. External horse statistics are append-only timestamped observations, not mutable profile values. Current track/balance/wagon contexts are bound to canonical/current KentaurAI identities where available. Unknown context remains unknown rather than guessed.
+8. External statistics from this workflow attach only to horses. Interview records attach to the horse and trainer/stable context with the actual speaker and role. Drivers are outside this workflow.
+9. Private PDFs/images are not direct database imports. Full paid article bodies are not persisted; structured evidence/signals and sufficiently complete summaries are retained privately with provenance.
+10. Step 6 is system registration. The registration file carries the latest sports assessment used by the final system; if Step 3 made no sports adjustment, this equals Step 1. Step 2 market data alone may not change those probabilities.
+11. System registration remains bound to reproducible Step 1 pack/facts and Step 2 market fingerprints. External blindness is recorded as `declared_unsealed`, not server-proven.
+12. KentaurAI validates canonical round/race/entry identities and recomputes spike count, row count and cost. AI-supplied arithmetic is not authoritative.
+13. Registrations at or after the authoritative deadline are preserved as post-race recovery/manual-review evidence and cannot become automatic learning evidence.
+14. Missing market percentages remain null. Exact retries are idempotent; changed content requires a new submission identity.
+15. Historical v1/v2 and sealed-v3 artifacts remain readable for compatibility, but their mutation routes stay disabled in the default workflow.
+16. F1 replay/calibration and F2 post-race diagnostics remain evidence layers; no model/rule change follows one race or round.
+
 
 ## Interface direction
 1. Horse, trainer and driver remain primary detail entities, with V85/V86 system/performance history available in a dedicated Spel area.
