@@ -28,6 +28,9 @@ test('external analysis UI matches approved six-step structure and strips sealed
   assert.match(html,/Hämta importunderlag/);
   assert.match(html,/settings-primary[^"]*" type="button">Hämta importunderlag/);
   assert.match(html,/settings-secondary[^"]*" type="button">Importera system/);
+  assert.match(html,/system sparade:/);
+  assert.match(html,/Huvudsystem/);
+  assert.match(html,/Alternativsystem/);
   assert.doesNotMatch(html,/kentaurai-f3-private-ui-script/);
   assert.doesNotMatch(html,/Försegla Steg 1/);
   assert.doesNotMatch(html,/Importera och optimera/);
