@@ -286,3 +286,40 @@ test('composed production payload has no legacy async detail writer left to reso
   assert.doesNotMatch(html, /appendDriverDetailStats|driverStatsBuildC/);
   assert.doesNotMatch(html, /priorAlignedDetailTabs|kentaurai-entity-detail-ui-runtime/);
 });
+
+test('stale canonical statistics request cannot repaint after navigation to another horse', async () => {
+  const html = await productionHtml();
+  const scripts = [...html.matchAll(/<script(?: id="([^"]+)")?[^>]*>([\s\S]*?)<\/script>/g)];
+  const { context, document, responses, requestedPaths } = runtimeContext();
+  for (const [, id = '(base)', source] of scripts) new vm.Script(source, { filename:id }).runInContext(context);
+
+  const base = { latestObservation:null, stats:{}, breakdowns:{ startMethods:[], distances:[], tracks:[] }, coverage:{}, starts:[] };
+  responses.set('/entities/horses/horse-1', { ...base, type:'horse', entity:{ name:'First Horse', country_code:'SE' } });
+  responses.set('/entities/horses/horse-2', { ...base, type:'horse', entity:{ name:'Second Horse', country_code:'SE' } });
+  responses.set('/horses/statistics/filter-options', { tracks:[], distanceGroups:[], ageOptions:[], birthYears:[], handicapBuckets:[] });
+  let resolveFirstCalendar;
+  const firstCalendar = new Promise((resolve) => { resolveFirstCalendar = resolve; });
+  responses.set('/horses/horse-1/calendar-statistics', firstCalendar);
+  responses.set('/horses/horse-1/statistics', { currentStartPoints:null, relevantPatterns:null });
+  responses.set('/horses/horse-2/calendar-statistics', { summary:{}, startMethods:[], distances:[], tracks:[] });
+  responses.set('/horses/horse-2/statistics', { currentStartPoints:null, relevantPatterns:null });
+  document.appWrites.length = 0;
+  document.elementWrites.length = 0;
+  document.domAppends.length = 0;
+
+  const firstOpen = vm.runInContext("openDetail('horses','horse-1')", context);
+  for (let i = 0; i < 30 && !requestedPaths.some((path) => path.startsWith('/horses/horse-1/calendar-statistics?')); i += 1) {
+    await Promise.resolve();
+  }
+  assert.ok(requestedPaths.some((path) => path.startsWith('/horses/horse-1/calendar-statistics?')));
+
+  await vm.runInContext("openDetail('horses','horse-2')", context);
+  const writesBeforeStaleResolution = document.elementWrites.length;
+  resolveFirstCalendar({ summary:{}, startMethods:[], distances:[], tracks:[] });
+  await firstOpen;
+
+  assert.equal(document.elementWrites.length, writesBeforeStaleResolution);
+  assert.match(document.appWrites.at(-1), /Second Horse/);
+  assert.doesNotMatch(document.appWrites.at(-1), /First Horse/);
+  assert.deepEqual(document.domAppends.filter((id) => /StatsBuild/.test(id)), []);
+});
