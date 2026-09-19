@@ -356,8 +356,8 @@ export function getRegistrationPrompt(provider = 'openai') {
     '  "submission_id": "nytt-stabilt-id",',
     '  "round_id": "<exakt från importunderlaget>",',
     '  "producer": {"provider": "' + key + '", "model": "<verklig modell eller unknown>"},',
-    '  "step1": {"pack_id":"<manifest.pack_id>","facts_fingerprint":"<manifest.facts_fingerprint>","as_of":"<manifest.as_of>"},',
-    '  "step2": {"market_fingerprint":"<market_fingerprint från Steg 2-filen>","as_of":"<market_as_of>","cutoff":"<market_cutoff>"},',
+    '  "step1": {"pack_id":"<manifest.pack_id>","facts_fingerprint":"<manifest.facts_fingerprint>","as_of":"<manifest.as_of>","generated_at":"<manifest.generated_at>"},',
+    '  "step2": {"market_fingerprint":"<market_fingerprint från Steg 2-filen>","as_of":"<market_as_of>","cutoff":"<market_cutoff>","generated_at":"<generated_at från Steg 2-filen>"},',
     '  "round_summary": "<Steg 1-sammanfattning>",',
     '  "recommendations": "<kort Steg 2/systemsammanfattning>",',
     '  "legs": [',
@@ -373,8 +373,8 @@ export function getRegistrationPrompt(provider = 'openai') {
     '}',
     '',
     'REGLER:',
-    '- Kopiera step1.pack_id, step1.facts_fingerprint och step1.as_of exakt från Steg 1-filens manifest.',
-    '- Kopiera step2.market_fingerprint, step2.as_of och step2.cutoff exakt från Steg 2-filen. Hitta inte på dessa värden.',
+    '- Kopiera step1.pack_id, step1.facts_fingerprint, step1.as_of och step1.generated_at exakt från Steg 1-filens manifest.',
+    '- Kopiera step2.market_fingerprint, step2.as_of, step2.cutoff och step2.generated_at exakt från Steg 2-filen. Hitta inte på dessa värden.',
     '- legs ska innehålla exakt 8 avdelningar och Steg 1-bedömningen ska återges utan marknadsfärgning.',
     '- win_probability ska vara JSON-tal 0-1 och summera till 1 per avdelning.',
     '- raw_rank ska vara unik 1..N och ABCD ska vara A/B/C/D.',
@@ -546,7 +546,8 @@ function normalizedStep1Provenance(payload) {
   return {
     packId: requiredText(step1.pack_id, 'step1.pack_id', 160),
     factsFingerprint: requiredText(step1.facts_fingerprint, 'step1.facts_fingerprint', 160),
-    asOf: exactIso(step1.as_of, 'step1.as_of')
+    asOf: exactIso(step1.as_of, 'step1.as_of'),
+    generatedAt: exactIso(step1.generated_at, 'step1.generated_at')
   };
 }
 
@@ -556,7 +557,8 @@ function normalizedStep2Provenance(payload) {
   return {
     marketFingerprint: requiredText(step2.market_fingerprint, 'step2.market_fingerprint', 160),
     asOf: exactIso(step2.as_of, 'step2.as_of'),
-    cutoff: exactIso(step2.cutoff, 'step2.cutoff')
+    cutoff: exactIso(step2.cutoff, 'step2.cutoff'),
+    generatedAt: exactIso(step2.generated_at, 'step2.generated_at')
   };
 }
 
@@ -567,10 +569,16 @@ async function verifyExternalProvenance(env, roundId, step1, step2) {
     || exactIso(pack.manifest.as_of, 'replayed Step 1 as_of') !== step1.asOf) {
     throw new Error('Step 1 provenance does not match a reproducible KentaurAI analysis pack');
   }
+  if (Date.parse(step1.generatedAt) < Date.parse(step1.asOf)) {
+    throw new Error('step1.generated_at cannot precede step1.as_of');
+  }
   const marketInput = await buildMarketInput(env, roundId, step2.asOf);
   if (marketInput.market_fingerprint !== step2.marketFingerprint
     || exactIso(marketInput.market_cutoff, 'replayed Step 2 cutoff') !== step2.cutoff) {
     throw new Error('Step 2 provenance does not match a reproducible KentaurAI market export');
+  }
+  if (Date.parse(step2.generatedAt) < Date.parse(step1.generatedAt)) {
+    throw new Error('step2.generated_at cannot precede step1.generated_at');
   }
   return { pack, marketInput };
 }
@@ -640,7 +648,9 @@ export async function importRecordedSystem(env, payload) {
 
   const createdAt = new Date().toISOString();
   const importTiming = Date.parse(createdAt) < Date.parse(deadline.deadline_at) ? 'pre_race' : 'post_race_recovery';
-  const learningEligibility = importTiming === 'pre_race' ? 'eligible_by_timing' : 'manual_review_required';
+  const sourceTimingEligible = Date.parse(step1.generatedAt) < Date.parse(deadline.deadline_at)
+    && Date.parse(step2.generatedAt) < Date.parse(deadline.deadline_at);
+  const learningEligibility = importTiming === 'pre_race' && sourceTimingEligible ? 'eligible_by_timing' : 'manual_review_required';
   const analysisBlindness = importTiming === 'pre_race' ? 'declared_unsealed' : 'declared_unsealed_post_race_import';
   const config = {
     recordedSystem: {
@@ -652,8 +662,10 @@ export async function importRecordedSystem(env, payload) {
       analysis_as_of: analysisAsOf,
       step1_pack_id: step1.packId,
       step1_facts_fingerprint: step1.factsFingerprint,
+      step1_generated_at: step1.generatedAt,
       step2_market_fingerprint: step2.marketFingerprint,
       step2_market_cutoff: step2.cutoff,
+      step2_generated_at: step2.generatedAt,
       analysis_blindness: analysisBlindness,
       import_timing: importTiming,
       learning_eligibility: learningEligibility,
@@ -773,7 +785,7 @@ export async function importRecordedSystem(env, payload) {
     externalRunId, roundId, modelVersionId, mainSystemId, EXTERNAL_ANALYSIS_RUN_CONTRACT,
     EXTERNAL_ANALYSIS_FLOW_VERSION, EXTERNAL_ANALYSIS_PROMPT_VERSION, producer.provider, producer.model,
     step1.packId, step1.asOf, step1.factsFingerprint, step2.marketFingerprint, step2.cutoff,
-    marketInput.generated_at, analysisBlindness, importTiming, learningEligibility, digest,
+    step2.generatedAt, analysisBlindness, importTiming, learningEligibility, digest,
     previousRun?.id || null, createdAt
   ));
   kinds.push('external_run');
