@@ -97,6 +97,26 @@ test('external evidence import is append-only, idempotent and links one intervie
   assert.equal(step3.trainers.find((row)=>row.trainer_id==='trainer_1').interview_history.length,1);
 });
 
+test('Step 3 historical context excludes evidence that became available after the round deadline', async () => {
+  const {env,db}=createTestEnv();seedRound(db);
+  await importExternalEvidence(env,payload());
+
+  const later=payload('2099-03-01T14:30:00Z');
+  later.submission_id='synthetic-evidence-later';
+  later.statistics[0].wins=5;
+  later.statistics[0].win_percent=42;
+  later.interviews[0].interview_text='Detta blev tillgängligt först efter spelstopp.';
+  await importExternalEvidence(env,later);
+
+  const step3=await buildStep3Context(env,'round_x');
+  assert.equal(step3.context_as_of,'2099-03-01T12:55:00Z');
+  const horse=step3.horses.find((row)=>row.horse_id==='horse_1');
+  assert.equal(horse.external_statistics.length,4);
+  assert.equal(horse.external_statistics.find((row)=>row.context_type==='all_starts').wins,4);
+  assert.equal(horse.interview_history.length,1);
+  assert.doesNotMatch(horse.interview_history[0].interview_text,/efter spelstopp/);
+});
+
 test('external evidence import rejects wrong round identities and unknown current equipment context', async () => {
   const {env,db}=createTestEnv();seedRound(db);
   const wrong=payload();wrong.statistics=[{...wrong.statistics[0],race_entry_id:'not_an_entry'}];wrong.interviews=[];
