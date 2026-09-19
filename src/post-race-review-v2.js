@@ -1,6 +1,7 @@
 import { stableId } from './ids.js';
 import { stableFeatureJson } from './analysis-v3-foundations.js';
 import { step1LockHash } from './analysis-step1-lock-v1.js';
+import { runNextExternalPostRaceReviewV1 } from './external-analysis-evidence-v1.js';
 
 export const POST_RACE_REVIEW_V2_VERSION = 'post-race-review-v2-f2';
 const LEARNING_EVIDENCE_VERSION = 'post-race-learning-evidence-v1';
@@ -56,6 +57,7 @@ async function candidateV3Round(env, roundId = null) {
     JOIN analysis_optimizer_runs aor ON aor.id = av3.optimizer_run_id
     WHERE gr.game_type IN ('V85','V86')
       ${filter}
+      AND NOT EXISTS (SELECT 1 FROM analysis_external_runs aer WHERE aer.game_round_id=gr.id)
       AND (SELECT COUNT(*) FROM game_legs gl WHERE gl.game_round_id = gr.id) = 8
       AND (SELECT COUNT(*)
            FROM game_legs gl
@@ -402,6 +404,8 @@ async function persistLegReview(env, row, facts, indexed, legNumber, now) {
 
 export async function runNextPostRaceReviewV2(env, options = {}) {
   if (!env?.DB) throw new Error('DB is not configured');
+  const external = await runNextExternalPostRaceReviewV1(env, options);
+  if (external) return external;
   const row = await candidateV3Round(env, options.roundId || null);
   if (!row) return null;
 
