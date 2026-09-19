@@ -73,6 +73,17 @@ async function loadInterviewRows(env, horseIds, trainerIds) {
     ).bind(...group).all();
     for (const row of results || []) rows.set(row.id,row);
   }
+  const horseNames=new Map(),trainerNames=new Map();
+  const rowHorseIds=[...new Set([...rows.values()].map((row)=>row.horse_id).filter(Boolean))];
+  const rowTrainerIds=[...new Set([...rows.values()].map((row)=>row.trainer_id).filter(Boolean))];
+  for(const group of chunks(rowHorseIds)){
+    const {results}=await env.DB.prepare('SELECT id,canonical_name FROM horses WHERE id IN ('+ph(group)+')').bind(...group).all();
+    for(const row of results||[]) horseNames.set(row.id,row.canonical_name);
+  }
+  for(const group of chunks(rowTrainerIds)){
+    const {results}=await env.DB.prepare('SELECT id,canonical_name FROM trainers WHERE id IN ('+ph(group)+')').bind(...group).all();
+    for(const row of results||[]) trainerNames.set(row.id,row.canonical_name);
+  }
   const ids=[...rows.keys()];
   const signals=new Map(ids.map((id)=>[id,[]]));
   for (const group of chunks(ids)) {
@@ -86,7 +97,8 @@ async function loadInterviewRows(env, horseIds, trainerIds) {
     });
   }
   return [...rows.values()].map((row)=>({
-    id:row.id,horse_id:row.horse_id,trainer_id:row.trainer_id||null,
+    id:row.id,horse_id:row.horse_id,horse_name:horseNames.get(row.horse_id)||null,
+    trainer_id:row.trainer_id||null,trainer_name:row.trainer_id?trainerNames.get(row.trainer_id)||null:null,
     speaker_name:row.speaker_name,speaker_role:row.speaker_role||null,speaker_relation:row.speaker_relation||null,
     published_at:row.published_at||null,available_at:row.available_at,
     interview_text:row.interview_text,summary:row.summary_text||null,signals:signals.get(row.id)||[]
