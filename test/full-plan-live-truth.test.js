@@ -30,10 +30,11 @@ test('live-state documentation contains no pre-cutover candidate markers', () =>
   assert.doesNotMatch(serialized, /target contract only; not active runtime behavior/i);
   assert.doesNotMatch(serialized, /legacy runtime behavior until the later v3 cutover build/i);
   assert.doesNotMatch(serialized, /worker-v075/i);
-  assert.match(files.readme, /Production release #62 (?:is current|is the currently deployed baseline)/i);
+  assert.match(files.readme, /Production release #64 (?:is current|is the currently deployed baseline)/i);
   assert.match(files.readme, /production entrypoint is `src\/worker-v077\.js`/i);
-  assert.match(files.buildState, /Production schema is current through migration `0026_app_read_performance\.sql`/i);
-  assert.match(files.buildState, /F4 v3 cutover\/deprecation\/release hardening: complete and deployed/i);
+  assert.match(files.buildState, /Production schema is current through migration `0027_external_analysis_lineage_v1\.sql`/i);
+  assert.match(files.buildState, /External analysis workflow production live/i);
+  assert.match(files.buildState, /Production release #64 completed successfully/i);
   assert.match(files.contract, /Status: active production contract after F4 cutover/i);
 });
 
