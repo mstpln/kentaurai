@@ -68,3 +68,24 @@ CREATE TABLE IF NOT EXISTS external_interview_signals (
 
 CREATE INDEX IF NOT EXISTS idx_external_interview_signals_interview
   ON external_interview_signals(interview_id, id);
+
+
+CREATE TABLE IF NOT EXISTS analysis_external_final_predictions (
+  id TEXT PRIMARY KEY,
+  model_version_id TEXT NOT NULL REFERENCES model_versions(id) ON DELETE CASCADE,
+  race_entry_id TEXT NOT NULL REFERENCES race_entries(id),
+  leg_number INTEGER NOT NULL CHECK(leg_number BETWEEN 1 AND 8),
+  win_probability REAL NOT NULL CHECK(win_probability >= 0 AND win_probability <= 1),
+  uncertainty_low REAL CHECK(uncertainty_low IS NULL OR (uncertainty_low >= 0 AND uncertainty_low <= 1)),
+  uncertainty_high REAL CHECK(uncertainty_high IS NULL OR (uncertainty_high >= 0 AND uncertainty_high <= 1)),
+  raw_rank INTEGER NOT NULL CHECK(raw_rank >= 1),
+  abcd_group TEXT NOT NULL CHECK(abcd_group IN ('A','B','C','D')),
+  scenario_robustness REAL CHECK(scenario_robustness IS NULL OR (scenario_robustness >= 0 AND scenario_robustness <= 1)),
+  reasoning_json TEXT,
+  revision_status TEXT NOT NULL CHECK(revision_status IN ('unchanged_from_step1','revised_after_step3')),
+  created_at TEXT NOT NULL,
+  UNIQUE(model_version_id, race_entry_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_analysis_external_final_predictions_model_leg
+  ON analysis_external_final_predictions(model_version_id, leg_number, raw_rank);
