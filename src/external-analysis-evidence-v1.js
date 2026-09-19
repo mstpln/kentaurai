@@ -120,6 +120,20 @@ async function roundEvidence(env, run) {
   return { legs: ordered, selectionByLeg };
 }
 
+function externalLearningEligibility(run, firstStartMs) {
+  const timestamps = [
+    run.created_at,
+    run.step1_pack_as_of,
+    run.step1_generated_at,
+    run.step2_market_cutoff,
+    run.step2_generated_at
+  ].map((value) => Date.parse(String(value || '')));
+  const chronological = timestamps.every((value) => Number.isFinite(value) && value < firstStartMs);
+  return run.import_timing === 'pre_race'
+    && run.learning_eligibility === 'eligible_by_timing'
+    && chronological;
+}
+
 function assertSettledLegs(evidence) {
   const winners = new Map();
   for (const leg of evidence.legs) {
@@ -202,6 +216,8 @@ export async function loadExternalDecisionReplayEvidenceV1(env, config = {}) {
     const starts = evidence.legs.map((leg) => Date.parse(String(leg.scheduled_start_at || '')));
     if (starts.some((value) => !Number.isFinite(value))) { exclusions.missing_start_time += 1; continue; }
     const firstStart = Math.min(...starts);
+    const chronologyEligible = externalLearningEligibility(run, firstStart);
+    const effectiveLearningEligibility = chronologyEligible ? 'eligible_by_timing' : 'manual_review_required';
     const system = await env.DB.prepare('SELECT row_count,budget_sek FROM systems WHERE id=? LIMIT 1').bind(run.main_system_id).first();
     if (!system) throw new Error('external run main system is missing');
     systemDiagnostics.push(systemDiagnostic(run, system, evidence, winners));
@@ -231,7 +247,9 @@ export async function loadExternalDecisionReplayEvidenceV1(env, config = {}) {
           market_cutoff: exactIso(run.step2_market_cutoff, 'step2_market_cutoff'),
           analysis_blindness: run.analysis_blindness,
           import_timing: run.import_timing,
-          learning_eligibility: run.learning_eligibility,
+          learning_eligibility: effectiveLearningEligibility,
+          stored_learning_eligibility: run.learning_eligibility,
+          chronology_verified: chronologyEligible,
           decision_semantics: 'blind_baseline_no_probability_rewrite'
         }
       });
@@ -317,6 +335,9 @@ export async function runNextExternalPostRaceReviewV1(env, options = {}) {
   const evidence = await roundEvidence(env, run);
   const winners = assertSettledLegs(evidence);
   if (!winners) return null;
+  const starts = evidence.legs.map((leg) => Date.parse(String(leg.scheduled_start_at || '')));
+  const firstStart = starts.every(Number.isFinite) ? Math.min(...starts) : NaN;
+  const chronologyEligible = Number.isFinite(firstStart) && externalLearningEligibility(run, firstStart);
   const now = new Date().toISOString();
   let inserted = 0;
 
@@ -337,7 +358,7 @@ export async function runNextExternalPostRaceReviewV1(env, options = {}) {
       incident: topPickIncident,
       hasPrediction: winner?.win_probability != null
     });
-    const learningEligible = run.learning_eligibility === 'eligible_by_timing' && Number(run.regression_only) !== 1;
+    const learningEligible = chronologyEligible && Number(run.regression_only) !== 1;
     const learningClassification = fail && learningEligible ? 'candidate_learning' : 'no_change';
     const id = stableId('post-race-review-external-v1', EXTERNAL_POST_RACE_REVIEW_VERSION, run.id, leg.race_id);
     const market = await env.DB.prepare(`
@@ -365,7 +386,8 @@ export async function runNextExternalPostRaceReviewV1(env, options = {}) {
         step2_market_cutoff: run.step2_market_cutoff,
         analysis_blindness: run.analysis_blindness,
         import_timing: run.import_timing,
-        learning_eligibility: run.learning_eligibility
+        learning_eligibility: run.learning_eligibility,
+        chronology_verified: chronologyEligible
       },
       outcome: { winner_entry_id: winnerId, selected_by_system: selectedWinner },
       probability: { blind_probability: asNumber(winner?.win_probability), winner_rank: asNumber(winner?.raw_rank) },
@@ -396,6 +418,20 @@ export async function runNextExternalPostRaceReviewV1(env, options = {}) {
       fail,learningEligible?1:0,learningClassification,stableFeatureJson(diagnostics),now
     ).run();
     inserted += Number(write.meta?.changes || 0);
+    const stored = await env.DB.prepare(
+      'SELECT winner_entry_id,pre_race_fingerprint,winner_blind_probability,winner_rank,failure_class,learning_eligible,learning_classification,diagnostics_json FROM post_race_reviews_external_v1 WHERE id=? LIMIT 1'
+    ).bind(id).first();
+    if (!stored
+      || stored.winner_entry_id !== winnerId
+      || stored.pre_race_fingerprint !== run.payload_digest
+      || asNumber(stored.winner_blind_probability) !== asNumber(winner?.win_probability)
+      || asNumber(stored.winner_rank) !== asNumber(winner?.raw_rank)
+      || (stored.failure_class || null) !== (fail || null)
+      || Number(stored.learning_eligible) !== (learningEligible ? 1 : 0)
+      || stored.learning_classification !== learningClassification
+      || stored.diagnostics_json !== stableFeatureJson(diagnostics)) {
+      throw new Error('existing external F2 review conflicts with current settled outcome for leg ' + leg.leg_number);
+    }
     if (learningEligible && learningClassification === 'candidate_learning') {
       await linkCandidateEvidence(env, {
         id,roundId:run.game_round_id,raceId:leg.race_id,externalRunId:run.id,
