@@ -18,6 +18,18 @@ import {
   listExternalAnalysisRounds,
   recordExternalAnalysisExport
 } from './external-analysis-flow-v1.js';
+import {
+  EXTERNAL_EVIDENCE_CONTEXT_CONTRACT,
+  EXTERNAL_EVIDENCE_IMPORT_CONTRACT,
+  EXTERNAL_EVIDENCE_PROMPT_VERSION,
+  buildExternalEvidenceContext,
+  getExternalEvidenceImportPrompt,
+  getExternalEvidenceStep3Prompt,
+  getHorseExternalStats,
+  getHorseInterviews,
+  getTrainerInterviews,
+  importExternalEvidence
+} from './external-evidence-flow-v1.js';
 
 function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -140,6 +152,111 @@ export default {
       try {
         return json({ prompt_version: 'external-analysis-prompt-v1', prompt: getExternalAnalysisStep2Prompt(url.searchParams.get('provider') || 'openai') });
       } catch (error) {
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    if (request.method === 'GET' && path === '/app/api/settings/external-evidence-context') {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        const roundId = String(url.searchParams.get('round_id') || '').trim();
+        if (!roundId) throw new Error('round_id is required');
+        const data = await buildExternalEvidenceContext(env, roundId, { purpose: 'analysis' });
+        const safe = roundId.replace(/[^a-zA-Z0-9._-]+/g, '_');
+        return attachmentJson(data, 'kentaurai-external-context_' + safe + '.json');
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    if (request.method === 'GET' && path === '/app/api/settings/external-step3-prompt') {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        return json({ prompt_version: EXTERNAL_EVIDENCE_PROMPT_VERSION, prompt: getExternalEvidenceStep3Prompt(url.searchParams.get('provider') || 'openai') });
+      } catch (error) {
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    if (request.method === 'GET' && path === '/app/api/settings/external-evidence-import-context') {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        const roundId = String(url.searchParams.get('round_id') || '').trim();
+        if (!roundId) throw new Error('round_id is required');
+        const data = await buildExternalEvidenceContext(env, roundId, { purpose: 'import' });
+        const safe = roundId.replace(/[^a-zA-Z0-9._-]+/g, '_');
+        return attachmentJson(data, 'kentaurai-external-import_' + safe + '.json');
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    if (request.method === 'GET' && path === '/app/api/settings/external-evidence-import-prompt') {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        return json({ prompt_version: EXTERNAL_EVIDENCE_PROMPT_VERSION, prompt: getExternalEvidenceImportPrompt(url.searchParams.get('provider') || 'openai') });
+      } catch (error) {
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    if (request.method === 'POST' && path === '/app/api/settings/external-evidence-import') {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        const payload = await readJson(request);
+        const roundId = String(url.searchParams.get('round_id') || '').trim();
+        if (!roundId) throw new Error('round_id is required');
+        if (String(payload.round_id || '') !== roundId) throw new Error('payload round_id must match selected round');
+        const result = await importExternalEvidence(env, payload);
+        return json(result, 201);
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    const horseExternalStatsMatch = path.match(/^\/app\/api\/horses\/([^/]+)\/external-statistics$/);
+    if (request.method === 'GET' && horseExternalStatsMatch) {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        const data = await getHorseExternalStats(env, decodeURIComponent(horseExternalStatsMatch[1]));
+        return data ? json(data) : json({ error: 'not_found' }, 404);
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    const horseInterviewsMatch = path.match(/^\/app\/api\/horses\/([^/]+)\/interviews$/);
+    if (request.method === 'GET' && horseInterviewsMatch) {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        const data = await getHorseInterviews(env, decodeURIComponent(horseInterviewsMatch[1]));
+        return data ? json(data) : json({ error: 'not_found' }, 404);
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    const trainerInterviewsMatch = path.match(/^\/app\/api\/trainers\/([^/]+)\/interviews$/);
+    if (request.method === 'GET' && trainerInterviewsMatch) {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        const data = await getTrainerInterviews(env, decodeURIComponent(trainerInterviewsMatch[1]));
+        return data ? json(data) : json({ error: 'not_found' }, 404);
+      } catch (error) {
+        console.error(error);
         return json({ error: 'request_failed', message: error.message }, 400);
       }
     }
