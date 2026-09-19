@@ -35,7 +35,7 @@ async function authenticatedAppHtml() {
   return response.text();
 }
 
-test('F4 actual Wrangler worker retains the legacy Settings script for read/rollback compatibility', async () => {
+test('F4 actual Wrangler worker runs the canonical external-analysis Settings workflow', async () => {
   const html = await authenticatedAppHtml();
   const script = extractScript(html, 'kentaurai-settings-script');
 
@@ -44,15 +44,18 @@ test('F4 actual Wrangler worker retains the legacy Settings script for read/roll
   const requested = [];
   const elements = new Map([
     ['settingsButton', { classList: classList(), onclick: null }],
-    ['exportProvider', { value: 'openai' }],
-    ['exportStep1', { onclick: null }],
-    ['copyStep1Prompt', { onclick: null, disabled: false, textContent: 'Kopiera analysinstruktion' }],
-    ['exportStep2', { onclick: null }],
-    ['copyStep2Prompt', { onclick: null, disabled: false, textContent: 'Kopiera systeminstruktion' }],
-    ['analysisFile', { files: [] }],
-    ['importAnalysis', { onclick: null, disabled: false }],
-    ['analysisImportResult', { className: '', textContent: '' }],
-    ['copyAnalysisPrompt', { onclick: null, disabled: false, textContent: 'Kopiera exportinstruktion' }]
+    ['analysisProvider', { value: 'openai', onchange: null }],
+    ['analysisRound', { value: 'synthetic-round', innerHTML: '', onchange: null }],
+    ['registrationRound', { value: 'synthetic-round', innerHTML: '', onchange: null }],
+    ['downloadAnalysisData', { onclick: null }],
+    ['copyStep1Prompt', { onclick: null, disabled: false, textContent: 'Kopiera instruktion' }],
+    ['downloadMarketData', { onclick: null }],
+    ['copyStep2Prompt', { onclick: null, disabled: false, textContent: 'Kopiera instruktion' }],
+    ['downloadImportContext', { onclick: null }],
+    ['copyImportPrompt', { onclick: null, disabled: false, textContent: 'Kopiera importinstruktion' }],
+    ['recordedSystemFile', { files: [] }],
+    ['importRecordedSystem', { onclick: null, disabled: false }],
+    ['recordedSystemResult', { className: '', textContent: '' }]
   ]);
 
   const context = vm.createContext({
@@ -75,8 +78,11 @@ test('F4 actual Wrangler worker retains the legacy Settings script for read/roll
       };
     },
     api: async (path) => {
-      assert.equal(path, '/settings/status');
-      return { appVersion: '0.6.0' };
+      if (path === '/settings/status') return { appVersion: '0.6.0' };
+      if (path.startsWith('/settings/external-rounds?scope=')) {
+        return { rounds: [{ id: 'synthetic-round', gameType: 'V85', roundDate: '2099-09-20', hasRecordedSystem: false }] };
+      }
+      throw new Error('unexpected api path: ' + path);
     },
     heading: (title, subtitle) => `<h1>${title}</h1><p>${subtitle}</p>`,
     tabs: (items) => items.map(([, label]) => label).join(' '),
@@ -95,24 +101,27 @@ test('F4 actual Wrangler worker retains the legacy Settings script for read/roll
   elements.get('settingsButton').onclick();
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.match(app.innerHTML, /Analysera omgången utan marknad/);
-  assert.match(app.innerHTML, /Värdera marknaden och bygg system/);
-  assert.match(app.innerHTML, /Skapa importfil till KentaurAI/);
-  assert.match(app.innerHTML, /Kopiera analysinstruktion/);
-  assert.match(app.innerHTML, /Kopiera systeminstruktion/);
-  assert.match(app.innerHTML, /Kopiera exportinstruktion/);
+  assert.match(app.innerHTML, /Analysera omgång/);
+  assert.match(app.innerHTML, /Marknadsblind analys/);
+  assert.match(app.innerHTML, /Hämta analysdata/);
+  assert.match(app.innerHTML, /Marknad och system/);
+  assert.match(app.innerHTML, /Hämta marknadsdata/);
+  assert.match(app.innerHTML, /Registrera system/);
+  assert.match(app.innerHTML, /Hämta importunderlag/);
+  assert.match(app.innerHTML, /Importera system/);
+
   assert.equal(typeof elements.get('copyStep1Prompt').onclick, 'function');
   assert.equal(typeof elements.get('copyStep2Prompt').onclick, 'function');
-  assert.equal(typeof elements.get('copyAnalysisPrompt').onclick, 'function');
+  assert.equal(typeof elements.get('copyImportPrompt').onclick, 'function');
 
   await elements.get('copyStep1Prompt').onclick({ currentTarget: elements.get('copyStep1Prompt') });
   await elements.get('copyStep2Prompt').onclick({ currentTarget: elements.get('copyStep2Prompt') });
-  await elements.get('copyAnalysisPrompt').onclick({ currentTarget: elements.get('copyAnalysisPrompt') });
+  await elements.get('copyImportPrompt').onclick({ currentTarget: elements.get('copyImportPrompt') });
 
-  assert.deepEqual(requested, [
-    '/app/api/settings/analysis-method-prompt?step=1',
-    '/app/api/settings/analysis-method-prompt?step=2',
-    '/app/api/settings/analysis-prompt?provider=openai'
+  assert.deepEqual(requested.slice(-3), [
+    '/app/api/settings/external-step1-prompt?provider=openai',
+    '/app/api/settings/external-step2-prompt?provider=openai',
+    '/app/api/settings/system-import-prompt?provider=openai'
   ]);
   assert.equal(copied.length, 3);
 });
