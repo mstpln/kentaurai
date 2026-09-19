@@ -21,12 +21,12 @@ state.entityDetailV2=state.entityDetailV2||null;let requestToken=0;
 function config(page){if(page==='trainers')return{options:'trainers',volt:true,market:true,rest:true,form:'30'};if(page==='drivers')return{options:'drivers',volt:true,market:true,rest:false,form:'30'};if(page==='horses')return{options:'horses',volt:false,market:false,rest:true,form:'10'};return null}
 function years(){const y=new Date().getFullYear();return Array.from({length:5},(_,i)=>[String(y-i),String(y-i)])}
 function defaults(){return{year:String(new Date().getFullYear()),raceScope:'all',trackId:'all',raceType:'all',breedType:'all',sex:'all',age:'all',startMethod:'all',distanceGroup:'all',voltLane:'all',handicapM:'all'}}
-function detailState(page,id){if(!state.entityDetailV2||state.entityDetailV2.page!==page||state.entityDetailV2.id!==id)state.entityDetailV2={page,id,open:false,filters:defaults(),options:null,horseExtra:''};return state.entityDetailV2}
+function detailState(page,id){if(!state.entityDetailV2||state.entityDetailV2.page!==page||state.entityDetailV2.id!==id)state.entityDetailV2={page,id,open:false,filters:defaults(),options:null};return state.entityDetailV2}
 function options(rows,active){return rows.map(([v,l])=>'<option value="'+esc(v)+'" '+(String(v)===String(active)?'selected':'')+'>'+esc(l)+'</option>').join('')}
 async function loadOptions(s,c){if(s.options)return;try{s.options=await api('/'+c.options+'/statistics/filter-options')}catch{s.options={tracks:[],distanceGroups:[],ageOptions:[],birthYears:[],handicapBuckets:[]}}}
 function tracks(s){return[['all','Alla banor'],...(s.options?.tracks||[]).map(x=>[String(x.id),x.name])]}
 function distances(s){return[['all','Alla'],...(s.options?.distanceGroups||[]).map(x=>[String(x),x==='other-long'?'Övrigt >2640':String(x)+' m'])]}
-function ages(s){let values=s.options?.ageOptions||[];if(!values.length&&s.options?.birthYears?.length){const y=new Date().getFullYear();values=[...new Set(s.options.birthYears.map(v=>y-Number(v)).filter(v=>v>=2&&v<=30))].sort((a,b)=>a-b)}return[['all','Alla'],...values.map(x=>[String(x),String(x)+' år'])]}
+function ages(s){let values=s.options?.ageOptions||[];if(!values.length&&s.options?.birthYears?.length){const y=Number(s.filters.year)||new Date().getFullYear();values=[...new Set(s.options.birthYears.map(v=>y-Number(v)).filter(v=>v>=2&&v<=30))].sort((a,b)=>a-b)}return[['all','Alla'],...values.map(x=>[String(x),String(x)+' år'])]}
 function handicaps(s){return[['all','Alla'],...(s.options?.handicapBuckets||[]).map(x=>[String(x),Number(x)===0?'Grunddistans':'+'+x+' m'])]}
 function field(label,key,rows,s){const v=s.filters[key];return'<div class="entity-detail-field"><label>'+esc(label)+'</label><select data-ed-filter="'+key+'" class="'+(v!=='all'?'active':'')+'">'+options(rows,v)+'</select></div>'}
 function count(s,c){return Object.entries(s.filters).filter(([k,v])=>k!=='year'&&v&&v!=='all'&&(c.volt||!['voltLane','handicapM'].includes(k))).length}
