@@ -101,15 +101,15 @@ function renderAi(version){
  settingsFooter(version)+'</div>';
  bindSettingsTabs();
  const providerSelect=document.getElementById('analysisProvider');
- providerSelect.value=state.analysisProvider||'openai';
- providerSelect.onchange=()=>{state.analysisProvider=providerSelect.value};
- document.getElementById('downloadAnalysisData').onclick=()=>{const id=selectedAnalysisRound();if(id)downloadSettingsFile('/app/api/settings/f3-analysis-pack?round_id='+encodeURIComponent(id))};
- document.getElementById('copyStep1Prompt').onclick=(event)=>copyPrompt(event.currentTarget,'/app/api/settings/external-step1-prompt?provider='+encodeURIComponent(selectedProvider()));
- document.getElementById('downloadMarketData').onclick=()=>{const id=selectedAnalysisRound();if(id)downloadSettingsFile('/app/api/settings/external-market?round_id='+encodeURIComponent(id))};
- document.getElementById('copyStep2Prompt').onclick=(event)=>copyPrompt(event.currentTarget,'/app/api/settings/external-step2-prompt?provider='+encodeURIComponent(selectedProvider()));
- document.getElementById('downloadImportContext').onclick=()=>{const id=selectedRegistrationRound();if(id)downloadSettingsFile('/app/api/settings/system-import-context?round_id='+encodeURIComponent(id))};
- document.getElementById('copyImportPrompt').onclick=(event)=>copyPrompt(event.currentTarget,'/app/api/settings/system-import-prompt?provider='+encodeURIComponent(selectedProvider()));
- document.getElementById('importRecordedSystem').onclick=importRecordedSystemFile;
+ if(providerSelect){providerSelect.value=state.analysisProvider||'openai';providerSelect.onchange=()=>{state.analysisProvider=providerSelect.value}}
+ function bindClick(id,handler){const node=document.getElementById(id);if(node)node.onclick=handler}
+ bindClick('downloadAnalysisData',()=>{const id=selectedAnalysisRound();if(id)downloadSettingsFile('/app/api/settings/f3-analysis-pack?round_id='+encodeURIComponent(id))});
+ bindClick('copyStep1Prompt',(event)=>copyPrompt(event.currentTarget,'/app/api/settings/external-step1-prompt?provider='+encodeURIComponent(selectedProvider())));
+ bindClick('downloadMarketData',()=>{const id=selectedAnalysisRound();if(id)downloadSettingsFile('/app/api/settings/external-market?round_id='+encodeURIComponent(id))});
+ bindClick('copyStep2Prompt',(event)=>copyPrompt(event.currentTarget,'/app/api/settings/external-step2-prompt?provider='+encodeURIComponent(selectedProvider())));
+ bindClick('downloadImportContext',()=>{const id=selectedRegistrationRound();if(id)downloadSettingsFile('/app/api/settings/system-import-context?round_id='+encodeURIComponent(id))});
+ bindClick('copyImportPrompt',(event)=>copyPrompt(event.currentTarget,'/app/api/settings/system-import-prompt?provider='+encodeURIComponent(selectedProvider())));
+ bindClick('importRecordedSystem',importRecordedSystemFile);
  loadExternalRounds('analysis','analysisRound','analysisRoundId');
  loadExternalRounds('registration','registrationRound','registrationRoundId');
 }
