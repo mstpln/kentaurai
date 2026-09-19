@@ -70,9 +70,25 @@ function externalAnalysisUiClient() {
       const result = await jsonFetch('/app/api/settings/system-import?round_id=' + encodeURIComponent(roundId), {
         method:'POST', headers:{'content-type':'application/json'}, body:text
       });
-      const first = result.systems && result.systems[0];
+      const systems = Array.isArray(result.systems) ? result.systems.slice() : [];
+      systems.sort(function(a, b) {
+        if (a.system_type === b.system_type) return 0;
+        if (a.system_type === 'main') return -1;
+        if (b.system_type === 'main') return 1;
+        return 0;
+      });
       box.className = 'settings-result show success';
-      box.textContent = first ? 'Systemet är sparat: ' + first.spike_count + ' spikar · ' + first.row_count + ' rader · ' + first.cost_sek + ' kr.' : 'Systemet är validerat och sparat.';
+      if (systems.length === 1) {
+        const system = systems[0];
+        box.textContent = 'Systemet är sparat: ' + system.spike_count + ' spikar · ' + system.row_count + ' rader · ' + system.cost_sek + ' kr.';
+      } else if (systems.length > 1) {
+        box.textContent = systems.length + ' system sparade: ' + systems.map(function(system) {
+          const label = system.system_type === 'main' ? 'Huvudsystem' : (system.system_type === 'alternative' ? 'Alternativsystem' : 'System');
+          return label + ': ' + system.spike_count + ' spikar · ' + system.row_count + ' rader · ' + system.cost_sek + ' kr';
+        }).join(' | ');
+      } else {
+        box.textContent = 'Systemet är validerat och sparat.';
+      }
       await loadRounds('registration', 'externalRegistrationRound');
     } catch (error) {
       box.className = 'settings-result show error';
