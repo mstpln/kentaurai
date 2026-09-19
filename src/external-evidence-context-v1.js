@@ -109,13 +109,11 @@ async function loadInterviewRows(env, horseIds, trainerIds, asOf = null) {
 }
 
 export async function buildStep3Context(env, roundId) {
-  const [identity,roundContext]=await Promise.all([
-    loadRoundEvidenceIdentity(env,roundId),
-    buildExternalEvidenceImportContext(env,roundId)
-  ]);
+  const identity=await loadRoundEvidenceIdentity(env,roundId);
   const active=identity.entries.filter((row)=>!row.scratched);
   const raceStarts=active.map((row)=>row.scheduled_start_at).filter(Boolean).sort();
   const contextAsOf=identity.round.bet_stop_at||identity.round.scheduled_start_at||raceStarts[0]||new Date().toISOString();
+  const roundContext=await buildExternalEvidenceImportContext(env,roundId,{asOf:contextAsOf});
   const horseIds=[...new Set(active.map((row)=>row.horse_id))];
   const trainerIds=[...new Set(active.map((row)=>row.trainer_id).filter(Boolean))];
   const [stats,interviews]=await Promise.all([
