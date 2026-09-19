@@ -91,7 +91,9 @@ test('external evidence import is append-only, idempotent and links one intervie
   assert.equal(horseInterviews.interviews[0].signals.length,2);
 
   const step3=await buildStep3Context(env,'round_x');
-  assert.equal(step3.horses.find((row)=>row.horse_id==='horse_1').external_statistics.length,4);
+  const step3Horse=step3.horses.find((row)=>row.horse_id==='horse_1');
+  assert.equal(step3Horse.external_statistics.length,4);
+  assert.equal(step3Horse.current_round_context.current_balance.label,'Barfota runt om');
   assert.equal(step3.trainers.find((row)=>row.trainer_id==='trainer_1').interview_history.length,1);
 });
 
