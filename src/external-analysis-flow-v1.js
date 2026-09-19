@@ -238,8 +238,7 @@ export async function buildMarketInput(env, roundId, asOf = null) {
       entries: leg.entries.map((entry) => ({
         race_entry_id: entry.race_entry_id,
         start_number: entry.start_number,
-        horse_id: entry.horse_id,
-        scratched: entry.scratched
+        horse_id: entry.horse_id
       }))
     }))
   };
@@ -399,6 +398,33 @@ export function getRegistrationPrompt(provider = 'openai') {
     '- Lägg INTE in row_count, budget_sek, cost_sek, line_price_sek, own_probability eller market_percent i systems/selections. KentaurAI räknar/hämtar dessa deterministiskt.',
     '- Om något inte kan mappas entydigt: skapa ingen partiell fil. Säg i chatten vad som blockerar.'
   ].join('\\n');
+}
+
+function predictionLegsFromStep1Pack(pack, identity) {
+  const byLeg = new Map();
+  for (const file of pack?.files || []) {
+    const payload = file?.payload;
+    const legNumber = Number(payload?.leg_number);
+    if (!Number.isInteger(legNumber) || legNumber < 1 || legNumber > 8) continue;
+    if (!byLeg.has(legNumber)) byLeg.set(legNumber, { race_id: payload?.race?.race_id || null, entry_ids: [] });
+    const target = byLeg.get(legNumber);
+    if (target.race_id !== (payload?.race?.race_id || null)) throw new Error('Step 1 pack contains conflicting race identity');
+    for (const entry of payload?.entries || []) {
+      if (entry?.current_facts?.analysis_eligible === true) target.entry_ids.push(requiredText(entry.race_entry_id, 'Step 1 race_entry_id', 200));
+    }
+  }
+  return identity.legs.map((leg) => {
+    const step1 = byLeg.get(leg.leg_number);
+    if (!step1 || step1.race_id !== leg.race_id) throw new Error('Step 1 pack does not match selected round race identity');
+    const canonical = new Set(leg.entries.map((entry) => entry.race_entry_id));
+    const unique = [...new Set(step1.entry_ids)];
+    if (!unique.length || unique.some((id) => !canonical.has(id))) throw new Error('Step 1 pack contains invalid active entry identity');
+    return {
+      leg_number: leg.leg_number,
+      race_id: leg.race_id,
+      entries: unique.map((race_entry_id) => ({ race_entry_id, scratched: false }))
+    };
+  });
 }
 
 function normalizePredictions(payloadLeg, expectedLeg, legIndex) {
@@ -625,7 +651,8 @@ export async function importRecordedSystem(env, payload, options = {}) {
   }
   const provenance = await verifyExternalProvenance(env, roundId, step1, step2);
   if (!Array.isArray(payload.legs) || payload.legs.length !== 8) throw new Error('legs must contain exactly eight legs');
-  const legs = payload.legs.map((leg, index) => normalizePredictions(leg, identity.legs[index], index));
+  const predictionLegs = predictionLegsFromStep1Pack(provenance.pack, identity);
+  const legs = payload.legs.map((leg, index) => normalizePredictions(leg, predictionLegs[index], index));
   const predictionMap = new Map(legs.flatMap((leg) => leg.predictions.map((prediction) => [prediction.raceEntryId, prediction])));
   const policy = normalizePolicy(await canonicalOptimizerPolicyForRound(env, roundId));
   const systems = normalizeSystems(payload.systems, identity.legs, predictionMap, policy);
