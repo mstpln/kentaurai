@@ -7,14 +7,14 @@ Updated: 2026-09-19
 - Worker: `kentaurai-api`.
 - D1: `kentaurai`.
 - R2: `kentaurai-raw`.
-- Latest v3 round-picker application source merged at `c3d36ff400b1a617475458d884e39cc0adebe372`; controlled release trigger/main head is `c86d3d209c3d42b86150c4522d11f708a6e94bf1`.
-- Worker entrypoint is `src/worker-v077.js` with `ANALYSIS_WORKFLOW_MODE=v3`; v077 delegates F4 analysis/scheduling behavior to `worker-v076.js`.
-- Production release #62 completed successfully. Exact-head QA, Cloudflare validation, migration/schema/index verification, Worker deploy, `/health`, `/app/login` and private analysis/replay route protection all passed.
-- Production schema is current through migration `0026_app_read_performance.sql`.
-- F1 replay/calibration, F2 post-race learning diagnostics, F3 private workflow/observability, F4 v3 cutover and the private-app navigation performance layer are production-live.
-- Historical official/X-Labs jobs keep their durable cursors. The round-picker release did not reset, recreate or resume stopped historical work.
+- External-analysis application source merged at `33a50de033656021b73639643ba9c8b35e6523a5`; successful controlled release/main head is `0831fbce90ffd6292f56a3c92ad6a62593b2e111`.
+- Worker entrypoint is `src/worker-v077.js` with `ANALYSIS_WORKFLOW_MODE=v3`; the default mode serves the external-AI workflow while historical sealed-v3 artifacts remain read-compatible.
+- Production release #64 completed successfully. Full QA, Cloudflare validation, migration/schema/index verification, Worker deploy, `/health`, `/app/login` and private external-analysis route protection all passed.
+- Production schema is current through migration `0027_external_analysis_lineage_v1.sql`.
+- External Step 1/Step 2 analysis exchange, later system registration, audited external lineage, external-aware F1 replay/F2 post-race diagnostics and the private-app performance layer are production-live.
+- Historical official/X-Labs jobs keep their durable cursors. The external-analysis release did not reset, recreate or resume stopped historical work.
 
-## External analysis workflow correction - reviewed source candidate
+## External analysis workflow production live
 - The reviewed source candidate replaces the primary private analysis UI with the approved external-AI workflow: shared round + AI selection -> Step 1 market-blind export/instruction -> Step 2 verified market export/instruction in the same external AI conversation.
 - Step 1 is not imported or server-sealed in the normal UI path and the normal UI does not invoke the canonical optimizer. Historical sealed-v3 data remains readable, while sealed-v3 creation/mutation routes are disabled in the default mode.
 - System registration is separate and may happen later: select round -> download canonical import context -> copy import instruction -> import the generated JSON.
@@ -24,7 +24,7 @@ Updated: 2026-09-19
 - Post-deadline registration remains allowed for bookkeeping but is marked `post_race_recovery` / `manual_review_required`. F1/F2 can diagnose it but exclude it from automatic promotion evidence.
 - Verified Step 2 reads enforce both observation/published timestamps and source-record availability at the cutoff. Missing market percentages stay null.
 - F1 and F2 understand the external lineage directly; they do not fabricate sealed Step 1/decision/optimizer parents. If an external run exists for a round, stale sealed-v3 system lineage is not selected as the current F1/F2 target.
-- Exact-head CI plus targeted external provenance/null/cutoff/F1/F2 tests are required before merge. Production remains on the last successful controlled release until the authorized release workflow applies migration 0027 and deploys the reviewed main head.
+- Exact-head CI passed with 809/809 tests before merge. Production release #64 then reran full QA, verified migration 0027 and the external schema, deployed the Worker and passed health/login/private-route verification.
 
 ## App performance live
 - `worker-v077` adds only the private-app HTML performance layer; racing/analysis semantics and auth boundaries are unchanged.
@@ -72,12 +72,12 @@ Updated: 2026-09-19
 - Learning requires repeated evidence; one result never changes weights automatically.
 - Real provider payloads, real reference exports, private editorial provenance and secrets never enter public GitHub.
 
-## F4 release verification
-F4 is production-live. The cutover was accepted after:
-1. Full exact-head CI and architecture review must pass.
-2. Synthetic v3 pack/lock/market/Step2/optimizer integration and private-auth/cutover tests must pass.
-3. Legacy read compatibility must remain intact while new legacy creation is disabled.
-4. Documentation and active prompts must contain no contradictory two-spike/declared-unsealed/current legacy policy.
-5. User must explicitly authorize merge/deploy.
-6. Controlled release must verify Worker v076, v3 health mode, login/private auth, F4 bundle route and legacy creation cutover.
-7. No historical replay/backfill reset or resume occurred. A bounded private dry-run remains the separate operational acceptance check when a suitable private current/reference round is available.
+## Production release verification
+The external-analysis production release was accepted after:
+1. Exact-head CI and architecture review passed.
+2. Synthetic external Step 1/Step 2/registration, provenance, null, cutoff, F1/F2 and private-auth tests passed.
+3. Historical sealed-v3 read compatibility remained intact while parallel sealed-v3 creation/mutation was disabled in the default mode.
+4. Migration 0027 was applied before Worker deployment and its external export/lineage/review tables were verified without exposing production data.
+5. User explicitly authorized merge/deploy.
+6. Controlled release #64 verified the Worker, v3 health mode, login/private auth and external-analysis route protection.
+7. No historical replay/backfill reset or resume occurred.
