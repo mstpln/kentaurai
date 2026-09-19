@@ -38,6 +38,11 @@ test('new external workflow routes fail closed without a private session', async
     new Request('https://example.test/app/api/settings/external-step1-prompt?provider=openai'),
     new Request('https://example.test/app/api/settings/external-market?round_id=ui-round'),
     new Request('https://example.test/app/api/settings/external-step2-prompt?provider=openai'),
+    new Request('https://example.test/app/api/settings/external-evidence-context?round_id=ui-round'),
+    new Request('https://example.test/app/api/settings/external-step3-prompt?provider=openai'),
+    new Request('https://example.test/app/api/settings/external-evidence-import-context?round_id=ui-round'),
+    new Request('https://example.test/app/api/settings/external-evidence-import-prompt?provider=openai'),
+    new Request('https://example.test/app/api/settings/external-evidence-import?round_id=ui-round', {method:'POST',headers:{'content-type':'application/json'},body:'{}'}),
     new Request('https://example.test/app/api/settings/system-import-context?round_id=ui-round'),
     new Request('https://example.test/app/api/settings/system-import-prompt?provider=openai'),
     new Request('https://example.test/app/api/settings/system-import?round_id=ui-round', {method:'POST',headers:{'content-type':'application/json'},body:'{}'})
@@ -66,6 +71,24 @@ test('authenticated external workflow serves round-scoped analysis and registrat
   assert.equal(data.round.id,'ui-round');
   assert.equal(data.market.betting.length,16);
 
+  response = await worker.fetch(new Request('https://example.test/app/api/settings/external-evidence-context?round_id=ui-round',{headers}),env,{});
+  assert.equal(response.status,200);
+  assert.match(response.headers.get('content-disposition'),/kentaurai-external-context_ui-round\.json/);
+  data = await response.json();
+  assert.equal(data.round.id,'ui-round');
+  assert.equal(data.contract_version,'kentaurai-external-evidence-context-v1');
+
+  response = await worker.fetch(new Request('https://example.test/app/api/settings/external-step3-prompt?provider=openai',{headers}),env,{});
+  assert.equal(response.status,200);
+  data = await response.json();
+  assert.match(data.prompt,/Intervjuer och extern statistik/);
+
+  response = await worker.fetch(new Request('https://example.test/app/api/settings/external-evidence-import-context?round_id=ui-round',{headers}),env,{});
+  assert.equal(response.status,200);
+  assert.match(response.headers.get('content-disposition'),/kentaurai-external-import_ui-round\.json/);
+  data = await response.json();
+  assert.equal(data.purpose,'import');
+
   response = await worker.fetch(new Request('https://example.test/app/api/settings/system-import-context?round_id=ui-round',{headers}),env,{});
   assert.equal(response.status,200);
   assert.match(response.headers.get('content-disposition'),/kentaurai-system-import_ui-round\.json/);
@@ -77,6 +100,16 @@ test('authenticated external workflow serves round-scoped analysis and registrat
   assert.equal(response.status,200);
   data = await response.json();
   assert.match(data.prompt,/Marknadsblind analys/);
+
+  response = await worker.fetch(new Request('https://example.test/app/api/settings/external-step2-prompt?provider=openai',{headers}),env,{});
+  assert.equal(response.status,200);
+  data = await response.json();
+  assert.match(data.prompt,/Bygg inget system/);
+
+  response = await worker.fetch(new Request('https://example.test/app/api/settings/external-evidence-import-prompt?provider=anthropic',{headers}),env,{});
+  assert.equal(response.status,200);
+  data = await response.json();
+  assert.match(data.prompt,/kentaurai-external-evidence-import-v1/);
 
   response = await worker.fetch(new Request('https://example.test/app/api/settings/system-import-prompt?provider=anthropic',{headers}),env,{});
   assert.equal(response.status,200);
