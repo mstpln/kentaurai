@@ -245,13 +245,14 @@ function statContext(type, entry, equipment) {
   return { key:'', label:labels[type], trackId:null, metadata:null };
 }
 
-export async function importExternalEvidence(env, payload) {
+export async function importExternalEvidence(env, payload, options = {}) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('import must be a JSON object');
   if (payload.contract_version !== EXTERNAL_EVIDENCE_IMPORT_CONTRACT) throw new Error('unsupported contract_version');
   const submissionId = requiredText(payload.submission_id, 'submission_id', 120);
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(submissionId)) throw new Error('submission_id must use lowercase letters, numbers and hyphens');
   const roundId = requiredText(payload.round_id, 'round_id');
   const generatedAt = iso(payload.generated_at, 'generated_at');
+  const importedAt = iso(options.now ?? new Date().toISOString(), 'imported_at');
   const sourceReference = optionalText(payload.source_reference, 'source_reference', 500);
   const stats = normalizeStats(payload.statistics);
   const interviews = normalizeInterviews(payload.interviews);
@@ -260,7 +261,7 @@ export async function importExternalEvidence(env, payload) {
   const existingSource = await env.DB.prepare(
     'SELECT id,fetched_at FROM source_records WHERE source_type=? AND external_id=? ORDER BY fetched_at LIMIT 1'
   ).bind(EXTERNAL_EVIDENCE_SOURCE_TYPE, submissionId).first();
-  if (existingSource && existingSource.fetched_at !== generatedAt) throw new Error('submission_id was already used by another import');
+  const availabilityAt = existingSource?.fetched_at || importedAt;
 
   const identity = await loadRoundEvidenceIdentity(env, roundId);
   const byEntry = new Map(identity.entries.map((row) => [row.race_entry_id,row]));
@@ -272,9 +273,9 @@ export async function importExternalEvidence(env, payload) {
   const counts = { inserted:0, updated:0, skipped:0, errors:0 };
   try {
     const raw = await archiveRawPayload(env, {
-      sourceType:EXTERNAL_EVIDENCE_SOURCE_TYPE, externalId:submissionId, fetchedAt:generatedAt, payload,
+      sourceType:EXTERNAL_EVIDENCE_SOURCE_TYPE, externalId:submissionId, fetchedAt:availabilityAt, payload,
       qualityStatus:'manual_structured', rightsStatus:'private_evidence',
-      metadata:{ roundId, contractVersion:EXTERNAL_EVIDENCE_IMPORT_CONTRACT, sourceReference }
+      metadata:{ roundId, contractVersion:EXTERNAL_EVIDENCE_IMPORT_CONTRACT, sourceReference, payloadGeneratedAt:generatedAt }
     });
     for (const [index, stat] of stats.entries()) {
       const entry = byEntry.get(stat.raceEntryId);
@@ -287,7 +288,7 @@ export async function importExternalEvidence(env, payload) {
         stableId('external-stat',raw.sourceRecordId,index,stat.raceEntryId,stat.type,ctx.key || 'default'),
         entry.horse_id,stat.raceEntryId,roundId,stat.type,ctx.key || '',ctx.label,ctx.trackId,
         ctx.metadata ? JSON.stringify(ctx.metadata) : null,stat.starts,stat.wins,stat.seconds,stat.thirds,
-        stat.winPercent,stat.roiPercent,stat.observedAt,generatedAt,raw.sourceRecordId
+        stat.winPercent,stat.roiPercent,stat.observedAt,availabilityAt,raw.sourceRecordId
       ).run();
       if (Number(result.meta?.changes || 0)) counts.inserted += 1; else counts.skipped += 1;
     }
@@ -300,7 +301,7 @@ export async function importExternalEvidence(env, payload) {
         'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
       ).bind(
         interviewId,entry.horse_id,entry.trainer_id,interview.raceEntryId,roundId,interview.speakerName,
-        interview.speakerRole,interview.speakerRelation,interview.publishedAt,generatedAt,interview.interviewText,interview.summary,raw.sourceRecordId
+        interview.speakerRole,interview.speakerRelation,interview.publishedAt,availabilityAt,interview.interviewText,interview.summary,raw.sourceRecordId
       ).run();
       if (!Number(result.meta?.changes || 0)) { counts.skipped += 1; continue; }
       counts.inserted += 1;
