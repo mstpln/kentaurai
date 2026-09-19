@@ -401,6 +401,11 @@ export function getRegistrationPrompt(provider = 'openai') {
     '      {"race_entry_id":"...","win_probability":0.0,"uncertainty_low":null,"uncertainty_high":null,"raw_rank":1,"abcd_group":"A","scenario_robustness":null,"reasoning":"..."}',
     '    ]}',
     '  ],',
+    '  "final_legs": [',
+    '    {"leg_number":1,"race_id":"...","scenarios":null,"race_shape_summary":"...","conclusion":"...","data_quality":"...","predictions":[',
+    '      {"race_entry_id":"...","win_probability":0.0,"uncertainty_low":null,"uncertainty_high":null,"raw_rank":1,"abcd_group":"A","scenario_robustness":null,"reasoning":"..."}',
+    '    ]}',
+    '  ],',
     '  "systems": [',
     '    {"system_id":"main","system_type":"main","notes":"...","risk_profile":null,"selections":[',
     '      {"leg_number":1,"race_entry_id":"...","selection_reason":"..."}',
@@ -411,11 +416,14 @@ export function getRegistrationPrompt(provider = 'openai') {
     'REGLER:',
     '- Kopiera step1.pack_id, step1.facts_fingerprint, step1.as_of och step1.generated_at exakt från Steg 1-filens manifest.',
     '- Kopiera step2.market_fingerprint, step2.as_of, step2.cutoff och step2.generated_at exakt från Steg 2-filen. Hitta inte på dessa värden.',
-    '- legs ska innehålla exakt 8 avdelningar och Steg 1-bedömningen ska återges utan marknadsfärgning.',
-    '- win_probability ska vara JSON-tal 0-1 och summera till 1 per avdelning.',
+    '- legs ska innehålla exakt 8 avdelningar och återge den ursprungliga marknadsblinda Steg 1-bedömningen. Marknad eller senare information får aldrig skrivas tillbaka här.',
+    '- final_legs ska innehålla exakt 8 avdelningar och återge den slutliga sportsliga bedömningen efter Steg 3. Om Steg 3 inte motiverade någon sportslig ändring kopierar du Steg 1 oförändrat.',
+    '- Marknaden i Steg 2 får aldrig i sig ändra final_legs. Endast ny sportslig fakta/statistik/intervju-evidens från Steg 3 får motivera en revision.',
+    '- win_probability ska vara JSON-tal 0-1 och summera till 1 per avdelning i både legs och final_legs.',
     '- raw_rank ska vara unik 1..N och ABCD ska vara A/B/C/D.',
     '- Matcha hästar med startnummer + namn mot importunderlaget och kopiera race_entry_id exakt. Ingen fuzzy gissning.',
     '- systems måste innehålla minst ett main-system. Varje system ska täcka alla 8 avdelningar och ge exakt 3 singleton-avdelningar; KentaurAI räknar dessa som spikar.',
+    '- Systemvalen ska bygga på final_legs, medan legs sparas separat som den blinda Steg 1-baslinjen.',
     '- Lägg INTE in row_count, budget_sek, cost_sek, line_price_sek, own_probability eller market_percent i systems/selections. KentaurAI räknar/hämtar dessa deterministiskt.',
     '- Om något inte kan mappas entydigt: skapa ingen partiell fil. Säg i chatten vad som blockerar.'
   ].join('\\n');
@@ -533,7 +541,7 @@ function normalizeSystems(payloadSystems, expectedLegs, predictionMap, policy) {
       const leg = jsonInteger(selection.leg_number, 'selection.leg_number', { min: 1, max: 8 });
       const entryId = requiredText(selection.race_entry_id, 'selection.race_entry_id', 200);
       if (!allowedByLeg.get(leg)?.has(entryId)) throw new Error('system selection ' + entryId + ' was not active in the audited Step 2 export for leg ' + leg);
-      if (!predictionMap.has(entryId)) throw new Error('system selection ' + entryId + ' has no Step 1 blind prediction');
+      if (!predictionMap.has(entryId)) throw new Error('system selection ' + entryId + ' has no final sports probability');
       const key = leg + '|' + entryId;
       if (seen.has(key)) throw new Error('system contains a duplicate selection in leg ' + leg);
       seen.add(key);
@@ -701,9 +709,14 @@ export async function importRecordedSystem(env, payload, options = {}) {
   const predictionLegs = activeLegsFromExportArtifact(provenance.step1Artifact, identity);
   const systemLegs = activeLegsFromExportArtifact(provenance.step2Artifact, identity);
   const legs = payload.legs.map((leg, index) => normalizePredictions(leg, predictionLegs[index], index));
+  const finalLegPayload = payload.final_legs == null ? payload.legs : payload.final_legs;
+  if (!Array.isArray(finalLegPayload) || finalLegPayload.length !== 8) throw new Error('final_legs must contain exactly eight legs');
+  const finalLegs = finalLegPayload.map((leg, index) => normalizePredictions(leg, predictionLegs[index], index));
   const predictionMap = new Map(legs.flatMap((leg) => leg.predictions.map((prediction) => [prediction.raceEntryId, prediction])));
+  const finalPredictionMap = new Map(finalLegs.flatMap((leg) => leg.predictions.map((prediction) => [prediction.raceEntryId, prediction])));
+  const finalLegsExplicit = payload.final_legs != null;
   const policy = normalizePolicy(await canonicalOptimizerPolicyForRound(env, roundId));
-  const systems = normalizeSystems(payload.systems, systemLegs, predictionMap, policy);
+  const systems = normalizeSystems(payload.systems, systemLegs, finalPredictionMap, policy);
 
   const marketInput = provenance.marketInput;
   const market = marketInput.market;
@@ -760,6 +773,7 @@ export async function importRecordedSystem(env, payload, options = {}) {
       payload_digest: digest,
       round_summary: roundSummary,
       recommendations,
+      final_probability_source: finalLegsExplicit ? 'step3_final' : 'step1_blind',
       system_policy: policy
     }
   };
@@ -776,6 +790,31 @@ export async function importRecordedSystem(env, payload, options = {}) {
       : 'Manual external AI analysis imported after market deadline; declared unsealed and excluded from automatic learning'
   ));
   kinds.push('model');
+
+  for (const leg of finalLegs) {
+    for (const prediction of leg.predictions) {
+      const blind = predictionMap.get(prediction.raceEntryId);
+      const revised = !blind
+        || Math.abs(blind.winProbability - prediction.winProbability) > 1e-12
+        || blind.rawRank !== prediction.rawRank
+        || blind.abcdGroup !== prediction.abcdGroup
+        || blind.uncertaintyLow !== prediction.uncertaintyLow
+        || blind.uncertaintyHigh !== prediction.uncertaintyHigh
+        || blind.scenarioRobustness !== prediction.scenarioRobustness;
+      statements.push(env.DB.prepare(
+        'INSERT INTO analysis_external_final_predictions ' +
+        '(id,model_version_id,race_entry_id,leg_number,win_probability,uncertainty_low,uncertainty_high,raw_rank,abcd_group,scenario_robustness,reasoning_json,revision_status,created_at) ' +
+        'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
+      ).bind(
+        stableId('external-final-prediction', modelVersionId, prediction.raceEntryId),
+        modelVersionId, prediction.raceEntryId, leg.legNumber, prediction.winProbability,
+        prediction.uncertaintyLow, prediction.uncertaintyHigh, prediction.rawRank, prediction.abcdGroup,
+        prediction.scenarioRobustness, prediction.reasoning == null ? null : JSON.stringify(prediction.reasoning),
+        revised ? 'revised_after_step3' : 'unchanged_from_step1', createdAt
+      ));
+      kinds.push('final_prediction');
+    }
+  }
 
   for (const leg of legs) {
     const analysisId = stableId('race-analysis', modelVersionId, leg.raceId);
@@ -835,7 +874,8 @@ export async function importRecordedSystem(env, payload, options = {}) {
         step1_facts_fingerprint: step1.factsFingerprint,
         analysis_blindness: analysisBlindness,
         import_timing: importTiming,
-        learning_eligibility: learningEligibility
+        learning_eligibility: learningEligibility,
+        probability_source: finalLegsExplicit ? 'step3_final' : 'step1_blind'
       }),
       system.notes
     ));
@@ -844,7 +884,7 @@ export async function importRecordedSystem(env, payload, options = {}) {
     for (const selection of system.selections) {
       const isSpike = system.byLeg.get(selection.legNumber).length === 1;
       const marketPercent = betting.get(selection.raceEntryId)?.betPercent;
-      const prediction = predictionMap.get(selection.raceEntryId);
+      const prediction = finalPredictionMap.get(selection.raceEntryId);
       statements.push(env.DB.prepare(
         'INSERT INTO system_selections (system_id,leg_number,race_entry_id,is_spike,own_probability,market_percent,selection_reason) VALUES (?,?,?,?,?,?,?)'
       ).bind(
