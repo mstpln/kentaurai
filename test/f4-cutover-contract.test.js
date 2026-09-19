@@ -49,7 +49,7 @@ test('active external prompts keep Step 1 blind, Step 2 market-only and exact-th
   assert.match(step2, /Marknadsanalys/i);
   assert.match(step2, /Bygg inget system/i);
   assert.doesNotMatch(step2, /två spikar|2[- ]spike|700\s*(?:SEK|kr)/i);
-  assert.match(registration, /exakt 3 spikar|exactly three|tre.*spik/i);
+  assert.match(registration, /exakt 3 singleton-avdelningar|exactly three|tre.*spik/i);
 });
 
 test('F4 runbook preserves controlled release source, rollback and no-backfill boundaries', () => {
