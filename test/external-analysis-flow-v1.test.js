@@ -112,6 +112,41 @@ function validPayload() {
   };
 }
 
+function canonicalizeForFingerprint(value) {
+  if (Array.isArray(value)) return value.map(canonicalizeForFingerprint);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalizeForFingerprint(value[key])]));
+  }
+  return value;
+}
+
+async function fingerprintForTest(value) {
+  const bytes = new TextEncoder().encode(JSON.stringify(canonicalizeForFingerprint(value)));
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return 'sha256:' + Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function legacyStep2FingerprintForTest(market) {
+  return fingerprintForTest({
+    contract_version: MARKET_INPUT_CONTRACT,
+    round_id: market.round.id,
+    game_type: market.round.game_type,
+    system_policy: market.system_policy,
+    market: market.market,
+    market_history: market.market_history,
+    external_rankings: [],
+    entry_identity: market.entry_map.map((leg) => ({
+      leg_number: leg.leg_number,
+      race_id: leg.race_id,
+      entries: leg.entries.map((entry) => ({
+        race_entry_id: entry.race_entry_id,
+        start_number: entry.start_number,
+        horse_id: entry.horse_id
+      }))
+    }))
+  });
+}
+
 async function withProvenance(env, payload, {
   step1AsOf = '2099-09-20T10:30:00Z',
   step2AsOf = '2099-09-20T11:00:00Z'
@@ -407,6 +442,75 @@ test('post-deadline registration is retained for diagnostics but excluded from a
   assert.equal(replay.regression_only_summary.systems.system_count, 1);
 });
 
+
+test('recorded-system import reproduces audited Step 2 exports created with the legacy external-rankings fingerprint recipe', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+
+  const payload = validPayload();
+  const pack = await createPreMarketAnalysisPackV3(env, ROUND_ID, { asOf: '2099-09-20T10:30:00Z' });
+  const activeByLeg = new Map();
+  for (const file of pack.files || []) {
+    const legNumber = Number(file.payload?.leg_number);
+    if (!Number.isInteger(legNumber)) continue;
+    if (!activeByLeg.has(legNumber)) {
+      activeByLeg.set(legNumber, { leg_number:legNumber, race_id:file.payload?.race?.race_id || null, entry_ids:[] });
+    }
+    for (const entry of file.payload?.entries || []) {
+      if (entry?.current_facts?.analysis_eligible === true) activeByLeg.get(legNumber).entry_ids.push(entry.race_entry_id);
+    }
+  }
+  await recordExternalAnalysisExport(env, {
+    stage:'step1',
+    roundId:ROUND_ID,
+    artifactId:pack.manifest.pack_id,
+    artifactFingerprint:pack.manifest.facts_fingerprint,
+    asOf:pack.manifest.as_of,
+    generatedAt:pack.manifest.generated_at,
+    artifact:{ active_legs:[...activeByLeg.values()] }
+  });
+
+  const market = await buildMarketInput(env, ROUND_ID, '2099-09-20T11:00:00Z');
+  const legacyFingerprint = await legacyStep2FingerprintForTest(market);
+  assert.notEqual(legacyFingerprint, market.market_fingerprint);
+  await recordExternalAnalysisExport(env, {
+    stage:'step2',
+    roundId:ROUND_ID,
+    artifactId:legacyFingerprint,
+    artifactFingerprint:legacyFingerprint,
+    asOf:market.market_as_of,
+    cutoffAt:market.market_cutoff,
+    generatedAt:market.generated_at,
+    artifact:{
+      market_fingerprint:legacyFingerprint,
+      market_cutoff:market.market_cutoff,
+      active_legs:(market.entry_map || []).map((leg) => ({
+        leg_number:leg.leg_number,
+        race_id:leg.race_id,
+        entry_ids:(leg.entries || []).filter((entry) => !entry.scratched).map((entry) => entry.race_entry_id)
+      }))
+    }
+  });
+
+  payload.step1 = {
+    pack_id: pack.manifest.pack_id,
+    facts_fingerprint: pack.manifest.facts_fingerprint,
+    as_of: pack.manifest.as_of,
+    generated_at: pack.manifest.generated_at
+  };
+  payload.step2 = {
+    market_fingerprint: legacyFingerprint,
+    as_of: market.market_as_of,
+    cutoff: market.market_cutoff,
+    generated_at: market.generated_at
+  };
+  payload.analysis_as_of = pack.manifest.as_of;
+  payload.submission_id = 'external-legacy-step2-replay';
+
+  const result = await importRecordedSystem(env, payload);
+  assert.equal(result.reused, false);
+  assert.equal(result.step2MarketFingerprint, legacyFingerprint);
+});
 
 test('later registration can reproduce Step 1/2 provenance after round status changes', async () => {
   const { env, db } = createTestEnv();
