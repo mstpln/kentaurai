@@ -194,9 +194,12 @@ test('external workflow exposes independent Step 1, Step 2 and registration cont
 
   assert.match(getExternalAnalysisStep1Prompt('openai'), /Marknadsblind analys/);
   assert.match(getExternalAnalysisStep1Prompt('openai'), /Bygg inget system/);
-  assert.match(getExternalAnalysisStep2Prompt('anthropic'), /exakt 3 spikar/);
+  assert.match(getExternalAnalysisStep2Prompt('anthropic'), /Marknadsanalys/);
+  assert.match(getExternalAnalysisStep2Prompt('anthropic'), /Bygg inget system/);
   assert.match(getRegistrationPrompt('openai'), /Gör inte om analysen/);
   assert.match(getRegistrationPrompt('openai'), /KentaurAI räknar/);
+  assert.match(getRegistrationPrompt('openai'), /final_legs/);
+  assert.match(getRegistrationPrompt('openai'), /Steg 1-baslinjen/);
 });
 
 test('recorded-system import derives spikes, rows and cost instead of trusting AI arithmetic', async () => {
@@ -227,6 +230,46 @@ test('recorded-system import derives spikes, rows and cost instead of trusting A
   const retry = await importRecordedSystem(env, payload);
   assert.equal(retry.reused, true);
   assert.deepEqual(retry.writes, { analyses: 0, predictions: 0, systems: 0, selections: 0 });
+});
+
+test('recorded-system import preserves blind Step 1 and uses Step 3 final probabilities for the system', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  const payload = await withProvenance(env, validPayload());
+  payload.submission_id = 'external-step3-revision';
+  payload.final_legs = structuredClone(payload.legs);
+  for (const leg of payload.final_legs) {
+    leg.predictions[0].win_probability = 0.7;
+    leg.predictions[0].uncertainty_low = 0.55;
+    leg.predictions[0].uncertainty_high = 0.8;
+    leg.predictions[1].win_probability = 0.3;
+    leg.predictions[1].uncertainty_low = 0.2;
+    leg.predictions[1].uncertainty_high = 0.45;
+  }
+
+  const result = await importRecordedSystem(env, payload);
+
+  const blind = db.prepare(
+    "SELECT p.win_probability FROM ai_horse_predictions p JOIN ai_race_analyses a ON a.id=p.ai_race_analysis_id " +
+    "WHERE a.model_version_id=? AND p.race_entry_id='external-entry-1-1'"
+  ).get(result.modelVersionId);
+  assert.equal(blind.win_probability, 0.6);
+
+  const final = db.prepare(
+    "SELECT win_probability,revision_status FROM analysis_external_final_predictions WHERE model_version_id=? AND race_entry_id='external-entry-1-1'"
+  ).get(result.modelVersionId);
+  assert.equal(final.win_probability, 0.7);
+  assert.equal(final.revision_status, 'revised_after_step3');
+
+  const lineage = db.prepare("SELECT main_system_id FROM analysis_external_runs WHERE id=?").get(result.externalRunId);
+  const selection = db.prepare(
+    "SELECT own_probability FROM system_selections WHERE system_id=? AND race_entry_id='external-entry-1-1'"
+  ).get(lineage.main_system_id);
+  assert.equal(selection.own_probability, 0.7);
+
+  const system = db.prepare("SELECT estimated_hit_probability,metrics_json FROM systems WHERE id=?").get(lineage.main_system_id);
+  assert.ok(Math.abs(system.estimated_hit_probability - Math.pow(0.7, 3)) < 1e-12);
+  assert.equal(JSON.parse(system.metrics_json).probability_source, 'step3_final');
 });
 
 test('recorded-system import fails closed on not-exactly-three spikes and client-supplied arithmetic', async () => {

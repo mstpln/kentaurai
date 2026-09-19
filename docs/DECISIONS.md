@@ -125,6 +125,12 @@
 6. KentaurAI does not browse or collect editorial content itself and does not build an automated logged-in editorial scraper.
 7. Public code, tests, docs and examples never identify a private editorial source.
 8. The private UI may display stored structured signals and short summaries/evidence, not full paid articles.
+9. External editorial evidence enters the live analysis only in Step 3, after the market-blind Step 1 baseline and the Step 2 market comparison. Step 2 does not build the final system.
+10. Horse external statistics are append-only timestamped snapshots. Source-reported all-starts aggregates may be retained when they extend beyond KentaurAI's own historical coverage; current track, current balance and current wagon are bound to the verified round context instead of storing ambiguous labels.
+11. Interviews are stored privately as a discrete interview record linked once to both the horse and the trainer/stable for that race entry, with the actual speaker retained. The interview section may be retained as private evidence; tips commentary and the rest of a paid article are not copied into that record.
+12. No driver/kusk external-statistics or interview profile is created by this workflow.
+13. External evidence registration is independent of analysis timing and system registration. It may occur after system submission or after the round, uses a canonical round-scoped import context, and imports structured JSON rather than PDFs/screenshots directly.
+14. External evidence availability is server-timed at private import, not trusted from an AI-supplied timestamp. Step 3 exports apply an as-of cutoff to stored statistics, interviews and current equipment context so later imports/updates cannot leak into an earlier round.
 
 ## Learning registry
 A single race must not directly change model weights. Candidate learnings are recorded as hypotheses and accumulate supporting/contradicting observations. Actual model/rule changes are stored in `model_change_log` and tied to `model_versions`.

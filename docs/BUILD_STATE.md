@@ -1,7 +1,15 @@
 # Build state
 
-Version: 0.6.0
+Version: 0.6.1 candidate
 Updated: 2026-09-19
+
+## Current branch target
+- Candidate `0.6.1` adds the six-step external workflow without changing the production data boundary: Step 1 blind -> Step 2 market-only -> Step 3 interviews/external statistics -> user/AI system dialogue -> optional external-evidence registration -> system registration.
+- Candidate Worker entrypoint is `src/worker-v078.js`; production remains on the deployed baseline until merge/release is explicitly authorized.
+- Migration `0028_external_evidence_v1.sql` adds append-only external horse-statistics snapshots and private interview records/signals linked to horse + trainer/stable. No driver evidence tables are added.
+- Step 1 no longer exposes editorial/interview signals. Step 2 no longer instructs the AI to build a system.
+- Step 3 can export stored external context for the selected round. External evidence registration uses canonical round/entry/equipment context and imports structured JSON; PDFs/screenshots remain manual chat inputs and are not directly imported.
+- Horse UI gains Extern statistik and Intervjuer; trainer UI gains Intervjuer. Existing tabs remain available.
 
 ## Current production truth
 - Worker: `kentaurai-api`.
@@ -68,7 +76,7 @@ Updated: 2026-09-19
 - Step 1 external analysis remains a declared-unsealed blind baseline; Step 2 market data is introduced only afterward in the same external conversation.
 - External AI may choose final system selections; code owns canonical IDs, exactly-three-spike validation, row count, line-price cost and null-safe market persistence.
 - Post-deadline external registrations are diagnostics/bookkeeping only until manually reviewed for learning.
-- External editorial/ranking signals are read last and cannot rewrite Step 1.
+- Interviews/editorial/external statistics are excluded from Step 1 and introduced only in Step 3 after the market comparison; external rankings/opinions cannot rewrite the blind baseline.
 - Learning requires repeated evidence; one result never changes weights automatically.
 - Real provider payloads, real reference exports, private editorial provenance and secrets never enter public GitHub.
 
