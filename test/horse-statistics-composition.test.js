@@ -21,10 +21,9 @@ test('horse statistics composes after Trend and before the shared final statisti
   assert.ok(trend >= 0 && horse > trend && finalizer > horse, 'render wrappers must retain their intended composition order');
 });
 
-test('horse statistics async renderers guard navigation and entity changes after awaited reads', async () => {
+test('horse statistics keeps list-ranking async guards and does not own entity detail rendering', async () => {
   const source = await readFile(new URL('../src/horse-statistics-ui.js', import.meta.url), 'utf8');
   assert.match(source, /token!==rankingToken\|\|state\.page!=='horses'\|\|state\.tab!=='stats'/);
-  assert.match(source, /token!==detailToken\|\|state\.detail\?\.id!==id\|\|state\.tab!=='stats'/);
   assert.match(source, /rankingToken\+\+;return previousHorseEntityList/);
-  assert.match(source, /const token=\+\+detailToken/);
+  assert.doesNotMatch(source, /detailToken|horseStatsBuildB|previousHorseRenderDetail|appendDetailStats|renderDetail=async function/);
 });
