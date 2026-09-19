@@ -61,7 +61,7 @@ function payload(exportId = 'manual-export-1', exportedAt = '2099-09-20T11:00:00
         race_entry_id:ENTRY_ID,
         context_type:'balance',
         context_key:'balance:barefoot|barefoot',
-        context_label:'Barfota runt om',
+        context_label:'Balans: Barfota runt om',
         starts:13,wins:2,seconds:5,thirds:0,win_rate_percent:15,roi_percent:55,
         observed_at:exportedAt
       }
@@ -93,6 +93,8 @@ test('Step 3 context exposes only horse external statistics and horse/trainer in
   assert.equal(entry.trainer_id, TRAINER_ID);
   assert.equal(Object.hasOwn(entry, 'driver_id'), false);
   assert.deepEqual(entry.current_balance, { key:'balance:barefoot|barefoot', label:'Barfota runt om' });
+  assert.ok(entry.allowed_stat_contexts.some((row) => row.context_type === 'balance' && row.context_label === 'Balans: Barfota runt om'));
+  assert.ok(entry.allowed_stat_contexts.some((row) => row.context_type === 'wagon' && row.context_label === 'Vagn: Amerikansk vagn'));
   assert.deepEqual(entry.current_wagon, { key:'wagon:american', label:'Amerikansk vagn' });
   assert.ok(entry.allowed_stat_contexts.some((row) => row.context_type === 'current_track' && row.context_label === 'Synthetic Track'));
   assert.ok(entry.allowed_stat_contexts.some((row) => row.context_type === 'lead'));
