@@ -1,5 +1,21 @@
 PRAGMA foreign_keys = ON;
 
+CREATE TABLE IF NOT EXISTS analysis_external_exports (
+  id TEXT PRIMARY KEY,
+  game_round_id TEXT NOT NULL REFERENCES game_rounds(id),
+  stage TEXT NOT NULL CHECK(stage IN ('step1','step2')),
+  artifact_id TEXT NOT NULL,
+  artifact_fingerprint TEXT NOT NULL,
+  as_of TEXT NOT NULL,
+  cutoff_at TEXT,
+  generated_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(stage, artifact_id, artifact_fingerprint)
+);
+
+CREATE INDEX IF NOT EXISTS idx_analysis_external_exports_round_stage
+  ON analysis_external_exports(game_round_id, stage, generated_at DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS analysis_external_runs (
   id TEXT PRIMARY KEY,
   game_round_id TEXT NOT NULL REFERENCES game_rounds(id),
