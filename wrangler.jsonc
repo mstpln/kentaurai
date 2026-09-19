@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "kentaurai-api",
-  "main": "./src/worker-v077.js",
+  "main": "./src/worker-v078.js",
   "compatibility_date": "2026-09-06",
   "vars": {
     "ANALYSIS_WORKFLOW_MODE": "v3",
