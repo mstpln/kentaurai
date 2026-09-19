@@ -130,6 +130,17 @@ function allPriorObjects(pack) {
   ];
 }
 
+test('B6 full seven-level hierarchy stays below the production D1 compound-select ceiling', async () => {
+  const { db, env } = createTestEnv();
+  const target = seedScenario(db);
+  const pack = (await buildRacePriorsV1ForEntries(env, [target.entryId], '2026-09-20T13:00:00Z')).get(target.entryId);
+
+  assert.equal(pack.priors.race_outcome.win_rate.direct_level, 'track_method_distance_field');
+  assert.equal(pack.priors.race_outcome.win_rate.backoff_level, 'method_distance_field');
+  assert.ok(pack.priors.race_outcome.win_rate.sample_size > 0);
+  assert.ok(pack.priors.shape.winner_lane_hhi.sample_size > 0);
+});
+
 test('B6 builds deterministic as-of race, lane and shape priors with explicit evidence metadata', async () => {
   const { db, env } = createTestEnv();
   const target = seedScenario(db);
