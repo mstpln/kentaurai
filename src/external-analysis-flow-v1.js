@@ -111,7 +111,7 @@ export async function listExternalAnalysisRounds(env, scope = 'analysis') {
   const { results } = await env.DB.prepare(
     "SELECT gr.id,gr.game_type,gr.round_date,gr.scheduled_start_at,gr.bet_stop_at,gr.status," +
     " (SELECT COUNT(*) FROM game_legs gl WHERE gl.game_round_id=gr.id) AS leg_count," +
-    " (SELECT COUNT(*) FROM systems s WHERE s.game_round_id=gr.id) AS system_count" +
+    " (SELECT COUNT(*) FROM analysis_external_runs aer WHERE aer.game_round_id=gr.id) AS system_count" +
     " FROM game_rounds gr" +
     " WHERE gr.game_type IN ('V85','V86')" +
     " AND (SELECT COUNT(*) FROM game_legs gl WHERE gl.game_round_id=gr.id)=8 " +
