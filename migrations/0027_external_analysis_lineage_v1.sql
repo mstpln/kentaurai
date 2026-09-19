@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS analysis_external_runs (
   model TEXT NOT NULL,
   step1_pack_id TEXT NOT NULL,
   step1_pack_as_of TEXT NOT NULL,
+  step1_generated_at TEXT NOT NULL,
   step1_facts_fingerprint TEXT NOT NULL,
   step2_market_fingerprint TEXT NOT NULL,
   step2_market_cutoff TEXT NOT NULL,
