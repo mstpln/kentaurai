@@ -39,6 +39,7 @@ function externalAnalysisUiClient() {
   function download(url) { window.location.href = url; }
   function analysisRound() { const node = document.getElementById('externalAnalysisRound'); return node ? node.value : ''; }
   function registrationRound() { const node = document.getElementById('externalRegistrationRound'); return node ? node.value : ''; }
+  function evidenceRegistrationRound() { const node = document.getElementById('externalEvidenceRegistrationRound'); return node ? node.value : ''; }
   function provider() { const node = document.getElementById('externalProvider'); return node ? node.value : 'openai'; }
 
   async function loadRounds(scope, selectId) {
@@ -81,6 +82,31 @@ function externalAnalysisUiClient() {
     }
   }
 
+  async function importExternalEvidence(button) {
+    const input = document.getElementById('externalEvidenceFile');
+    const file = input && input.files ? input.files[0] : null;
+    const box = document.getElementById('externalEvidenceMessage');
+    const roundId = evidenceRegistrationRound();
+    if (!roundId) { box.className = 'settings-result show error'; box.textContent = 'Välj en omgång först.'; return; }
+    if (!file) { box.className = 'settings-result show error'; box.textContent = 'Välj en JSON-fil först.'; return; }
+    button.disabled = true;
+    box.className = 'settings-result';
+    try {
+      const text = await file.text();
+      const result = await jsonFetch('/app/api/settings/external-evidence-import?round_id=' + encodeURIComponent(roundId), {
+        method:'POST', headers:{'content-type':'application/json'}, body:text
+      });
+      const counts = result.counts || {};
+      box.className = 'settings-result show success';
+      box.textContent = 'Extern data sparad: ' + (counts.statistics || 0) + ' statistikobservationer · ' + (counts.interviews || 0) + ' intervjuer.';
+    } catch (error) {
+      box.className = 'settings-result show error';
+      box.textContent = error.message;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   function workflowMarkup() {
     return '<div id="externalWorkflowCard" class="external-workflow">' +
       '<h2 class="external-section-title">Analysera omgång</h2>' +
@@ -90,20 +116,26 @@ function externalAnalysisUiClient() {
           '<div class="settings-field"><label for="externalProvider">AI</label><select id="externalProvider" class="settings-select"><option value="openai">ChatGPT</option><option value="anthropic">Claude</option></select></div>' +
         '</div>' +
         '<div class="external-card-body"><div class="external-timeline">' +
-          '<div class="external-node"><span>1</span></div><div class="external-step"><h3>Marknadsblind analys</h3><div class="settings-actions"><button id="externalDownloadPack" class="settings-primary" type="button">Hämta analysdata</button><button id="externalCopyStep1" class="settings-secondary" type="button">Kopiera instruktion</button></div></div>' +
-          '<div class="external-node external-last"><span>2</span></div><div class="external-step"><h3>Marknad och system</h3><div class="settings-actions"><button id="externalDownloadMarket" class="settings-primary" type="button">Hämta marknadsdata</button><button id="externalCopyStep2" class="settings-secondary" type="button">Kopiera instruktion</button></div></div>' +
+          '<div class="external-node"><span>1</span></div><div class="external-step"><h3>Marknadsblind analys <span class="external-pill">Ny AI-konversation</span></h3><p>Blind sportslig analys utan marknad, intervjuer eller krönikor.</p><div class="settings-actions"><button id="externalDownloadPack" class="settings-primary" type="button">Hämta analysdata</button><button id="externalCopyStep1" class="settings-secondary" type="button">Kopiera instruktion</button></div></div>' +
+          '<div class="external-node"><span>2</span></div><div class="external-step"><h3>Marknadsanalys <span class="external-pill">Samma AI-konversation</span></h3><p>Jämför den blinda analysen mot streck, odds och marknadsrörelser.</p><div class="settings-actions"><button id="externalDownloadMarket" class="settings-primary" type="button">Hämta marknadsdata</button><button id="externalCopyStep2" class="settings-secondary" type="button">Kopiera instruktion</button></div></div>' +
+          '<div class="external-node"><span>3</span></div><div class="external-step"><h3>Intervjuer & extern statistik <span class="external-pill">Samma AI-konversation</span></h3><p>Hämta sparad kontext och ladda upp dagens PDF:er/skärmbilder i AI-chatten.</p><div class="settings-actions"><button id="externalDownloadEvidenceContext" class="settings-primary" type="button">Hämta extern kontext</button><button id="externalCopyStep3" class="settings-secondary" type="button">Kopiera instruktion</button></div></div>' +
+          '<div class="external-node external-last"><span>4</span></div><div class="external-step"><h3>Bygg färdigt system <span class="external-pill">I AI-chatten</span></h3><p>Diskutera spikar, garderingar, risk och värde tills systemet är klart.</p></div>' +
         '</div></div>' +
+      '</section>' +
+      '<h2 class="external-section-title">Registrera extern statistik & intervjuer</h2>' +
+      '<section class="settings-section settings-card external-card">' +
+        '<div class="external-context"><div class="settings-field"><label for="externalEvidenceRegistrationRound">Omgång</label><select id="externalEvidenceRegistrationRound" class="settings-select"><option>Läser…</option></select></div></div>' +
+        '<div class="external-register-head"><div class="external-node external-last"><span>5</span></div><div><h3>Skapa och importera extern data</h3><p>Kan göras även efter omgången.</p></div></div>' +
+        '<div class="external-register-body"><div class="settings-actions"><button id="externalDownloadEvidenceImport" class="settings-primary" type="button">Hämta importunderlag</button><button id="externalCopyEvidenceImport" class="settings-secondary" type="button">Kopiera importinstruktion</button></div>' +
+        '<div class="external-callout">AI:n skapar JSON-filen från materialet i chatten.</div>' +
+        '<div class="settings-actions external-import"><div class="settings-field"><label for="externalEvidenceFile">Extern datafil</label><input id="externalEvidenceFile" class="settings-file" type="file" accept="application/json,.json"></div><button id="externalImportEvidence" class="settings-secondary" type="button">Importera extern data</button></div><div id="externalEvidenceMessage" class="settings-result"></div></div>' +
       '</section>' +
       '<h2 class="external-section-title">Registrera system</h2>' +
       '<section class="settings-section settings-card external-card">' +
         '<div class="external-context"><div class="settings-field"><label for="externalRegistrationRound">Omgång</label><select id="externalRegistrationRound" class="settings-select"><option>Läser…</option></select></div></div>' +
-        '<div class="external-card-body"><div class="external-timeline">' +
-          '<div class="external-node external-last"><span>3</span></div><div class="external-step"><h3>Registrera färdigt system</h3>' +
-            '<div class="settings-actions"><button id="externalDownloadImport" class="settings-primary" type="button">Hämta importunderlag</button><button id="externalCopyImport" class="settings-secondary" type="button">Kopiera importinstruktion</button></div>' +
-            '<div class="settings-actions external-import"><div class="settings-field"><label for="externalSystemFile">Systemfil</label><input id="externalSystemFile" class="settings-file" type="file" accept="application/json,.json"></div><button id="externalImportSystem" class="settings-secondary" type="button">Importera system</button></div>' +
-            '<div id="externalMessage" class="settings-result"></div>' +
-          '</div>' +
-        '</div></div>' +
+        '<div class="external-register-head"><div class="external-node external-last"><span>6</span></div><div><h3>Registrera färdigt system</h3><p>AI:n skapar registreringsfilen från den färdiga analysen.</p></div></div>' +
+        '<div class="external-register-body"><div class="settings-actions"><button id="externalDownloadImport" class="settings-primary" type="button">Hämta importunderlag</button><button id="externalCopyImport" class="settings-secondary" type="button">Kopiera importinstruktion</button></div>' +
+        '<div class="settings-actions external-import"><div class="settings-field"><label for="externalSystemFile">Systemfil</label><input id="externalSystemFile" class="settings-file" type="file" accept="application/json,.json"></div><button id="externalImportSystem" class="settings-secondary" type="button">Importera system</button></div><div id="externalMessage" class="settings-result"></div></div>' +
       '</section>' +
     '</div>';
   }
@@ -125,10 +157,16 @@ function externalAnalysisUiClient() {
     document.getElementById('externalCopyStep1').addEventListener('click', function(event){ copyPrompt(event.currentTarget, '/app/api/settings/external-step1-prompt?provider=' + encodeURIComponent(provider())); });
     document.getElementById('externalDownloadMarket').addEventListener('click', function(){ const id=analysisRound(); if(id) download('/app/api/settings/external-market?round_id=' + encodeURIComponent(id)); });
     document.getElementById('externalCopyStep2').addEventListener('click', function(event){ copyPrompt(event.currentTarget, '/app/api/settings/external-step2-prompt?provider=' + encodeURIComponent(provider())); });
+    document.getElementById('externalDownloadEvidenceContext').addEventListener('click', function(){ const id=analysisRound(); if(id) download('/app/api/settings/external-evidence-context?round_id=' + encodeURIComponent(id)); });
+    document.getElementById('externalCopyStep3').addEventListener('click', function(event){ copyPrompt(event.currentTarget, '/app/api/settings/external-step3-prompt?provider=' + encodeURIComponent(provider())); });
+    document.getElementById('externalDownloadEvidenceImport').addEventListener('click', function(){ const id=evidenceRegistrationRound(); if(id) download('/app/api/settings/external-evidence-import-context?round_id=' + encodeURIComponent(id)); });
+    document.getElementById('externalCopyEvidenceImport').addEventListener('click', function(event){ copyPrompt(event.currentTarget, '/app/api/settings/external-evidence-import-prompt?provider=' + encodeURIComponent(provider())); });
+    document.getElementById('externalImportEvidence').addEventListener('click', function(event){ importExternalEvidence(event.currentTarget); });
     document.getElementById('externalDownloadImport').addEventListener('click', function(){ const id=registrationRound(); if(id) download('/app/api/settings/system-import-context?round_id=' + encodeURIComponent(id)); });
     document.getElementById('externalCopyImport').addEventListener('click', function(event){ copyPrompt(event.currentTarget, '/app/api/settings/system-import-prompt?provider=' + encodeURIComponent(provider())); });
     document.getElementById('externalImportSystem').addEventListener('click', function(event){ importSystem(event.currentTarget); });
     loadRounds('analysis','externalAnalysisRound');
+    loadRounds('registration','externalEvidenceRegistrationRound');
     loadRounds('registration','externalRegistrationRound');
   }
 
