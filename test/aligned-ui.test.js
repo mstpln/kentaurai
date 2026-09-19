@@ -14,12 +14,12 @@ test('final aligned app adds Bana as the sixth bottom-navigation area', () => {
 
 test('horse detail uses one compact expandable Starter history instead of a duplicate equipment tab', () => {
   const html = renderAppPage();
-  assert.match(html, /if\(type==='horse'\)return \[\['stats','Statistik'\],\['starts','Starter'\],\['data','Data'\]\]/);
+  assert.match(html, /if\(type==='horse'\)return \[\['stats','Statistik'\],\['external_stats','Extern statistik'\],\['interviews','Intervjuer'\],\['starts','Starter'\],\['data','Data'\]\]/);
   assert.match(html, /Kommande lopp/);
   assert.match(html, /Tidigare starter/);
   assert.match(html, /priorAlignedStartCards\(detail\)/);
   assert.match(html, /querySelectorAll\('\.start-card'\)/);
-  assert.doesNotMatch(html, /return \[\['stats','Statistik'\],\['starts','Starter'\],\['equipment','Utrustning'\],\['data','Data'\]\];return priorAlignedDetailTabs/);
+  assert.doesNotMatch(html, /\['equipment','Utrustning'\]/);
 });
 
 test('settings statuses use a dedicated labelled bottom row with words rather than standalone symbols', () => {
