@@ -139,14 +139,15 @@ async function roundIdentity(env, roundId) {
   return { round:{ id:round.id, game_type:round.game_type, round_date:round.round_date, scheduled_start_at:round.scheduled_start_at || null, bet_stop_at:round.bet_stop_at || null, status:round.status || null }, entries };
 }
 
-async function loadStats(env, horseIds) {
+async function loadStats(env, horseIds, asOf = null) {
   const out = [];
   for (const group of chunks([...new Set(horseIds)].filter(Boolean))) {
     const { results } = await env.DB.prepare(
       "SELECT id,horse_id,race_entry_id,game_round_id,context_type,context_key,context_label,starts,wins,seconds,thirds,win_rate_percent,roi_percent,observed_at " +
       "FROM external_horse_stat_snapshots WHERE horse_id IN (" + placeholders(group) + ") " +
+      (asOf ? "AND julianday(observed_at)<=julianday(?) " : "") +
       "ORDER BY observed_at DESC,id DESC LIMIT 2400"
-    ).bind(...group).all();
+    ).bind(...group, ...(asOf ? [asOf] : [])).all();
     out.push(...(results || []));
   }
   const counts = new Map();
@@ -197,20 +198,26 @@ async function loadSignals(env, itemIds) {
   return map;
 }
 
-async function loadInterviews(env, horseIds, trainerIds) {
+async function loadInterviews(env, horseIds, trainerIds, asOf = null) {
   const byId = new Map();
   for (const group of chunks([...new Set(horseIds)].filter(Boolean), 35)) {
     const { results } = await env.DB.prepare(
-      "SELECT id,horse_id,trainer_id,race_entry_id,race_id,game_round_id,speaker_name,speaker_role,published_at,summary_text " +
-      "FROM editorial_items WHERE horse_id IN (" + placeholders(group) + ") ORDER BY COALESCE(published_at,created_at) DESC,id DESC LIMIT 1600"
-    ).bind(...group).all();
+      "SELECT ei.id,ei.horse_id,ei.trainer_id,ei.race_entry_id,ei.race_id,ei.game_round_id,ei.speaker_name,ei.speaker_role,ei.published_at,ei.summary_text " +
+      "FROM editorial_items ei JOIN source_records sr ON sr.id=ei.source_record_id " +
+      "WHERE sr.source_type='manual_editorial_import' AND ei.horse_id IN (" + placeholders(group) + ") " +
+      (asOf ? "AND julianday(COALESCE(ei.published_at,sr.fetched_at))<=julianday(?) AND julianday(sr.fetched_at)<=julianday(?) " : "") +
+      "ORDER BY COALESCE(ei.published_at,ei.created_at) DESC,ei.id DESC LIMIT 1600"
+    ).bind(...group, ...(asOf ? [asOf,asOf] : [])).all();
     for (const row of results || []) byId.set(row.id, row);
   }
   for (const group of chunks([...new Set(trainerIds)].filter(Boolean), 35)) {
     const { results } = await env.DB.prepare(
-      "SELECT id,horse_id,trainer_id,race_entry_id,race_id,game_round_id,speaker_name,speaker_role,published_at,summary_text " +
-      "FROM editorial_items WHERE trainer_id IN (" + placeholders(group) + ") ORDER BY COALESCE(published_at,created_at) DESC,id DESC LIMIT 1600"
-    ).bind(...group).all();
+      "SELECT ei.id,ei.horse_id,ei.trainer_id,ei.race_entry_id,ei.race_id,ei.game_round_id,ei.speaker_name,ei.speaker_role,ei.published_at,ei.summary_text " +
+      "FROM editorial_items ei JOIN source_records sr ON sr.id=ei.source_record_id " +
+      "WHERE sr.source_type='manual_editorial_import' AND ei.trainer_id IN (" + placeholders(group) + ") " +
+      (asOf ? "AND julianday(COALESCE(ei.published_at,sr.fetched_at))<=julianday(?) AND julianday(sr.fetched_at)<=julianday(?) " : "") +
+      "ORDER BY COALESCE(ei.published_at,ei.created_at) DESC,ei.id DESC LIMIT 1600"
+    ).bind(...group, ...(asOf ? [asOf,asOf] : [])).all();
     for (const row of results || []) byId.set(row.id, row);
   }
   const rows = [...byId.values()].sort((a,b) => String(b.published_at || '').localeCompare(String(a.published_at || '')));
@@ -242,16 +249,28 @@ async function loadInterviews(env, horseIds, trainerIds) {
 export async function buildExternalEvidenceContext(env, roundId, { purpose = 'analysis' } = {}) {
   if (!env?.DB) throw new Error('DB is not configured');
   const identity = await roundIdentity(env, roundId);
-  const stats = await loadStats(env, identity.entries.map((row) => row.horse_id));
-  const interviews = await loadInterviews(
-    env,
-    identity.entries.map((row) => row.horse_id),
-    identity.entries.map((row) => row.trainer_id)
-  );
+  const normalizedPurpose = purpose === 'import' ? 'import' : 'analysis';
+  const generatedAt = new Date().toISOString();
+  const deadline = identity.round.bet_stop_at || identity.round.scheduled_start_at || null;
+  const analysisAsOf = deadline && Date.parse(deadline) < Date.parse(generatedAt)
+    ? new Date(Date.parse(deadline)).toISOString()
+    : generatedAt;
+  const stats = normalizedPurpose === 'analysis'
+    ? await loadStats(env, identity.entries.map((row) => row.horse_id), analysisAsOf)
+    : [];
+  const interviews = normalizedPurpose === 'analysis'
+    ? await loadInterviews(
+      env,
+      identity.entries.map((row) => row.horse_id),
+      identity.entries.map((row) => row.trainer_id),
+      analysisAsOf
+    )
+    : [];
   return {
     contract_version:EXTERNAL_EVIDENCE_CONTEXT_CONTRACT,
-    purpose:purpose === 'import' ? 'import' : 'analysis',
-    generated_at:new Date().toISOString(),
+    purpose:normalizedPurpose,
+    generated_at:generatedAt,
+    analysis_as_of:normalizedPurpose === 'analysis' ? analysisAsOf : null,
     round:identity.round,
     entries:identity.entries,
     historical_external_statistics:stats,
@@ -443,8 +462,8 @@ async function interviewsFor(env, column, id) {
   const { results } = await env.DB.prepare(
     "SELECT ei.id,ei.horse_id,h.canonical_name AS horse_name,ei.trainer_id,tr.canonical_name AS trainer_name," +
     "ei.speaker_name,ei.speaker_role,ei.published_at,ei.summary_text " +
-    "FROM editorial_items ei LEFT JOIN horses h ON h.id=ei.horse_id LEFT JOIN trainers tr ON tr.id=ei.trainer_id " +
-    "WHERE ei." + column + "=? ORDER BY COALESCE(ei.published_at,ei.created_at) DESC,ei.id DESC LIMIT 200"
+    "FROM editorial_items ei JOIN source_records sr ON sr.id=ei.source_record_id LEFT JOIN horses h ON h.id=ei.horse_id LEFT JOIN trainers tr ON tr.id=ei.trainer_id " +
+    "WHERE sr.source_type='manual_editorial_import' AND ei." + column + "=? ORDER BY COALESCE(ei.published_at,ei.created_at) DESC,ei.id DESC LIMIT 200"
   ).bind(id).all();
   const signals = await loadSignals(env, (results || []).map((row) => row.id));
   return (results || []).map((row) => ({
