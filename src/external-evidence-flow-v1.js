@@ -135,7 +135,10 @@ async function roundIdentity(env, roundId) {
       allowed_stat_contexts:contexts
     };
   });
-  if (!entries.length) throw new Error('round has no entries');
+  const legNumbers = new Set(entries.map((row) => row.leg_number));
+  if (legNumbers.size !== 8 || [...legNumbers].some((leg) => !Number.isInteger(leg) || leg < 1 || leg > 8)) {
+    throw new Error('round must contain exactly eight populated legs');
+  }
   return { round:{ id:round.id, game_type:round.game_type, round_date:round.round_date, scheduled_start_at:round.scheduled_start_at || null, bet_stop_at:round.bet_stop_at || null, status:round.status || null }, entries };
 }
 
