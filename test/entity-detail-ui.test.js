@@ -119,8 +119,11 @@ test('trainer-specific verified home-track summaries remain visible after shared
 });
 
 test('shared summary keeps entity-specific specialized sections without the scorecard kicker', () => {
-  const script = statsScriptFrom(enhanced());
+  const html = enhanced();
+  const script = statsScriptFrom(html);
   assert.doesNotMatch(script, /Scorecard/);
+  assert.doesNotMatch(html, /entity-detail-kicker/);
+  assert.doesNotMatch(html, /\.entity-detail-label\{[^}]*margin-top/);
   assert.match(script, /Segerprocent/);
   assert.match(script, /Form '\+c\.form/);
   assert.match(script, /if\(c\.rest\)/);
