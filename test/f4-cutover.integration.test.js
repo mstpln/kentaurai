@@ -106,7 +106,8 @@ test('F4 default private app renders the v3 workflow while rollback preserves th
   let response = await worker.fetch(new Request('https://example.test/app/', { headers: { cookie } }), env, {});
   assert.equal(response.status, 200);
   let html = await response.text();
-  assert.match(html, /kentaurai-external-analysis-ui-script/);
+  assert.doesNotMatch(html, /kentaurai-external-analysis-ui-script/);
+  assert.match(html, /canonicalAnalysisWorkflow/);
   assert.match(html, /Analysera omgång/);
   assert.match(html, /Hämta marknadsdata/);
   assert.match(html, /Registrera system/);
