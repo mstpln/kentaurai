@@ -181,6 +181,33 @@ test('actual production evidence tabs call their canonical APIs', async () => {
   assert.ok(requestedPaths.includes('/trainers/trainer-1/interviews'));
 });
 
+test('core production detail path remains canonical even without the final runtime wrapper', async () => {
+  let html = await productionHtml();
+  html = html.replace(/<script id="kentaurai-entity-detail-ui-runtime">[\s\S]*?<\/script>/, '');
+  const scripts = [...html.matchAll(/<script(?: id="([^"]+)")?[^>]*>([\s\S]*?)<\/script>/g)];
+  const { context, document, responses } = runtimeContext();
+  for (const [, id = '(base)', source] of scripts) new vm.Script(source, { filename:id }).runInContext(context);
+  const detail = {
+    type:'horse', entity:{ name:'Nilla Lane', country_code:'SE' }, latestObservation:null,
+    stats:{}, breakdowns:{ startMethods:[], distances:[], tracks:[] }, coverage:{}, starts:[]
+  };
+  responses.set('/entities/horses/horse-1', detail);
+  responses.set('/horses/statistics/filter-options', { tracks:[], distanceGroups:[], ageOptions:[], birthYears:[], handicapBuckets:[] });
+  responses.set('/horses/horse-1/calendar-statistics', { summary:{}, startMethods:[], distances:[], tracks:[] });
+  responses.set('/horses/horse-1/statistics', { currentStartPoints:null, relevantPatterns:null });
+  document.appWrites.length = 0;
+
+  await vm.runInContext("openDetail('horses','horse-1')", context);
+
+  const shell = document.appWrites.at(-1);
+  assert.match(shell, /Statistik[\s\S]*Extern statistik[\s\S]*Intervjuer[\s\S]*Starter[\s\S]*Data/);
+  assert.match(shell, /entityDetailStatisticsV2/);
+  for (const write of document.appWrites) {
+    assert.doesNotMatch(write, /Starter med resultat|Vinstprocent|entityStatSummary|horseStatsBuildB/);
+  }
+  assert.match(document.getElementById('entityDetailStatisticsV2').innerHTML, /Scorecard/);
+});
+
 test('actual production click path owns tabs and never paints legacy statistics', async () => {
   const html = await productionHtml();
   const scripts = [...html.matchAll(/<script(?: id="([^"]+)")?[^>]*>([\s\S]*?)<\/script>/g)];
