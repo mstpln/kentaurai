@@ -113,8 +113,8 @@ test('actual F3 Worker serves the guided UI and session-private observability ro
   let response = await worker.fetch(new Request('https://example.test/app/', { headers: { cookie: session } }), env, {});
   assert.equal(response.status,200);
   const html = await response.text();
-  assert.equal((html.match(/kentaurai-external-analysis-ui-script/g) || []).length,1);
-  assert.match(html,/kentaurai-external-analysis-ui-style/);
+  assert.doesNotMatch(html,/kentaurai-external-analysis-ui-script/);
+  assert.match(html,/canonicalAnalysisWorkflow/);
   assert.match(html,/Analysera omgång/);
   assert.match(html,/Registrera system/);
   assert.match(html,/Hämta marknadsdata/);
