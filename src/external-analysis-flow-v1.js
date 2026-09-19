@@ -580,7 +580,7 @@ async function verifyExternalProvenance(env, roundId, step1, step2) {
   return { pack, marketInput };
 }
 
-export async function importRecordedSystem(env, payload) {
+export async function importRecordedSystem(env, payload, options = {}) {
   if (!env?.DB || typeof env.DB.batch !== 'function') throw new Error('D1 batch support is required');
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('import must be a JSON object');
   if (payload.contract_version !== RECORDED_SYSTEM_CONTRACT) throw new Error('unsupported contract_version');
@@ -601,8 +601,9 @@ export async function importRecordedSystem(env, payload) {
   const roundSummary = optionalText(payload.round_summary, 'round_summary', MAX_TEXT);
   const recommendations = boundedJson(payload.recommendations, 'recommendations', MAX_JSON_TEXT);
 
+  const createdAt = exactIso(options.now ?? new Date().toISOString(), 'imported_at');
   const identity = await loadRoundIdentity(env, roundId);
-  const deadline = await loadMarketDeadlineV3(env, roundId, new Date().toISOString());
+  const deadline = await loadMarketDeadlineV3(env, roundId, createdAt);
   if (Date.parse(analysisAsOf) > Date.parse(deadline.deadline_at)) {
     throw new Error('step1.as_of must not be after the authoritative round deadline');
   }
@@ -643,7 +644,6 @@ export async function importRecordedSystem(env, payload) {
     };
   }
 
-  const createdAt = new Date().toISOString();
   const importTiming = Date.parse(createdAt) < Date.parse(deadline.deadline_at) ? 'pre_race' : 'post_race_recovery';
   const sourceTimingEligible = Date.parse(step1.generatedAt) < Date.parse(deadline.deadline_at)
     && Date.parse(step2.generatedAt) < Date.parse(deadline.deadline_at);
