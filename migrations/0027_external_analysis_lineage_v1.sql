@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS analysis_external_exports (
   artifact_fingerprint TEXT NOT NULL,
   as_of TEXT NOT NULL,
   cutoff_at TEXT,
+  artifact_json TEXT NOT NULL,
   generated_at TEXT NOT NULL,
   created_at TEXT NOT NULL,
   UNIQUE(stage, artifact_id, artifact_fingerprint, generated_at)
