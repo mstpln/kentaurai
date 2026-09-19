@@ -132,9 +132,12 @@ export async function loadRoundEvidenceIdentity(env, roundId) {
   return { round, entries };
 }
 
-export async function loadRoundEquipment(env, entries) {
+export async function loadRoundEquipment(env, entries, asOf = null) {
   const ids = [...new Set(entries.map((row) => row.race_entry_id))];
-  const cutoffs = new Map(entries.map((row) => [row.race_entry_id, row.scheduled_start_at]));
+  const cutoffs = new Map(entries.map((row) => {
+    const candidates=[row.scheduled_start_at,asOf].filter(Boolean).map((value)=>new Date(value).toISOString()).sort();
+    return [row.race_entry_id,candidates[0]||null];
+  }));
   const out = new Map();
   for (const group of chunks(ids)) {
     const { results } = await env.DB.prepare(
@@ -152,9 +155,9 @@ export async function loadRoundEquipment(env, entries) {
   return out;
 }
 
-export async function buildExternalEvidenceImportContext(env, roundId) {
+export async function buildExternalEvidenceImportContext(env, roundId, options = {}) {
   const identity = await loadRoundEvidenceIdentity(env, roundId);
-  const equipment = await loadRoundEquipment(env, identity.entries);
+  const equipment = await loadRoundEquipment(env, identity.entries, options.asOf || null);
   return {
     contract_version:EXTERNAL_EVIDENCE_IMPORT_CONTEXT_CONTRACT,
     output_contract:EXTERNAL_EVIDENCE_IMPORT_CONTRACT,
