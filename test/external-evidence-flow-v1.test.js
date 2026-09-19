@@ -28,7 +28,7 @@ function seed(env, db) {
   db.prepare("INSERT INTO trainers (id,canonical_name) VALUES (?, 'Synthetic Trainer')").run(TRAINER_ID);
   db.prepare("INSERT INTO drivers (id,canonical_name) VALUES ('evidence-driver','Synthetic Driver')").run();
   db.prepare("INSERT INTO race_entries (id,race_id,horse_id,driver_id,trainer_id,start_number,actual_start_distance_m,scratched,data_quality) VALUES (?,'evidence-race',?,'evidence-driver',?,1,2140,0,'verified')").run(ENTRY_ID,HORSE_ID,TRAINER_ID);
-  db.prepare("INSERT INTO source_records (id,source_type,fetched_at,quality_status) VALUES ('evidence-official-source','official_provider','2099-09-20T08:00:00Z','normalized_verified_subset')").run();
+  db.prepare("INSERT INTO source_records (id,source_type,fetched_at,quality_status) VALUES ('evidence-official-source','official_provider','2026-09-19T08:00:00Z','normalized_verified_subset')").run();
   db.prepare("INSERT INTO equipment (id,race_entry_id,shoes_front,shoes_rear,barefoot_front,barefoot_rear,sulky_type,verification_status,source_record_id) VALUES ('evidence-equipment',?,'barefoot','barefoot',1,1,'american','reported','evidence-official-source')").run(ENTRY_ID);
   for (let leg = 2; leg <= 8; leg += 1) {
     const raceId = 'evidence-race-' + leg;
@@ -146,6 +146,8 @@ test('Step 3 historical context excludes evidence unavailable at the round cutof
   const { env, db } = createTestEnv();
   seed(env, db);
   db.prepare("UPDATE game_rounds SET scheduled_start_at='2026-09-19T15:00:00Z',bet_stop_at='2026-09-19T14:55:00Z' WHERE id=?").run(ROUND_ID);
+  db.prepare("INSERT INTO source_records (id,source_type,fetched_at,quality_status) VALUES ('evidence-late-equipment-source','official_provider','2026-09-19T16:00:00Z','normalized_verified_subset')").run();
+  db.prepare("INSERT INTO equipment (id,race_entry_id,shoes_front,shoes_rear,barefoot_front,barefoot_rear,sulky_type,verification_status,source_record_id) VALUES ('evidence-late-equipment',?,'shod','shod',0,0,'regular','reported','evidence-late-equipment-source')").run(ENTRY_ID);
 
   const before = payload('before-cutoff','2026-09-19T12:00:00Z');
   before.statistics = [before.statistics[0]];
@@ -167,6 +169,8 @@ test('Step 3 historical context excludes evidence unavailable at the round cutof
 
   const context = await buildExternalEvidenceContext(env, ROUND_ID);
   assert.equal(context.analysis_as_of, '2026-09-19T14:55:00.000Z');
+  assert.deepEqual(context.entries[0].current_balance, { key:'balance:barefoot|barefoot', label:'Barfota runt om' });
+  assert.deepEqual(context.entries[0].current_wagon, { key:'wagon:american', label:'Amerikansk vagn' });
   assert.equal(context.historical_external_statistics.length, 2);
   assert.deepEqual(context.historical_external_statistics.map((row) => row.starts), [24,25]);
   assert.equal(context.historical_interviews.length, 2);
@@ -176,6 +180,9 @@ test('Step 3 historical context excludes evidence unavailable at the round cutof
   ]);
 
   const importContext = await buildExternalEvidenceContext(env, ROUND_ID, { purpose:'import' });
+  assert.deepEqual(importContext.current_balance, undefined);
+  assert.deepEqual(importContext.entries[0].current_balance, { key:'balance:shod|shod', label:'Skor runt om' });
+  assert.deepEqual(importContext.entries[0].current_wagon, { key:'wagon:regular', label:'Vanlig vagn' });
   assert.deepEqual(importContext.historical_external_statistics, []);
   assert.deepEqual(importContext.historical_interviews, []);
 });
