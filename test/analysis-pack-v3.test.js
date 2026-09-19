@@ -4,6 +4,7 @@ import {
   ANALYSIS_PACK_V3_CONTRACT,
   assertAnalysisPackMarketBlind,
   buildAnalysisPackV3Files,
+  createPreMarketAnalysisPackV3,
   findAnalysisPackMarketLeaks
 } from '../src/analysis-pack-v3.js';
 import { assertAnalysisPackReplaySafe } from '../src/analysis-pack-v3-asof-guard.js';
@@ -166,4 +167,23 @@ test('D1 as-of guard passes current target state and rejects later-state leakage
     () => assertAnalysisPackReplaySafe(env, 'round_d1', '2099-01-02T12:10:00Z'),
     /refusing a potentially contaminated replay.*actual_lane/
   );
+});
+
+
+test('D1 Step 1 keeps trainer/driver interview opinion but excludes generic editorial opinion', async () => {
+  const { env, db } = createTestEnv();
+  seedAsOfRound(db);
+  db.prepare("INSERT INTO source_records (id,source_type,external_id,fetched_at,quality_status) VALUES ('editorial-step1','editorial_manual','synthetic','2099-01-02T11:10:00Z','manual_structured')").run();
+
+  db.prepare("INSERT INTO editorial_items (id,race_entry_id,horse_id,speaker_name,speaker_role,published_at,source_name,rights_status,source_record_id) VALUES ('editorial-analyst','entry_1','horse_1','Synthetic Analyst','analyst','2099-01-02T11:05:00Z','Synthetic','structured_only','editorial-step1')").run();
+  db.prepare("INSERT INTO editorial_signals (id,editorial_item_id,signal_type,value_text,polarity,fact_or_opinion,confidence) VALUES ('signal-analyst','editorial-analyst','form','positive','positive','opinion',0.8)").run();
+
+  db.prepare("INSERT INTO editorial_items (id,race_entry_id,horse_id,speaker_name,speaker_role,published_at,source_name,rights_status,source_record_id) VALUES ('editorial-trainer','entry_1','horse_1','Synthetic Trainer','trainer','2099-01-02T11:05:00Z','Synthetic','structured_only','editorial-step1')").run();
+  db.prepare("INSERT INTO editorial_signals (id,editorial_item_id,signal_type,value_text,polarity,fact_or_opinion,confidence) VALUES ('signal-trainer','editorial-trainer','tactics','offensive','positive','opinion',0.8)").run();
+
+  const pack = await createPreMarketAnalysisPackV3(env,'round_d1',{asOf:'2099-01-02T11:30:00Z'});
+  const leg1 = pack.files.find((file) => file.name === '01_leg_1.json').payload;
+  const signals = leg1.entries.find((entry) => entry.race_entry_id === 'entry_1').current_signals;
+  assert.equal(signals.some((signal) => signal.signal_type === 'tactics' && signal.value === 'offensive'), true);
+  assert.equal(signals.some((signal) => signal.signal_type === 'form' && signal.value === 'positive'), false);
 });
