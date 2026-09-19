@@ -31,7 +31,10 @@ test('production /app/ contains the canonical entity-detail stack exactly once',
   assert.match(html, /id="kentaurai-entity-detail-ui-runtime"/);
   assert.match(html, /id="kentaurai-performance-v1-script"/);
   assert.equal((html.match(/kentaurai-entity-detail-ui-runtime/g) || []).length, 1);
-  assert.match(html, /app\.querySelector\(':scope > \.data-groups'\)\?\.remove\(\)/);
+  assert.match(html, /__kentauraiEntityDetailStatistics=\{mount/);
+  assert.match(html, /const legacyRenderDetail = renderDetail/);
+  assert.match(html, /if \(!\['stats','external_stats','interviews'\]\.includes\(requestedTab\)\) return legacyRenderDetail\(\)/);
+  assert.doesNotMatch(html, /#horseStatsBuildB,#trainerStatsBuildD,#driverStatsBuildC\{display:none!important\}/);
   assert.match(html, /\['external_stats','Extern statistik'\]/);
   assert.match(html, /\['interviews','Intervjuer'\]/);
   const performanceIndex = html.indexOf('id="kentaurai-performance-v1-script"');
