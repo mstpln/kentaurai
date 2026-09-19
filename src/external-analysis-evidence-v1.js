@@ -137,13 +137,16 @@ function externalLearningEligibility(run, firstStartMs) {
 function assertSettledLegs(evidence) {
   const winners = new Map();
   for (const leg of evidence.legs) {
-    const active = leg.entries.filter((entry) => !entry.scratched);
-    const winnersHere = active.filter((entry) => Number(entry.placing) === 1);
-    if (winnersHere.length !== 1) return null;
-    if (active.some((entry) => entry.win_probability == null)) throw new Error('external evidence is missing a blind prediction');
-    const sum = active.reduce((total, entry) => total + Number(entry.win_probability), 0);
+    const raceWinners = leg.entries.filter((entry) => Number(entry.placing) === 1);
+    if (raceWinners.length !== 1) return null;
+    const predicted = leg.entries.filter((entry) => entry.win_probability != null);
+    if (predicted.length < 2) throw new Error('external evidence is missing the Step 1 prediction population');
+    const sum = predicted.reduce((total, entry) => total + Number(entry.win_probability), 0);
     if (Math.abs(sum - 1) > PROBABILITY_TOLERANCE) throw new Error('external blind probabilities do not sum to 1');
-    winners.set(leg.leg_number, winnersHere[0].race_entry_id);
+    if (!predicted.some((entry) => entry.race_entry_id === raceWinners[0].race_entry_id)) {
+      throw new Error('factual winner was not in the Step 1 active prediction population');
+    }
+    winners.set(leg.leg_number, raceWinners[0].race_entry_id);
   }
   return winners;
 }
@@ -223,8 +226,8 @@ export async function loadExternalDecisionReplayEvidenceV1(env, config = {}) {
     systemDiagnostics.push(systemDiagnostic(run, system, evidence, winners));
 
     for (const leg of evidence.legs) {
-      const active = leg.entries.filter((entry) => !entry.scratched);
-      const entries = active.map((entry) => ({ race_entry_id: entry.race_entry_id, probability: Number(entry.win_probability) }));
+      const predicted = leg.entries.filter((entry) => entry.win_probability != null);
+      const entries = predicted.map((entry) => ({ race_entry_id: entry.race_entry_id, probability: Number(entry.win_probability) }));
       const blind = scoreForecast(entries, winners.get(leg.leg_number));
       targets.push({
         target_id: run.game_round_id + ':' + run.id + ':leg:' + leg.leg_number,
