@@ -323,3 +323,35 @@ test('external registered system is the F1/F2 evidence lineage instead of stale 
     && lineage.version_metadata?.external_run_id === imported.externalRunId
   ));
 });
+
+
+test('post-deadline registration is retained for diagnostics but excluded from automatic learning', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  const payload = await withProvenance(env, validPayload());
+  payload.submission_id = 'external-post-race';
+  const imported = await importRecordedSystem(env, payload, { now: '2099-09-20T16:30:00Z' });
+  assert.equal(imported.importTiming, 'post_race_recovery');
+  assert.equal(imported.learningEligibility, 'manual_review_required');
+  const lineage = db.prepare("SELECT import_timing,learning_eligibility,analysis_blindness FROM analysis_external_runs WHERE id=?").get(imported.externalRunId);
+  assert.deepEqual(lineage, {
+    import_timing: 'post_race_recovery',
+    learning_eligibility: 'manual_review_required',
+    analysis_blindness: 'declared_unsealed_post_race_import'
+  });
+
+  settleRound(db);
+  const review = await runNextPostRaceReviewV2(env, { roundId: ROUND_ID });
+  assert.equal(review.externalRunId, imported.externalRunId);
+  const learning = db.prepare("SELECT DISTINCT learning_eligible,learning_classification FROM post_race_reviews_external_v1 WHERE external_run_id=?").all(imported.externalRunId);
+  assert.deepEqual(learning, [{ learning_eligible: 0, learning_classification: 'no_change' }]);
+
+  const replay = await runDecisionReplayV1(env, {
+    from: '2099-09-20T00:00:00Z',
+    to: '2099-09-21T00:00:00Z',
+    max_targets: 10
+  });
+  assert.equal(replay.evidence_target_count, 0);
+  assert.equal(replay.regression_only_target_count, 8);
+  assert.equal(replay.regression_only_summary.systems.system_count, 1);
+});
