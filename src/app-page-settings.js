@@ -17,7 +17,7 @@ const settingsCss = `
 .settings-button{justify-self:end;width:42px;height:42px;border:1px solid var(--line);border-radius:11px;background:#121210;color:#9c958b;display:grid;place-items:center;cursor:pointer;padding:9px}.settings-button:hover,.settings-button.active{color:var(--accent-soft);border-color:#5b4933;background:#1a1712}.settings-button svg{width:21px;height:21px;display:block}
 .settings-layout{max-width:920px}.settings-tabs{margin-bottom:22px}.settings-section{margin-top:16px}.settings-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}.settings-card-head{padding:18px 20px;border-bottom:1px solid var(--line-soft)}.settings-card-head h2{font-size:16px;font-weight:600;margin:0}.settings-card-head p{font-size:12px;line-height:1.55;color:var(--muted);margin:6px 0 0;max-width:720px}.settings-card-body{padding:20px}.settings-actions{display:flex;gap:10px;align-items:end;flex-wrap:wrap}.settings-field{display:grid;gap:7px;min-width:210px}.settings-field label{font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);font-weight:650}.settings-select,.settings-file{min-height:42px;border:1px solid var(--line);background:#10100f;color:var(--text);border-radius:10px;padding:9px 11px}.settings-file{padding:8px;max-width:100%}.settings-primary,.settings-secondary{min-height:42px;border-radius:10px;padding:10px 15px;cursor:pointer;font-weight:600}.settings-primary{border:1px solid var(--accent);background:var(--accent);color:#17120d}.settings-secondary{border:1px solid var(--line);background:#121210;color:var(--text)}.settings-primary:disabled,.settings-secondary:disabled{opacity:.5;cursor:default}.settings-help{font-size:12px;color:var(--muted);line-height:1.55;margin-top:12px}.settings-code{font:11px/1.5 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;color:#bbb3a8;background:#0d0d0c;border:1px solid var(--line-soft);border-radius:9px;padding:9px 11px;margin-top:9px;overflow-wrap:anywhere}.settings-result{display:none;margin-top:12px;padding:10px 12px;border-radius:10px;font-size:12px}.settings-result.show{display:block}.settings-result.success{border:1px solid #455743;background:#151c14;color:#a8bda4}.settings-result.error{border:1px solid #66413a;background:#211512;color:#d4a49a}
 .settings-counts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.settings-count{border:1px solid var(--line-soft);background:#10100f;border-radius:11px;padding:14px}.settings-count strong{font-size:24px;font-weight:650;display:block}.settings-count span{display:block;color:var(--muted);font-size:11px;margin-top:3px}.settings-list{display:grid}.settings-row{display:grid;grid-template-columns:minmax(140px,1fr) minmax(0,2fr) auto;gap:14px;align-items:center;padding:13px 0;border-bottom:1px solid var(--line-soft)}.settings-row:last-child{border-bottom:0}.settings-row-title{font-size:13px;font-weight:550}.settings-row-meta{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.45}.settings-row-output{font-size:11px;color:#aaa39a}.status-pill{font-size:10px;font-weight:650;text-transform:uppercase;letter-spacing:.06em;border:1px solid var(--line);border-radius:999px;padding:5px 8px;white-space:nowrap}.status-pill.working,.status-pill.success{color:#a8bda4;border-color:#455743}.status-pill.warning,.status-pill.running,.status-pill.unknown{color:#d0b178;border-color:#665536}.status-pill.error{color:#d4a49a;border-color:#66413a}.settings-footer{margin-top:26px;padding-top:16px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px;color:var(--muted);font-size:11px}.settings-footer form{margin:0}.settings-logout{border:0;background:transparent;color:#aaa39a;padding:7px 0;cursor:pointer}.settings-logout:hover{color:var(--text)}
-.analysis-section-title{font-size:18px;font-weight:650;margin:18px 0 10px}.analysis-card{border-color:#3a3125}.analysis-context{display:flex;gap:12px;flex-wrap:wrap;align-items:end;padding:16px 18px;border-bottom:1px solid var(--line-soft)}.analysis-context .settings-field{min-width:230px}.analysis-card-body{padding:18px}.analysis-timeline{display:grid;grid-template-columns:34px minmax(0,1fr);gap:0 14px}.analysis-node{position:relative}.analysis-node span{width:30px;height:30px;border:1px solid #a77f49;border-radius:50%;display:grid;place-items:center;color:#d0b178;font-size:12px;font-weight:700}.analysis-node:not(.analysis-last)::after{content:"";position:absolute;top:31px;left:14px;bottom:-18px;width:1px;background:var(--line-soft)}.analysis-step{padding:2px 0 22px}.analysis-step h3{font-size:14px;margin:4px 0 10px}.analysis-import{margin-top:12px;align-items:end}.analysis-import .settings-field{min-width:260px}
+.analysis-section-title{font-size:18px;font-weight:650;margin:18px 0 10px}.analysis-card{border-color:#3a3125}.analysis-context{display:flex;gap:12px;flex-wrap:wrap;align-items:end;padding:16px 18px;border-bottom:1px solid var(--line-soft)}.analysis-context .settings-field{min-width:230px}.analysis-card-body{padding:18px}.analysis-timeline{display:grid;grid-template-columns:34px minmax(0,1fr);gap:0 14px}.analysis-node{position:relative}.analysis-node span{width:30px;height:30px;border:1px solid #a77f49;border-radius:50%;display:grid;place-items:center;color:#d0b178;font-size:12px;font-weight:700}.analysis-node:not(.analysis-last)::after{content:"";position:absolute;top:31px;left:14px;bottom:-18px;width:1px;background:var(--line-soft)}.analysis-step{padding:2px 0 22px}.analysis-step h3{font-size:14px;margin:4px 0 5px}.analysis-step p{font-size:11px;line-height:1.45;color:var(--muted);margin:0 0 10px}.analysis-pill{display:inline-flex;margin-left:7px;padding:3px 7px;border:1px solid var(--line-soft);border-radius:999px;color:var(--muted);font-size:9px;font-weight:550;vertical-align:1px}.analysis-import{margin-top:12px;align-items:end}.analysis-import .settings-field{min-width:260px}.analysis-register-head{display:grid;grid-template-columns:34px minmax(0,1fr);gap:14px;padding:18px 18px 10px}.analysis-register-head h3{font-size:14px;margin:4px 0 4px}.analysis-register-head p{font-size:11px;color:var(--muted);margin:0}.analysis-register-body{padding:0 18px 18px 66px}.analysis-callout{font-size:11px;color:var(--muted);border:1px solid var(--line-soft);border-radius:9px;padding:9px 11px;margin-top:12px}
 @media(max-width:760px){.top-inner{position:relative}.settings-button{position:absolute;right:12px;top:10px;width:38px;height:38px}.brand{padding-right:48px}.settings-counts{grid-template-columns:1fr 1fr}.settings-row{grid-template-columns:1fr auto}.settings-row-output{grid-column:1/-1}.settings-layout{max-width:none}.analysis-context{display:grid}.analysis-context .settings-field,.analysis-import .settings-field{min-width:0;width:100%}.analysis-step .settings-actions,.analysis-import{display:grid}.analysis-step .settings-primary,.analysis-step .settings-secondary,.analysis-step .settings-file{width:100%;max-width:none}}
 @media(max-width:430px){.settings-card-body,.settings-card-head{padding:16px}.settings-counts{grid-template-columns:1fr 1fr}.settings-actions{display:grid}.settings-field{min-width:0}.settings-primary,.settings-secondary{width:100%}}
 </style>`;
@@ -38,6 +38,7 @@ async function copyPrompt(button,url){const old=button.textContent;button.disabl
 function selectedProvider(){return document.getElementById('analysisProvider')?.value||state.analysisProvider||'openai'}
 function selectedAnalysisRound(){return document.getElementById('analysisRound')?.value||state.analysisRoundId||''}
 function selectedRegistrationRound(){return document.getElementById('registrationRound')?.value||state.registrationRoundId||''}
+function selectedEvidenceRegistrationRound(){return document.getElementById('evidenceRegistrationRound')?.value||state.evidenceRegistrationRoundId||''}
 function downloadSettingsFile(url){window.location.href=url}
 async function loadExternalRounds(scope,selectId,stateKey){
  const select=document.getElementById(selectId);if(!select)return;
@@ -74,6 +75,25 @@ async function importRecordedSystemFile(){
  }catch(err){box.className='settings-result show error';box.textContent='Kunde inte importera systemet: '+err.message}
  finally{button.disabled=false}
 }
+async function importExternalEvidenceFile(){
+ const button=document.getElementById('importExternalEvidence');
+ const input=document.getElementById('externalEvidenceFile');
+ const box=document.getElementById('externalEvidenceResult');
+ const file=input?.files?.[0];
+ const roundId=selectedEvidenceRegistrationRound();
+ if(!roundId){box.className='settings-result show error';box.textContent='Välj en omgång först.';return}
+ if(!file){box.className='settings-result show error';box.textContent='Välj en JSON-fil först.';return}
+ button.disabled=true;box.className='settings-result';
+ try{
+  const r=await fetch('/app/api/settings/external-evidence-import?round_id='+encodeURIComponent(roundId),{method:'POST',headers:{accept:'application/json','content-type':'application/json'},body:await file.text()});
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok)throw new Error(data.message||data.error||'Importen misslyckades');
+  const counts=data.counts||{};
+  box.className='settings-result show success';
+  box.textContent='Extern data sparad: '+num(counts.statistics||0)+' statistikobservationer · '+num(counts.interviews||0)+' intervjuer.';
+ }catch(err){box.className='settings-result show error';box.textContent='Kunde inte importera extern data: '+err.message}
+ finally{button.disabled=false}
+}
 function renderAi(version){
  app.innerHTML=heading('Inställningar','Hantera AI-utbyte och appdata')+tabs([['ai','AI'],['data','Data']],state.settingsTab)+'<div class="settings-layout">'+
  '<h2 class="analysis-section-title">Analysera omgång</h2>'+
@@ -83,20 +103,32 @@ function renderAi(version){
    '<div class="settings-field"><label for="analysisProvider">AI</label><select id="analysisProvider" class="settings-select"><option value="openai">ChatGPT</option><option value="anthropic">Claude</option></select></div>'+
   '</div>'+
   '<div class="analysis-card-body"><div class="analysis-timeline">'+
-   '<div class="analysis-node"><span>1</span></div><div class="analysis-step"><h3>Marknadsblind analys</h3><div class="settings-actions"><button id="downloadAnalysisData" class="settings-primary" type="button">Hämta analysdata</button><button id="copyStep1Prompt" class="settings-secondary" type="button">Kopiera instruktion</button></div></div>'+
-   '<div class="analysis-node analysis-last"><span>2</span></div><div class="analysis-step"><h3>Marknad och system</h3><div class="settings-actions"><button id="downloadMarketData" class="settings-primary" type="button">Hämta marknadsdata</button><button id="copyStep2Prompt" class="settings-secondary" type="button">Kopiera instruktion</button></div></div>'+
+   '<div class="analysis-node"><span>1</span></div><div class="analysis-step"><h3>Marknadsblind analys <span class="analysis-pill">Ny AI-konversation</span></h3><p>Blind sportslig analys utan marknad, intervjuer eller krönikor.</p><div class="settings-actions"><button id="downloadAnalysisData" class="settings-primary" type="button">Hämta analysdata</button><button id="copyStep1Prompt" class="settings-secondary" type="button">Kopiera instruktion</button></div></div>'+
+   '<div class="analysis-node"><span>2</span></div><div class="analysis-step"><h3>Marknadsanalys <span class="analysis-pill">Samma AI-konversation</span></h3><p>Jämför den blinda analysen mot streck, odds och marknadsrörelser.</p><div class="settings-actions"><button id="downloadMarketData" class="settings-primary" type="button">Hämta marknadsdata</button><button id="copyStep2Prompt" class="settings-secondary" type="button">Kopiera instruktion</button></div></div>'+
+   '<div class="analysis-node"><span>3</span></div><div class="analysis-step"><h3>Intervjuer & extern statistik <span class="analysis-pill">Samma AI-konversation</span></h3><p>Hämta sparad kontext och ladda upp dagens PDF:er/skärmbilder i AI-chatten.</p><div class="settings-actions"><button id="downloadExternalContext" class="settings-primary" type="button">Hämta extern kontext</button><button id="copyStep3Prompt" class="settings-secondary" type="button">Kopiera instruktion</button></div></div>'+
+   '<div class="analysis-node analysis-last"><span>4</span></div><div class="analysis-step"><h3>Bygg färdigt system <span class="analysis-pill">I AI-chatten</span></h3><p>Diskutera spikar, garderingar, risk och värde tills systemet är klart.</p></div>'+
   '</div></div>'+
+ '</section>'+
+ '<h2 class="analysis-section-title">Registrera extern statistik & intervjuer</h2>'+
+ '<section class="settings-section settings-card analysis-card">'+
+  '<div class="analysis-context"><div class="settings-field"><label for="evidenceRegistrationRound">Omgång</label><select id="evidenceRegistrationRound" class="settings-select"><option>Läser…</option></select></div></div>'+
+  '<div class="analysis-register-head"><div class="analysis-node analysis-last"><span>5</span></div><div><h3>Skapa och importera extern data</h3><p>Kan göras även efter omgången.</p></div></div>'+
+  '<div class="analysis-register-body">'+
+   '<div class="settings-actions"><button id="downloadEvidenceImportContext" class="settings-primary" type="button">Hämta importunderlag</button><button id="copyEvidenceImportPrompt" class="settings-secondary" type="button">Kopiera importinstruktion</button></div>'+
+   '<div class="analysis-callout">AI:n skapar JSON-filen från materialet i chatten.</div>'+
+   '<div class="settings-actions analysis-import"><div class="settings-field"><label for="externalEvidenceFile">Extern datafil</label><input id="externalEvidenceFile" class="settings-file" type="file" accept="application/json,.json"></div><button id="importExternalEvidence" class="settings-secondary" type="button">Importera extern data</button></div>'+
+   '<div id="externalEvidenceResult" class="settings-result"></div>'+
+  '</div>'+
  '</section>'+
  '<h2 class="analysis-section-title">Registrera system</h2>'+
  '<section class="settings-section settings-card analysis-card">'+
   '<div class="analysis-context"><div class="settings-field"><label for="registrationRound">Omgång</label><select id="registrationRound" class="settings-select"><option>Läser…</option></select></div></div>'+
-  '<div class="analysis-card-body"><div class="analysis-timeline">'+
-   '<div class="analysis-node analysis-last"><span>3</span></div><div class="analysis-step"><h3>Registrera färdigt system</h3>'+
-    '<div class="settings-actions"><button id="downloadImportContext" class="settings-primary" type="button">Hämta importunderlag</button><button id="copyImportPrompt" class="settings-secondary" type="button">Kopiera importinstruktion</button></div>'+
-    '<div class="settings-actions analysis-import"><div class="settings-field"><label for="recordedSystemFile">Systemfil</label><input id="recordedSystemFile" class="settings-file" type="file" accept="application/json,.json"></div><button id="importRecordedSystem" class="settings-secondary" type="button">Importera system</button></div>'+
-    '<div id="recordedSystemResult" class="settings-result"></div>'+
-   '</div>'+
-  '</div></div>'+
+  '<div class="analysis-register-head"><div class="analysis-node analysis-last"><span>6</span></div><div><h3>Registrera färdigt system</h3><p>AI:n skapar registreringsfilen från den färdiga analysen.</p></div></div>'+
+  '<div class="analysis-register-body">'+
+   '<div class="settings-actions"><button id="downloadImportContext" class="settings-primary" type="button">Hämta importunderlag</button><button id="copyImportPrompt" class="settings-secondary" type="button">Kopiera importinstruktion</button></div>'+
+   '<div class="settings-actions analysis-import"><div class="settings-field"><label for="recordedSystemFile">Systemfil</label><input id="recordedSystemFile" class="settings-file" type="file" accept="application/json,.json"></div><button id="importRecordedSystem" class="settings-secondary" type="button">Importera system</button></div>'+
+   '<div id="recordedSystemResult" class="settings-result"></div>'+
+  '</div>'+
  '</section>'+
  settingsFooter(version)+'</div>';
  bindSettingsTabs();
@@ -107,10 +139,16 @@ function renderAi(version){
  bindClick('copyStep1Prompt',(event)=>copyPrompt(event.currentTarget,'/app/api/settings/external-step1-prompt?provider='+encodeURIComponent(selectedProvider())));
  bindClick('downloadMarketData',()=>{const id=selectedAnalysisRound();if(id)downloadSettingsFile('/app/api/settings/external-market?round_id='+encodeURIComponent(id))});
  bindClick('copyStep2Prompt',(event)=>copyPrompt(event.currentTarget,'/app/api/settings/external-step2-prompt?provider='+encodeURIComponent(selectedProvider())));
+ bindClick('downloadExternalContext',()=>{const id=selectedAnalysisRound();if(id)downloadSettingsFile('/app/api/settings/external-evidence-context?round_id='+encodeURIComponent(id))});
+ bindClick('copyStep3Prompt',(event)=>copyPrompt(event.currentTarget,'/app/api/settings/external-step3-prompt?provider='+encodeURIComponent(selectedProvider())));
+ bindClick('downloadEvidenceImportContext',()=>{const id=selectedEvidenceRegistrationRound();if(id)downloadSettingsFile('/app/api/settings/external-evidence-import-context?round_id='+encodeURIComponent(id))});
+ bindClick('copyEvidenceImportPrompt',(event)=>copyPrompt(event.currentTarget,'/app/api/settings/external-evidence-import-prompt?provider='+encodeURIComponent(selectedProvider())));
+ bindClick('importExternalEvidence',importExternalEvidenceFile);
  bindClick('downloadImportContext',()=>{const id=selectedRegistrationRound();if(id)downloadSettingsFile('/app/api/settings/system-import-context?round_id='+encodeURIComponent(id))});
  bindClick('copyImportPrompt',(event)=>copyPrompt(event.currentTarget,'/app/api/settings/system-import-prompt?provider='+encodeURIComponent(selectedProvider())));
  bindClick('importRecordedSystem',importRecordedSystemFile);
  loadExternalRounds('analysis','analysisRound','analysisRoundId');
+ loadExternalRounds('registration','evidenceRegistrationRound','evidenceRegistrationRoundId');
  loadExternalRounds('registration','registrationRound','registrationRoundId');
 }
 async function renderData(){

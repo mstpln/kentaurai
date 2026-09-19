@@ -119,12 +119,18 @@ jobs:
           grep -q 'idx_editorial_items_entry' /tmp/migration-check.txt
           grep -q 'idx_ai_predictions_entry' /tmp/migration-check.txt
 
-          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT id,game_round_id,stage,artifact_id,artifact_fingerprint,as_of,cutoff_at,artifact_json,generated_at,created_at FROM analysis_external_exports LIMIT 0; SELECT id,game_round_id,model_version_id,main_system_id,contract_version,step1_pack_id,step1_pack_as_of,step1_generated_at,step1_facts_fingerprint,step2_market_fingerprint,step2_market_cutoff,step2_generated_at,analysis_blindness,import_timing,learning_eligibility,payload_digest,supersedes_run_id,created_at FROM analysis_external_runs LIMIT 0; SELECT id,game_round_id,race_id,leg_number,winner_entry_id,external_run_id,system_id,review_version,pre_race_fingerprint,learning_eligible,learning_classification,created_at FROM post_race_reviews_external_v1 LIMIT 0; SELECT review_id,hypothesis_id,observation_id FROM post_race_learning_links_external_v1 LIMIT 0; SELECT name FROM sqlite_master WHERE type='table' AND name IN ('analysis_external_exports','analysis_external_runs','post_race_reviews_external_v1','post_race_learning_links_external_v1') ORDER BY name; SELECT name FROM d1_migrations WHERE name='0027_external_analysis_lineage_v1.sql';" > /tmp/external-schema-check.txt
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT id,game_round_id,stage,artifact_id,artifact_fingerprint,as_of,cutoff_at,artifact_json,generated_at,created_at FROM analysis_external_exports LIMIT 0; SELECT id,game_round_id,model_version_id,main_system_id,contract_version,step1_pack_id,step1_pack_as_of,step1_generated_at,step1_facts_fingerprint,step2_market_fingerprint,step2_market_cutoff,step2_generated_at,analysis_blindness,import_timing,learning_eligibility,payload_digest,supersedes_run_id,created_at FROM analysis_external_runs LIMIT 0; SELECT id,game_round_id,race_id,leg_number,winner_entry_id,external_run_id,system_id,review_version,pre_race_fingerprint,learning_eligible,learning_classification,created_at FROM post_race_reviews_external_v1 LIMIT 0; SELECT review_id,hypothesis_id,observation_id FROM post_race_learning_links_external_v1 LIMIT 0; SELECT trainer_id FROM editorial_items LIMIT 0; SELECT id,horse_id,race_entry_id,game_round_id,context_type,context_key,context_label,starts,wins,seconds,thirds,win_rate_percent,roi_percent,observed_at,source_record_id FROM external_horse_stat_snapshots LIMIT 0; SELECT name FROM sqlite_master WHERE type='table' AND name IN ('analysis_external_exports','analysis_external_runs','post_race_reviews_external_v1','post_race_learning_links_external_v1','external_horse_stat_snapshots') ORDER BY name; SELECT name FROM d1_migrations WHERE name IN ('0027_external_analysis_lineage_v1.sql','0028_external_evidence_v1.sql') ORDER BY name; SELECT name FROM sqlite_master WHERE type='index' AND name IN ('idx_editorial_items_horse_published','idx_editorial_items_trainer_published','idx_external_horse_stats_horse_context_time','idx_external_horse_stats_round') ORDER BY name;" > /tmp/external-schema-check.txt
           grep -q 'analysis_external_exports' /tmp/external-schema-check.txt
           grep -q 'analysis_external_runs' /tmp/external-schema-check.txt
           grep -q 'post_race_reviews_external_v1' /tmp/external-schema-check.txt
           grep -q 'post_race_learning_links_external_v1' /tmp/external-schema-check.txt
+          grep -q 'external_horse_stat_snapshots' /tmp/external-schema-check.txt
           grep -q '0027_external_analysis_lineage_v1.sql' /tmp/external-schema-check.txt
+          grep -q '0028_external_evidence_v1.sql' /tmp/external-schema-check.txt
+          grep -q 'idx_editorial_items_horse_published' /tmp/external-schema-check.txt
+          grep -q 'idx_editorial_items_trainer_published' /tmp/external-schema-check.txt
+          grep -q 'idx_external_horse_stats_horse_context_time' /tmp/external-schema-check.txt
+          grep -q 'idx_external_horse_stats_round' /tmp/external-schema-check.txt
 
       - name: Deploy Worker
         id: deploy
@@ -178,6 +184,13 @@ jobs:
             '/app/api/settings/external-step1-prompt?provider=openai' \
             '/app/api/settings/external-market?round_id=private-probe' \
             '/app/api/settings/external-step2-prompt?provider=openai' \
+            '/app/api/settings/external-evidence-context?round_id=private-probe' \
+            '/app/api/settings/external-step3-prompt?provider=openai' \
+            '/app/api/settings/external-evidence-import-context?round_id=private-probe' \
+            '/app/api/settings/external-evidence-import-prompt?provider=openai' \
+            '/app/api/horses/private-probe/external-statistics' \
+            '/app/api/horses/private-probe/interviews' \
+            '/app/api/trainers/private-probe/interviews' \
             '/app/api/settings/system-import-context?round_id=private-probe' \
             '/app/api/settings/system-import-prompt?provider=openai' \
             '/v1/analysis-pack/private-probe' \
@@ -203,4 +216,4 @@ jobs:
         run: |
           echo 'KentaurAI v0.6.0 production release completed.'
           echo "Worker: $WORKER_URL"
-          echo 'Required production schema through migration 0027, external analysis lineage, external F1/F2 evidence integration, worker-v077 runtime, controlled legacy boundary, exact app version, health, login and private external-analysis route checks passed.'
+          echo 'Required production schema through migration 0028, external analysis lineage/evidence storage, external F1/F2 evidence integration, worker-v077 runtime, controlled legacy boundary, exact app version, health, login and private external-analysis route checks passed.'

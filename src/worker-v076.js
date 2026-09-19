@@ -141,27 +141,27 @@ export default {
     if (isRetiredSealedAppGeneration(path, request.method)) {
       const denied = await requireSession(request, env);
       if (denied) return denied;
-      return gone('The sealed-v3 creation workflow is retired in the default mode. Use the external Step 1 -> Step 2 -> system registration workflow.');
+      return gone('The sealed-v3 creation workflow is retired in the default mode. Use the external Step 1 -> Step 2 -> Step 3 -> system dialogue -> registration workflow.');
     }
 
     if (isSealedV3Mutation(path, request.method)) {
       const appPath = path.startsWith('/app/');
       const denied = appPath ? await requireSession(request, env) : requireAdmin(request, env);
       if (denied) return denied;
-      return gone('The sealed-v3 mutation workflow is disabled in the default mode. Historical sealed artifacts remain readable; new work uses the external analysis workflow.');
+      return gone('The sealed-v3 mutation workflow is disabled in the default mode. Historical sealed artifacts remain readable; new work uses the external six-step analysis workflow.');
     }
 
     const legacyAdminWrite = path.match(/^\/v1\/analysis\/rounds\/[^/]+\/submissions$/);
     if (request.method === 'POST' && legacyAdminWrite) {
       const denied = requireAdmin(request, env);
       if (denied) return denied;
-      return gone('Legacy v1/v2 analysis creation is disabled. Use the external Step 1 -> Step 2 -> system registration workflow.');
+      return gone('Legacy v1/v2 analysis creation is disabled. Use the external Step 1 -> Step 2 -> Step 3 -> system dialogue -> registration workflow.');
     }
 
     if (request.method === 'POST' && path === '/app/api/settings/import-analysis') {
       const denied = await requireSession(request, env);
       if (denied) return denied;
-      return gone('Legacy combined-analysis import is read-only. Create new analyses through the external Step 1 -> Step 2 -> system registration workflow.');
+      return gone('Legacy combined-analysis import is read-only. Create new analyses through the external Step 1 -> Step 2 -> Step 3 -> system dialogue -> registration workflow.');
     }
 
     if (isLegacyAppGeneration(path, request.method)) {

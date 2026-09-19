@@ -194,7 +194,9 @@ test('external workflow exposes independent Step 1, Step 2 and registration cont
 
   assert.match(getExternalAnalysisStep1Prompt('openai'), /Marknadsblind analys/);
   assert.match(getExternalAnalysisStep1Prompt('openai'), /Bygg inget system/);
-  assert.match(getExternalAnalysisStep2Prompt('anthropic'), /exakt 3 spikar/);
+  assert.match(getExternalAnalysisStep2Prompt('anthropic'), /Marknadsanalys/);
+  assert.match(getExternalAnalysisStep2Prompt('anthropic'), /Bygg inget system/);
+  assert.doesNotMatch(getExternalAnalysisStep2Prompt('anthropic'), /SYSTEMREGLER/);
   assert.match(getRegistrationPrompt('openai'), /Gör inte om analysen/);
   assert.match(getRegistrationPrompt('openai'), /KentaurAI räknar/);
 });

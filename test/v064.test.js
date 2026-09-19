@@ -184,8 +184,9 @@ test('actual Wrangler worker serves the canonical completion UI after browser lo
   assert.equal(response.status, 200);
   const html = await response.text();
   for (const label of ['Trend', 'Tränare', 'Hästar', 'Kuskar', 'Bana', 'Spel', 'AI', 'Data',
-    'Analysera omgång', 'Marknadsblind analys', 'Hämta analysdata', 'Marknad och system',
-    'Hämta marknadsdata', 'Registrera system', 'Hämta importunderlag', 'Kopiera importinstruktion',
+    'Analysera omgång', 'Marknadsblind analys', 'Hämta analysdata', 'Marknadsanalys',
+    'Hämta marknadsdata', 'Intervjuer & extern statistik', 'Bygg färdigt system',
+    'Registrera extern statistik & intervjuer', 'Registrera system', 'Hämta importunderlag', 'Kopiera importinstruktion',
     'All data', 'Loppnivå', 'Högre prissumma', 'Vardagstrav', 'Översikt', 'Spårstatistik', 'Hemmatränare',
     'Startmetod', 'STL-klass', 'Lopptyp', 'Sverige']) assert.match(html, new RegExp(label.replace('/', '\\/')));
   assert.doesNotMatch(html, /STL-lopp/);

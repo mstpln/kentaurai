@@ -1,6 +1,6 @@
 import { stableId } from './ids.js';
 import { canonicalOptimizerPolicyForRound } from './analysis-optimizer-policy-config.js';
-import { loadExternalRankingsV3, loadMarketDeadlineV3, loadVerifiedMarketRowsV3 } from './analysis-market-pack-v3.js';
+import { loadMarketDeadlineV3, loadVerifiedMarketRowsV3 } from './analysis-market-pack-v3.js';
 
 export const EXTERNAL_ANALYSIS_FLOW_VERSION = 'external-analysis-v1';
 export const MARKET_INPUT_CONTRACT = 'kentaurai-market-input-v1';
@@ -222,8 +222,6 @@ export async function buildMarketInput(env, roundId, asOf = null) {
   const requestedAt = validIso(asOf) ? new Date(Date.parse(asOf)).toISOString() : new Date().toISOString();
   const deadline = await loadMarketDeadlineV3(env, roundId, requestedAt);
   const history = await loadVerifiedMarketRowsV3(env, roundId, deadline.cutoff);
-  const externalRankings = await loadExternalRankingsV3(env, roundId, deadline.cutoff);
-
   const latestBetting = new Map();
   for (const row of history.betting || []) latestBetting.set(row.race_entry_id, row);
   const latestOdds = new Map();
@@ -262,7 +260,6 @@ export async function buildMarketInput(env, roundId, asOf = null) {
     system_policy: policy,
     market,
     market_history: history,
-    external_rankings: externalRankings,
     entry_identity: identity.legs.map((leg) => ({
       leg_number: leg.leg_number,
       race_id: leg.race_id,
@@ -280,7 +277,6 @@ export async function buildMarketInput(env, roundId, asOf = null) {
     system_policy: policy,
     market,
     market_history: history,
-    external_rankings: externalRankings,
     entry_map: identity.legs,
     generated_at: new Date().toISOString(),
     market_fingerprint: marketFingerprint,
@@ -351,38 +347,27 @@ export function getExternalAnalysisStep1Prompt(provider = 'openai') {
 export function getExternalAnalysisStep2Prompt(provider = 'openai') {
   providerKey(provider);
   return [
-    '# KentaurAI - Steg 2: marknad, värde och system',
+    '# KentaurAI - Steg 2: Marknadsanalys',
     '',
     'Fortsätt i samma konversation där Steg 1 redan är färdigt. Läs nu den uppladdade KentaurAI-filen med marknadsdata.',
     '',
     'GRUNDREGEL:',
-    '- Steg 1 är din oberoende styrkebedömning. Ändra inte sannolikheter, ranking eller ABCD bara för att marknaden tycker annorlunda.',
-    '- Jämför egen vinstchans mot streck/odds och förklara tydligt var marknaden och din analys skiljer sig.',
-    '- Externa rankingsignaler får bara användas sist som kontroll om de finns i underlaget; de får inte styra grundrankingen.',
+    '- Steg 1 är din oberoende marknadsblinda styrkebedömning. Ändra inte sannolikheter, ranking eller ABCD för att marknaden tycker annorlunda.',
+    '- Jämför egen vinstchans mot streck/odds och förklara tydligt var marknaden och den blinda analysen skiljer sig.',
+    '- Intervjuer, krönikor och extern statistik kommer först i Steg 3 och ska inte användas här.',
     '',
     'GÖR NU:',
-    '1. Beräkna värde mot marknaden för relevanta hästar.',
-    '2. Identifiera överstreckade favoriter, understreckade värdehästar och avdelningar där marknaden verkar mest fel.',
-    '3. Återkoppla till loppbild/scenarier och de viktigaste statistiska detaljerna från Steg 1.',
-    '4. Bygg det slutliga systemet enligt system_policy i den uppladdade filen.',
+    '1. Bedöm marknadsläget per avdelning mot Steg 1.',
+    '2. Identifiera tydligt överstreckade och understreckade hästar samt stora marknadskonflikter.',
+    '3. Notera relevanta marknadsrörelser och eventuella avvikelser som kan motivera en informationskontroll i Steg 3.',
+    '4. Sammanfatta var marknaden skiljer sig mest från den blinda analysen.',
     '',
-    'SYSTEMREGLER:',
-    '- Systemet ska ha exakt 3 spikar i tre olika avdelningar.',
-    '- En spikavdelning har exakt en vald häst.',
-    '- Alla 8 avdelningar måste ha minst en vald häst.',
-    '- Huvudsystemet ska normalt ligga inom budgetintervallet i system_policy.',
-    '- Radantalet är produkten av antalet valda hästar i de 8 avdelningarna.',
-    '- Prioritera träffchans och spelvärde tillsammans; marknadsprocent får aldrig ersätta egen vinstchans.',
+    'VIKTIGT:',
+    '- Bygg inget system i Steg 2.',
+    '- Välj inga spikar eller garderingar ännu.',
+    '- Marknadsdata får inte skriva om Steg 1.',
     '',
-    'OUTPUT I CHATten:',
-    '- Kort marknads-/värdebedömning per avdelning.',
-    '- Slutligt system, avdelning 1-8.',
-    '- Exakt vilka 3 spikar som valts och varför.',
-    '- Radantal och kostnad.',
-    '- Viktigaste fällningarna och accepterad risk.',
-    '- Kort systemtes: vilket loppförlopp och vilka statistiska observationer systemet främst bygger på.',
-    '',
-    'Skapa ingen KentaurAI-importfil ännu. Den görs först senare när jag väljer Registrera system i appen.'
+    'När marknadsanalysen är klar stannar du. Jag kommer därefter ladda upp Steg 3-underlaget med intervjuer och extern statistik i samma konversation.'
   ].join('\\n');
 }
 
@@ -404,8 +389,8 @@ export function getRegistrationPrompt(provider = 'openai') {
     '  "producer": {"provider": "' + key + '", "model": "<verklig modellbeteckning>"},',
     '  "step1": {"pack_id":"<manifest.pack_id>","facts_fingerprint":"<manifest.facts_fingerprint>","as_of":"<manifest.as_of>","generated_at":"<manifest.generated_at>"},',
     '  "step2": {"market_fingerprint":"<market_fingerprint från Steg 2-filen>","as_of":"<market_as_of>","cutoff":"<market_cutoff>","generated_at":"<generated_at från Steg 2-filen>"},',
-    '  "round_summary": "<Steg 1-sammanfattning>",',
-    '  "recommendations": "<kort Steg 2/systemsammanfattning>",',
+    '  "round_summary": "<senaste sportsliga sammanfattning efter Steg 3>",',
+    '  "recommendations": "<kort slutlig systemsammanfattning>",',
     '  "legs": [',
     '    {"leg_number":1,"race_id":"...","scenarios":null,"race_shape_summary":"...","conclusion":"...","data_quality":"...","predictions":[',
     '      {"race_entry_id":"...","win_probability":0.0,"uncertainty_low":null,"uncertainty_high":null,"raw_rank":1,"abcd_group":"A","scenario_robustness":null,"reasoning":"..."}',
@@ -421,7 +406,8 @@ export function getRegistrationPrompt(provider = 'openai') {
     'REGLER:',
     '- Kopiera step1.pack_id, step1.facts_fingerprint, step1.as_of och step1.generated_at exakt från Steg 1-filens manifest.',
     '- Kopiera step2.market_fingerprint, step2.as_of, step2.cutoff och step2.generated_at exakt från Steg 2-filen. Hitta inte på dessa värden.',
-    '- legs ska innehålla exakt 8 avdelningar och Steg 1-bedömningen ska återges utan marknadsfärgning.',
+    '- legs ska innehålla exakt 8 avdelningar och återge den senaste sportsliga bedömningen efter Steg 3. Om Steg 3 inte ändrade något är detta samma sannolikheter som Steg 1.',
+    '- Marknaden i Steg 2 får aldrig i sig ändra win_probability. Endast ny sportslig fakta/statistik i Steg 3 får motivera en dagsjustering.',
     '- win_probability ska vara JSON-tal 0-1 och summera till 1 per avdelning.',
     '- raw_rank ska vara unik 1..N och ABCD ska vara A/B/C/D.',
     '- Matcha hästar med startnummer + namn mot importunderlaget och kopiera race_entry_id exakt. Ingen fuzzy gissning.',
@@ -543,7 +529,7 @@ function normalizeSystems(payloadSystems, expectedLegs, predictionMap, policy) {
       const leg = jsonInteger(selection.leg_number, 'selection.leg_number', { min: 1, max: 8 });
       const entryId = requiredText(selection.race_entry_id, 'selection.race_entry_id', 200);
       if (!allowedByLeg.get(leg)?.has(entryId)) throw new Error('system selection ' + entryId + ' was not active in the audited Step 2 export for leg ' + leg);
-      if (!predictionMap.has(entryId)) throw new Error('system selection ' + entryId + ' has no Step 1 blind prediction');
+      if (!predictionMap.has(entryId)) throw new Error('system selection ' + entryId + ' has no current sports prediction');
       const key = leg + '|' + entryId;
       if (seen.has(key)) throw new Error('system contains a duplicate selection in leg ' + leg);
       seen.add(key);

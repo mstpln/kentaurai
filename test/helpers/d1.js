@@ -92,7 +92,8 @@ export function createTestEnv() {
     '../../migrations/0024_replay_calibration_v1.sql',
     '../../migrations/0025_post_race_learning_f2.sql',
     '../../migrations/0026_app_read_performance.sql',
-    '../../migrations/0027_external_analysis_lineage_v1.sql'
+    '../../migrations/0027_external_analysis_lineage_v1.sql',
+    '../../migrations/0028_external_evidence_v1.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }

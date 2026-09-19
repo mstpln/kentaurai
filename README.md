@@ -9,13 +9,16 @@ Production release #64 is the currently deployed baseline. The production entryp
 
 ### Default external AI analysis workflow
 1. Select one complete V85/V86 round and AI provider in the private app.
-2. Step 1 exports a deterministic market-blind analysis pack. The user uploads it to ChatGPT or Claude together with the Step 1 instruction and performs the full blind strength/scenario/probability analysis there.
-3. Step 2 exports verified current market data plus the round's system policy for the same selected round. The user uploads it in the same AI conversation and the AI completes value analysis and builds the final system.
-4. Step 1 is not imported or server-sealed during the normal analysis workflow. Once Step 2 market data is visible, the blind probabilities/ranking/ABCD remain the baseline rather than being silently rewritten by the market.
-5. System registration is separate and may happen later. The user selects the round again, downloads an import context, copies the registration instruction into the AI conversation, and imports the generated JSON.
-6. KentaurAI validates canonical identities and exactly three singleton spike legs, then deterministically calculates row count and cost from selections and the configured line price before persistence.
-7. Registration records explicit external-analysis lineage, reproducible Step 1/Step 2 fingerprints and server-side import timing. Because the external conversation is not server-sealed, its blindness status is `declared_unsealed`; post-deadline registrations are retained for diagnostics but excluded from automatic learning.
-8. Registered analysis/system data feeds Spel plus external-aware F1 replay and F2 post-race diagnostics. The older sealed lock/decision/optimizer stack remains historical/compatibility code rather than a parallel writable path.
+2. Step 1 exports a deterministic market-blind analysis pack. It contains verified KentaurAI facts/features only; editorial/interview material is excluded.
+3. Step 2 exports verified current market data. The same AI conversation compares the frozen blind assessment with the market but does not build the system yet.
+4. Step 3 exports relevant previously stored external horse statistics and horse/trainer interview context. The user may add current private PDFs/screenshots manually in the same AI conversation. New factual/statistical evidence may justify a sports-only day adjustment, while the Step 1 baseline remains conceptually separate and market movement alone never changes probabilities.
+5. Step 4 is the user/AI system-building dialogue. The finished system must still follow the exact-three-spikes rule and configured budget policy.
+6. External horse statistics/interviews are registered through a separate round-scoped workflow that may be completed before or after the race: download import context, copy the import instruction, let the AI create structured JSON, then import it. Private PDFs/images are never uploaded directly into KentaurAI.
+7. External horse statistics are append-only dated snapshots. Supported contexts include career/all starts, current track, source-defined season, V85/V86, lead, current verified balance and current verified wagon. Interviews are linked to the horse and trainer/stable context with the actual speaker/role; drivers are intentionally outside this storage flow.
+8. System registration remains separate and may happen later. KentaurAI validates canonical identities and exactly three singleton spike legs, then deterministically calculates row count and cost.
+9. Registration records external-analysis lineage, reproducible Step 1/Step 2 fingerprints and server-side import timing. Post-deadline registrations are retained for diagnostics but excluded from automatic learning.
+10. Registered analysis/system data feeds Spel plus external-aware F1 replay and F2 post-race diagnostics. Historical sealed-v3 paths remain compatibility-only.
+
 
 C4 named X-Labs trip labels remain optional/gated; the v3 workflow uses only validated continuous evidence while unsupported labels remain null.
 
@@ -41,8 +44,8 @@ The current build contains:
 - Spel area with Översikt / V85 / V86 plus saved-round post-race detail
 - F1 replay/calibration and ablation evidence with chronological leakage guards
 - F2 post-race probability/system diagnostics for both historical sealed-v3 and external-analysis lineage, with repeated eligible misses recorded as candidate learning only and no automatic model changes
-- guided private external-AI workflow plus sanitized coverage/backfill observability
-- complete presentation of currently stored measurement families on entity/start detail, while internal provenance remains backend-only
+- guided private four-stage external-AI workflow, separate external-evidence registration and sanitized coverage/backfill observability
+- complete presentation of currently stored measurement families on entity/start detail, including horse External statistics / Interviews and trainer Interviews tabs, while internal provenance remains backend-only
 - verified X-Labs race-telemetry capture, normalization and raw-vs-normalized checks; exact payloads remain private
 - scheduled previous-day X-Labs catch-up for stored V85/V86 game legs
 - a separate three-year-capable historical X-Labs job that follows verified official-history readiness rather than outrunning it

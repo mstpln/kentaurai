@@ -170,13 +170,10 @@ test('D1 as-of guard passes current target state and rejects later-state leakage
 });
 
 
-test('D1 Step 1 keeps trainer/driver interview opinion but excludes generic editorial opinion', async () => {
+test('D1 Step 1 excludes editorial and interview signals entirely', async () => {
   const { env, db } = createTestEnv();
   seedAsOfRound(db);
   db.prepare("INSERT INTO source_records (id,source_type,external_id,fetched_at,quality_status) VALUES ('editorial-step1','editorial_manual','synthetic','2099-01-02T11:10:00Z','manual_structured')").run();
-
-  db.prepare("INSERT INTO editorial_items (id,race_entry_id,horse_id,speaker_name,speaker_role,published_at,source_name,rights_status,source_record_id) VALUES ('editorial-analyst','entry_1','horse_1','Synthetic Analyst','analyst','2099-01-02T11:05:00Z','Synthetic','structured_only','editorial-step1')").run();
-  db.prepare("INSERT INTO editorial_signals (id,editorial_item_id,signal_type,value_text,polarity,fact_or_opinion,confidence) VALUES ('signal-analyst','editorial-analyst','form','positive','positive','opinion',0.8)").run();
 
   db.prepare("INSERT INTO editorial_items (id,race_entry_id,horse_id,speaker_name,speaker_role,published_at,source_name,rights_status,source_record_id) VALUES ('editorial-trainer','entry_1','horse_1','Synthetic Trainer','trainer','2099-01-02T11:05:00Z','Synthetic','structured_only','editorial-step1')").run();
   db.prepare("INSERT INTO editorial_signals (id,editorial_item_id,signal_type,value_text,polarity,fact_or_opinion,confidence) VALUES ('signal-trainer','editorial-trainer','tactics','offensive','positive','opinion',0.8)").run();
@@ -184,8 +181,9 @@ test('D1 Step 1 keeps trainer/driver interview opinion but excludes generic edit
   const pack = await createPreMarketAnalysisPackV3(env,'round_d1',{asOf:'2099-01-02T11:30:00Z'});
   const leg1 = pack.files.find((file) => file.name === '01_leg_1.json').payload;
   const signals = leg1.entries.find((entry) => entry.race_entry_id === 'entry_1').current_signals;
-  assert.equal(signals.some((signal) => signal.signal_type === 'tactics' && signal.value === 'offensive'), true);
-  assert.equal(signals.some((signal) => signal.signal_type === 'form' && signal.value === 'positive'), false);
+  assert.deepEqual(signals, []);
+  assert.equal(Object.hasOwn(pack.manifest.source_family_coverage, 'editorial_signals'), false);
+  assert.equal(Object.hasOwn(pack.manifest.source_freshness, 'editorial'), false);
 });
 
 
@@ -288,7 +286,7 @@ test('D1 Step 1 handles a full 128-entry round without truncation, market leakag
   assert.equal(new Set(entries.map((entry) => entry.race_entry_id)).size,128);
   assert.equal(new Set(entries.map((entry) => entry.current_facts.driver.id)).size,128);
   assert.equal(new Set(entries.map((entry) => entry.current_facts.trainer.id)).size,128);
-  assert.equal(entries.filter((entry) => entry.current_signals?.some((signal) => signal.signal_type === 'tactics')).length,128);
+  assert.equal(entries.filter((entry) => (entry.current_signals || []).length > 0).length,0);
   assert.equal(entries.find((entry) => entry.race_entry_id === 'wide_entry_1').current_facts.actual_lane,1);
   assert.equal(entries.filter((entry) => entry.history_selection?.counts?.totalSafe === 1).length,128);
   assert.equal(entries.filter((entry) => entry.relevant_history?.length === 1).length,128);
@@ -297,6 +295,7 @@ test('D1 Step 1 handles a full 128-entry round without truncation, market leakag
   assert.equal(entries.filter((entry) => entry.features?.race_priors?.priors?.race_outcome?.win_rate?.sample_size > 0).length,128);
   assert.equal(pack.manifest.source_family_coverage.relevant_history.observed,128);
   assert.equal(pack.manifest.source_family_coverage.xlabs_measured_history.observed,128);
+  assert.equal(Object.hasOwn(pack.manifest.source_family_coverage,'editorial_signals'),false);
   assert.equal(pack.manifest.contains_current_market,false);
   assert.equal(pack.files.some((file) => file.content.includes('wide_official_future')),false);
   assert.equal(pack.files.some((file) => file.content.includes('wide_xlabs_future')),false);
