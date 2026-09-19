@@ -7,7 +7,7 @@ class StatementAdapter {
     this.sql = sql;
     this.args = [];
   }
-  bind(...args) { this.args = args; return this; }
+  bind(...args) { if (args.length > 100) throw new Error(`D1_ERROR: too many SQL variables (${args.length} > 100)`); this.args = args; return this; }
   async run() {
     const result = this.db.prepare(this.sql).run(...this.args);
     return { success: true, meta: { changes: Number(result.changes ?? 0), last_row_id: result.lastInsertRowid == null ? null : Number(result.lastInsertRowid) } };

@@ -43,7 +43,7 @@ export const ANALYSIS_PACK_V3_VERSION = 'analysis-pack-v3-d1';
 export const ANALYSIS_PACK_V3_MAX_FILE_BYTES = 20 * 1024 * 1024;
 
 const CONTENT_TYPE = 'application/json; charset=utf-8';
-const SQL_CHUNK_SIZE = 80;
+const SQL_CHUNK_SIZE = 48; // D1 allows at most 100 bound parameters; some Step 1 queries bind two ID lists plus fixed cutoffs.
 const EDITORIAL_MARKET_RE = /(?:market|odds|bet|streck|rank|ranking|tip|spik|spike|pick|value|värde|probab|system|selection|recommend)/i;
 const MARKET_KEY_PATTERNS = Object.freeze([
   /^(?:bet_percent|bet_percentage|bet_distribution|betting|betting_percent|betting_percentage|betting_snapshot|betting_snapshots)$/,
