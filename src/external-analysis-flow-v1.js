@@ -1,6 +1,6 @@
 import { stableId } from './ids.js';
 import { canonicalOptimizerPolicyForRound } from './analysis-optimizer-policy-config.js';
-import { loadMarketDeadlineV3, loadVerifiedMarketRowsV3 } from './analysis-market-pack-v3.js';
+import { loadExternalRankingsV3, loadMarketDeadlineV3, loadVerifiedMarketRowsV3 } from './analysis-market-pack-v3.js';
 
 export const EXTERNAL_ANALYSIS_FLOW_VERSION = 'external-analysis-v1';
 export const MARKET_INPUT_CONTRACT = 'kentaurai-market-input-v1';
@@ -636,6 +636,28 @@ async function requireAuditedExport(env, {
   return artifact;
 }
 
+async function legacyStep2MarketFingerprint(env, roundId, marketInput) {
+  const externalRankings = await loadExternalRankingsV3(env, roundId, marketInput.market_cutoff);
+  return sha256({
+    contract_version: MARKET_INPUT_CONTRACT,
+    round_id: marketInput.round.id,
+    game_type: marketInput.round.game_type,
+    system_policy: marketInput.system_policy,
+    market: marketInput.market,
+    market_history: marketInput.market_history,
+    external_rankings: externalRankings,
+    entry_identity: marketInput.entry_map.map((leg) => ({
+      leg_number: leg.leg_number,
+      race_id: leg.race_id,
+      entries: leg.entries.map((entry) => ({
+        race_entry_id: entry.race_entry_id,
+        start_number: entry.start_number,
+        horse_id: entry.horse_id
+      }))
+    }))
+  });
+}
+
 async function verifyExternalProvenance(env, roundId, step1, step2) {
   const step1Artifact = await requireAuditedExport(env, {
     roundId,
@@ -655,8 +677,12 @@ async function verifyExternalProvenance(env, roundId, step1, step2) {
     generatedAt: step2.generatedAt
   });
   const marketInput = await buildMarketInput(env, roundId, step2.asOf);
-  if (marketInput.market_fingerprint !== step2.marketFingerprint
-    || exactIso(marketInput.market_cutoff, 'replayed Step 2 cutoff') !== step2.cutoff) {
+  const replayedCutoff = exactIso(marketInput.market_cutoff, 'replayed Step 2 cutoff');
+  let replayedFingerprint = marketInput.market_fingerprint;
+  if (replayedCutoff === step2.cutoff && replayedFingerprint !== step2.marketFingerprint) {
+    replayedFingerprint = await legacyStep2MarketFingerprint(env, roundId, marketInput);
+  }
+  if (replayedFingerprint !== step2.marketFingerprint || replayedCutoff !== step2.cutoff) {
     throw new Error('Step 2 provenance can no longer be reproduced from immutable market history');
   }
   if (Date.parse(step2.generatedAt) < Date.parse(step1.generatedAt)) {
