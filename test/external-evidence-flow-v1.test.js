@@ -131,6 +131,33 @@ test('external statistics and interviews import append-only and are readable fro
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM editorial_items WHERE trainer_id=?").get(TRAINER_ID).n, 1);
 });
 
+test('Step 3 historical context excludes evidence unavailable at the round cutoff', async () => {
+  const { env, db } = createTestEnv();
+  seed(env, db);
+  db.prepare("UPDATE game_rounds SET scheduled_start_at='2026-09-19T15:00:00Z',bet_stop_at='2026-09-19T14:55:00Z' WHERE id=?").run(ROUND_ID);
+
+  const before = payload('before-cutoff','2026-09-19T12:00:00Z');
+  before.statistics = [before.statistics[0]];
+  await importExternalEvidence(env, before);
+
+  const after = payload('after-cutoff','2026-09-19T16:00:00Z');
+  after.statistics = [after.statistics[0]];
+  after.statistics[0].starts = 26;
+  after.interviews[0].summary = 'Syntetisk information som först blev tillgänglig efter spelstoppet.';
+  await importExternalEvidence(env, after);
+
+  const context = await buildExternalEvidenceContext(env, ROUND_ID);
+  assert.equal(context.analysis_as_of, '2026-09-19T14:55:00.000Z');
+  assert.equal(context.historical_external_statistics.length, 1);
+  assert.equal(context.historical_external_statistics[0].starts, 25);
+  assert.equal(context.historical_interviews.length, 1);
+  assert.equal(context.historical_interviews[0].published_at, '2026-09-19T12:00:00.000Z');
+
+  const importContext = await buildExternalEvidenceContext(env, ROUND_ID, { purpose:'import' });
+  assert.deepEqual(importContext.historical_external_statistics, []);
+  assert.deepEqual(importContext.historical_interviews, []);
+});
+
 test('external evidence import fails closed on mismatched context, trainer and full paid text fields', async () => {
   const { env, db } = createTestEnv();
   seed(env, db);
