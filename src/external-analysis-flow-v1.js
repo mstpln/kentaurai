@@ -436,13 +436,13 @@ function activeLegsFromExportArtifact(artifact, identity) {
   const byLeg = new Map(activeLegs.map((leg) => [Number(leg?.leg_number), leg]));
   return identity.legs.map((leg) => {
     const step1 = byLeg.get(leg.leg_number);
-    if (!step1 || requiredText(step1.race_id, 'Step 1 export race_id', 200) !== leg.race_id) {
-      throw new Error('Step 1 export does not match selected round race identity');
+    if (!step1 || requiredText(step1.race_id, 'audited export race_id', 200) !== leg.race_id) {
+      throw new Error('audited export does not match selected round race identity');
     }
     const canonical = new Set(leg.entries.map((entry) => entry.race_entry_id));
-    const unique = [...new Set((step1.entry_ids || []).map((id) => requiredText(id, 'Step 1 race_entry_id', 200)))];
+    const unique = [...new Set((step1.entry_ids || []).map((id) => requiredText(id, 'audited export race_entry_id', 200)))];
     if (!unique.length || unique.some((id) => !canonical.has(id))) {
-      throw new Error('Step 1 export contains invalid active entry identity');
+      throw new Error('audited export contains invalid active entry identity');
     }
     return {
       leg_number: leg.leg_number,
