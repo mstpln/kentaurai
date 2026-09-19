@@ -131,3 +131,23 @@ test('DB wrapper replays deterministically at the same cutoff', async () => {
   const second = await buildXlabsEvidenceProfilesForRace(env, options);
   assert.deepEqual(first, second);
 });
+
+test('DB wrapper loads a 128-horse target field without exceeding the D1 parameter boundary', async () => {
+  const { db, env } = createTestEnv();
+  seedRace(db, {
+    raceId: 'wide-target-race', date: '2026-09-20', scheduledAt: '2026-09-20T13:00:00.000Z',
+    trackId: 'track-wide', method: 'auto', distance: 2140, fieldSize: 128
+  });
+  for (let index = 1; index <= 128; index += 1) {
+    seedEntry(db, { id: `wide-target-${index}`, raceId: 'wide-target-race', horseId: `wide-horse-${index}`, number: index });
+  }
+
+  const result = await buildXlabsEvidenceProfilesForRace(env, {
+    raceId: 'wide-target-race',
+    asOf: '2026-09-15T06:00:00.000Z'
+  });
+
+  assert.equal(result.profiles.length, 128);
+  assert.equal(new Set(result.profiles.map((profile) => profile.horse_id)).size, 128);
+  assert.equal(result.coverage.field.eligible_entries, 128);
+});

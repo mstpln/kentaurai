@@ -193,9 +193,10 @@ function seedWideStep1Round(db) {
   db.prepare(`INSERT INTO tracks (id,canonical_name,country_code) VALUES ('wide_track','Wide Synthetic Track','SE')`).run();
   db.prepare(`INSERT INTO game_rounds (id,game_type,round_date,scheduled_start_at,bet_stop_at,status) VALUES ('wide_round','V85','2099-02-01','2099-02-01T13:00:00Z','2099-02-01T12:55:00Z','upcoming')`).run();
   db.prepare(`INSERT INTO source_records (id,source_type,external_id,fetched_at,content_hash,quality_status) VALUES ('wide_official','official_provider','game:wide_round','2099-02-01T11:00:00Z','wide-hash','normalized_verified_subset')`).run();
+  db.prepare(`INSERT INTO source_records (id,source_type,external_id,fetched_at,content_hash,quality_status) VALUES ('wide_official_future','official_provider','game:wide_round:future','2099-02-01T12:00:00Z','wide-future-hash','normalized_verified_subset')`).run();
   db.prepare(`INSERT INTO source_records (id,source_type,external_id,fetched_at,content_hash,quality_status) VALUES ('wide_editorial','editorial_manual','wide-editorial','2099-02-01T11:05:00Z','wide-editorial-hash','manual_structured')`).run();
 
-  const counts = [12,12,12,12,12,11,11,11];
+  const counts = [16,16,16,16,16,16,16,16];
   let serial = 0;
   for (let leg = 1; leg <= 8; leg += 1) {
     const race = `wide_race_${leg}`;
@@ -209,11 +210,15 @@ function seedWideStep1Round(db) {
     for (let start = 1; start <= counts[leg - 1]; start += 1) {
       serial += 1;
       const horse = `wide_horse_${serial}`;
+      const driver = `wide_driver_${serial}`;
+      const trainer = `wide_trainer_${serial}`;
       const entry = `wide_entry_${serial}`;
       db.prepare(`INSERT INTO horses (id,canonical_name) VALUES (?,?)`).run(horse,`Wide Horse ${serial}`);
-      db.prepare(`INSERT INTO race_entries (id,race_id,horse_id,start_number,actual_lane,start_tier,handicap_m,actual_start_distance_m,scratched) VALUES (?,?,?,?,?,1,0,2140,0)`)
-        .run(entry,race,horse,start,start);
-      const entryFields = JSON.stringify({ startNumber:start, postPosition:start, startTier:1, handicapM:0, actualStartDistanceM:2140, scratched:false, scratchSemanticsVerified:true });
+      db.prepare(`INSERT INTO drivers (id,canonical_name) VALUES (?,?)`).run(driver,`Wide Driver ${serial}`);
+      db.prepare(`INSERT INTO trainers (id,canonical_name) VALUES (?,?)`).run(trainer,`Wide Trainer ${serial}`);
+      db.prepare(`INSERT INTO race_entries (id,race_id,horse_id,driver_id,trainer_id,start_number,actual_lane,start_tier,handicap_m,actual_start_distance_m,scratched) VALUES (?,?,?,?,?,?,?,1,0,2140,0)`)
+        .run(entry,race,horse,driver,trainer,start,start);
+      const entryFields = JSON.stringify({ startNumber:start, postPosition:start, startTier:1, handicapM:0, actualStartDistanceM:2140, scratched:false, scratchSemanticsVerified:true, horseName:`Wide Horse ${serial}`, driverName:`Wide Driver ${serial}`, trainerName:`Wide Trainer ${serial}` });
       db.prepare(`INSERT INTO normalized_observations (id,entity_type,entity_id,source_record_id,observed_at,fields_json,quality_status) VALUES (?, 'race_entry', ?, 'wide_official','2099-02-01T11:00:00Z',?,'normalized_verified_subset')`)
         .run(`wide_obs_entry_${serial}`,entry,entryFields);
       db.prepare(`INSERT INTO editorial_items (id,race_entry_id,horse_id,speaker_name,speaker_role,published_at,source_name,rights_status,source_record_id) VALUES (?,?,?,?, 'trainer','2099-02-01T11:02:00Z','Synthetic','structured_only','wide_editorial')`)
@@ -222,10 +227,12 @@ function seedWideStep1Round(db) {
         .run(`wide_editorial_signal_${serial}`,`wide_editorial_item_${serial}`);
     }
   }
-  assert.equal(serial,93);
+  db.prepare(`INSERT INTO normalized_observations (id,entity_type,entity_id,source_record_id,observed_at,fields_json,quality_status) VALUES ('wide_obs_entry_future', 'race_entry', 'wide_entry_1', 'wide_official_future','2099-02-01T12:00:00Z',?,'normalized_verified_subset')`)
+    .run(JSON.stringify({ startNumber:1, postPosition:99, startTier:1, handicapM:0, actualStartDistanceM:2140, scratched:false, scratchSemanticsVerified:true }));
+  assert.equal(serial,128);
 }
 
-test('D1 Step 1 handles a full 93-entry round without exceeding the production bind-parameter cap', async () => {
+test('D1 Step 1 handles a full 128-entry round without truncation, market leakage or post-as-of leakage', async () => {
   const { env, db } = createTestEnv();
   seedWideStep1Round(db);
 
@@ -233,7 +240,13 @@ test('D1 Step 1 handles a full 93-entry round without exceeding the production b
   const legFiles = pack.files.filter((file) => /^\d{2}_leg_\d/.test(file.name));
   const entries = legFiles.flatMap((file) => file.payload.entries || []);
 
-  assert.equal(entries.length,93);
-  assert.equal(new Set(entries.map((entry) => entry.race_entry_id)).size,93);
-  assert.equal(entries.filter((entry) => entry.current_signals?.some((signal) => signal.signal_type === 'tactics')).length,93);
+  assert.equal(legFiles.length,8);
+  assert.equal(entries.length,128);
+  assert.equal(new Set(entries.map((entry) => entry.race_entry_id)).size,128);
+  assert.equal(new Set(entries.map((entry) => entry.current_facts.driver.id)).size,128);
+  assert.equal(new Set(entries.map((entry) => entry.current_facts.trainer.id)).size,128);
+  assert.equal(entries.filter((entry) => entry.current_signals?.some((signal) => signal.signal_type === 'tactics')).length,128);
+  assert.equal(entries.find((entry) => entry.race_entry_id === 'wide_entry_1').current_facts.actual_lane,1);
+  assert.equal(pack.manifest.contains_current_market,false);
+  for (const file of pack.files) assert.equal(findAnalysisPackMarketLeaks(file.payload).length,0);
 });

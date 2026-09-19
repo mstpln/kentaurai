@@ -10,6 +10,7 @@ import { XLABS_INTERVALS_V2_VERSION } from './xlabs-intervals-v2.js';
 
 export const XLABS_EVIDENCE_PROFILE_CONTRACT = 'kentaurai-xlabs-evidence-profiles-v1';
 export const XLABS_EVIDENCE_PROFILE_VERSION = 'xlabs-evidence-profiles-v1';
+const SQL_CHUNK_SIZE = 80;
 
 export const XLABS_EVIDENCE_PROFILE_POLICY = Object.freeze({
   recentWindowStarts: 5,
@@ -641,14 +642,24 @@ async function loadTargetRace(env, raceId) {
 
 async function loadHorseHistory(env, cutoff, horseIds) {
   if (!horseIds.length) return [];
-  const placeholders = horseIds.map(() => '?').join(',');
-  const sql = `${featureRowsCte()}
-    SELECT * FROM feature_rows
-    WHERE horse_id IN (${placeholders})
-    ORDER BY horse_id, race_date, scheduled_start_at, race_entry_id
-  `;
-  const { results } = await env.DB.prepare(sql).bind(...featureRowsBindings(cutoff), ...horseIds).all();
-  return results || [];
+  const rows = [];
+  for (let index = 0; index < horseIds.length; index += SQL_CHUNK_SIZE) {
+    const group = horseIds.slice(index, index + SQL_CHUNK_SIZE);
+    const placeholders = group.map(() => '?').join(',');
+    const sql = `${featureRowsCte()}
+      SELECT * FROM feature_rows
+      WHERE horse_id IN (${placeholders})
+      ORDER BY horse_id, race_date, scheduled_start_at, race_entry_id
+    `;
+    const { results } = await env.DB.prepare(sql).bind(...featureRowsBindings(cutoff), ...group).all();
+    rows.push(...(results || []));
+  }
+  return rows.sort((left, right) =>
+    String(left.horse_id).localeCompare(String(right.horse_id))
+    || String(left.race_date || '').localeCompare(String(right.race_date || ''))
+    || String(left.scheduled_start_at || '').localeCompare(String(right.scheduled_start_at || ''))
+    || String(left.race_entry_id).localeCompare(String(right.race_entry_id))
+  );
 }
 
 async function loadPopulationAggregates(env, cutoff) {
