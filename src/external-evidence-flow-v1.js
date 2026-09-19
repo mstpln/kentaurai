@@ -116,8 +116,8 @@ async function roundIdentity(env, roundId) {
       { context_type:'season', context_key:'source_defined_current_season', context_label:'Årstid' },
       { context_type:String(round.game_type).toLowerCase(), context_key:String(round.game_type).toLowerCase(), context_label:round.game_type },
       { context_type:'lead', context_key:'lead', context_label:'Spets' },
-      balance ? { context_type:'balance', context_key:balance.key, context_label:balance.label } : null,
-      wagon ? { context_type:'wagon', context_key:wagon.key, context_label:wagon.label } : null
+      balance ? { context_type:'balance', context_key:balance.key, context_label:'Balans: ' + balance.label } : null,
+      wagon ? { context_type:'wagon', context_key:wagon.key, context_label:'Vagn: ' + wagon.label } : null
     ].filter(Boolean);
     return {
       leg_number:Number(row.leg_number),
@@ -456,7 +456,9 @@ export async function getHorseExternalStats(env, horseId) {
   if (!horse) return null;
   const { results } = await env.DB.prepare(
     "SELECT id,context_type,context_key,context_label,starts,wins,seconds,thirds,win_rate_percent,roi_percent,observed_at " +
-    "FROM external_horse_stat_snapshots WHERE horse_id=? ORDER BY context_type,context_key,observed_at DESC,id DESC"
+    "FROM external_horse_stat_snapshots WHERE horse_id=? ORDER BY " +
+    "CASE context_type WHEN 'all_starts' THEN 1 WHEN 'current_track' THEN 2 WHEN 'season' THEN 3 WHEN 'v85' THEN 4 WHEN 'v86' THEN 4 WHEN 'lead' THEN 5 WHEN 'balance' THEN 6 WHEN 'wagon' THEN 7 ELSE 99 END," +
+    "context_key,observed_at DESC,id DESC"
   ).bind(id).all();
   return {
     horse:{ id:horse.id, name:horse.canonical_name },
