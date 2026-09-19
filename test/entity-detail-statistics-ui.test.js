@@ -25,6 +25,17 @@ test('shared detail enhancement composes valid runtime for trainer, driver and h
   assert.doesNotMatch(script, /page==='games'/);
 });
 
+test('scorecard win percentage uses a restrained font weight', () => {
+  const html = enhanced();
+  assert.match(html, /\.entity-detail-win\{[^}]*font-weight:600/);
+});
+
+test('shared detail enhancement removes legacy statistics immediately after base detail render', () => {
+  const script = scriptFrom(enhanced());
+  assert.match(script, /await previousRenderDetail\(\);[^;]*document\.getElementById\('entityDetailStatisticsV2'\)\?\.remove\(\);/);
+  assert.match(script, /if\(c&&state\.tab==='stats'&&id\)\{const s=detailState\(page,id\);cleanup\(page,s\)\}await mount\(\)/);
+});
+
 test('detail pages reuse the exact start-page sliders icon and year-based selector', () => {
   const html = enhanced();
   assert.match(html, /M4 7h10M18 7h2M14 4v6M4 17h2M10 17h10M10 14v6/);
