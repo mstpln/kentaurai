@@ -210,6 +210,7 @@ export function getExternalEvidenceImportPrompt(provider='openai') {
     '- submission_id: nytt stabilt id med gemener/siffror/bindestreck',
     '- round_id: exakt från importunderlaget',
     '- generated_at: aktuell ISO-tid',
+    '- source_reference: kort privat källreferens från materialet, om den framgår',
     '- producer: {"provider":"'+key+'","model":"<verklig modell>"}',
     '- statistics: race_entry_id, context_type, starts, wins, seconds, thirds, win_percent, roi_percent, observed_at',
     '- interviews: race_entry_id, speaker_name, speaker_role, speaker_relation, published_at, interview_text, summary, signals','',
