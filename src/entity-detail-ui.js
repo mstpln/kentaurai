@@ -155,8 +155,8 @@ export function enhanceEntityDetailUiHtml(html) {
   if (!enhanced.includes('kentaurai-external-evidence-ui-style')) {
     enhanced = enhanced.replace('</head>', externalEvidenceCss + '</head>');
   }
-  if (!enhanced.includes('kentaurai-entity-detail-runtime-final')) {
-    const finalScript = '<script id="kentaurai-entity-detail-runtime-final">(' + runtimeClient.toString() + ')();</script>';
+  if (!enhanced.includes('kentaurai-entity-detail-ui-runtime')) {
+    const finalScript = '<script id="kentaurai-entity-detail-ui-runtime">(' + runtimeClient.toString() + ')();</script>';
     enhanced = enhanced.replace('</body>', finalScript + '</body>');
   }
   return enhanced;
