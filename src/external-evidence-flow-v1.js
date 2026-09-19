@@ -48,6 +48,12 @@ function placeholders(values) {
   return values.map(() => '?').join(',');
 }
 
+async function evidenceDigest(value) {
+  const bytes = new TextEncoder().encode(JSON.stringify(value));
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 function providerKey(value) {
   const provider = String(value || '').trim().toLowerCase();
   if (provider === 'openai' || provider === 'chatgpt') return 'openai';
@@ -413,7 +419,21 @@ export async function importExternalEvidence(env, payload) {
   const counts = { statistics:0, interviews:0, signals:0 };
   for (const [index, stat] of validated.statistics.entries()) {
     const entry = entries.get(stat.raceEntryId);
-    const id = stableId('external-stat', raw.sourceRecordId, index, stat.raceEntryId, stat.contextType, stat.contextKey || 'null');
+    const observationDigest = await evidenceDigest({
+      horseId:stat.horseId,
+      raceEntryId:stat.raceEntryId,
+      contextType:stat.contextType,
+      contextKey:stat.contextKey,
+      contextLabel:stat.contextLabel,
+      starts:stat.starts,
+      wins:stat.wins,
+      seconds:stat.seconds,
+      thirds:stat.thirds,
+      winRate:stat.winRate,
+      roi:stat.roi,
+      observedAt:stat.observedAt
+    });
+    const id = stableId('external-stat', stat.raceEntryId, observationDigest);
     const result = await env.DB.prepare(
       "INSERT OR IGNORE INTO external_horse_stat_snapshots " +
       "(id,horse_id,race_entry_id,game_round_id,context_type,context_key,context_label,starts,wins,seconds,thirds,win_rate_percent,roi_percent,observed_at,source_record_id) " +
@@ -427,7 +447,17 @@ export async function importExternalEvidence(env, payload) {
 
   for (const [index, interview] of validated.interviews.entries()) {
     const entry = entries.get(interview.raceEntryId);
-    const itemId = stableId('external-interview', raw.sourceRecordId, index, interview.raceEntryId, interview.speakerName || 'unknown');
+    const interviewDigest = await evidenceDigest({
+      horseId:interview.horseId,
+      trainerId:interview.trainerId || entry.trainer_id || null,
+      raceEntryId:interview.raceEntryId,
+      speakerName:interview.speakerName,
+      speakerRole:interview.speakerRole,
+      publishedAt:interview.publishedAt,
+      summary:interview.summary,
+      signals:interview.signals
+    });
+    const itemId = stableId('external-interview', interview.raceEntryId, interviewDigest);
     const result = await env.DB.prepare(
       "INSERT OR IGNORE INTO editorial_items " +
       "(id,race_entry_id,horse_id,trainer_id,race_id,game_round_id,speaker_name,speaker_role,published_at,source_name,source_url,summary_text,rights_status,source_record_id) " +
