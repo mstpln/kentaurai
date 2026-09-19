@@ -58,9 +58,13 @@ test('settings routes are private and settings UI includes the three-step AI wor
   const html = await response.text();
   assert.match(html, /id="settingsButton"/);
   assert.match(html, /Inställningar/);
-  assert.match(html, /Analysera omgången utan marknad/);
-  assert.match(html, /Värdera marknaden och bygg system/);
-  assert.match(html, /Skapa importfil till KentaurAI/);
+  assert.match(html, /Analysera omgång/);
+  assert.match(html, /Marknadsblind analys/);
+  assert.match(html, /Hämta analysdata/);
+  assert.match(html, /Marknad och system/);
+  assert.match(html, /Hämta marknadsdata/);
+  assert.match(html, /Registrera system/);
+  assert.match(html, /Hämta importunderlag/);
   assert.match(html, /Datamängd/);
   assert.match(html, /Senaste körningar/);
   assert.match(html, /Datakällor/);
