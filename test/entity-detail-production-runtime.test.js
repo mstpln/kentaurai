@@ -25,6 +25,7 @@ class FakeElement {
   }
   set innerHTML(value) {
     this._innerHTML = String(value);
+    this.ownerDocument.elementWrites.push({ id:this.id, html:this._innerHTML });
     if (this.id === 'app') {
       this.ownerDocument.appWrites.push(this._innerHTML);
       this.ownerDocument.resetRenderedNodes(this._innerHTML);
@@ -41,7 +42,12 @@ class FakeElement {
   setAttribute() {}
   removeAttribute() {}
   append(...nodes) { this.childNodes.push(...nodes); }
-  appendChild(node) { this.childNodes.push(node); return node; }
+  appendChild(node) {
+    this.childNodes.push(node);
+    if (node?.id) this.ownerDocument.nodes.set(node.id, node);
+    if (this.id === 'app') this.ownerDocument.domAppends.push(node?.id || '');
+    return node;
+  }
   insertBefore(node) { this.childNodes.push(node); return node; }
   insertAdjacentHTML(_position, html) { this.innerHTML += html; }
   remove() {}
@@ -53,6 +59,8 @@ class FakeElement {
 class FakeDocument {
   constructor() {
     this.appWrites = [];
+    this.elementWrites = [];
+    this.domAppends = [];
     this.nodes = new Map();
     this.body = new FakeElement(this, 'body');
     for (const id of ['app', 'globalSearch', 'searchResults', 'clearSearch']) {
@@ -132,20 +140,30 @@ function runtimeContext() {
   return { context:vm.createContext(context), document, responses, requestedPaths };
 }
 
-test('actual production scripts initialize without errors', async () => {
+test('actual production scripts initialize without errors and no later layer reverts canonical tabs', async () => {
   const html = await productionHtml();
+  assert.doesNotMatch(html, /kentaurai-entity-detail-ui-runtime/);
   const scripts = [...html.matchAll(/<script(?: id="([^"]+)")?[^>]*>([\s\S]*?)<\/script>/g)];
   const { context } = runtimeContext();
   const errors = [];
+  const canonicalHorse = [['stats','Statistik'],['external_stats','Extern statistik'],['interviews','Intervjuer'],['starts','Starter'],['data','Data']];
+  let canonicalSeen = false;
+  const lateSnapshots = [];
   for (const [, id = '(base)', source] of scripts) {
-    try { new vm.Script(source, { filename:id }).runInContext(context); }
-    catch (error) { errors.push({ id, message:error.message }); }
+    try {
+      new vm.Script(source, { filename:id }).runInContext(context);
+      if (vm.runInContext("typeof detailTabs", context) === 'function') {
+        const horseTabs = Array.from(vm.runInContext("detailTabs('horse')", context), (row) => Array.from(row));
+        if (JSON.stringify(horseTabs) === JSON.stringify(canonicalHorse)) canonicalSeen = true;
+        if (canonicalSeen) lateSnapshots.push({ id, horseTabs });
+      }
+    } catch (error) {
+      errors.push({ id, message:error.message });
+    }
   }
   assert.deepEqual(errors, []);
-  assert.deepEqual(
-    Array.from(vm.runInContext("detailTabs('horse')", context), (row) => Array.from(row)),
-    [['stats','Statistik'],['external_stats','Extern statistik'],['interviews','Intervjuer'],['starts','Starter'],['data','Data']]
-  );
+  assert.equal(canonicalSeen, true);
+  for (const snapshot of lateSnapshots) assert.deepEqual(snapshot.horseTabs, canonicalHorse, snapshot.id);
   assert.deepEqual(
     Array.from(vm.runInContext("detailTabs('trainer')", context), (row) => Array.from(row)),
     [['stats','Statistik'],['interviews','Intervjuer'],['starts','Starter'],['horses','Hästar'],['data','Data']]
@@ -181,10 +199,41 @@ test('actual production evidence tabs call their canonical APIs', async () => {
   assert.ok(requestedPaths.includes('/trainers/trainer-1/interviews'));
 });
 
+test('core production detail path is canonical with no final runtime wrapper present', async () => {
+  const html = await productionHtml();
+  assert.doesNotMatch(html, /kentaurai-entity-detail-ui-runtime/);
+  const scripts = [...html.matchAll(/<script(?: id="([^"]+)")?[^>]*>([\s\S]*?)<\/script>/g)];
+  const { context, document, responses, requestedPaths } = runtimeContext();
+  for (const [, id = '(base)', source] of scripts) new vm.Script(source, { filename:id }).runInContext(context);
+  const detail = {
+    type:'horse', entity:{ name:'Nilla Lane', country_code:'SE' }, latestObservation:null,
+    stats:{}, breakdowns:{ startMethods:[], distances:[], tracks:[] }, coverage:{}, starts:[]
+  };
+  responses.set('/entities/horses/horse-1', detail);
+  responses.set('/horses/statistics/filter-options', { tracks:[], distanceGroups:[], ageOptions:[], birthYears:[], handicapBuckets:[] });
+  responses.set('/horses/horse-1/calendar-statistics', { summary:{}, startMethods:[], distances:[], tracks:[] });
+  responses.set('/horses/horse-1/statistics', { currentStartPoints:null, relevantPatterns:null });
+  document.appWrites.length = 0;
+  document.elementWrites.length = 0;
+  document.domAppends.length = 0;
+
+  await vm.runInContext("openDetail('horses','horse-1')", context);
+
+  const shell = document.appWrites.at(-1);
+  assert.match(shell, /Statistik[\s\S]*Extern statistik[\s\S]*Intervjuer[\s\S]*Starter[\s\S]*Data/);
+  assert.match(shell, /entityDetailStatisticsV2/);
+  for (const write of document.elementWrites) {
+    assert.doesNotMatch(write.html, /Starter med resultat|Vinstprocent|entityStatSummary|horseStatsBuildB|trainerStatsBuildD|driverStatsBuildC/);
+  }
+  assert.deepEqual(document.domAppends.filter((id) => /StatsBuild/.test(id)), []);
+  assert.equal(requestedPaths.some((path) => path.startsWith('/horses/horse-1/statistics?')), false);
+  assert.match(document.getElementById('entityDetailStatisticsV2').innerHTML, /Scorecard/);
+});
+
 test('actual production click path owns tabs and never paints legacy statistics', async () => {
   const html = await productionHtml();
   const scripts = [...html.matchAll(/<script(?: id="([^"]+)")?[^>]*>([\s\S]*?)<\/script>/g)];
-  const { context, document, responses } = runtimeContext();
+  const { context, document, responses, requestedPaths } = runtimeContext();
   for (const [, id = '(base)', source] of scripts) new vm.Script(source, { filename:id }).runInContext(context);
   const detail = {
     type:'horse', entity:{ name:'Nilla Lane', country_code:'SE' }, latestObservation:null,
@@ -201,6 +250,8 @@ test('actual production click path owns tabs and never paints legacy statistics'
   responses.set('/drivers/statistics/filter-options', { tracks:[], distanceGroups:[], ageOptions:[], birthYears:[], handicapBuckets:[] });
   responses.set('/drivers/driver-1/calendar-statistics', { summary:{}, startMethods:[], distances:[], tracks:[] });
   document.appWrites.length = 0;
+  document.elementWrites.length = 0;
+  document.domAppends.length = 0;
 
   await vm.runInContext("openDetail('horses','horse-1')", context);
 
@@ -209,9 +260,11 @@ test('actual production click path owns tabs and never paints legacy statistics'
   const shell = document.appWrites.at(-1);
   assert.match(shell, /Statistik[\s\S]*Extern statistik[\s\S]*Intervjuer[\s\S]*Starter[\s\S]*Data/);
   assert.match(shell, /entityDetailStatisticsV2[\s\S]*skeleton/);
-  for (const write of document.appWrites) {
-    assert.doesNotMatch(write, /Starter med resultat|Vinstprocent|horseStatsBuildB|trainerStatsBuildD|driverStatsBuildC/);
+  for (const write of document.elementWrites) {
+    assert.doesNotMatch(write.html, /Starter med resultat|Vinstprocent|entityStatSummary|horseStatsBuildB|trainerStatsBuildD|driverStatsBuildC/);
   }
+  assert.deepEqual(document.domAppends.filter((id) => /StatsBuild/.test(id)), []);
+  assert.equal(requestedPaths.some((path) => path.startsWith('/horses/horse-1/statistics?')), false);
   assert.match(document.getElementById('entityDetailStatisticsV2').innerHTML, /Scorecard/);
   assert.match(document.getElementById('entityDetailStatisticsV2').innerHTML, /Segerprocent/);
 
@@ -224,4 +277,12 @@ test('actual production click path owns tabs and never paints legacy statistics'
   await vm.runInContext("openDetail('drivers','driver-1')", context);
   assert.match(document.appWrites.at(-1), /Statistik[\s\S]*Starter[\s\S]*Hästar[\s\S]*Data/);
   assert.doesNotMatch(document.appWrites.at(-1), /Extern statistik|Intervjuer/);
+});
+
+test('composed production payload has no legacy async detail writer left to resolve after canonical mount', async () => {
+  const html = await productionHtml();
+  assert.doesNotMatch(html, /previousHorseRenderDetail|previousHorsePatternsRenderDetail|appendDetailStats|horseStatsBuildB/);
+  assert.doesNotMatch(html, /appendTrainerDetailStats|trainerStatsBuildD/);
+  assert.doesNotMatch(html, /appendDriverDetailStats|driverStatsBuildC/);
+  assert.doesNotMatch(html, /priorAlignedDetailTabs|kentaurai-entity-detail-ui-runtime/);
 });

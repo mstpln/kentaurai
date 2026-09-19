@@ -14,7 +14,7 @@ test('production Worker canonicalizes bare /app to /app/', async () => {
   assert.equal(response.headers.get('cache-control'), 'no-store');
 });
 
-test('production /app/ contains the canonical entity-detail stack exactly once', async () => {
+test('production /app/ contains the canonical core-owned entity-detail stack exactly once', async () => {
   const { env } = createTestEnv();
   env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
   const setCookie = await createAppSessionCookie(env);
@@ -28,17 +28,26 @@ test('production /app/ contains the canonical entity-detail stack exactly once',
   assert.match(html, /id="kentaurai-trainer-statistics-build-d-script"/);
   assert.match(html, /id="kentaurai-entity-detail-statistics-v2-script"/);
   assert.match(html, /id="kentaurai-external-evidence-ui-style"/);
-  assert.match(html, /id="kentaurai-entity-detail-ui-runtime"/);
   assert.match(html, /id="kentaurai-performance-v1-script"/);
-  assert.equal((html.match(/kentaurai-entity-detail-ui-runtime/g) || []).length, 1);
+  assert.equal((html.match(/kentaurai-entity-detail-statistics-v2-script/g) || []).length, 1);
+  assert.doesNotMatch(html, /kentaurai-entity-detail-ui-runtime|legacyRenderDetail|priorAlignedDetailTabs/);
+  assert.doesNotMatch(html, /horseStatsBuildB|trainerStatsBuildD|driverStatsBuildC/);
   assert.match(html, /__kentauraiEntityDetailStatistics=\{mount/);
-  assert.match(html, /const legacyRenderDetail = renderDetail/);
-  assert.match(html, /if \(!\['stats','external_stats','interviews'\]\.includes\(requestedTab\)\) return legacyRenderDetail\(\)/);
-  assert.doesNotMatch(html, /#horseStatsBuildB,#trainerStatsBuildD,#driverStatsBuildC\{display:none!important\}/);
   assert.match(html, /\['external_stats','Extern statistik'\]/);
   assert.match(html, /\['interviews','Intervjuer'\]/);
   const performanceIndex = html.indexOf('id="kentaurai-performance-v1-script"');
   const scorecardIndex = html.indexOf('id="kentaurai-entity-detail-statistics-v2-script"');
-  const runtimeIndex = html.indexOf('id="kentaurai-entity-detail-ui-runtime"');
-  assert.ok(performanceIndex >= 0 && scorecardIndex > performanceIndex && runtimeIndex > scorecardIndex);
+  assert.ok(performanceIndex >= 0 && scorecardIndex > performanceIndex);
+});
+
+test('safe entity-detail health probe validates the deployed app payload without returning private HTML', async () => {
+  const { env } = createTestEnv();
+  env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
+  const response = await worker.fetch(new Request('https://example.test/health/entity-detail-ui'), env, {});
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.version, 'core-owner-v1');
+  assert.ok(Object.values(body.checks).every(Boolean));
+  assert.equal(Object.prototype.hasOwnProperty.call(body, 'html'), false);
 });

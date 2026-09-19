@@ -5,6 +5,7 @@ import fs from 'node:fs';
 const statFilters = fs.readFileSync(new URL('../src/app-page-stat-filters.js', import.meta.url), 'utf8');
 const horseStats = fs.readFileSync(new URL('../src/horse-statistics-ui.js', import.meta.url), 'utf8');
 const horsePatterns = fs.readFileSync(new URL('../src/horse-patterns-ui.js', import.meta.url), 'utf8');
+const entityDetailStats = fs.readFileSync(new URL('../src/entity-detail-statistics-ui-v2.js', import.meta.url), 'utf8');
 
 test('generic entity breakdown loading is owned by the section that renders the loader', () => {
   assert.match(statFilters, /function scheduleStatFilters\(\)/);
@@ -29,12 +30,11 @@ test('scheduled breakdown work is guarded against stale navigation and missing D
   assert.match(statFilters, /token!==statRequestToken\|\|key!==entityStatKey\(\)\|\|state\.tab!=='stats'/);
 });
 
-test('horse detail and Build F pattern layers remain composed independently', () => {
-  assert.match(horseStats, /const previousHorseRenderDetail=renderDetail/);
-  assert.match(horseStats, /appendDetailStats\(id,token\)/);
-  assert.match(horsePatterns, /const previousHorsePatternsRenderDetail=renderDetail/);
-  assert.match(horsePatterns, /Utveckling & löpstyrka/);
-  assert.match(horsePatterns, /Starttempo/);
-  assert.match(horsePatterns, /Avslutning/);
-  assert.match(horsePatterns, /Extra distans/);
+test('horse detail statistics and patterns are owned only by the canonical detail layer', () => {
+  assert.doesNotMatch(horseStats, /previousHorseRenderDetail|appendDetailStats|horseStatsBuildB|renderDetail=async function/);
+  assert.doesNotMatch(horsePatterns, /previousHorsePatternsRenderDetail|renderDetail=async function|horseStatsBuildB/);
+  assert.match(entityDetailStats, /Utveckling & löpstyrka/);
+  assert.match(entityDetailStats, /Starttempo/);
+  assert.match(entityDetailStats, /Avslutning/);
+  assert.match(entityDetailStats, /Extra distans/);
 });
