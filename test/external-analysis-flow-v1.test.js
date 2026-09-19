@@ -417,3 +417,28 @@ test('a later external registration explicitly supersedes the prior external run
   assert.equal(lineage.supersedes_run_id, first.externalRunId);
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM analysis_external_runs WHERE game_round_id=?").get(ROUND_ID).n, 2);
 });
+
+
+test('later scratch preserves the original Step 1 prediction population', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  const payload = await withProvenance(env, validPayload());
+  payload.submission_id = 'external-late-scratch';
+
+  db.prepare("UPDATE race_entries SET scratched=1 WHERE id='external-entry-1-2'").run();
+
+  const result = await importRecordedSystem(env, payload, { now: '2099-09-20T16:30:00Z' });
+  assert.equal(result.reused, false);
+  assert.equal(result.importTiming, 'post_race_recovery');
+
+  const prediction = db.prepare(
+    "SELECT p.race_entry_id FROM ai_horse_predictions p JOIN ai_race_analyses a ON a.id=p.ai_race_analysis_id WHERE a.model_version_id=? AND p.race_entry_id='external-entry-1-2'"
+  ).get(result.modelVersionId);
+  assert.equal(prediction.race_entry_id, 'external-entry-1-2');
+
+  const externalRun = db.prepare("SELECT main_system_id FROM analysis_external_runs WHERE id=?").get(result.externalRunId);
+  const selected = db.prepare(
+    "SELECT COUNT(*) AS n FROM system_selections WHERE system_id=? AND race_entry_id='external-entry-1-2'"
+  ).get(externalRun.main_system_id);
+  assert.equal(selected.n, 0);
+});
