@@ -69,8 +69,8 @@ export function equipmentContexts(row) {
   const front = shoeState(row.shoes_front, row.barefoot_front);
   const rear = shoeState(row.shoes_rear, row.barefoot_rear);
   let balance = null;
-  if (front === 'conflict' || rear === 'conflict') return { balance:null, wagon:null };
-  if (front || rear) {
+  const balanceConflict = front === 'conflict' || rear === 'conflict';
+  if (!balanceConflict && (front || rear)) {
     let label;
     if (front === 'barefoot' && rear === 'barefoot') label = 'Barfota runt om';
     else if (front === 'shod' && rear === 'shod') label = 'Skor runt om';
