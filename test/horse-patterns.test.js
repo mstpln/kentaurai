@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import { prepareAnalysisContext } from '../src/analysis-api.js';
 import { enhanceHorsePatternsHtml } from '../src/horse-patterns-ui.js';
+import { enhanceEntityDetailStatisticsHtmlV2 } from '../src/entity-detail-statistics-ui-v2.js';
 import { getHorseRelevantPatterns, getHorseRelevantPatternsBatch } from '../src/statistics/horse-patterns.js';
 import { createTestEnv } from './helpers/d1.js';
 
@@ -171,10 +172,14 @@ test('AI pattern history excludes same-day results from the target round date', 
   assert.equal(patterns.get('h1').xlabs.openingPace.averageSecondsPerKm, 72);
 });
 
-test('horse pattern UI uses natural Swedish labels and separates facts from AI judgement', () => {
-  const html = enhanceHorsePatternsHtml('<html><head></head><body><div id="app"></div></body></html>');
+test('canonical horse pattern UI uses natural Swedish labels while the legacy enhancer is styling-only', () => {
+  const legacyHtml = enhanceHorsePatternsHtml('<html><head></head><body><div id="app"></div></body></html>');
+  assert.match(legacyHtml, /id="kentaurai-horse-patterns-ui"/);
+  assert.doesNotMatch(legacyHtml, /kentaurai-horse-patterns-ui-script|renderDetail=async function/);
+
+  const html = enhanceEntityDetailStatisticsHtmlV2('<html><head></head><body><div id="app"></div></body></html>');
   for (const text of ['Utveckling & löpstyrka', 'Startpoäng', 'Starttempo', 'Avslutning', 'Extra distans', 'Visar mönster – inte en AI-bedömning.']) {
-    assert.match(html, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.ok(html.includes(text), 'missing ' + text);
   }
   assert.doesNotMatch(html, />openingPace</);
   assert.doesNotMatch(html, />closingPace</);
