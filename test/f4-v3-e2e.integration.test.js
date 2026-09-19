@@ -207,10 +207,32 @@ test('F4 default mode disables sealed-v3 creation endpoints', async () => {
     assert.match(body.message, /external/i);
   }
 
-  const retiredBundle = await worker.fetch(new Request(
-    'https://example.test/app/api/settings/f4-step2-bundle?round_id=' + encodeURIComponent(ROUND_ID),
-    { headers:{ cookie } }
-  ), env, {});
-  assert.equal(retiredBundle.status, 410);
+  for (const path of [
+    '/app/api/settings/f4-step2-bundle?round_id=' + encodeURIComponent(ROUND_ID),
+    '/app/api/settings/analysis-market-pack?round_id=' + encodeURIComponent(ROUND_ID),
+    '/app/api/settings/analysis-step2-prompt?provider=openai',
+    '/app/api/settings/analysis-step1-revision-prompt?provider=openai'
+  ]) {
+    const response = await worker.fetch(new Request('https://example.test' + path, { headers:{ cookie } }), env, {});
+    assert.equal(response.status, 410, path);
+  }
+
+  env.ADMIN_TOKEN = 'synthetic-admin-token-with-high-entropy';
+  for (const path of [
+    '/v1/analysis-step1-lock/' + encodeURIComponent(ROUND_ID),
+    '/v1/analysis-step1-revision/' + encodeURIComponent(ROUND_ID),
+    '/v1/analysis-decision-probability/' + encodeURIComponent(ROUND_ID),
+    '/v1/analysis-optimizer/' + encodeURIComponent(ROUND_ID),
+    '/v1/analysis-step2/' + encodeURIComponent(ROUND_ID),
+    '/v1/analysis-v3/synthetic/narrative'
+  ]) {
+    const response = await worker.fetch(new Request('https://example.test' + path, {
+      method:'POST',
+      headers:{ authorization:'Bearer ' + env.ADMIN_TOKEN, 'content-type':'application/json' },
+      body:'{}'
+    }), env, {});
+    assert.equal(response.status, 410, path);
+  }
+
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM analysis_v3_runs').get().n, 0);
 });
