@@ -81,11 +81,10 @@ test('horse age options follow the selected calendar year rather than the device
   assert.match(script, /s\.options\.birthYears\.map\(v=>y-Number\(v\)\)/);
 });
 
-test('filter controls are placed directly below the scorecard before detail tables', () => {
+test('year and filter controls are rendered above the score summary because they affect the full view', () => {
   const script = statsScriptFrom(enhanced());
-  assert.match(script, /const scoreNode=host\.querySelector\('\.entity-detail-score'\)/);
-  assert.match(script, /const controlsNode=host\.querySelector\('\.entity-detail-controls'\)/);
-  assert.match(script, /scoreNode\.after\(controlsNode\)/);
+  assert.match(script, /host\.innerHTML='<div class="entity-detail-controls">'\+toolbar\(s,c\)\+panel\(s,c\)\+'<\/div>'\+content\(data,s,c,extra\)/);
+  assert.doesNotMatch(script, /scoreNode\.after\(controlsNode\)/);
 });
 
 
@@ -119,9 +118,12 @@ test('trainer-specific verified home-track summaries remain visible after shared
   assert.match(script, /special\('Övriga banor',data\.otherTrackResults,'Endast tränare med verifierad hemmabana'\)/);
 });
 
-test('shared scorecard keeps entity-specific specialized sections', () => {
-  const script = statsScriptFrom(enhanced());
-  assert.match(script, /Scorecard/);
+test('shared summary keeps entity-specific specialized sections without the scorecard kicker', () => {
+  const html = enhanced();
+  const script = statsScriptFrom(html);
+  assert.doesNotMatch(script, /Scorecard/);
+  assert.doesNotMatch(html, /entity-detail-kicker/);
+  assert.doesNotMatch(html, /\.entity-detail-label\{[^}]*margin-top/);
   assert.match(script, /Segerprocent/);
   assert.match(script, /Form '\+c\.form/);
   assert.match(script, /if\(c\.rest\)/);
