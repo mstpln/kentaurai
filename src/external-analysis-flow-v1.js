@@ -707,7 +707,7 @@ export async function importRecordedSystem(env, payload, options = {}) {
     statements.push(env.DB.prepare(
       "INSERT INTO ai_race_analyses " +
       "(id,race_id,model_version_id,data_snapshot_at,market_blind,scenarios_json,race_shape_summary,conclusion,data_quality,created_at,analysis_origin,method_note) " +
-      "VALUES (?,?,?,?,1,?,?,?,?,?,'analysis_exchange',?)"
+      "VALUES (?,?,?,?,0,?,?,?,?,?,'analysis_exchange',?)"
     ).bind(
       analysisId, leg.raceId, modelVersionId, analysisAsOf,
       leg.scenarios == null ? null : JSON.stringify(leg.scenarios),
