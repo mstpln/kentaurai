@@ -245,7 +245,10 @@ function statContext(type, entry, equipment) {
     return { ...contexts.wagon, trackId:null };
   }
   const labels = { all_starts:'Alla starter', season:'Årstid', v85:'V85', v86:'V86', lead:'Spets' };
-  return { key:'', label:labels[type], trackId:null, metadata:null };
+  const sourceDefined = ['all_starts','season','lead'].includes(type)
+    ? { definition:'source_defined', scope_verified:false }
+    : null;
+  return { key:'', label:labels[type], trackId:null, metadata:sourceDefined };
 }
 
 export async function importExternalEvidence(env, payload, options = {}) {
