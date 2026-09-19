@@ -101,12 +101,12 @@ test('Step 3 historical context excludes evidence that became available after th
   const {env,db}=createTestEnv();seedRound(db);
   await importExternalEvidence(env,payload());
 
-  const later=payload('2099-03-01T14:30:00Z');
+  const later=payload('2099-03-01T12:00:00Z');
   later.submission_id='synthetic-evidence-later';
   later.statistics[0].wins=5;
   later.statistics[0].win_percent=42;
-  later.interviews[0].interview_text='Detta blev tillgängligt först efter spelstopp.';
-  await importExternalEvidence(env,later);
+  later.interviews[0].interview_text='Detta importerades först efter spelstopp.';
+  await importExternalEvidence(env,later,{now:'2099-03-01T14:30:00Z'});
 
   const step3=await buildStep3Context(env,'round_x');
   assert.equal(step3.context_as_of,'2099-03-01T12:55:00Z');
