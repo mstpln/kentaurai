@@ -4,6 +4,7 @@ import { requireAdmin } from './auth.js';
 import { appAuthConfigured, hasValidAppSession } from './app-auth.js';
 
 export const F4_CUTOVER_VERSION = 'analysis-v3-default-f4';
+export const ANALYSIS_UI_VERSION = 'external-analysis-canonical-v1';
 export const F4_DEFAULT_MODE = 'v3';
 export const F4_ROLLBACK_MODE = 'legacy_v2';
 
@@ -111,6 +112,7 @@ async function healthResponse(request, env, ctx, mode) {
     ...data,
     analysisWorkflow: mode,
     analysisCutoverVersion: F4_CUTOVER_VERSION,
+    analysisUiVersion: ANALYSIS_UI_VERSION,
     legacyAnalysisCreationEnabled: mode === F4_ROLLBACK_MODE
   }, response.status);
 }
