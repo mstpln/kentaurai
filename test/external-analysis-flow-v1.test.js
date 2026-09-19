@@ -14,6 +14,8 @@ import {
   listExternalAnalysisRounds
 } from '../src/external-analysis-flow-v1.js';
 import { createPreMarketAnalysisPackV3 } from '../src/analysis-pack-v3.js';
+import { runNextPostRaceReviewV2 } from '../src/post-race-review-v2.js';
+import { runDecisionReplayV1 } from '../src/replay-calibration-v1.js';
 import { createTestEnv } from './helpers/d1.js';
 
 const ROUND_ID = 'external-round';
@@ -281,4 +283,43 @@ test('recorded-system import uses first-leg start as deadline fallback', async (
     /step1.as_of must not be after the authoritative round deadline/
   );
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM systems WHERE game_round_id=?").get(ROUND_ID).n, 0);
+});
+
+
+function settleRound(db) {
+  db.prepare("INSERT INTO source_records (id,source_type,fetched_at,quality_status) VALUES ('external-result-source','official_provider','2099-09-20T16:00:00Z','normalized_verified_subset')").run();
+  for (let leg = 1; leg <= 8; leg += 1) {
+    for (let starter = 1; starter <= 2; starter += 1) {
+      db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,source_record_id,updated_at) VALUES (?,?,?,?,?)")
+        .run('external-entry-' + leg + '-' + starter, starter, 'official', 'external-result-source', '2099-09-20T16:00:00Z');
+    }
+  }
+}
+
+test('external registered system is the F1/F2 evidence lineage instead of stale sealed-v3 lineage', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  const payload = await withProvenance(env, validPayload());
+  payload.submission_id = 'external-evidence';
+  const imported = await importRecordedSystem(env, payload);
+  settleRound(db);
+
+  const review = await runNextPostRaceReviewV2(env, { roundId: ROUND_ID });
+  assert.equal(review.externalRunId, imported.externalRunId);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM post_race_reviews_external_v1 WHERE external_run_id=?").get(imported.externalRunId).n, 8);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM post_race_reviews_v2 WHERE game_round_id=?").get(ROUND_ID).n, 0);
+
+  const replay = await runDecisionReplayV1(env, {
+    from: '2099-09-20T00:00:00Z',
+    to: '2099-09-21T00:00:00Z',
+    max_targets: 10
+  });
+  assert.equal(replay.target_count, 8);
+  assert.equal(replay.evidence_target_count, 8);
+  assert.equal(replay.system_diagnostics.length, 1);
+  assert.equal(replay.system_diagnostics[0].external_run_id, imported.externalRunId);
+  assert.ok(replay.version_metadata.decision_lineages.some((lineage) =>
+    lineage.version_metadata?.lineage_type === 'external_declared_unsealed'
+    && lineage.version_metadata?.external_run_id === imported.externalRunId
+  ));
 });
