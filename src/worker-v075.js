@@ -42,6 +42,8 @@ function attachmentJson(data, filename, status = 200) {
 }
 
 async function readJson(request, maxBytes = 2 * 1024 * 1024) {
+  const contentType = String(request.headers.get('content-type') || '').toLowerCase();
+  if (!contentType.startsWith('application/json')) throw new Error('content-type must be application/json');
   const declared = Number(request.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > maxBytes) throw new Error('JSON body is too large');
   const text = await request.text();
