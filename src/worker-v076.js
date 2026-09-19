@@ -2,7 +2,6 @@ import workerV3 from './worker-v075.js';
 import workerLegacy from './worker-v074.js';
 import { requireAdmin } from './auth.js';
 import { appAuthConfigured, hasValidAppSession } from './app-auth.js';
-import { createF4Step2BundleResponse } from './f4-step2-bundle.js';
 
 export const F4_CUTOVER_VERSION = 'analysis-v3-default-f4';
 export const F4_DEFAULT_MODE = 'v3';
@@ -67,6 +66,35 @@ function isLegacyAppGeneration(path, method) {
   ]).has(path);
 }
 
+function isSealedV3Mutation(path, method) {
+  if (method !== 'POST') return false;
+  if (new Set([
+    '/app/api/settings/analysis-step1-lock',
+    '/app/api/settings/analysis-step1-revision',
+    '/app/api/settings/analysis-decision-probability',
+    '/app/api/settings/analysis-optimizer',
+    '/app/api/settings/analysis-step2'
+  ]).has(path)) return true;
+  return [
+    /^\/v1\/analysis-step1-lock\/[^/]+$/,
+    /^\/v1\/analysis-step1-revision\/[^/]+$/,
+    /^\/v1\/analysis-decision-probability\/[^/]+$/,
+    /^\/v1\/analysis-optimizer\/[^/]+$/,
+    /^\/v1\/analysis-step2\/[^/]+$/,
+    /^\/v1\/analysis-v3\/[^/]+\/narrative$/
+  ].some((pattern) => pattern.test(path));
+}
+
+function isRetiredSealedAppGeneration(path, method) {
+  if (method !== 'GET') return false;
+  return new Set([
+    '/app/api/settings/f4-step2-bundle',
+    '/app/api/settings/analysis-market-pack',
+    '/app/api/settings/analysis-step2-prompt',
+    '/app/api/settings/analysis-step1-revision-prompt'
+  ]).has(path);
+}
+
 async function withLegacyReadHeaders(response) {
   if (!response) return response;
   const headers = new Headers(response.headers);
@@ -108,36 +136,36 @@ export default {
       return workerLegacy.fetch(request, env, ctx);
     }
 
-    if (request.method === 'GET' && path === '/app/api/settings/f4-step2-bundle') {
+    if (isRetiredSealedAppGeneration(path, request.method)) {
       const denied = await requireSession(request, env);
       if (denied) return denied;
-      try {
-        const roundId = String(url.searchParams.get('round_id') || '').trim();
-        if (!roundId) throw new Error('round_id is required');
-        return await createF4Step2BundleResponse(env, roundId, { asOf: url.searchParams.get('as_of') || null });
-      } catch (error) {
-        console.error(error);
-        return json({ error: 'request_failed', message: error.message }, 400);
-      }
+      return gone('The sealed-v3 creation workflow is retired in the default mode. Use the external Step 1 -> Step 2 -> system registration workflow.');
+    }
+
+    if (isSealedV3Mutation(path, request.method)) {
+      const appPath = path.startsWith('/app/');
+      const denied = appPath ? await requireSession(request, env) : requireAdmin(request, env);
+      if (denied) return denied;
+      return gone('The sealed-v3 mutation workflow is disabled in the default mode. Historical sealed artifacts remain readable; new work uses the external analysis workflow.');
     }
 
     const legacyAdminWrite = path.match(/^\/v1\/analysis\/rounds\/[^/]+\/submissions$/);
     if (request.method === 'POST' && legacyAdminWrite) {
       const denied = requireAdmin(request, env);
       if (denied) return denied;
-      return gone('Legacy v1/v2 analysis creation is disabled after the F4 cutover. Use the v3 pack -> sealed Step 1 -> market -> Step 2 -> code optimizer workflow.');
+      return gone('Legacy v1/v2 analysis creation is disabled. Use the external Step 1 -> Step 2 -> system registration workflow.');
     }
 
     if (request.method === 'POST' && path === '/app/api/settings/import-analysis') {
       const denied = await requireSession(request, env);
       if (denied) return denied;
-      return gone('Legacy combined-analysis import is read-only after the F4 cutover. Create new analyses through the guided v3 workflow.');
+      return gone('Legacy combined-analysis import is read-only. Create new analyses through the external Step 1 -> Step 2 -> system registration workflow.');
     }
 
     if (isLegacyAppGeneration(path, request.method)) {
       const denied = await requireSession(request, env);
       if (denied) return denied;
-      return gone('This legacy analysis-generation route is deprecated after the F4 cutover. The private UI now uses the v3 workflow.');
+      return gone('This legacy analysis-generation route is deprecated. The private UI now uses the external analysis workflow.');
     }
 
     if (isLegacyAdminRead(path, request.method)) {
