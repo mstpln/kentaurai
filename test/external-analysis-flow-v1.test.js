@@ -361,3 +361,18 @@ test('post-deadline registration is retained for diagnostics but excluded from a
   assert.equal(replay.regression_only_target_count, 8);
   assert.equal(replay.regression_only_summary.systems.system_count, 1);
 });
+
+
+test('later registration can reproduce Step 1/2 provenance after round status changes', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  const payload = await withProvenance(env, validPayload());
+  payload.submission_id = 'external-later-registration';
+  db.prepare("UPDATE game_rounds SET status='completed' WHERE id=?").run(ROUND_ID);
+
+  const result = await importRecordedSystem(env, payload, { now: '2099-09-20T16:30:00Z' });
+  assert.equal(result.reused, false);
+  assert.equal(result.importTiming, 'post_race_recovery');
+  assert.equal(result.learningEligibility, 'manual_review_required');
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM analysis_external_runs WHERE id=?").get(result.externalRunId).n, 1);
+});
