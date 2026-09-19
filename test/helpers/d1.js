@@ -1,13 +1,43 @@
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 
+const D1_MAX_BOUND_PARAMETERS = 100;
+const D1_MAX_COMPOUND_SELECT_TERMS = 5;
+
+function stripSqlLiteralsAndComments(sql) {
+  return String(sql)
+    .replace(/'(?:''|[^'])*'/g, "''")
+    .replace(/"(?:""|[^"])*"/g, '""')
+    .replace(/--[^\n]*/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+}
+
+function maxCompoundSelectTerms(sql) {
+  const cleaned = stripSqlLiteralsAndComments(sql);
+  const frames = [0];
+  let maxTerms = 1;
+  for (const match of cleaned.matchAll(/\(|\)|\b(?:UNION|INTERSECT|EXCEPT)\b/gi)) {
+    const token = match[0].toUpperCase();
+    if (token === '(') {
+      frames.push(0);
+    } else if (token === ')') {
+      const operators = frames.length > 1 ? frames.pop() : frames[0];
+      maxTerms = Math.max(maxTerms, operators + 1);
+    } else {
+      frames[frames.length - 1] += 1;
+      maxTerms = Math.max(maxTerms, frames[frames.length - 1] + 1);
+    }
+  }
+  return maxTerms;
+}
+
 class StatementAdapter {
   constructor(db, sql) {
     this.db = db;
     this.sql = sql;
     this.args = [];
   }
-  bind(...args) { if (args.length > 100) throw new Error(`D1_ERROR: too many SQL variables (${args.length} > 100)`); this.args = args; return this; }
+  bind(...args) { if (args.length > D1_MAX_BOUND_PARAMETERS) throw new Error(`D1_ERROR: too many SQL variables (${args.length} > ${D1_MAX_BOUND_PARAMETERS})`); this.args = args; return this; }
   async run() {
     const result = this.db.prepare(this.sql).run(...this.args);
     return { success: true, meta: { changes: Number(result.changes ?? 0), last_row_id: result.lastInsertRowid == null ? null : Number(result.lastInsertRowid) } };
@@ -18,7 +48,7 @@ class StatementAdapter {
 
 class D1Adapter {
   constructor(db) { this.db = db; }
-  prepare(sql) { return new StatementAdapter(this.db, sql); }
+  prepare(sql) { const terms = maxCompoundSelectTerms(sql); if (terms > D1_MAX_COMPOUND_SELECT_TERMS) throw new Error(`D1_ERROR: too many terms in compound SELECT (${terms} > ${D1_MAX_COMPOUND_SELECT_TERMS})`); return new StatementAdapter(this.db, sql); }
   async batch(statements) {
     this.db.exec('BEGIN');
     try {
