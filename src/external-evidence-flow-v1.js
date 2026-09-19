@@ -205,9 +205,9 @@ async function loadInterviews(env, horseIds, trainerIds, asOf = null) {
       "SELECT ei.id,ei.horse_id,ei.trainer_id,ei.race_entry_id,ei.race_id,ei.game_round_id,ei.speaker_name,ei.speaker_role,ei.published_at,ei.summary_text " +
       "FROM editorial_items ei JOIN source_records sr ON sr.id=ei.source_record_id " +
       "WHERE sr.source_type='manual_editorial_import' AND ei.horse_id IN (" + placeholders(group) + ") " +
-      (asOf ? "AND julianday(COALESCE(ei.published_at,sr.fetched_at))<=julianday(?) AND julianday(sr.fetched_at)<=julianday(?) " : "") +
+      (asOf ? "AND julianday(COALESCE(ei.published_at,sr.fetched_at))<=julianday(?) " : "") +
       "ORDER BY COALESCE(ei.published_at,ei.created_at) DESC,ei.id DESC LIMIT 1600"
-    ).bind(...group, ...(asOf ? [asOf,asOf] : [])).all();
+    ).bind(...group, ...(asOf ? [asOf] : [])).all();
     for (const row of results || []) byId.set(row.id, row);
   }
   for (const group of chunks([...new Set(trainerIds)].filter(Boolean), 35)) {
@@ -215,9 +215,9 @@ async function loadInterviews(env, horseIds, trainerIds, asOf = null) {
       "SELECT ei.id,ei.horse_id,ei.trainer_id,ei.race_entry_id,ei.race_id,ei.game_round_id,ei.speaker_name,ei.speaker_role,ei.published_at,ei.summary_text " +
       "FROM editorial_items ei JOIN source_records sr ON sr.id=ei.source_record_id " +
       "WHERE sr.source_type='manual_editorial_import' AND ei.trainer_id IN (" + placeholders(group) + ") " +
-      (asOf ? "AND julianday(COALESCE(ei.published_at,sr.fetched_at))<=julianday(?) AND julianday(sr.fetched_at)<=julianday(?) " : "") +
+      (asOf ? "AND julianday(COALESCE(ei.published_at,sr.fetched_at))<=julianday(?) " : "") +
       "ORDER BY COALESCE(ei.published_at,ei.created_at) DESC,ei.id DESC LIMIT 1600"
-    ).bind(...group, ...(asOf ? [asOf,asOf] : [])).all();
+    ).bind(...group, ...(asOf ? [asOf] : [])).all();
     for (const row of results || []) byId.set(row.id, row);
   }
   const rows = [...byId.values()].sort((a,b) => String(b.published_at || '').localeCompare(String(a.published_at || '')));
