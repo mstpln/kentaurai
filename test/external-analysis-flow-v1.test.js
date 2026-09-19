@@ -13,23 +13,49 @@ import {
   importRecordedSystem,
   listExternalAnalysisRounds
 } from '../src/external-analysis-flow-v1.js';
+import { createPreMarketAnalysisPackV3 } from '../src/analysis-pack-v3.js';
 import { createTestEnv } from './helpers/d1.js';
 
 const ROUND_ID = 'external-round';
 
 function seedRound(db) {
   db.prepare("INSERT INTO tracks (id,canonical_name,country_code) VALUES ('external-track','Synthetic Track','SE')").run();
+  db.prepare("INSERT INTO track_external_ids (track_id,source_type,external_id) VALUES ('external-track','official','901')").run();
   db.prepare("INSERT INTO game_rounds (id,game_type,round_date,scheduled_start_at,bet_stop_at,status) VALUES (?, 'V85','2099-09-20','2099-09-20T14:00:00Z','2099-09-20T13:55:00Z','upcoming')").run(ROUND_ID);
   db.prepare("INSERT INTO source_records (id,source_type,fetched_at,quality_status) VALUES ('external-market-source','official_provider','2099-09-20T10:00:00Z','normalized_verified_subset')").run();
+
   for (let leg = 1; leg <= 8; leg += 1) {
     const raceId = 'external-race-' + leg;
     db.prepare("INSERT INTO races (id,track_id,race_date,race_number,scheduled_start_at,distance_m,start_method,status) VALUES (?, 'external-track','2099-09-20',?,'2099-09-20T14:00:00Z',2140,'auto','upcoming')").run(raceId, leg);
     db.prepare("INSERT INTO game_legs (game_round_id,leg_number,race_id) VALUES (?,?,?)").run(ROUND_ID, leg, raceId);
+    db.prepare("INSERT INTO normalized_observations (id,entity_type,entity_id,source_record_id,observed_at,fields_json,quality_status) VALUES (?, 'race', ?, 'external-market-source','2099-09-20T10:00:00Z',?,'normalized_verified_subset')")
+      .run('external-race-obs-' + leg, raceId, JSON.stringify({
+        date:'2099-09-20', raceNumber:leg, distanceM:2140, startMethod:'auto',
+        scheduledStartAt:'2099-09-20T14:00:00Z', trackExternalId:'901', status:'upcoming'
+      }));
+
     for (let starter = 1; starter <= 2; starter += 1) {
       const horseId = 'external-horse-' + leg + '-' + starter;
+      const driverId = 'external-driver-' + leg + '-' + starter;
+      const trainerId = 'external-trainer-' + leg + '-' + starter;
       const entryId = 'external-entry-' + leg + '-' + starter;
+      const horseExternal = String(1000 + leg * 10 + starter);
+      const driverExternal = String(2000 + leg * 10 + starter);
+      const trainerExternal = String(3000 + leg * 10 + starter);
       db.prepare("INSERT INTO horses (id,canonical_name) VALUES (?,?)").run(horseId, 'Synthetic Horse ' + leg + '-' + starter);
-      db.prepare("INSERT INTO race_entries (id,race_id,horse_id,start_number,scratched,data_quality) VALUES (?,?,?,?,0,'normalized_verified_subset')").run(entryId, raceId, horseId, starter);
+      db.prepare("INSERT INTO horse_external_ids (horse_id,source_type,external_id) VALUES (?,'official',?)").run(horseId, horseExternal);
+      db.prepare("INSERT INTO drivers (id,canonical_name) VALUES (?,?)").run(driverId, 'Synthetic Driver ' + leg + '-' + starter);
+      db.prepare("INSERT INTO driver_external_ids (driver_id,source_type,external_id) VALUES (?,'official',?)").run(driverId, driverExternal);
+      db.prepare("INSERT INTO trainers (id,canonical_name) VALUES (?,?)").run(trainerId, 'Synthetic Trainer ' + leg + '-' + starter);
+      db.prepare("INSERT INTO trainer_external_ids (trainer_id,source_type,external_id) VALUES (?,'official',?)").run(trainerId, trainerExternal);
+      db.prepare("INSERT INTO race_entries (id,race_id,horse_id,driver_id,trainer_id,start_number,actual_lane,start_tier,handicap_m,actual_start_distance_m,scratched,data_quality) VALUES (?,?,?,?,?,?,?,1,0,2140,0,'normalized_verified_subset')")
+        .run(entryId, raceId, horseId, driverId, trainerId, starter, starter);
+      db.prepare("INSERT INTO normalized_observations (id,entity_type,entity_id,source_record_id,observed_at,fields_json,quality_status) VALUES (?, 'race_entry', ?, 'external-market-source','2099-09-20T10:00:00Z',?,'normalized_verified_subset')")
+        .run('external-entry-obs-' + leg + '-' + starter, entryId, JSON.stringify({
+          startNumber:starter, postPosition:starter, startTier:1, handicapM:0, actualStartDistanceM:2140,
+          scratched:false, scratchSemanticsVerified:true, horseExternalId:horseExternal,
+          driverExternalId:driverExternal, trainerExternalId:trainerExternal
+        }));
       db.prepare("INSERT INTO betting_snapshots (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id) VALUES (?,?,?,?,?,?,?,?)")
         .run('external-bet-' + leg + '-' + starter, ROUND_ID, leg, entryId, '2099-09-20T10:00:00Z', starter === 1 ? 60 : 40, starter, 'external-market-source');
     }
@@ -68,7 +94,7 @@ function validPayload() {
     submission_id: 'external-test-1',
     round_id: ROUND_ID,
     producer: { provider: 'openai', model: 'synthetic-model' },
-    analysis_as_of: '2099-09-20T09:00:00Z',
+    analysis_as_of: '2099-09-20T10:30:00Z',
     round_summary: 'Synthetic blind summary.',
     recommendations: { summary: 'Synthetic final system.' },
     legs,
@@ -81,6 +107,29 @@ function validPayload() {
     }]
   };
 }
+
+async function withProvenance(env, payload, {
+  step1AsOf = '2099-09-20T10:30:00Z',
+  step2AsOf = '2099-09-20T11:00:00Z'
+} = {}) {
+  const pack = await createPreMarketAnalysisPackV3(env, ROUND_ID, { asOf: step1AsOf });
+  const market = await buildMarketInput(env, ROUND_ID, step2AsOf);
+  payload.step1 = {
+    pack_id: pack.manifest.pack_id,
+    facts_fingerprint: pack.manifest.facts_fingerprint,
+    as_of: pack.manifest.as_of,
+    generated_at: pack.manifest.generated_at
+  };
+  payload.step2 = {
+    market_fingerprint: market.market_fingerprint,
+    as_of: market.market_as_of,
+    cutoff: market.market_cutoff,
+    generated_at: market.generated_at
+  };
+  payload.analysis_as_of = pack.manifest.as_of;
+  return payload;
+}
+
 
 test('external workflow exposes independent Step 1, Step 2 and registration contracts', async () => {
   const { env, db } = createTestEnv();
@@ -111,7 +160,7 @@ test('external workflow exposes independent Step 1, Step 2 and registration cont
 test('recorded-system import derives spikes, rows and cost instead of trusting AI arithmetic', async () => {
   const { env, db } = createTestEnv();
   seedRound(db);
-  const payload = validPayload();
+  const payload = await withProvenance(env, validPayload());
 
   const result = await importRecordedSystem(env, payload);
   assert.equal(result.reused, false);
@@ -142,11 +191,11 @@ test('recorded-system import fails closed on not-exactly-three spikes and client
   const { env, db } = createTestEnv();
   seedRound(db);
 
-  let payload = validPayload();
+  let payload = await withProvenance(env, validPayload());
   payload.systems[0].selections = payload.systems[0].selections.filter((row) => !(row.leg_number === 4 && row.race_entry_id.endsWith('-2')));
   await assert.rejects(() => importRecordedSystem(env, payload), /exactly three one-horse spike legs/);
 
-  payload = validPayload();
+  payload = await withProvenance(env, validPayload());
   payload.submission_id = 'external-test-2';
   payload.systems[0].row_count = 32;
   await assert.rejects(() => importRecordedSystem(env, payload), /row_count is calculated by KentaurAI/);
@@ -159,12 +208,13 @@ test('recorded-system import rejects post-deadline analysis and systems above co
   {
     const { env, db } = createTestEnv();
     seedRound(db);
-    const payload = validPayload();
+    const payload = await withProvenance(env, validPayload());
     payload.submission_id = 'external-test-late';
-    payload.analysis_as_of = '2099-09-20T14:01:00Z';
+    payload.step1.as_of = '2099-09-20T14:01:00Z';
+    payload.analysis_as_of = payload.step1.as_of;
     await assert.rejects(
       () => importRecordedSystem(env, payload),
-      /analysis_as_of must not be after the round market deadline/
+      /step1.as_of must not be after the authoritative round deadline/
     );
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM systems WHERE game_round_id=?").get(ROUND_ID).n, 0);
   }
@@ -173,7 +223,7 @@ test('recorded-system import rejects post-deadline analysis and systems above co
     const { env, db } = createTestEnv();
     seedRound(db);
     env.V85_LINE_PRICE_SEK = '10';
-    const payload = validPayload();
+    const payload = await withProvenance(env, validPayload());
     payload.submission_id = 'external-test-over-budget';
     await assert.rejects(
       () => importRecordedSystem(env, payload),
@@ -181,4 +231,54 @@ test('recorded-system import rejects post-deadline analysis and systems above co
     );
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM systems WHERE game_round_id=?").get(ROUND_ID).n, 0);
   }
+});
+
+
+test('recorded-system import persists truthful external lineage and preserves unknown market values as null', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  db.prepare("UPDATE betting_snapshots SET bet_percent=NULL WHERE id='external-bet-1-1'").run();
+  const payload = await withProvenance(env, validPayload());
+  payload.submission_id = 'external-null-market';
+
+  const result = await importRecordedSystem(env, payload);
+  const lineage = db.prepare("SELECT * FROM analysis_external_runs WHERE id=?").get(result.externalRunId);
+  assert.equal(lineage.analysis_blindness, 'declared_unsealed');
+  assert.equal(lineage.import_timing, 'pre_race');
+  assert.equal(lineage.learning_eligibility, 'eligible_by_timing');
+  assert.equal(lineage.step1_pack_id, payload.step1.pack_id);
+  assert.equal(lineage.step1_facts_fingerprint, payload.step1.facts_fingerprint);
+  assert.equal(lineage.step2_market_fingerprint, payload.step2.market_fingerprint);
+
+  const selection = db.prepare("SELECT market_percent FROM system_selections WHERE system_id=? AND leg_number=1 AND race_entry_id='external-entry-1-1'")
+    .get(lineage.main_system_id);
+  assert.equal(selection.market_percent, null);
+  const system = db.prepare("SELECT estimated_market_ownership,value_metric FROM systems WHERE id=?").get(lineage.main_system_id);
+  assert.equal(system.estimated_market_ownership, null);
+  assert.equal(system.value_metric, null);
+});
+
+test('recorded-system import uses first-leg start as deadline fallback', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  db.prepare("UPDATE game_rounds SET bet_stop_at=NULL,scheduled_start_at=NULL WHERE id=?").run(ROUND_ID);
+  const payload = validPayload();
+  payload.step1 = {
+    pack_id: 'irrelevant-after-deadline',
+    facts_fingerprint: 'sha256:' + 'a'.repeat(64),
+    as_of: '2099-09-20T14:01:00Z',
+    generated_at: '2099-09-20T14:01:00Z'
+  };
+  payload.step2 = {
+    market_fingerprint: 'sha256:' + 'b'.repeat(64),
+    as_of: '2099-09-20T14:01:00Z',
+    cutoff: '2099-09-20T14:00:00Z',
+    generated_at: '2099-09-20T14:01:00Z'
+  };
+  payload.analysis_as_of = payload.step1.as_of;
+  await assert.rejects(
+    () => importRecordedSystem(env, payload),
+    /step1.as_of must not be after the authoritative round deadline/
+  );
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM systems WHERE game_round_id=?").get(ROUND_ID).n, 0);
 });
