@@ -94,7 +94,8 @@ test('external evidence import is append-only, idempotent and links one intervie
   const step3Horse=step3.horses.find((row)=>row.horse_id==='horse_1');
   assert.equal(step3Horse.external_statistics.length,4);
   assert.equal(step3Horse.current_round_context.current_balance.label,'Barfota runt om');
-  assert.equal(step3.trainers.find((row)=>row.trainer_id==='trainer_1').interview_history.length,1);
+  assert.equal(step3.trainers.find((row)=>row.trainer_id==='trainer_1').interview_ids.length,1);
+  assert.equal(step3.interviews.length,1);
 });
 
 test('Step 3 current equipment context excludes updates captured after the round deadline', async () => {
@@ -129,8 +130,9 @@ test('Step 3 historical context excludes evidence that became available after th
   const horse=step3.horses.find((row)=>row.horse_id==='horse_1');
   assert.equal(horse.external_statistics.length,4);
   assert.equal(horse.external_statistics.find((row)=>row.context_type==='all_starts').wins,4);
-  assert.equal(horse.interview_history.length,1);
-  assert.doesNotMatch(horse.interview_history[0].interview_text,/efter spelstopp/);
+  assert.equal(horse.interview_ids.length,1);
+  assert.equal(step3.interviews.length,1);
+  assert.doesNotMatch(step3.interviews[0].interview_text,/efter spelstopp/);
 });
 
 test('external evidence import rejects wrong round identities and unknown current equipment context', async () => {
