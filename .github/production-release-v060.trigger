@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=05347f072bfe02964c3d71bfeff04ca8b43ef11b
-release_nonce=2026-09-19-entity-evidence-detail-polish-1
+source_main=a31de63a1c9579e66dd4981663d22dc6733c7541
+release_nonce=2026-09-19-entity-detail-runtime-order-1
