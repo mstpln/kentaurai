@@ -23,8 +23,10 @@ function runtimeScriptFrom(html) {
 test('canonical detail enhancer composes the shared statistics UI, evidence styles and final runtime exactly once', () => {
   const html = enhanced();
   assert.match(html, /kentaurai-entity-detail-statistics-v2-script/);
+  assert.match(html, /kentaurai-entity-detail-canonical-style/);
   assert.match(html, /kentaurai-external-evidence-ui-style/);
   assert.match(html, /kentaurai-entity-detail-ui-runtime/);
+  assert.match(html, /#horseStatsBuildB,#trainerStatsBuildD,#driverStatsBuildC\{display:none!important\}/);
   assert.match(html, /external-evidence-table/);
   assert.match(html, /external-interview-card/);
   assert.doesNotThrow(() => new vm.Script(statsScriptFrom(html)));
