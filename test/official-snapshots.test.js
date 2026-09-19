@@ -217,3 +217,57 @@ test('A4 as-of readers ignore rows from a failed source sync', async () => {
   const snapshots = await getOfficialHorseSnapshotsAsOf(env, ['horse-a'], '2026-09-11T00:00:00Z');
   assert.equal(snapshots.get('horse-a').age, null);
 });
+
+test('A4 horse as-of reader returns every requested ID across the D1 parameter boundary', async () => {
+  const { db, env } = createTestEnv();
+  addSource(db, 'bulk-before', '2026-09-10T10:00:00Z', 'bulk-before');
+  addSource(db, 'bulk-after', '2026-09-12T10:00:00Z', 'bulk-after');
+  db.prepare("INSERT INTO official_snapshot_source_sync (source_record_id,status,horse_profile_count) VALUES ('bulk-before','complete',127)").run();
+  db.prepare("INSERT INTO official_snapshot_source_sync (source_record_id,status,horse_profile_count) VALUES ('bulk-after','complete',1)").run();
+  const ids = [];
+  for (let index = 1; index <= 128; index += 1) {
+    const id = `bulk-horse-${index}`;
+    ids.push(id);
+    db.prepare('INSERT INTO horses (id,canonical_name) VALUES (?,?)').run(id, `Bulk Horse ${index}`);
+    if (index < 128) db.prepare('INSERT INTO horse_profile_snapshots (id,horse_id,observed_at,age_years,source_record_id) VALUES (?,?,?,?,?)')
+      .run(`bulk-profile-${index}`, id, '2026-09-10T10:00:00Z', index, 'bulk-before');
+  }
+  db.prepare("INSERT INTO horse_profile_snapshots (id,horse_id,observed_at,age_years,source_record_id) VALUES ('bulk-profile-future','bulk-horse-1','2026-09-12T10:00:00Z',99,'bulk-after')").run();
+
+  const snapshots = await getOfficialHorseSnapshotsAsOf(env, [...ids, ids[0]], '2026-09-11T00:00:00Z');
+  assert.equal(snapshots.size, 128);
+  assert.deepEqual([...snapshots.keys()], ids);
+  assert.equal(snapshots.get('bulk-horse-1').age.years, 1);
+  assert.equal(snapshots.get('bulk-horse-127').age.years, 127);
+  assert.equal(snapshots.get('bulk-horse-128').age, null);
+  assert.equal([...snapshots.keys()].filter((id) => id === 'bulk-horse-1').length, 1);
+});
+
+test('A4 person as-of reader returns every requested ID across the D1 parameter boundary', async () => {
+  const { db, env } = createTestEnv();
+  addSource(db, 'bulk-person-before', '2026-09-10T10:00:00Z', 'bulk-person-before');
+  addSource(db, 'bulk-person-after', '2026-09-12T10:00:00Z', 'bulk-person-after');
+  db.prepare("INSERT INTO official_snapshot_source_sync (source_record_id,status,person_stat_count) VALUES ('bulk-person-before','complete',127)").run();
+  db.prepare("INSERT INTO official_snapshot_source_sync (source_record_id,status,person_stat_count) VALUES ('bulk-person-after','complete',1)").run();
+  const ids = [];
+  for (let index = 1; index <= 128; index += 1) {
+    const id = `bulk-driver-${index}`;
+    ids.push(id);
+    db.prepare('INSERT INTO drivers (id,canonical_name) VALUES (?,?)').run(id, `Bulk Driver ${index}`);
+    if (index < 128) db.prepare(`INSERT INTO person_stat_snapshots
+      (id,person_type,person_id,observed_at,stat_year,starts,wins,seconds,thirds,source_record_id)
+      VALUES (?,'driver',?,'2026-09-10T10:00:00Z',2026,?,?,0,0,'bulk-person-before')`)
+      .run(`bulk-person-stat-${index}`, id, index, index === 1 ? 1 : 0);
+  }
+  db.prepare(`INSERT INTO person_stat_snapshots
+    (id,person_type,person_id,observed_at,stat_year,starts,wins,seconds,thirds,source_record_id)
+    VALUES ('bulk-person-stat-future','driver','bulk-driver-1','2026-09-12T10:00:00Z',2026,999,999,0,0,'bulk-person-after')`).run();
+
+  const snapshots = await getOfficialPersonAnnualSnapshotsAsOf(env, 'driver', [...ids, ids[0]], '2026-09-11T00:00:00Z');
+  assert.equal(snapshots.size, 128);
+  assert.deepEqual([...snapshots.keys()], ids);
+  assert.equal(snapshots.get('bulk-driver-1').starts, 1);
+  assert.equal(snapshots.get('bulk-driver-127').starts, 127);
+  assert.equal(snapshots.get('bulk-driver-128'), null);
+  assert.equal([...snapshots.keys()].filter((id) => id === 'bulk-driver-1').length, 1);
+});

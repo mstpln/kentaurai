@@ -352,6 +352,14 @@ function requireAsOf(value) {
   return new Date(Date.parse(text)).toISOString();
 }
 
+const SQL_CHUNK_SIZE = 80;
+
+function chunks(values, size = SQL_CHUNK_SIZE) {
+  const out = [];
+  for (let index = 0; index < values.length; index += size) out.push(values.slice(index, index + size));
+  return out;
+}
+
 function placeholders(values) { return values.map(() => '?').join(','); }
 
 function statFromRow(row) {
@@ -377,73 +385,80 @@ export async function getOfficialHorseSnapshotsAsOf(env, horseIds, asOf) {
   if (!ids.length) return new Map();
   const cutoff = requireAsOf(asOf);
   const year = new Date(cutoff).getUTCFullYear();
-  const ph = placeholders(ids);
   const result = new Map(ids.map((id) => [id, {
     age: null, currentRecord: null, officialStatistics: { year: null, life: null },
     coverage: { ownKnownStarts: 0, officialLifeStarts: null, gap: null, ratio: null, status: 'no_official_life' }
   }]));
 
-  const { results: profiles } = await env.DB.prepare(`
-    WITH ranked AS (
-      SELECT hps.*, ROW_NUMBER() OVER (PARTITION BY hps.horse_id ORDER BY julianday(hps.observed_at) DESC, hps.id DESC) AS rn
-      FROM horse_profile_snapshots hps
-      JOIN official_snapshot_source_sync os ON os.source_record_id = hps.source_record_id AND os.status = 'complete'
-      JOIN source_records sr ON sr.id = hps.source_record_id
-      WHERE hps.horse_id IN (${ph})
-        AND julianday(hps.observed_at) <= julianday(?)
-        AND julianday(sr.fetched_at) <= julianday(?)
-    ) SELECT * FROM ranked WHERE rn = 1
-  `).bind(...ids, cutoff, cutoff).all();
-  for (const row of profiles) result.get(row.horse_id).age = {
-    years: row.age_years == null ? null : Number(row.age_years), observedAt: row.observed_at, sourceRecordId: row.source_record_id
-  };
-
-  const scope = `year:${year}`;
-  const { results: stats } = await env.DB.prepare(`
-    WITH ranked AS (
-      SELECT hss.*, ROW_NUMBER() OVER (PARTITION BY hss.horse_id, hss.snapshot_scope ORDER BY julianday(hss.observed_at) DESC, hss.id DESC) AS rn
-      FROM horse_stat_snapshots hss
-      JOIN official_snapshot_source_sync os ON os.source_record_id = hss.source_record_id AND os.status = 'complete'
-      JOIN source_records sr ON sr.id = hss.source_record_id
-      WHERE hss.horse_id IN (${ph}) AND hss.snapshot_scope IN ('life', ?)
-        AND julianday(hss.observed_at) <= julianday(?)
-        AND julianday(sr.fetched_at) <= julianday(?)
-    ) SELECT * FROM ranked WHERE rn = 1
-  `).bind(...ids, scope, cutoff, cutoff).all();
-  for (const row of stats) {
-    if (row.snapshot_scope === 'life') result.get(row.horse_id).officialStatistics.life = statFromRow(row);
-    else result.get(row.horse_id).officialStatistics.year = statFromRow(row);
+  for (const group of chunks(ids)) {
+    const { results: profiles } = await env.DB.prepare(`
+      WITH ranked AS (
+        SELECT hps.*, ROW_NUMBER() OVER (PARTITION BY hps.horse_id ORDER BY julianday(hps.observed_at) DESC, hps.id DESC) AS rn
+        FROM horse_profile_snapshots hps
+        JOIN official_snapshot_source_sync os ON os.source_record_id = hps.source_record_id AND os.status = 'complete'
+        JOIN source_records sr ON sr.id = hps.source_record_id
+        WHERE hps.horse_id IN (${placeholders(group)})
+          AND julianday(hps.observed_at) <= julianday(?)
+          AND julianday(sr.fetched_at) <= julianday(?)
+      ) SELECT * FROM ranked WHERE rn = 1
+    `).bind(...group, cutoff, cutoff).all();
+    for (const row of profiles) result.get(row.horse_id).age = {
+      years: row.age_years == null ? null : Number(row.age_years), observedAt: row.observed_at, sourceRecordId: row.source_record_id
+    };
   }
 
-  const { results: records } = await env.DB.prepare(`
-    WITH ranked AS (
-      SELECT hrs.*, ROW_NUMBER() OVER (PARTITION BY hrs.horse_id ORDER BY julianday(hrs.observed_at) DESC, hrs.id DESC) AS rn
-      FROM horse_record_snapshots hrs
-      JOIN official_snapshot_source_sync os ON os.source_record_id = hrs.source_record_id AND os.status = 'complete'
-      JOIN source_records sr ON sr.id = hrs.source_record_id
-      WHERE hrs.horse_id IN (${ph}) AND hrs.record_scope = 'current'
-        AND julianday(hrs.observed_at) <= julianday(?)
-        AND julianday(sr.fetched_at) <= julianday(?)
-    ) SELECT * FROM ranked WHERE rn = 1
-  `).bind(...ids, cutoff, cutoff).all();
-  for (const row of records) result.get(row.horse_id).currentRecord = {
-    code: row.code || null, startMethod: row.start_method || null, distanceGroup: row.distance_group || null,
-    time: { minutes: row.time_minutes == null ? null : Number(row.time_minutes), seconds: row.time_seconds == null ? null : Number(row.time_seconds), tenths: row.time_tenths == null ? null : Number(row.time_tenths) },
-    place: row.place == null ? null : Number(row.place), observedAt: row.observed_at, sourceRecordId: row.source_record_id
-  };
+  const scope = `year:${year}`;
+  for (const group of chunks(ids)) {
+    const { results: stats } = await env.DB.prepare(`
+      WITH ranked AS (
+        SELECT hss.*, ROW_NUMBER() OVER (PARTITION BY hss.horse_id, hss.snapshot_scope ORDER BY julianday(hss.observed_at) DESC, hss.id DESC) AS rn
+        FROM horse_stat_snapshots hss
+        JOIN official_snapshot_source_sync os ON os.source_record_id = hss.source_record_id AND os.status = 'complete'
+        JOIN source_records sr ON sr.id = hss.source_record_id
+        WHERE hss.horse_id IN (${placeholders(group)}) AND hss.snapshot_scope IN ('life', ?)
+          AND julianday(hss.observed_at) <= julianday(?)
+          AND julianday(sr.fetched_at) <= julianday(?)
+      ) SELECT * FROM ranked WHERE rn = 1
+    `).bind(...group, scope, cutoff, cutoff).all();
+    for (const row of stats) {
+      if (row.snapshot_scope === 'life') result.get(row.horse_id).officialStatistics.life = statFromRow(row);
+      else result.get(row.horse_id).officialStatistics.year = statFromRow(row);
+    }
+  }
 
-  const { results: own } = await env.DB.prepare(`
-    SELECT re.horse_id, COUNT(*) AS n
-    FROM race_entries re
-    JOIN race_results rr ON rr.race_entry_id = re.id
-    JOIN source_records sr ON sr.id = rr.source_record_id
-    WHERE re.horse_id IN (${ph})
-      AND re.scratched = 0
-      AND rr.result_status = 'official'
-      AND julianday(sr.fetched_at) <= julianday(?)
-    GROUP BY re.horse_id
-  `).bind(...ids, cutoff).all();
-  for (const row of own) result.get(row.horse_id).coverage.ownKnownStarts = Number(row.n);
+  for (const group of chunks(ids)) {
+    const { results: records } = await env.DB.prepare(`
+      WITH ranked AS (
+        SELECT hrs.*, ROW_NUMBER() OVER (PARTITION BY hrs.horse_id ORDER BY julianday(hrs.observed_at) DESC, hrs.id DESC) AS rn
+        FROM horse_record_snapshots hrs
+        JOIN official_snapshot_source_sync os ON os.source_record_id = hrs.source_record_id AND os.status = 'complete'
+        JOIN source_records sr ON sr.id = hrs.source_record_id
+        WHERE hrs.horse_id IN (${placeholders(group)}) AND hrs.record_scope = 'current'
+          AND julianday(hrs.observed_at) <= julianday(?)
+          AND julianday(sr.fetched_at) <= julianday(?)
+      ) SELECT * FROM ranked WHERE rn = 1
+    `).bind(...group, cutoff, cutoff).all();
+    for (const row of records) result.get(row.horse_id).currentRecord = {
+      code: row.code || null, startMethod: row.start_method || null, distanceGroup: row.distance_group || null,
+      time: { minutes: row.time_minutes == null ? null : Number(row.time_minutes), seconds: row.time_seconds == null ? null : Number(row.time_seconds), tenths: row.time_tenths == null ? null : Number(row.time_tenths) },
+      place: row.place == null ? null : Number(row.place), observedAt: row.observed_at, sourceRecordId: row.source_record_id
+    };
+  }
+
+  for (const group of chunks(ids)) {
+    const { results: own } = await env.DB.prepare(`
+      SELECT re.horse_id, COUNT(*) AS n
+      FROM race_entries re
+      JOIN race_results rr ON rr.race_entry_id = re.id
+      JOIN source_records sr ON sr.id = rr.source_record_id
+      WHERE re.horse_id IN (${placeholders(group)})
+        AND re.scratched = 0
+        AND rr.result_status = 'official'
+        AND julianday(sr.fetched_at) <= julianday(?)
+      GROUP BY re.horse_id
+    `).bind(...group, cutoff).all();
+    for (const row of own) result.get(row.horse_id).coverage.ownKnownStarts = Number(row.n);
+  }
   for (const value of result.values()) {
     const officialStarts = value.officialStatistics.life?.starts ?? null;
     value.coverage.officialLifeStarts = officialStarts;
@@ -463,23 +478,25 @@ export async function getOfficialPersonAnnualSnapshotsAsOf(env, personType, pers
   if (!ids.length) return new Map();
   const cutoff = requireAsOf(asOf);
   const year = statYear == null ? new Date(cutoff).getUTCFullYear() : yearNumber(statYear, 'statYear');
-  const { results } = await env.DB.prepare(`
-    WITH ranked AS (
-      SELECT pss.*, ROW_NUMBER() OVER (PARTITION BY pss.person_id ORDER BY julianday(pss.observed_at) DESC, pss.id DESC) AS rn
-      FROM person_stat_snapshots pss
-      JOIN official_snapshot_source_sync os ON os.source_record_id = pss.source_record_id AND os.status = 'complete'
-      JOIN source_records sr ON sr.id = pss.source_record_id
-      WHERE pss.person_type = ? AND pss.person_id IN (${placeholders(ids)}) AND pss.stat_year = ?
-        AND julianday(pss.observed_at) <= julianday(?)
-        AND julianday(sr.fetched_at) <= julianday(?)
-    ) SELECT * FROM ranked WHERE rn = 1
-  `).bind(personType, ...ids, year, cutoff, cutoff).all();
   const out = new Map(ids.map((id) => [id, null]));
-  for (const row of results) out.set(row.person_id, {
-    starts: row.starts == null ? null : Number(row.starts), earningsRaw: row.earnings_raw == null ? null : Number(row.earnings_raw),
-    wins: row.wins == null ? null : Number(row.wins), seconds: row.seconds == null ? null : Number(row.seconds),
-    thirds: row.thirds == null ? null : Number(row.thirds), winPercentageRaw: row.win_percentage_raw == null ? null : Number(row.win_percentage_raw),
-    statYear: Number(row.stat_year), observedAt: row.observed_at, sourceRecordId: row.source_record_id
-  });
+  for (const group of chunks(ids)) {
+    const { results } = await env.DB.prepare(`
+      WITH ranked AS (
+        SELECT pss.*, ROW_NUMBER() OVER (PARTITION BY pss.person_id ORDER BY julianday(pss.observed_at) DESC, pss.id DESC) AS rn
+        FROM person_stat_snapshots pss
+        JOIN official_snapshot_source_sync os ON os.source_record_id = pss.source_record_id AND os.status = 'complete'
+        JOIN source_records sr ON sr.id = pss.source_record_id
+        WHERE pss.person_type = ? AND pss.person_id IN (${placeholders(group)}) AND pss.stat_year = ?
+          AND julianday(pss.observed_at) <= julianday(?)
+          AND julianday(sr.fetched_at) <= julianday(?)
+      ) SELECT * FROM ranked WHERE rn = 1
+    `).bind(personType, ...group, year, cutoff, cutoff).all();
+    for (const row of results) out.set(row.person_id, {
+      starts: row.starts == null ? null : Number(row.starts), earningsRaw: row.earnings_raw == null ? null : Number(row.earnings_raw),
+      wins: row.wins == null ? null : Number(row.wins), seconds: row.seconds == null ? null : Number(row.seconds),
+      thirds: row.thirds == null ? null : Number(row.thirds), winPercentageRaw: row.win_percentage_raw == null ? null : Number(row.win_percentage_raw),
+      statYear: Number(row.stat_year), observedAt: row.observed_at, sourceRecordId: row.source_record_id
+    });
+  }
   return out;
 }
