@@ -187,3 +187,53 @@ test('D1 Step 1 keeps trainer/driver interview opinion but excludes generic edit
   assert.equal(signals.some((signal) => signal.signal_type === 'tactics' && signal.value === 'offensive'), true);
   assert.equal(signals.some((signal) => signal.signal_type === 'form' && signal.value === 'positive'), false);
 });
+
+
+function seedWideStep1Round(db) {
+  db.prepare(`INSERT INTO tracks (id,canonical_name,country_code) VALUES ('wide_track','Wide Synthetic Track','SE')`).run();
+  db.prepare(`INSERT INTO game_rounds (id,game_type,round_date,scheduled_start_at,bet_stop_at,status) VALUES ('wide_round','V85','2099-02-01','2099-02-01T13:00:00Z','2099-02-01T12:55:00Z','upcoming')`).run();
+  db.prepare(`INSERT INTO source_records (id,source_type,external_id,fetched_at,content_hash,quality_status) VALUES ('wide_official','official_provider','game:wide_round','2099-02-01T11:00:00Z','wide-hash','normalized_verified_subset')`).run();
+  db.prepare(`INSERT INTO source_records (id,source_type,external_id,fetched_at,content_hash,quality_status) VALUES ('wide_editorial','editorial_manual','wide-editorial','2099-02-01T11:05:00Z','wide-editorial-hash','manual_structured')`).run();
+
+  const counts = [12,12,12,12,12,11,11,11];
+  let serial = 0;
+  for (let leg = 1; leg <= 8; leg += 1) {
+    const race = `wide_race_${leg}`;
+    db.prepare(`INSERT INTO races (id,track_id,race_date,race_number,scheduled_start_at,distance_m,start_method,status) VALUES (?,'wide_track','2099-02-01',?, ?,2140,'auto','upcoming')`)
+      .run(race, leg, `2099-02-01T13:${String(leg).padStart(2,'0')}:00Z`);
+    db.prepare(`INSERT INTO game_legs (game_round_id,leg_number,race_id) VALUES ('wide_round',?,?)`).run(leg,race);
+    const raceFields = JSON.stringify({ date:'2099-02-01', raceNumber:leg, distanceM:2140, startMethod:'auto', scheduledStartAt:`2099-02-01T13:${String(leg).padStart(2,'0')}:00Z`, status:'upcoming' });
+    db.prepare(`INSERT INTO normalized_observations (id,entity_type,entity_id,source_record_id,observed_at,fields_json,quality_status) VALUES (?, 'race', ?, 'wide_official','2099-02-01T11:00:00Z',?,'normalized_verified_subset')`)
+      .run(`wide_obs_race_${leg}`,race,raceFields);
+
+    for (let start = 1; start <= counts[leg - 1]; start += 1) {
+      serial += 1;
+      const horse = `wide_horse_${serial}`;
+      const entry = `wide_entry_${serial}`;
+      db.prepare(`INSERT INTO horses (id,canonical_name) VALUES (?,?)`).run(horse,`Wide Horse ${serial}`);
+      db.prepare(`INSERT INTO race_entries (id,race_id,horse_id,start_number,actual_lane,start_tier,handicap_m,actual_start_distance_m,scratched) VALUES (?,?,?,?,?,1,0,2140,0)`)
+        .run(entry,race,horse,start,start);
+      const entryFields = JSON.stringify({ startNumber:start, postPosition:start, startTier:1, handicapM:0, actualStartDistanceM:2140, scratched:false, scratchSemanticsVerified:true });
+      db.prepare(`INSERT INTO normalized_observations (id,entity_type,entity_id,source_record_id,observed_at,fields_json,quality_status) VALUES (?, 'race_entry', ?, 'wide_official','2099-02-01T11:00:00Z',?,'normalized_verified_subset')`)
+        .run(`wide_obs_entry_${serial}`,entry,entryFields);
+      db.prepare(`INSERT INTO editorial_items (id,race_entry_id,horse_id,speaker_name,speaker_role,published_at,source_name,rights_status,source_record_id) VALUES (?,?,?,?, 'trainer','2099-02-01T11:02:00Z','Synthetic','structured_only','wide_editorial')`)
+        .run(`wide_editorial_item_${serial}`,entry,horse,`Trainer ${serial}`);
+      db.prepare(`INSERT INTO editorial_signals (id,editorial_item_id,signal_type,value_text,polarity,fact_or_opinion,confidence) VALUES (?,?, 'tactics','normal','neutral','fact',0.7)`)
+        .run(`wide_editorial_signal_${serial}`,`wide_editorial_item_${serial}`);
+    }
+  }
+  assert.equal(serial,93);
+}
+
+test('D1 Step 1 handles a full 93-entry round without exceeding the production bind-parameter cap', async () => {
+  const { env, db } = createTestEnv();
+  seedWideStep1Round(db);
+
+  const pack = await createPreMarketAnalysisPackV3(env,'wide_round',{asOf:'2099-02-01T11:30:00Z'});
+  const legFiles = pack.files.filter((file) => /^\d{2}_leg_\d/.test(file.name));
+  const entries = legFiles.flatMap((file) => file.payload.entries || []);
+
+  assert.equal(entries.length,93);
+  assert.equal(new Set(entries.map((entry) => entry.race_entry_id)).size,93);
+  assert.equal(entries.filter((entry) => entry.current_signals?.some((signal) => signal.signal_type === 'tactics')).length,93);
+});
