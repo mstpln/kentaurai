@@ -26,6 +26,17 @@ Updated: 2026-09-19
 - F1 and F2 understand the external lineage directly; they do not fabricate sealed Step 1/decision/optimizer parents. If an external run exists for a round, stale sealed-v3 system lineage is not selected as the current F1/F2 target.
 - Exact-head CI passed with 809/809 tests before merge. Production release #64 then reran full QA, verified migration 0027 and the external schema, deployed the Worker and passed health/login/private-route verification.
 
+## External evidence workflow candidate
+- Feature branch: `feat/external-evidence-workflow`; not merged or deployed.
+- Proposed Settings flow is Step 1 blind analysis -> Step 2 market analysis only -> Step 3 interviews/external horse statistics -> Step 4 user/AI system dialogue -> Step 5 separate external-evidence registration -> Step 6 separate system registration.
+- Step 1 analysis-pack generation now excludes editorial/interview signals entirely.
+- External horse statistics use append-only dated snapshots with canonical contexts for track/balance/wagon where known. Historical values are never overwritten.
+- Interview records are linked to horse plus trainer/stable context with actual speaker/role and structured signals/summary. Drivers are intentionally outside this workflow.
+- Step 3 and Step 5 use private round-scoped context exports. Private PDFs/screenshots remain manual conversation inputs and are transformed by the external AI into validated structured JSON before import.
+- Horse detail gains `Extern statistik` and `Intervjuer`; trainer detail gains `Intervjuer`; driver detail is unchanged.
+- Migration candidate: `0028_external_evidence_v1.sql`.
+- This section describes an in-review candidate only. Current production remains schema 0027 and the production workflow above until a separate merge/release is explicitly authorized.
+
 ## App performance live
 - `worker-v077` adds only the private-app HTML performance layer; racing/analysis semantics and auth boundaries are unchanged.
 - The browser uses short-lived in-memory GET caching and in-flight request de-duplication only; no private API payloads are persisted to localStorage.
@@ -65,10 +76,10 @@ Updated: 2026-09-19
 - Raw facts, deterministic features and AI judgments remain separate.
 - Unknown facts remain null/unknown.
 - Current market cannot enter Step 1.
-- Step 1 external analysis remains a declared-unsealed blind baseline; Step 2 market data is introduced only afterward in the same external conversation.
+- Step 1 external analysis remains a declared-unsealed blind baseline. In the candidate flow Step 2 is market-only and Step 3 is the first point where interview/external-stat evidence can enter.
 - External AI may choose final system selections; code owns canonical IDs, exactly-three-spike validation, row count, line-price cost and null-safe market persistence.
 - Post-deadline external registrations are diagnostics/bookkeeping only until manually reviewed for learning.
-- External editorial/ranking signals are read last and cannot rewrite Step 1.
+- External editorial/interview evidence is excluded from Step 1; in the candidate flow it enters at Step 3 and market disagreement alone cannot rewrite the blind baseline.
 - Learning requires repeated evidence; one result never changes weights automatically.
 - Real provider payloads, real reference exports, private editorial provenance and secrets never enter public GitHub.
 
