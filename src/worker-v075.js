@@ -119,7 +119,12 @@ export default {
           generatedAt: data.generated_at,
           artifact: {
             market_fingerprint: data.market_fingerprint,
-            market_cutoff: data.market_cutoff
+            market_cutoff: data.market_cutoff,
+            active_legs: (data.entry_map || []).map((leg) => ({
+              leg_number: leg.leg_number,
+              race_id: leg.race_id,
+              entry_ids: (leg.entries || []).filter((entry) => !entry.scratched).map((entry) => entry.race_entry_id)
+            }))
           }
         });
         const safe = roundId.replace(/[^a-zA-Z0-9._-]+/g, '_');
