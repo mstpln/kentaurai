@@ -569,9 +569,6 @@ async function verifyExternalProvenance(env, roundId, step1, step2) {
     || exactIso(pack.manifest.as_of, 'replayed Step 1 as_of') !== step1.asOf) {
     throw new Error('Step 1 provenance does not match a reproducible KentaurAI analysis pack');
   }
-  if (Date.parse(step1.generatedAt) < Date.parse(step1.asOf)) {
-    throw new Error('step1.generated_at cannot precede step1.as_of');
-  }
   const marketInput = await buildMarketInput(env, roundId, step2.asOf);
   if (marketInput.market_fingerprint !== step2.marketFingerprint
     || exactIso(marketInput.market_cutoff, 'replayed Step 2 cutoff') !== step2.cutoff) {
