@@ -7,10 +7,10 @@ Updated: 2026-09-19
 - Worker: `kentaurai-api`.
 - D1: `kentaurai`.
 - R2: `kentaurai-raw`.
-- External-analysis application source merged at `33a50de033656021b73639643ba9c8b35e6523a5`; successful controlled release/main head is `0831fbce90ffd6292f56a3c92ad6a62593b2e111`.
+- Current deployed main head before the entity-detail consolidation branch is `743445d04135c991ffdbcdd014e24b2bb61352c1`.
 - Worker entrypoint is `src/worker-v077.js` with `ANALYSIS_WORKFLOW_MODE=v3`; the default mode serves the external-AI workflow while historical sealed-v3 artifacts remain read-compatible.
-- Production release #64 completed successfully. Full QA, Cloudflare validation, migration/schema/index verification, Worker deploy, `/health`, `/app/login` and private external-analysis route protection all passed.
-- Production schema is current through migration `0027_external_analysis_lineage_v1.sql`.
+- The latest production release completed successfully with full QA, Cloudflare validation, migration/schema/index verification, Worker deploy, `/health`, `/app/login` and private analysis/evidence route protection.
+- Production schema is current through migration `0028_external_evidence_v1.sql`.
 - External Step 1/Step 2 analysis exchange, later system registration, audited external lineage, external-aware F1 replay/F2 post-race diagnostics and the private-app performance layer are production-live.
 - Historical official/X-Labs jobs keep their durable cursors. The external-analysis release did not reset, recreate or resume stopped historical work.
 
@@ -26,16 +26,23 @@ Updated: 2026-09-19
 - F1 and F2 understand the external lineage directly; they do not fabricate sealed Step 1/decision/optimizer parents. If an external run exists for a round, stale sealed-v3 system lineage is not selected as the current F1/F2 target.
 - Exact-head CI passed with 809/809 tests before merge. Production release #64 then reran full QA, verified migration 0027 and the external schema, deployed the Worker and passed health/login/private-route verification.
 
-## External evidence workflow candidate
-- Feature branch: `feat/external-evidence-workflow`; not merged or deployed.
-- Proposed Settings flow is Step 1 blind analysis -> Step 2 market analysis only -> Step 3 interviews/external horse statistics -> Step 4 user/AI system dialogue -> Step 5 separate external-evidence registration -> Step 6 separate system registration.
-- Step 1 analysis-pack generation now excludes editorial/interview signals entirely.
+## External evidence workflow production live
+- The Settings flow is Step 1 blind analysis -> Step 2 market analysis only -> Step 3 interviews/external horse statistics -> Step 4 user/AI system dialogue -> Step 5 separate external-evidence registration -> Step 6 separate system registration.
+- Step 1 excludes editorial/interview signals entirely.
 - External horse statistics use append-only dated snapshots with canonical contexts for track/balance/wagon where known. Historical values are never overwritten.
-- Interview records are linked to horse plus trainer/stable context with actual speaker/role and structured signals/summary. Drivers are intentionally outside this workflow.
+- Interview records link to horse plus trainer/stable context with actual speaker/role and structured signals/summary. Drivers remain intentionally outside this workflow.
 - Step 3 and Step 5 use private round-scoped context exports. Private PDFs/screenshots remain manual conversation inputs and are transformed by the external AI into validated structured JSON before import.
-- Horse detail gains `Extern statistik` and `Intervjuer`; trainer detail gains `Intervjuer`; driver detail is unchanged.
-- Migration candidate: `0028_external_evidence_v1.sql`.
-- This section describes an in-review candidate only. Current production remains schema 0027 and the production workflow above until a separate merge/release is explicitly authorized.
+- Migration `0028_external_evidence_v1.sql` is deployed.
+- Horse detail supports `Extern statistik` and `Intervjuer`; trainer detail supports `Intervjuer`; driver detail remains unchanged.
+
+## Entity detail UI consolidation candidate
+- Branch: `refactor/consolidate-entity-detail-ui`.
+- Goal: one final entity-detail composition layer at the production entrypoint instead of separate statistics, evidence and final-runtime overlays.
+- The consolidated `src/entity-detail-ui.js` owns shared scorecard composition, external-evidence presentation and final detail runtime behavior.
+- `worker-v077` applies the canonical entity-detail UI after the performance layer, making its runtime order explicit.
+- Superseded source files `entity-detail-statistics-ui.js`, `app-external-evidence-ui.js` and `entity-detail-runtime-final.js` are removed on the candidate branch.
+- Trainer/driver legacy detail wrappers are retired while list/ranking behavior remains. The retained horse adapter is temporarily kept only because it supplies start-point/pattern material consumed by the canonical scorecard.
+- Production-entrypoint regression tests now run through `worker-v077` and verify final script order, evidence tabs and canonical detail markers.
 
 ## App performance live
 - `worker-v077` adds only the private-app HTML performance layer; racing/analysis semantics and auth boundaries are unchanged.
