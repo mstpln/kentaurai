@@ -1,5 +1,6 @@
 import worker from './worker-v076.js';
 import { enhanceAppPerformanceHtml } from './app-performance-v1.js';
+import { enhanceEntityDetailRuntimeFinalHtml } from './entity-detail-runtime-final.js';
 
 async function enhanceApp(request, response) {
   if (request.method !== 'GET') return response;
@@ -9,7 +10,8 @@ async function enhanceApp(request, response) {
   if (!type.includes('text/html')) return response;
   const headers = new Headers(response.headers);
   headers.delete('content-length');
-  return new Response(enhanceAppPerformanceHtml(await response.text()), {
+  const html = enhanceAppPerformanceHtml(await response.text());
+  return new Response(enhanceEntityDetailRuntimeFinalHtml(html), {
     status: response.status,
     statusText: response.statusText,
     headers
