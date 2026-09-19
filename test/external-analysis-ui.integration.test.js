@@ -83,3 +83,22 @@ test('authenticated external workflow serves round-scoped analysis and registrat
   data = await response.json();
   assert.match(data.prompt,/kentaurai-recorded-system-v1/);
 });
+
+
+test('authenticated system import requires JSON content type before parsing', async () => {
+  const { env, db } = createTestEnv();
+  env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
+  seedRound(db);
+  const session = await cookie(env);
+  const response = await worker.fetch(new Request(
+    'https://example.test/app/api/settings/system-import?round_id=ui-round',
+    {
+      method:'POST',
+      headers:{ cookie:session, 'content-type':'text/plain' },
+      body:'{}'
+    }
+  ),env,{});
+  assert.equal(response.status,400);
+  const data = await response.json();
+  assert.match(data.message,/content-type must be application\/json/);
+});
