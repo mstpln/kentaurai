@@ -123,8 +123,8 @@ export async function buildStep3Context(env, roundId) {
   const byHorse=new Map(horseIds.map((id)=>[id,[]]));
   const byTrainer=new Map(trainerIds.map((id)=>[id,[]]));
   for(const item of interviews){
-    if(byHorse.has(item.horse_id)&&byHorse.get(item.horse_id).length<12) byHorse.get(item.horse_id).push(item);
-    if(item.trainer_id&&byTrainer.has(item.trainer_id)&&byTrainer.get(item.trainer_id).length<20) byTrainer.get(item.trainer_id).push(item);
+    if(byHorse.has(item.horse_id)&&byHorse.get(item.horse_id).length<12) byHorse.get(item.horse_id).push(item.id);
+    if(item.trainer_id&&byTrainer.has(item.trainer_id)&&byTrainer.get(item.trainer_id).length<20) byTrainer.get(item.trainer_id).push(item.id);
   }
   const horseNames=new Map(active.map((row)=>[row.horse_id,row.horse_name]));
   const trainerNames=new Map(active.filter((row)=>row.trainer_id).map((row)=>[row.trainer_id,row.trainer_name]));
@@ -137,15 +137,16 @@ export async function buildStep3Context(env, roundId) {
     round:identity.round,
     context_as_of:contextAsOf,
     purpose:'historical_external_context_for_step3_only',
+    interviews,
     horses:horseIds.map((id)=>({
       horse_id:id,horse_name:horseNames.get(id)||null,
       current_round_context:currentContextByHorse.get(id)||null,
       external_statistics:stats.get(id)||[],
-      interview_history:byHorse.get(id)||[]
+      interview_ids:byHorse.get(id)||[]
     })),
     trainers:trainerIds.map((id)=>({
       trainer_id:id,trainer_name:trainerNames.get(id)||null,
-      interview_history:byTrainer.get(id)||[]
+      interview_ids:byTrainer.get(id)||[]
     }))
   };
 }
