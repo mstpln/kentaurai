@@ -7,7 +7,7 @@ Updated: 2026-09-19
 - Worker: `kentaurai-api`.
 - D1: `kentaurai`.
 - R2: `kentaurai-raw`.
-- Current deployed main head before the entity-detail consolidation branch is `743445d04135c991ffdbcdd014e24b2bb61352c1`.
+- Current deployed main head before PR #202 is `650d882ad7bf9e03038ff43fee6671662332be12`.
 - Worker entrypoint is `src/worker-v077.js` with `ANALYSIS_WORKFLOW_MODE=v3`; the default mode serves the external-AI workflow while historical sealed-v3 artifacts remain read-compatible.
 - The latest production release completed successfully with full QA, Cloudflare validation, migration/schema/index verification, Worker deploy, `/health`, `/app/login` and private analysis/evidence route protection.
 - Production schema is current through migration `0028_external_evidence_v1.sql`.
@@ -35,14 +35,15 @@ Updated: 2026-09-19
 - Migration `0028_external_evidence_v1.sql` is deployed.
 - Horse detail supports `Extern statistik` and `Intervjuer`; trainer detail supports `Intervjuer`; driver detail remains unchanged.
 
-## Entity detail UI consolidation candidate
-- Branch: `refactor/consolidate-entity-detail-ui`.
-- Goal: one final entity-detail composition layer at the production entrypoint instead of separate statistics, evidence and final-runtime overlays.
-- The consolidated `src/entity-detail-ui.js` owns shared scorecard composition, external-evidence presentation and final detail runtime behavior.
-- `worker-v077` applies the canonical entity-detail UI after the performance layer, making its runtime order explicit.
-- Superseded source files `entity-detail-statistics-ui.js`, `app-external-evidence-ui.js` and `entity-detail-runtime-final.js` are removed on the candidate branch.
-- Trainer/driver legacy detail wrappers are retired while list/ranking behavior remains. The retained horse adapter is temporarily kept only because it supplies start-point/pattern material consumed by the canonical scorecard.
-- Production-entrypoint regression tests now run through `worker-v077` and verify final script order, evidence tabs and canonical detail markers.
+## Entity detail UI core-ownership candidate
+- Branch: `fix/entity-detail-core-runtime` / PR #202.
+- Goal: make `src/app-page-final.js` the single owner of entity-detail tabs and page rendering instead of relying on late runtime wrappers.
+- The core renderer owns the canonical horse/trainer/driver tab sets, statistics shell and external-evidence routes. `src/entity-detail-ui.js` is presentation-only: it supplies the shared scorecard runtime and evidence styles but no longer mutates `detailTabs` or `renderDetail`.
+- Legacy horse/trainer/driver detail append helpers and the horse-pattern `renderDetail` wrapper are retired; list/ranking behavior remains.
+- Horse Startpoäng/X-Labs sections and trainer home-track/other-track specialty statistics remain part of the canonical scorecard.
+- Production-entrypoint regression tests execute the composed `worker-v077` scripts in order, record visible writes, verify no late tab reversion or legacy detail hosts, and check that no legacy async detail writer remains.
+- `/health/entity-detail-ui` performs a safe structural probe of the actual authenticated app payload inside the Worker and returns only boolean checks. The production release workflow verifies this probe after deployment without exposing `APP_PASSWORD` or private app HTML.
+- This candidate is not production-accepted until PR #202 is explicitly authorized, merged, released and then verified on the stable production app.
 
 ## App performance live
 - `worker-v077` adds only the private-app HTML performance layer; racing/analysis semantics and auth boundaries are unchanged.
