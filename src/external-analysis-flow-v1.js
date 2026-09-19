@@ -1,12 +1,14 @@
 import { stableId } from './ids.js';
 import { canonicalOptimizerPolicyForRound } from './analysis-optimizer-policy-config.js';
 import { loadExternalRankingsV3, loadMarketDeadlineV3, loadVerifiedMarketRowsV3 } from './analysis-market-pack-v3.js';
+import { createPreMarketAnalysisPackV3 } from './analysis-pack-v3.js';
 
 export const EXTERNAL_ANALYSIS_FLOW_VERSION = 'external-analysis-v1';
 export const MARKET_INPUT_CONTRACT = 'kentaurai-market-input-v1';
 export const REGISTRATION_CONTEXT_CONTRACT = 'kentaurai-system-import-context-v1';
 export const RECORDED_SYSTEM_CONTRACT = 'kentaurai-recorded-system-v1';
 export const EXTERNAL_ANALYSIS_PROMPT_VERSION = 'external-analysis-prompt-v1';
+export const EXTERNAL_ANALYSIS_RUN_CONTRACT = 'kentaurai-external-analysis-run-v1';
 
 const MAX_TEXT = 12000;
 const MAX_JSON_TEXT = 30000;
@@ -31,6 +33,12 @@ function providerKey(value) {
   if (provider === 'openai' || provider === 'chatgpt') return 'openai';
   if (provider === 'anthropic' || provider === 'claude') return 'anthropic';
   throw new Error('provider must be openai or anthropic');
+}
+
+function providerModel(value) {
+  const model = requiredText(value || 'unknown', 'producer.model', 200);
+  if (/[\u0000-\u001f\u007f]/.test(model)) throw new Error('producer.model contains control characters');
+  return model;
 }
 
 function jsonNumber(value, field, { min = -Infinity, max = Infinity, nullable = false } = {}) {
@@ -216,15 +224,22 @@ export async function buildMarketInput(env, roundId, asOf = null) {
   };
 
   const policy = normalizePolicy(await canonicalOptimizerPolicyForRound(env, roundId));
-  return {
+  const fingerprintInput = {
     contract_version: MARKET_INPUT_CONTRACT,
-    generated_at: new Date().toISOString(),
     round: identity.round,
     system_policy: policy,
     market,
     market_history: history,
     external_rankings: externalRankings,
     entry_map: identity.legs
+  };
+  const marketFingerprint = await sha256(fingerprintInput);
+  return {
+    ...fingerprintInput,
+    generated_at: new Date().toISOString(),
+    market_fingerprint: marketFingerprint,
+    market_as_of: deadline.requested_as_of,
+    market_cutoff: deadline.cutoff
   };
 }
 
@@ -341,7 +356,8 @@ export function getRegistrationPrompt(provider = 'openai') {
     '  "submission_id": "nytt-stabilt-id",',
     '  "round_id": "<exakt från importunderlaget>",',
     '  "producer": {"provider": "' + key + '", "model": "<verklig modell eller unknown>"},',
-    '  "analysis_as_of": "<manifest.as_of från Steg 1-filen>",',
+    '  "step1": {"pack_id":"<manifest.pack_id>","facts_fingerprint":"<manifest.facts_fingerprint>","as_of":"<manifest.as_of>"},',
+    '  "step2": {"market_fingerprint":"<market_fingerprint från Steg 2-filen>","as_of":"<market_as_of>","cutoff":"<market_cutoff>"},',
     '  "round_summary": "<Steg 1-sammanfattning>",',
     '  "recommendations": "<kort Steg 2/systemsammanfattning>",',
     '  "legs": [',
@@ -357,6 +373,8 @@ export function getRegistrationPrompt(provider = 'openai') {
     '}',
     '',
     'REGLER:',
+    '- Kopiera step1.pack_id, step1.facts_fingerprint och step1.as_of exakt från Steg 1-filens manifest.',
+    '- Kopiera step2.market_fingerprint, step2.as_of och step2.cutoff exakt från Steg 2-filen. Hitta inte på dessa värden.',
     '- legs ska innehålla exakt 8 avdelningar och Steg 1-bedömningen ska återges utan marknadsfärgning.',
     '- win_probability ska vara JSON-tal 0-1 och summera till 1 per avdelning.',
     '- raw_rank ska vara unik 1..N och ABCD ska vara A/B/C/D.',
@@ -475,6 +493,7 @@ function normalizeSystems(payloadSystems, expectedLegs, predictionMap, policy) {
     const singletonLegs = [...byLeg.values()].filter((items) => items.length === 1).length;
     if (singletonLegs !== 3) throw new Error('every V85/V86 system must contain exactly three one-horse spike legs');
     const rowCount = [...byLeg.values()].reduce((rows, items) => rows * items.length, 1);
+    if (!Number.isSafeInteger(rowCount) || rowCount < 1) throw new Error('system row count is not a safe positive integer');
     const costSek = Math.round(rowCount * policy.line_price_sek * 100) / 100;
     if (costSek > policy.max_budget_sek + 0.009) {
       throw new Error('system cost exceeds configured max budget');
@@ -512,11 +531,48 @@ function marketMaps(market) {
 function marketOwnership(system, betting) {
   const byLeg = new Map();
   for (const selection of system.selections) {
-    const percent = Number(betting.get(selection.raceEntryId)?.betPercent);
+    const raw = betting.get(selection.raceEntryId)?.betPercent;
+    if (raw == null) return null;
+    const percent = Number(raw);
     if (!Number.isFinite(percent)) return null;
     byLeg.set(selection.legNumber, (byLeg.get(selection.legNumber) || 0) + percent / 100);
   }
   return [...byLeg.values()].reduce((product, value) => product * value, 1);
+}
+
+function normalizedStep1Provenance(payload) {
+  const step1 = payload?.step1;
+  if (!step1 || typeof step1 !== 'object' || Array.isArray(step1)) throw new Error('step1 provenance is required');
+  return {
+    packId: requiredText(step1.pack_id, 'step1.pack_id', 160),
+    factsFingerprint: requiredText(step1.facts_fingerprint, 'step1.facts_fingerprint', 160),
+    asOf: exactIso(step1.as_of, 'step1.as_of')
+  };
+}
+
+function normalizedStep2Provenance(payload) {
+  const step2 = payload?.step2;
+  if (!step2 || typeof step2 !== 'object' || Array.isArray(step2)) throw new Error('step2 provenance is required');
+  return {
+    marketFingerprint: requiredText(step2.market_fingerprint, 'step2.market_fingerprint', 160),
+    asOf: exactIso(step2.as_of, 'step2.as_of'),
+    cutoff: exactIso(step2.cutoff, 'step2.cutoff')
+  };
+}
+
+async function verifyExternalProvenance(env, roundId, step1, step2) {
+  const pack = await createPreMarketAnalysisPackV3(env, roundId, { asOf: step1.asOf });
+  if (pack.manifest.pack_id !== step1.packId
+    || pack.manifest.facts_fingerprint !== step1.factsFingerprint
+    || exactIso(pack.manifest.as_of, 'replayed Step 1 as_of') !== step1.asOf) {
+    throw new Error('Step 1 provenance does not match a reproducible KentaurAI analysis pack');
+  }
+  const marketInput = await buildMarketInput(env, roundId, step2.asOf);
+  if (marketInput.market_fingerprint !== step2.marketFingerprint
+    || exactIso(marketInput.market_cutoff, 'replayed Step 2 cutoff') !== step2.cutoff) {
+    throw new Error('Step 2 provenance does not match a reproducible KentaurAI market export');
+  }
+  return { pack, marketInput };
 }
 
 export async function importRecordedSystem(env, payload) {
@@ -529,29 +585,31 @@ export async function importRecordedSystem(env, payload) {
   const roundId = requiredText(payload.round_id, 'round_id', 200);
   const producer = {
     provider: providerKey(payload.producer?.provider),
-    model: requiredText(payload.producer?.model || 'unknown', 'producer.model', 200)
+    model: providerModel(payload.producer?.model)
   };
-  const analysisAsOf = exactIso(payload.analysis_as_of, 'analysis_as_of');
+  const step1 = normalizedStep1Provenance(payload);
+  const step2 = normalizedStep2Provenance(payload);
+  if (payload.analysis_as_of != null && exactIso(payload.analysis_as_of, 'analysis_as_of') !== step1.asOf) {
+    throw new Error('analysis_as_of must match step1.as_of');
+  }
+  const analysisAsOf = step1.asOf;
   const roundSummary = optionalText(payload.round_summary, 'round_summary', MAX_TEXT);
   const recommendations = boundedJson(payload.recommendations, 'recommendations', MAX_JSON_TEXT);
 
   const identity = await loadRoundIdentity(env, roundId);
-  const marketDeadline = identity.round.bet_stop_at || identity.round.scheduled_start_at;
-  if (validIso(marketDeadline) && Date.parse(analysisAsOf) > Date.parse(marketDeadline)) {
-    throw new Error('analysis_as_of must not be after the round market deadline');
+  const deadline = await loadMarketDeadlineV3(env, roundId, new Date().toISOString());
+  if (Date.parse(analysisAsOf) > Date.parse(deadline.deadline_at)) {
+    throw new Error('step1.as_of must not be after the authoritative round deadline');
   }
+  const provenance = await verifyExternalProvenance(env, roundId, step1, step2);
   if (!Array.isArray(payload.legs) || payload.legs.length !== 8) throw new Error('legs must contain exactly eight legs');
   const legs = payload.legs.map((leg, index) => normalizePredictions(leg, identity.legs[index], index));
   const predictionMap = new Map(legs.flatMap((leg) => leg.predictions.map((prediction) => [prediction.raceEntryId, prediction])));
   const policy = normalizePolicy(await canonicalOptimizerPolicyForRound(env, roundId));
   const systems = normalizeSystems(payload.systems, identity.legs, predictionMap, policy);
 
-  let market = null;
-  try {
-    market = (await buildMarketInput(env, roundId, new Date().toISOString())).market;
-  } catch {
-    market = null;
-  }
+  const marketInput = provenance.marketInput;
+  const market = marketInput.market;
   const betting = marketMaps(market);
   const digest = await sha256(payload);
   const modelVersionId = stableId('analysis', roundId, submissionId);
@@ -567,6 +625,7 @@ export async function importRecordedSystem(env, payload) {
       submissionId,
       roundId,
       modelVersionId,
+      externalRunId: stableId('external-analysis-run', modelVersionId),
       reused: true,
       writes: { analyses: 0, predictions: 0, systems: 0, selections: 0 },
       systems: systems.map((system) => ({
@@ -580,6 +639,9 @@ export async function importRecordedSystem(env, payload) {
   }
 
   const createdAt = new Date().toISOString();
+  const importTiming = Date.parse(createdAt) < Date.parse(deadline.deadline_at) ? 'pre_race' : 'post_race_recovery';
+  const learningEligibility = importTiming === 'pre_race' ? 'eligible_by_timing' : 'manual_review_required';
+  const analysisBlindness = importTiming === 'pre_race' ? 'declared_unsealed' : 'declared_unsealed_post_race_import';
   const config = {
     recordedSystem: {
       contract_version: RECORDED_SYSTEM_CONTRACT,
@@ -588,6 +650,13 @@ export async function importRecordedSystem(env, payload) {
       submission_id: submissionId,
       round_id: roundId,
       analysis_as_of: analysisAsOf,
+      step1_pack_id: step1.packId,
+      step1_facts_fingerprint: step1.factsFingerprint,
+      step2_market_fingerprint: step2.marketFingerprint,
+      step2_market_cutoff: step2.cutoff,
+      analysis_blindness: analysisBlindness,
+      import_timing: importTiming,
+      learning_eligibility: learningEligibility,
       payload_digest: digest,
       round_summary: roundSummary,
       recommendations,
@@ -601,7 +670,10 @@ export async function importRecordedSystem(env, payload) {
     'INSERT INTO model_versions (id,created_at,feature_version,prompt_version,ai_provider,ai_model,config_json,notes) VALUES (?,?,?,?,?,?,?,?)'
   ).bind(
     modelVersionId, createdAt, EXTERNAL_ANALYSIS_FLOW_VERSION, EXTERNAL_ANALYSIS_PROMPT_VERSION,
-    producer.provider, producer.model, JSON.stringify(config), 'Manual external AI analysis and recorded system'
+    producer.provider, producer.model, JSON.stringify(config),
+    importTiming === 'pre_race'
+      ? 'Manual external AI analysis; Step 1 blindness declared but unsealed'
+      : 'Manual external AI analysis imported after market deadline; declared unsealed and excluded from automatic learning'
   ));
   kinds.push('model');
 
@@ -610,11 +682,12 @@ export async function importRecordedSystem(env, payload) {
     statements.push(env.DB.prepare(
       "INSERT INTO ai_race_analyses " +
       "(id,race_id,model_version_id,data_snapshot_at,market_blind,scenarios_json,race_shape_summary,conclusion,data_quality,created_at,analysis_origin,method_note) " +
-      "VALUES (?,?,?,?,1,?,?,?,?,?,'analysis_exchange','manual_record_v1')"
+      "VALUES (?,?,?,?,1,?,?,?,?,?,'analysis_exchange',?)"
     ).bind(
       analysisId, leg.raceId, modelVersionId, analysisAsOf,
       leg.scenarios == null ? null : JSON.stringify(leg.scenarios),
-      leg.raceShapeSummary, leg.conclusion, leg.dataQuality, createdAt
+      leg.raceShapeSummary, leg.conclusion, leg.dataQuality, createdAt,
+      analysisBlindness
     ));
     kinds.push('analysis');
 
@@ -656,7 +729,13 @@ export async function importRecordedSystem(env, payload) {
         target_budget_min_sek: policy.target_budget_min_sek,
         max_budget_sek: policy.max_budget_sek,
         market_definition_version: market?.definitionVersion || null,
-        market_cutoff: market?.cutoff || null
+        market_cutoff: step2.cutoff,
+        market_fingerprint: step2.marketFingerprint,
+        step1_pack_id: step1.packId,
+        step1_facts_fingerprint: step1.factsFingerprint,
+        analysis_blindness: analysisBlindness,
+        import_timing: importTiming,
+        learning_eligibility: learningEligibility
       }),
       system.notes
     ));
@@ -671,20 +750,73 @@ export async function importRecordedSystem(env, payload) {
       ).bind(
         systemId, selection.legNumber, selection.raceEntryId, isSpike ? 1 : 0,
         prediction?.winProbability ?? null,
-        Number.isFinite(Number(marketPercent)) ? Number(marketPercent) : null,
+        marketPercent == null ? null : (Number.isFinite(Number(marketPercent)) ? Number(marketPercent) : null),
         selection.selectionReason
       ));
       kinds.push('selection');
     }
   }
 
-  const results = await env.DB.batch(statements);
+  const mainSystem = systems.find((system) => system.systemType === 'main');
+  const mainSystemId = stableId('system', modelVersionId, mainSystem.clientId);
+  const externalRunId = stableId('external-analysis-run', modelVersionId);
+  const previousRun = await env.DB.prepare(
+    "SELECT id FROM analysis_external_runs WHERE game_round_id=? ORDER BY datetime(created_at) DESC,id DESC LIMIT 1"
+  ).bind(roundId).first();
+  statements.push(env.DB.prepare(
+    'INSERT INTO analysis_external_runs ' +
+    '(id,game_round_id,model_version_id,main_system_id,contract_version,flow_version,prompt_version,provider,model,' +
+    'step1_pack_id,step1_pack_as_of,step1_facts_fingerprint,step2_market_fingerprint,step2_market_cutoff,step2_generated_at,' +
+    'analysis_blindness,import_timing,learning_eligibility,payload_digest,supersedes_run_id,created_at) ' +
+    'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+  ).bind(
+    externalRunId, roundId, modelVersionId, mainSystemId, EXTERNAL_ANALYSIS_RUN_CONTRACT,
+    EXTERNAL_ANALYSIS_FLOW_VERSION, EXTERNAL_ANALYSIS_PROMPT_VERSION, producer.provider, producer.model,
+    step1.packId, step1.asOf, step1.factsFingerprint, step2.marketFingerprint, step2.cutoff,
+    marketInput.generated_at, analysisBlindness, importTiming, learningEligibility, digest,
+    previousRun?.id || null, createdAt
+  ));
+  kinds.push('external_run');
+
+  let results;
+  try {
+    results = await env.DB.batch(statements);
+  } catch (error) {
+    const raced = await env.DB.prepare('SELECT config_json FROM model_versions WHERE id=? LIMIT 1').bind(modelVersionId).first();
+    if (raced) {
+      let stored = null;
+      try { stored = JSON.parse(raced.config_json || 'null'); } catch {}
+      if (stored?.recordedSystem?.payload_digest === digest) {
+        return {
+          contractVersion: RECORDED_SYSTEM_CONTRACT,
+          submissionId,
+          roundId,
+          modelVersionId,
+          externalRunId,
+          reused: true,
+          writes: { analyses: 0, predictions: 0, systems: 0, selections: 0 },
+          systems: systems.map((system) => ({
+            system_id: system.clientId,
+            system_type: system.systemType,
+            spike_count: system.spikeCount,
+            row_count: system.rowCount,
+            cost_sek: system.costSek
+          }))
+        };
+      }
+    }
+    throw error;
+  }
   const changes = (kind) => results.reduce((sum, result, index) => sum + (kinds[index] === kind ? Number(result.meta?.changes ?? 0) : 0), 0);
   return {
     contractVersion: RECORDED_SYSTEM_CONTRACT,
     submissionId,
     roundId,
     modelVersionId,
+    externalRunId,
+    analysisBlindness,
+    importTiming,
+    learningEligibility,
     reused: false,
     writes: {
       analyses: changes('analysis'),
