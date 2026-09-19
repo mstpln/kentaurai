@@ -5,7 +5,7 @@ Private V85/V86 data, analysis backend and read-only intelligence interface with
 ## Current build
 Version 0.6.0 contains the verified official/X-Labs data foundation, resumable history pipelines, the external two-step V85/V86 analysis workflow, the historical sealed-v3 stack, replay/calibration, post-race learning diagnostics, private workflow/coverage observability and the read-only PWA. Real provider payloads and private reference/editorial/contact data remain outside the public repository; GitHub contains code, migrations, tests, documentation and synthetic fixtures only.
 
-F4 is production-live. The default analysis workflow remains `ANALYSIS_WORKFLOW_MODE=v3`; the production entrypoint is `src/worker-v077.js`, a private-app performance wrapper around the F4 `worker-v076.js` cutover layer. Production release #62 is the currently deployed baseline. It keeps the release #61 performance layer and fixes the private v3 analysis round picker by removing the two legacy analysis UI scripts from the default v3 app rendering. The app now uses the v3 `/app/api/settings/f3-rounds` picker path while legacy generation routes remain intentionally disabled. Historical v1/v2 analysis reads remain available, new legacy creation is disabled in v3 mode, and `legacy_v2` exists only as a controlled release rollback value.
+The production entrypoint remains `src/worker-v077.js` with `ANALYSIS_WORKFLOW_MODE=v3`; that mode now serves the external-AI workflow described below. Historical v1/v2 and sealed-v3 artifacts remain readable, while their creation/mutation routes are disabled in the default mode. `legacy_v2` remains a controlled release rollback value only. Production changes are accepted only through the repository's reviewed release workflow, which applies pending migrations before deploying the Worker and verifies health/private-route boundaries.
 
 ### Default external AI analysis workflow
 1. Select one complete V85/V86 round and AI provider in the private app.
@@ -14,7 +14,8 @@ F4 is production-live. The default analysis workflow remains `ANALYSIS_WORKFLOW_
 4. Step 1 is not imported or server-sealed during the normal analysis workflow. Once Step 2 market data is visible, the blind probabilities/ranking/ABCD remain the baseline rather than being silently rewritten by the market.
 5. System registration is separate and may happen later. The user selects the round again, downloads an import context, copies the registration instruction into the AI conversation, and imports the generated JSON.
 6. KentaurAI validates canonical identities and exactly three singleton spike legs, then deterministically calculates row count and cost from selections and the configured line price before persistence.
-7. Registered analysis/system data feeds the existing Spel, post-race and performance tracking paths. The older sealed lock/decision/optimizer stack remains historical/compatibility code rather than the primary UI path.
+7. Registration records explicit external-analysis lineage, reproducible Step 1/Step 2 fingerprints and server-side import timing. Because the external conversation is not server-sealed, its blindness status is `declared_unsealed`; post-deadline registrations are retained for diagnostics but excluded from automatic learning.
+8. Registered analysis/system data feeds Spel plus external-aware F1 replay and F2 post-race diagnostics. The older sealed lock/decision/optimizer stack remains historical/compatibility code rather than a parallel writable path.
 
 C4 named X-Labs trip labels remain optional/gated; the v3 workflow uses only validated continuous evidence while unsupported labels remain null.
 
@@ -39,7 +40,7 @@ The current build contains:
 - nullable track address/website presentation with fact-level provenance for private enrichment
 - Spel area with Översikt / V85 / V86 plus saved-round post-race detail
 - F1 replay/calibration and ablation evidence with chronological leakage guards
-- F2 v3 post-race probability/system diagnostics, with repeated misses recorded as candidate learning only and no automatic model changes
+- F2 post-race probability/system diagnostics for both historical sealed-v3 and external-analysis lineage, with repeated eligible misses recorded as candidate learning only and no automatic model changes
 - guided private external-AI workflow plus sanitized coverage/backfill observability
 - complete presentation of currently stored measurement families on entity/start detail, while internal provenance remains backend-only
 - verified X-Labs race-telemetry capture, normalization and raw-vs-normalized checks; exact payloads remain private
