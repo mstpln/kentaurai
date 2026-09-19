@@ -678,13 +678,12 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
     const fields = entryObs.get(id)?.fields || {};
     return !(fields.scratchSemanticsVerified === true && boolOrNull(fields.scratched) === true);
   });
-  const [history,performance,equipment,personContext,racePriors,editorial] = await Promise.all([
+  const [history,performance,equipment,personContext,racePriors] = await Promise.all([
     buildRelevantHistoryForEntries(env,eligibleIds,asOf),
     buildPerformanceFeaturesV3ForEntries(env,eligibleIds,asOf),
     buildEquipmentResponseV1ForEntries(env,eligibleIds,asOf),
     buildPersonContextV1ForEntries(env,eligibleIds,asOf),
-    buildRacePriorsV1ForEntries(env,eligibleIds,asOf),
-    loadEditorialSignalsAsOf(env,rows,asOf)
+    buildRacePriorsV1ForEntries(env,eligibleIds,asOf)
   ]);
   const xlabsByRace = new Map();
   for (const raceId of raceIds) xlabsByRace.set(raceId, await buildXlabsEvidenceProfilesForRace(env,{raceId,asOf,frontContenderEntryIds:[]}));
@@ -711,7 +710,7 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
       const eq = equipment.get(id) || null;
       const facts = currentFacts(row,entryObs.get(id),horseObs.get(row.horse_id),driverObs.get(row.driver_id),trainerObs.get(row.trainer_id),snapshots.get(row.horse_id),eq);
       if (!facts.analysis_eligible) return {
-        race_entry_id:id,horse_id:row.horse_id,current_facts:facts,features:null,xlabs:null,history_aggregates:null,relevant_history:[],history_selection:null,current_signals:editorial.get(id)||[]
+        race_entry_id:id,horse_id:row.horse_id,current_facts:facts,features:null,xlabs:null,history_aggregates:null,relevant_history:[],history_selection:null,current_signals:[]
       };
       const hist = history.get(id);
       const relevantHistory = (hist?.relevantHistoryUnion || []).map((start) => {
@@ -739,7 +738,7 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
         official_history_reference:hist?.officialHistoryReference||null,
         relevant_history:relevantHistory,
         history_selection:hist?{contract_version:hist.contractVersion,selection_version:hist.selectionVersion,counts:hist.counts,policy:hist.policy}:null,
-        current_signals:editorial.get(id)||[]
+        current_signals:[]
       };
     });
     const raceRow = legRows[0];
@@ -765,7 +764,6 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
     const profile=(xlabsByRace.get(raceId)?.profiles||[]).find((item)=>item.race_entry_id===id);
     return profile && Object.values(profile.features||{}).some((feature)=>(feature?.measurement_depth?.measured_starts||0)>0);
   }).length;
-  const signalKnown = eligibleIds.filter((id)=>(editorial.get(id)||[]).length>0).length;
   const sourceFamilyCoverage = {
     official_race_observations:coverageCounter(raceObs.size,raceIds.length),
     official_entry_observations:coverageCounter(entryObs.size,entryIds.length),
@@ -773,16 +771,14 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
     relevant_history:coverageCounter(historyKnown,eligibleCount),
     current_equipment:coverageCounter(equipmentKnown,eligibleCount),
     xlabs_measured_history:coverageCounter(xlabsKnown,eligibleCount),
-    trajectory_reconstruction_selected_history:coverageCounter(historiesWithTrajectory,historiesSelected),
-    editorial_signals:coverageCounter(signalKnown,eligibleCount)
+    trajectory_reconstruction_selected_history:coverageCounter(historiesWithTrajectory,historiesSelected)
   };
   const sourceFreshness = {
     official_current:maxIso([...raceObs.values(),...entryObs.values(),...horseObs.values(),...driverObs.values(),...trainerObs.values(),...trackObs.values()].map((value)=>value.observedAt)),
     official_snapshots:maxIso([...snapshots.values()].flatMap((snapshot)=>[
       snapshot?.age?.observedAt,snapshot?.currentRecord?.observedAt,snapshot?.officialStatistics?.year?.observedAt,snapshot?.officialStatistics?.life?.observedAt
     ])),
-    xlabs:maxIso([...xlabsByRace.values()].flatMap((value)=>sourceRefTimes(value))),
-    editorial:maxIso([...editorial.values()].flatMap((signals)=>signals.map((signal)=>signal.available_at)))
+    xlabs:maxIso([...xlabsByRace.values()].flatMap((value)=>sourceRefTimes(value)))
   };
   const versions = manifestVersions();
   return buildAnalysisPackV3Files({
