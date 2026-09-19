@@ -243,9 +243,12 @@ export async function loadMarketDeadlineV3(env, roundId, asOf = null) {
   if (!env?.DB) throw new Error('DB is not configured');
   const round = requiredText(roundId, 'round_id');
   const row = await env.DB.prepare(`
-    SELECT id,game_type,bet_stop_at,scheduled_start_at
-    FROM game_rounds
-    WHERE id=? AND game_type IN ('V85','V86')
+    SELECT gr.id,gr.game_type,gr.bet_stop_at,gr.scheduled_start_at,
+      (SELECT MIN(r.scheduled_start_at)
+       FROM game_legs gl JOIN races r ON r.id=gl.race_id
+       WHERE gl.game_round_id=gr.id) AS first_leg_start
+    FROM game_rounds gr
+    WHERE gr.id=? AND gr.game_type IN ('V85','V86')
     LIMIT 1
   `).bind(round).first();
   if (!row) throw new Error('V85/V86 round was not found');
@@ -261,6 +264,10 @@ export async function loadMarketDeadlineV3(env, roundId, asOf = null) {
   } else if (validIso(row.scheduled_start_at)) {
     deadlineAt = exactIso(row.scheduled_start_at, 'scheduled_start_at');
     deadlineSource = 'round_scheduled_start_at';
+    deadlineQuality = 'conservative_proxy';
+  } else if (validIso(row.first_leg_start)) {
+    deadlineAt = exactIso(row.first_leg_start, 'first_leg_start');
+    deadlineSource = 'first_leg_start';
     deadlineQuality = 'conservative_proxy';
   } else {
     throw new Error('market pack requires a verified betting stop or round start');
@@ -316,8 +323,9 @@ export async function loadVerifiedMarketRowsV3(env, roundId, cutoff) {
       AND sr.source_type='official_provider'
       AND sr.quality_status=?
       AND julianday(bs.captured_at)<=julianday(?)
+      AND julianday(sr.fetched_at)<=julianday(?)
     ORDER BY bs.leg_number,bs.race_entry_id,julianday(bs.captured_at),bs.id
-  `).bind(round, ANALYSIS_MARKET_SOURCE_QUALITY, marketCutoff).all();
+  `).bind(round, ANALYSIS_MARKET_SOURCE_QUALITY, marketCutoff, marketCutoff).all();
 
   const { results: odds } = await env.DB.prepare(`
     SELECT os.race_entry_id,gl.leg_number,lower(os.market_type) AS market_type,os.odds,os.captured_at
@@ -330,8 +338,9 @@ export async function loadVerifiedMarketRowsV3(env, roundId, cutoff) {
       AND sr.quality_status=?
       AND lower(os.market_type) IN ('win','winner','place')
       AND julianday(os.captured_at)<=julianday(?)
+      AND julianday(sr.fetched_at)<=julianday(?)
     ORDER BY gl.leg_number,os.race_entry_id,lower(os.market_type),julianday(os.captured_at),os.id
-  `).bind(round, ANALYSIS_MARKET_SOURCE_QUALITY, marketCutoff).all();
+  `).bind(round, ANALYSIS_MARKET_SOURCE_QUALITY, marketCutoff, marketCutoff).all();
 
   return {
     betting: (betting || []).map((row) => ({
@@ -363,16 +372,20 @@ export async function loadExternalRankingsV3(env, roundId, cutoff) {
            es.fact_or_opinion,es.confidence,ei.published_at
     FROM editorial_signals es
     JOIN editorial_items ei ON ei.id=es.editorial_item_id
+    JOIN source_records sr ON sr.id=ei.source_record_id
     JOIN race_entries re ON re.id=ei.race_entry_id
     JOIN game_legs gl ON gl.race_id=re.race_id
     WHERE gl.game_round_id=?
       AND ei.source_record_id IS NOT NULL
       AND ei.rights_status='structured_only'
+      AND sr.source_type='editorial_manual'
+      AND sr.quality_status='manual_structured'
       AND ei.published_at IS NOT NULL
       AND julianday(ei.published_at)<=julianday(?)
+      AND julianday(sr.fetched_at)<=julianday(?)
       AND lower(es.signal_type) IN (${placeholders})
     ORDER BY gl.leg_number,ei.race_entry_id,julianday(ei.published_at),es.id
-  `).bind(round, marketCutoff, ...EXTERNAL_RANKING_TYPES).all();
+  `).bind(round, marketCutoff, marketCutoff, ...EXTERNAL_RANKING_TYPES).all();
   return (results || []).map((row) => sanitizeExternalRankingSignalV3({
     leg_number: Number(row.leg_number),
     race_entry_id: row.race_entry_id,

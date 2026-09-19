@@ -21,6 +21,7 @@ function normalizeSort(value) {
 }
 
 const PRIMARY_SYSTEM_ID = `COALESCE(
+  (SELECT aer.main_system_id FROM analysis_external_runs aer WHERE aer.game_round_id = gr.id ORDER BY aer.created_at DESC, aer.id DESC LIMIT 1),
   (SELECT s1.id FROM systems s1 WHERE s1.game_round_id = gr.id AND s1.system_type = 'main' ORDER BY s1.created_at DESC, s1.id ASC LIMIT 1),
   (SELECT s2.id FROM systems s2 WHERE s2.game_round_id = gr.id ORDER BY s2.created_at ASC, s2.id ASC LIMIT 1)
 )`;

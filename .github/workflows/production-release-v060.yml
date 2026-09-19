@@ -119,6 +119,13 @@ jobs:
           grep -q 'idx_editorial_items_entry' /tmp/migration-check.txt
           grep -q 'idx_ai_predictions_entry' /tmp/migration-check.txt
 
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT id,game_round_id,stage,artifact_id,artifact_fingerprint,as_of,cutoff_at,artifact_json,generated_at,created_at FROM analysis_external_exports LIMIT 0; SELECT id,game_round_id,model_version_id,main_system_id,contract_version,step1_pack_id,step1_pack_as_of,step1_generated_at,step1_facts_fingerprint,step2_market_fingerprint,step2_market_cutoff,step2_generated_at,analysis_blindness,import_timing,learning_eligibility,payload_digest,supersedes_run_id,created_at FROM analysis_external_runs LIMIT 0; SELECT id,game_round_id,race_id,leg_number,winner_entry_id,external_run_id,system_id,review_version,pre_race_fingerprint,learning_eligible,learning_classification,created_at FROM post_race_reviews_external_v1 LIMIT 0; SELECT review_id,hypothesis_id,observation_id FROM post_race_learning_links_external_v1 LIMIT 0; SELECT name FROM d1_migrations WHERE name='0027_external_analysis_lineage_v1.sql';" > /tmp/external-schema-check.txt
+          grep -q 'analysis_external_exports' /tmp/external-schema-check.txt
+          grep -q 'analysis_external_runs' /tmp/external-schema-check.txt
+          grep -q 'post_race_reviews_external_v1' /tmp/external-schema-check.txt
+          grep -q 'post_race_learning_links_external_v1' /tmp/external-schema-check.txt
+          grep -q '0027_external_analysis_lineage_v1.sql' /tmp/external-schema-check.txt
+
       - name: Deploy Worker
         id: deploy
         shell: bash
@@ -167,6 +174,12 @@ jobs:
             '/app/api/settings/f3-analysis-pack?round_id=private-probe' \
             '/app/api/settings/f4-step2-bundle?round_id=private-probe' \
             '/app/api/settings/f3-operational-status' \
+            '/app/api/settings/external-rounds?scope=analysis' \
+            '/app/api/settings/external-step1-prompt?provider=openai' \
+            '/app/api/settings/external-market?round_id=private-probe' \
+            '/app/api/settings/external-step2-prompt?provider=openai' \
+            '/app/api/settings/system-import-context?round_id=private-probe' \
+            '/app/api/settings/system-import-prompt?provider=openai' \
             '/v1/analysis-pack/private-probe' \
             '/v1/analysis-step1-lock/private-probe' \
             '/v1/analysis-step1-prompt?provider=openai' \
@@ -190,4 +203,4 @@ jobs:
         run: |
           echo 'KentaurAI v0.6.0 production release completed.'
           echo "Worker: $WORKER_URL"
-          echo 'Required production schema through migration 0026, app-read performance indexes, worker-v077 performance layer, F1 replay storage, F2 post-race learning storage, F4 v3 cutover health, self-contained Step 2 bundle protection, controlled legacy boundary, game-specific optimizer policy config, exact app version, health, login and private analysis/replay route checks passed.'
+          echo 'Required production schema through migration 0027, external analysis lineage, external F1/F2 evidence integration, worker-v077 runtime, controlled legacy boundary, exact app version, health, login and private external-analysis route checks passed.'

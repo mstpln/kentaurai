@@ -2,8 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { getAnalysisStep1PromptV3 } from '../src/analysis-step1-prompt-v3.js';
-import { getAnalysisStep2PromptV3 } from '../src/analysis-step2-prompt-v3.js';
+import { getExternalAnalysisStep1Prompt, getExternalAnalysisStep2Prompt } from '../src/external-analysis-flow-v1.js';
 import { canonicalOptimizerPolicyForGameType } from '../src/analysis-optimizer-policy-config.js';
 
 const wrangler = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
@@ -28,24 +27,27 @@ test('repository default keeps F4 v3 mode behind the worker-v077 performance lay
   assert.match(wrangler, /"ANALYSIS_WORKFLOW_MODE": "v3"/);
 });
 
-test('F4 live documentation agrees on sealed v3, exact3 and legacy read-only policy', () => {
+test('documentation agrees on external two-step analysis, exact3 registration and legacy compatibility', () => {
   for (const [name, text] of Object.entries({ agents, decisions, buildState, readme })) {
-    assert.match(text, /v3/i, name);
-    assert.match(text, /sealed|försegl/i, name);
-    assert.match(text, /exactly three|exact-three|exact-three-spike|exakt tre|three spike/i, name);
+    assert.match(text, /external|ChatGPT|Claude/i, name);
+    assert.match(text, /Step 1|Steg 1/i, name);
+    assert.match(text, /Step 2|Steg 2/i, name);
+    assert.match(text, /exactly three|exact-three|exakt tre|three singleton|tre.*spik/i, name);
   }
-  assert.match(agents, /Legacy v1\/v2 analysis artifacts remain readable/i);
-  assert.match(decisions, /New legacy creation.*disabled/i);
-  assert.match(buildState, /legacy v1\/v2 analysis creation.*disabled/i);
-  assert.match(readme, /new legacy creation is disabled|disables new legacy creation/i);
+  assert.match(agents, /Step 1 is not imported or server-sealed/i);
+  assert.match(decisions, /system registration is a separate later workflow/i);
+  assert.match(buildState, /older sealed-v3.*compatibility|sealed-v3.*compatibility/i);
+  assert.match(readme, /System registration is separate/i);
 });
 
-test('F4 active v3 prompts contain no legacy two-spike, 700 SEK or client-built-system policy', () => {
-  const prompts = [getAnalysisStep1PromptV3('openai'), getAnalysisStep2PromptV3('openai')].join('\n');
-  assert.doesNotMatch(prompts, /700\s*(?:SEK|kr)/i);
-  assert.doesNotMatch(prompts, /two[- ]spike|two spikes|två spikar|2[- ]spike/i);
-  assert.doesNotMatch(prompts, /build (?:the )?system|bygg systemet/i);
-  assert.match(prompts, /code optimizer will build the authoritative system/i);
+test('active external prompts keep Step 1 market-blind and require exactly three spikes in Step 2', () => {
+  const step1 = getExternalAnalysisStep1Prompt('openai');
+  const step2 = getExternalAnalysisStep2Prompt('openai');
+  assert.match(step1, /Sök inte på webben och använd inte aktuell streck-, odds- eller tippsinformation/i);
+  assert.match(step1, /Bygg inget system/i);
+  assert.match(step2, /exakt 3 spikar/i);
+  assert.doesNotMatch(step2, /två spikar|2[- ]spike|700\s*(?:SEK|kr)/i);
+  assert.match(step2, /system_policy/i);
 });
 
 test('F4 runbook preserves controlled release source, rollback and no-backfill boundaries', () => {

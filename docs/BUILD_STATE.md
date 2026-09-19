@@ -1,7 +1,7 @@
 # Build state
 
 Version: 0.6.0
-Updated: 2026-09-18
+Updated: 2026-09-19
 
 ## Current production truth
 - Worker: `kentaurai-api`.
@@ -14,6 +14,18 @@ Updated: 2026-09-18
 - F1 replay/calibration, F2 post-race learning diagnostics, F3 private workflow/observability, F4 v3 cutover and the private-app navigation performance layer are production-live.
 - Historical official/X-Labs jobs keep their durable cursors. The round-picker release did not reset, recreate or resume stopped historical work.
 
+## External analysis workflow correction - reviewed source candidate
+- The reviewed source candidate replaces the primary private analysis UI with the approved external-AI workflow: shared round + AI selection -> Step 1 market-blind export/instruction -> Step 2 verified market export/instruction in the same external AI conversation.
+- Step 1 is not imported or server-sealed in the normal UI path and the normal UI does not invoke the canonical optimizer. Historical sealed-v3 data remains readable, while sealed-v3 creation/mutation routes are disabled in the default mode.
+- System registration is separate and may happen later: select round -> download canonical import context -> copy import instruction -> import the generated JSON.
+- Registration validates canonical identities, eight complete legs, probability/rank/ABCD constraints and exactly three singleton spike legs. KentaurAI derives row count, line-price cost, spike flags and market metrics.
+- Migration `0027_external_analysis_lineage_v1.sql` adds explicit external lineage plus external post-race diagnostic/link tables. It does not alter or delete historical sealed-v3 records.
+- External lineage binds the registration to reproducible Step 1 pack/facts fingerprints and Step 2 market fingerprint/cutoff, records `declared_unsealed` blindness and server-side import timing, and preserves explicit supersession between repeated registrations.
+- Post-deadline registration remains allowed for bookkeeping but is marked `post_race_recovery` / `manual_review_required`. F1/F2 can diagnose it but exclude it from automatic promotion evidence.
+- Verified Step 2 reads enforce both observation/published timestamps and source-record availability at the cutoff. Missing market percentages stay null.
+- F1 and F2 understand the external lineage directly; they do not fabricate sealed Step 1/decision/optimizer parents. If an external run exists for a round, stale sealed-v3 system lineage is not selected as the current F1/F2 target.
+- Exact-head CI plus targeted external provenance/null/cutoff/F1/F2 tests are required before merge. Production remains on the last successful controlled release until the authorized release workflow applies migration 0027 and deploys the reviewed main head.
+
 ## App performance live
 - `worker-v077` adds only the private-app HTML performance layer; racing/analysis semantics and auth boundaries are unchanged.
 - The browser uses short-lived in-memory GET caching and in-flight request de-duplication only; no private API payloads are persisted to localStorage.
@@ -22,14 +34,14 @@ Updated: 2026-09-18
 - Track overview defers the expensive home-trainer scan to the dedicated Hemmatränare tab and avoids a duplicate track metadata query.
 - Migration `0026_app_read_performance.sql` adds the genuinely new indexes for the hottest entity/track/history read paths; existing driver/trainer/betting indexes are reused.
 
-## F4 live - v3 cutover, legacy deprecation and release hardening
+## Historical F4 sealed-v3 baseline
 - F4 cutover layer: `src/worker-v076.js`; production is wrapped by `src/worker-v077.js` for private-app performance only.
 - Production default: `ANALYSIS_WORKFLOW_MODE=v3`.
 - Controlled rollback value: `ANALYSIS_WORKFLOW_MODE=legacy_v2`. Rollback requires a reviewed production release; there is no automatic fallback.
-- The normal creation workflow is v3: deterministic pre-market pack -> server-sealed Step 1 -> optional late-fact revision -> self-contained Step 2 bundle -> Step 2 interpretation -> canonical decision -> deterministic exact-three-spike optimizer.
+- This section describes the historical sealed-v3 baseline retained for compatibility and rollback context. It is no longer the intended normal creation workflow after the external-analysis release.
 - The Step 2 bundle contains the exact persisted sealed Step 1 document plus its bound verified market files. New Step 2 work therefore does not rely on reconstructing Step 1 from conversation memory.
 - Legacy v1/v2 analysis creation is disabled in v3 mode after authentication; creation routes return a deprecation error. Historical legacy read routes/artifacts remain available.
-- Newly created V85/V86 systems are authoritative optimizer output with exactly three spikes. Current default policy targets 150-250 SEK and may spend less when additional rows add no P(8) coverage.
+- Historical sealed-v3 systems remain authoritative for their own lineage. New external-workflow systems are selected by the external AI and accepted only after deterministic exact-three-spike/row/cost validation.
 - C4 named trip-label promotion remains optional/gated and is not required for the cutover.
 - F4 has no planned schema migration and does not reset or start replay/backfill work.
 
@@ -52,10 +64,10 @@ Updated: 2026-09-18
 ## Active invariants
 - Raw facts, deterministic features and AI judgments remain separate.
 - Unknown facts remain null/unknown.
-- Current market cannot enter sealed Step 1.
-- Latest non-superseded Step 1 lock is required before market export.
-- Step 2 cannot submit canonical decision probability or system structure.
-- Code optimizer owns new system selections, row count, cost and exact-three-spike structure.
+- Current market cannot enter Step 1.
+- Step 1 external analysis remains a declared-unsealed blind baseline; Step 2 market data is introduced only afterward in the same external conversation.
+- External AI may choose final system selections; code owns canonical IDs, exactly-three-spike validation, row count, line-price cost and null-safe market persistence.
+- Post-deadline external registrations are diagnostics/bookkeeping only until manually reviewed for learning.
 - External editorial/ranking signals are read last and cannot rewrite Step 1.
 - Learning requires repeated evidence; one result never changes weights automatically.
 - Real provider payloads, real reference exports, private editorial provenance and secrets never enter public GitHub.

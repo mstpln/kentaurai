@@ -1,6 +1,7 @@
 import { createPreMarketAnalysisPackV3 } from './analysis-pack-v3.js';
 import { requireLatestStep1LockV1 } from './analysis-step1-revision-v1.js';
 import { buildDataCoverageReport } from './data-coverage-v2.js';
+import { recordExternalAnalysisExport } from './external-analysis-flow-v1.js';
 
 export const F3_PRIVATE_UI_VERSION = 'private-ui-observability-v1-f3';
 
@@ -163,6 +164,32 @@ export async function createF3AnalysisPackBundleResponse(env, roundId, { asOf = 
     { name: 'manifest.json', content: parseJson(pack.manifestContent, {}) },
     ...(pack.files || []).map((file) => ({ name: file.name, content: parseJson(file.content, {}) }))
   ];
+  const activeByLeg = new Map();
+  for (const file of pack.files || []) {
+    const payload = file.payload || parseJson(file.content, {});
+    const legNumber = Number(payload?.leg_number);
+    if (!Number.isInteger(legNumber) || legNumber < 1 || legNumber > 8) continue;
+    if (!activeByLeg.has(legNumber)) {
+      activeByLeg.set(legNumber, { leg_number: legNumber, race_id: payload?.race?.race_id || null, entry_ids: [] });
+    }
+    const target = activeByLeg.get(legNumber);
+    for (const entry of payload?.entries || []) {
+      if (entry?.current_facts?.analysis_eligible === true) target.entry_ids.push(String(entry.race_entry_id));
+    }
+  }
+  await recordExternalAnalysisExport(env, {
+    stage: 'step1',
+    roundId,
+    artifactId: pack.manifest.pack_id,
+    artifactFingerprint: pack.manifest.facts_fingerprint,
+    asOf: pack.manifest.as_of,
+    generatedAt: pack.manifest.generated_at,
+    artifact: {
+      active_legs: [...activeByLeg.values()]
+        .sort((a, b) => a.leg_number - b.leg_number)
+        .map((leg) => ({ ...leg, entry_ids: [...new Set(leg.entry_ids)].sort() }))
+    }
+  });
   const body = {
     transport_contract: 'kentaurai-analysis-pack-v3-ui-bundle',
     analysis_contract: pack.manifest?.contract_version || 'kentaurai-analysis-pack-v3',

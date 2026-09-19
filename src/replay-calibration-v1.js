@@ -38,6 +38,7 @@ import {
   ANALYSIS_OPTIMIZER_VERSION,
   buildCanonicalOptimizerV1
 } from './analysis-optimizer-v1.js';
+import { loadExternalDecisionReplayEvidenceV1 } from './external-analysis-evidence-v1.js';
 
 export const REPLAY_CONTRACT_VERSION = 'kentaurai-replay-v1';
 export const REPLAY_VERSION = 'replay-calibration-v1-f1';
@@ -1122,6 +1123,7 @@ async function loadDecisionTargets(env, config) {
       JOIN analysis_step1_locks asl ON asl.id=adr.lock_id
       JOIN game_rounds gr ON gr.id=adr.game_round_id
       WHERE gr.game_type IN ('V85','V86')
+        AND NOT EXISTS (SELECT 1 FROM analysis_external_runs aer WHERE aer.game_round_id=adr.game_round_id)
         AND datetime((
           SELECT MIN(r0.scheduled_start_at)
           FROM game_legs gl0 JOIN races r0 ON r0.id=gl0.race_id
@@ -1369,7 +1371,24 @@ async function loadDecisionTargets(env, config) {
       });
     }
   }
-  return { targets, systemDiagnostics, exclusions };
+  const external = await loadExternalDecisionReplayEvidenceV1(env, config);
+  const combinedTargets = [...targets, ...external.targets].sort((a, b) =>
+    Date.parse(a.target_group_at) - Date.parse(b.target_group_at)
+    || compareId(a.target_group_id, b.target_group_id)
+    || Number(a.leg_number || 0) - Number(b.leg_number || 0)
+  );
+  const allowedGroups = new Set();
+  for (const target of combinedTargets) {
+    if (allowedGroups.has(target.target_group_id)) continue;
+    if (allowedGroups.size >= maxTargets) break;
+    allowedGroups.add(target.target_group_id);
+  }
+  return {
+    targets: combinedTargets.filter((target) => allowedGroups.has(target.target_group_id)),
+    systemDiagnostics: [...systemDiagnostics, ...external.systemDiagnostics]
+      .filter((item) => allowedGroups.has(item.target_group_id)),
+    exclusions: { ...exclusions, external: external.exclusions }
+  };
 }
 
 export async function runDecisionReplayV1(env, config = {}) {
@@ -1381,6 +1400,14 @@ export async function runDecisionReplayV1(env, config = {}) {
     'regression_only_round_ids'
   );
   const regressionOnly = new Set(regressionOnlyRoundIds);
+  const automaticRegressionOnly = new Set();
+  for (const target of targets) {
+    if (target.version_metadata?.learning_eligibility
+      && target.version_metadata.learning_eligibility !== 'eligible_by_timing') {
+      regressionOnly.add(target.target_group_id);
+      automaticRegressionOnly.add(target.target_group_id);
+    }
+  }
   const evidenceTargets = targets.filter((target) => !regressionOnly.has(target.target_group_id));
   const regressionTargets = targets.filter((target) => regressionOnly.has(target.target_group_id));
   const walkForward = buildWalkForwardFoldsV1(evidenceTargets, config.walk_forward ?? config.walkForward ?? {});
@@ -1438,6 +1465,7 @@ export async function runDecisionReplayV1(env, config = {}) {
       max_targets: replayTargetLimit(config.max_targets ?? config.maxTargets),
       decision_probability_version: config.decision_probability_version ?? null,
       regression_only_round_ids: regressionOnlyRoundIds,
+      automatic_regression_only_round_ids: [...automaticRegressionOnly].sort(compareId),
       walk_forward: walkForward.policy
     },
     version_metadata: {

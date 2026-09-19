@@ -178,44 +178,61 @@ function step2Document(lock, market) {
   };
 }
 
-test('F4 synthetic round completes pack -> sealed lock -> self-contained Step2 -> exact3 optimizer without conversation memory', async () => {
+test('F4 default mode disables sealed-v3 creation endpoints', async () => {
   const { env, db } = createTestEnv();
   seedRound(db);
-
-  const pack = await createPreMarketAnalysisPackV3(env,ROUND_ID,{asOf:PACK_AS_OF,generatedAt:PACK_AS_OF});
-  assert.equal(pack.manifest.round_id,ROUND_ID);
-  assert.equal(pack.manifest.contains_current_market,false);
-
-  const lock = await importStep1LockV1(env,step1Document(pack),{now:LOCK_AT});
-  assert.equal(lock.sealed,true);
-
-  const market = await createMarketPackV3(env,ROUND_ID,{
-    lockId:lock.lock_id,lockHash:lock.lock_hash,asOf:MARKET_CUTOFF,generatedAt:MARKET_CUTOFF
-  });
-  assert.equal(market.manifest.lock.lock_hash,lock.lock_hash);
-
-  const bundle = await createF4Step2Bundle(env,ROUND_ID,{asOf:MARKET_CUTOFF});
-  assert.equal(bundle.instructions.conversation_memory_required,false);
-  assert.equal(bundle.sealed_step1.lock_id,lock.lock_id);
-  assert.equal(bundle.market_manifest.market_fingerprint,market.manifest.market_fingerprint);
-  assert.equal(bundle.market_files.length,market.files.length);
-
   env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
   const cookie = (await createAppSessionCookie(env)).split(';')[0];
-  const response = await worker.fetch(new Request(
-    `https://example.test/app/api/settings/analysis-step2?round_id=${encodeURIComponent(ROUND_ID)}`,
-    {
+
+  const requests = [
+    new Request('https://example.test/app/api/settings/analysis-step1-lock?round_id=' + encodeURIComponent(ROUND_ID), {
+      method:'POST', headers:{ cookie, 'content-type':'application/json' }, body:'{}'
+    }),
+    new Request('https://example.test/app/api/settings/analysis-decision-probability?round_id=' + encodeURIComponent(ROUND_ID), {
+      method:'POST', headers:{ cookie, 'content-type':'application/json' }, body:'{}'
+    }),
+    new Request('https://example.test/app/api/settings/analysis-optimizer?round_id=' + encodeURIComponent(ROUND_ID), {
+      method:'POST', headers:{ cookie, 'content-type':'application/json' }, body:'{}'
+    }),
+    new Request('https://example.test/app/api/settings/analysis-step2?round_id=' + encodeURIComponent(ROUND_ID), {
+      method:'POST', headers:{ cookie, 'content-type':'application/json' }, body:'{}'
+    })
+  ];
+
+  for (const request of requests) {
+    const response = await worker.fetch(request, env, {});
+    assert.equal(response.status, 410, request.url);
+    const body = await response.json();
+    assert.equal(body.error, 'legacy_analysis_creation_disabled');
+    assert.match(body.message, /external/i);
+  }
+
+  for (const path of [
+    '/app/api/settings/f4-step2-bundle?round_id=' + encodeURIComponent(ROUND_ID),
+    '/app/api/settings/analysis-market-pack?round_id=' + encodeURIComponent(ROUND_ID),
+    '/app/api/settings/analysis-step2-prompt?provider=openai',
+    '/app/api/settings/analysis-step1-revision-prompt?provider=openai'
+  ]) {
+    const response = await worker.fetch(new Request('https://example.test' + path, { headers:{ cookie } }), env, {});
+    assert.equal(response.status, 410, path);
+  }
+
+  env.ADMIN_TOKEN = 'synthetic-admin-token-with-high-entropy';
+  for (const path of [
+    '/v1/analysis-step1-lock/' + encodeURIComponent(ROUND_ID),
+    '/v1/analysis-step1-revision/' + encodeURIComponent(ROUND_ID),
+    '/v1/analysis-decision-probability/' + encodeURIComponent(ROUND_ID),
+    '/v1/analysis-optimizer/' + encodeURIComponent(ROUND_ID),
+    '/v1/analysis-step2/' + encodeURIComponent(ROUND_ID),
+    '/v1/analysis-v3/synthetic/narrative'
+  ]) {
+    const response = await worker.fetch(new Request('https://example.test' + path, {
       method:'POST',
-      headers:{ cookie, 'content-type':'application/json' },
-      body:JSON.stringify(step2Document(lock,market))
-    }
-  ), env, {});
-  assert.equal(response.status,201);
-  const imported = await response.json();
-  const integrated = imported.integrated_analysis;
-  assert.equal(integrated.analysis.optimizer_system.spike_count,3);
-  assert.equal(integrated.analysis.optimizer_system.legs.filter((leg) => leg.is_spike).length,3);
-  assert.ok(integrated.analysis.optimizer_system.cost_sek <= 250);
-  assert.equal(integrated.analysis.optimizer_system.line_price_sek,0.5);
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM analysis_v3_runs').get().n,1);
+      headers:{ authorization:'Bearer ' + env.ADMIN_TOKEN, 'content-type':'application/json' },
+      body:'{}'
+    }), env, {});
+    assert.equal(response.status, 410, path);
+  }
+
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM analysis_v3_runs').get().n, 0);
 });
