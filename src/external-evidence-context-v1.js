@@ -141,8 +141,20 @@ export async function getHorseExternalStatistics(env, horseId) {
   if(!id) throw new Error('horse_id is required');
   const horse=await env.DB.prepare('SELECT id,canonical_name FROM horses WHERE id=? LIMIT 1').bind(id).first();
   if(!horse) return null;
-  const stats=await loadStatistics(env,[id]);
-  return { horse:{id:horse.id,name:horse.canonical_name}, snapshots:stats.get(id)||[] };
+  const {results}=await env.DB.prepare(
+    'SELECT context_type,context_key,context_label,track_id,context_json,starts,wins,seconds,thirds,win_percent,roi_percent,observed_at,available_at ' +
+    'FROM external_horse_stat_snapshots WHERE horse_id=? ORDER BY context_type,context_key,datetime(available_at) DESC,id DESC LIMIT 500'
+  ).bind(id).all();
+  return {
+    horse:{id:horse.id,name:horse.canonical_name},
+    snapshots:(results||[]).map((row)=>({
+      context_type:row.context_type,context_key:row.context_key||'',context_label:row.context_label||null,
+      track_id:row.track_id||null,context:parseJson(row.context_json),starts:Number(row.starts),
+      wins:row.wins==null?null:Number(row.wins),seconds:row.seconds==null?null:Number(row.seconds),
+      thirds:row.thirds==null?null:Number(row.thirds),win_percent:row.win_percent==null?null:Number(row.win_percent),
+      roi_percent:row.roi_percent==null?null:Number(row.roi_percent),observed_at:row.observed_at||null,available_at:row.available_at
+    }))
+  };
 }
 
 export async function getExternalInterviews(env, type, entityId) {
