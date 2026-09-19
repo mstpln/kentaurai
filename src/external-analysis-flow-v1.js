@@ -1,7 +1,6 @@
 import { stableId } from './ids.js';
 import { canonicalOptimizerPolicyForRound } from './analysis-optimizer-policy-config.js';
 import { loadExternalRankingsV3, loadMarketDeadlineV3, loadVerifiedMarketRowsV3 } from './analysis-market-pack-v3.js';
-import { createPreMarketAnalysisPackV3 } from './analysis-pack-v3.js';
 
 export const EXTERNAL_ANALYSIS_FLOW_VERSION = 'external-analysis-v1';
 export const MARKET_INPUT_CONTRACT = 'kentaurai-market-input-v1';
@@ -96,6 +95,38 @@ function normalizePolicy(policy) {
     exact_spike_count: Number(policy.exact_spike_count),
     system_type: policy.system_type
   };
+}
+
+export async function recordExternalAnalysisExport(env, {
+  stage,
+  roundId,
+  artifactId,
+  artifactFingerprint,
+  asOf,
+  cutoffAt = null,
+  generatedAt,
+  artifact = {}
+} = {}) {
+  if (!env?.DB) throw new Error('DB is not configured');
+  const normalizedStage = requiredText(stage, 'stage', 20).toLowerCase();
+  if (!['step1', 'step2'].includes(normalizedStage)) throw new Error('stage must be step1 or step2');
+  const round = requiredText(roundId, 'round_id', 200);
+  const idValue = requiredText(artifactId, 'artifact_id', 200);
+  const fingerprint = requiredText(artifactFingerprint, 'artifact_fingerprint', 200);
+  const asOfIso = exactIso(asOf, 'as_of');
+  const cutoffIso = cutoffAt == null ? null : exactIso(cutoffAt, 'cutoff_at');
+  const generatedIso = exactIso(generatedAt, 'generated_at');
+  const artifactJson = JSON.stringify(boundedJson(artifact, 'artifact', 30000) || {});
+  const id = stableId('external-analysis-export', normalizedStage, round, idValue, fingerprint, generatedIso);
+  await env.DB.prepare(
+    'INSERT OR IGNORE INTO analysis_external_exports ' +
+    '(id,game_round_id,stage,artifact_id,artifact_fingerprint,as_of,cutoff_at,artifact_json,generated_at,created_at) ' +
+    'VALUES (?,?,?,?,?,?,?,?,?,?)'
+  ).bind(
+    id, round, normalizedStage, idValue, fingerprint, asOfIso, cutoffIso,
+    artifactJson, generatedIso, new Date().toISOString()
+  ).run();
+  return { id, stage: normalizedStage, roundId: round };
 }
 
 export async function listExternalAnalysisRounds(env, scope = 'analysis') {
@@ -400,25 +431,19 @@ export function getRegistrationPrompt(provider = 'openai') {
   ].join('\\n');
 }
 
-function predictionLegsFromStep1Pack(pack, identity) {
-  const byLeg = new Map();
-  for (const file of pack?.files || []) {
-    const payload = file?.payload;
-    const legNumber = Number(payload?.leg_number);
-    if (!Number.isInteger(legNumber) || legNumber < 1 || legNumber > 8) continue;
-    if (!byLeg.has(legNumber)) byLeg.set(legNumber, { race_id: payload?.race?.race_id || null, entry_ids: [] });
-    const target = byLeg.get(legNumber);
-    if (target.race_id !== (payload?.race?.race_id || null)) throw new Error('Step 1 pack contains conflicting race identity');
-    for (const entry of payload?.entries || []) {
-      if (entry?.current_facts?.analysis_eligible === true) target.entry_ids.push(requiredText(entry.race_entry_id, 'Step 1 race_entry_id', 200));
-    }
-  }
+function predictionLegsFromExportArtifact(artifact, identity) {
+  const activeLegs = Array.isArray(artifact?.active_legs) ? artifact.active_legs : [];
+  const byLeg = new Map(activeLegs.map((leg) => [Number(leg?.leg_number), leg]));
   return identity.legs.map((leg) => {
     const step1 = byLeg.get(leg.leg_number);
-    if (!step1 || step1.race_id !== leg.race_id) throw new Error('Step 1 pack does not match selected round race identity');
+    if (!step1 || requiredText(step1.race_id, 'Step 1 export race_id', 200) !== leg.race_id) {
+      throw new Error('Step 1 export does not match selected round race identity');
+    }
     const canonical = new Set(leg.entries.map((entry) => entry.race_entry_id));
-    const unique = [...new Set(step1.entry_ids)];
-    if (!unique.length || unique.some((id) => !canonical.has(id))) throw new Error('Step 1 pack contains invalid active entry identity');
+    const unique = [...new Set((step1.entry_ids || []).map((id) => requiredText(id, 'Step 1 race_entry_id', 200)))];
+    if (!unique.length || unique.some((id) => !canonical.has(id))) {
+      throw new Error('Step 1 export contains invalid active entry identity');
+    }
     return {
       leg_number: leg.leg_number,
       race_id: leg.race_id,
@@ -604,22 +629,53 @@ function normalizedStep2Provenance(payload) {
   };
 }
 
+async function requireAuditedExport(env, {
+  roundId,
+  stage,
+  artifactId,
+  artifactFingerprint,
+  asOf,
+  cutoffAt = null,
+  generatedAt
+}) {
+  const row = await env.DB.prepare(
+    'SELECT artifact_json,cutoff_at FROM analysis_external_exports ' +
+    'WHERE game_round_id=? AND stage=? AND artifact_id=? AND artifact_fingerprint=? AND as_of=? AND generated_at=? LIMIT 1'
+  ).bind(roundId, stage, artifactId, artifactFingerprint, asOf, generatedAt).first();
+  if (!row) throw new Error(stage + ' provenance does not match an audited KentaurAI export');
+  if ((cutoffAt || null) !== (row.cutoff_at || null)) throw new Error(stage + ' cutoff does not match audited KentaurAI export');
+  let artifact = {};
+  try { artifact = JSON.parse(row.artifact_json || '{}'); } catch { throw new Error(stage + ' audited export metadata is invalid'); }
+  return artifact;
+}
+
 async function verifyExternalProvenance(env, roundId, step1, step2) {
-  const pack = await createPreMarketAnalysisPackV3(env, roundId, { asOf: step1.asOf });
-  if (pack.manifest.pack_id !== step1.packId
-    || pack.manifest.facts_fingerprint !== step1.factsFingerprint
-    || exactIso(pack.manifest.as_of, 'replayed Step 1 as_of') !== step1.asOf) {
-    throw new Error('Step 1 provenance does not match a reproducible KentaurAI analysis pack');
-  }
+  const step1Artifact = await requireAuditedExport(env, {
+    roundId,
+    stage: 'step1',
+    artifactId: step1.packId,
+    artifactFingerprint: step1.factsFingerprint,
+    asOf: step1.asOf,
+    generatedAt: step1.generatedAt
+  });
+  await requireAuditedExport(env, {
+    roundId,
+    stage: 'step2',
+    artifactId: step2.marketFingerprint,
+    artifactFingerprint: step2.marketFingerprint,
+    asOf: step2.asOf,
+    cutoffAt: step2.cutoff,
+    generatedAt: step2.generatedAt
+  });
   const marketInput = await buildMarketInput(env, roundId, step2.asOf);
   if (marketInput.market_fingerprint !== step2.marketFingerprint
     || exactIso(marketInput.market_cutoff, 'replayed Step 2 cutoff') !== step2.cutoff) {
-    throw new Error('Step 2 provenance does not match a reproducible KentaurAI market export');
+    throw new Error('Step 2 provenance can no longer be reproduced from immutable market history');
   }
   if (Date.parse(step2.generatedAt) < Date.parse(step1.generatedAt)) {
     throw new Error('step2.generated_at cannot precede step1.generated_at');
   }
-  return { pack, marketInput };
+  return { step1Artifact, marketInput };
 }
 
 export async function importRecordedSystem(env, payload, options = {}) {
@@ -651,7 +707,7 @@ export async function importRecordedSystem(env, payload, options = {}) {
   }
   const provenance = await verifyExternalProvenance(env, roundId, step1, step2);
   if (!Array.isArray(payload.legs) || payload.legs.length !== 8) throw new Error('legs must contain exactly eight legs');
-  const predictionLegs = predictionLegsFromStep1Pack(provenance.pack, identity);
+  const predictionLegs = predictionLegsFromExportArtifact(provenance.step1Artifact, identity);
   const legs = payload.legs.map((leg, index) => normalizePredictions(leg, predictionLegs[index], index));
   const predictionMap = new Map(legs.flatMap((leg) => leg.predictions.map((prediction) => [prediction.raceEntryId, prediction])));
   const policy = normalizePolicy(await canonicalOptimizerPolicyForRound(env, roundId));
