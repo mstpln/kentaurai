@@ -8,7 +8,6 @@ import {
   getTrainerCalendarYearDetailStatistics
 } from './entity-detail-calendar-statistics.js';
 import { getTrainerCalendarHomeTrackResults } from './trainer-calendar-home-statistics.js';
-import { enhanceEntityDetailStatisticsHtml } from './entity-detail-statistics-ui.js';
 
 const dataCoverageUiStyle = `
 <style id="kentaurai-data-coverage-ui-style">
@@ -102,8 +101,7 @@ async function enhancedAppResponse(request, response) {
   if (request.method !== 'GET' || path !== '/app/') return response;
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.includes('text/html')) return response;
-  const baseHtml = enhanceEntityDetailStatisticsHtml(await response.text());
-  const body = enhanceDataCoverageDownloadHtml(baseHtml);
+  const body = enhanceDataCoverageDownloadHtml(await response.text());
   const headers = new Headers(response.headers);
   headers.delete('content-length');
   return new Response(body, { status: response.status, statusText: response.statusText, headers });
