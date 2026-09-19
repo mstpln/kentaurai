@@ -248,6 +248,7 @@ export async function importExternalEvidence(env, payload) {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(submissionId)) throw new Error('submission_id must use lowercase letters, numbers and hyphens');
   const roundId = requiredText(payload.round_id, 'round_id');
   const generatedAt = iso(payload.generated_at, 'generated_at');
+  const sourceReference = optionalText(payload.source_reference, 'source_reference', 500);
   const stats = normalizeStats(payload.statistics);
   const interviews = normalizeInterviews(payload.interviews);
   if (!stats.length && !interviews.length) throw new Error('import must contain statistics and/or interviews');
@@ -269,7 +270,7 @@ export async function importExternalEvidence(env, payload) {
     const raw = await archiveRawPayload(env, {
       sourceType:EXTERNAL_EVIDENCE_SOURCE_TYPE, externalId:submissionId, fetchedAt:generatedAt, payload,
       qualityStatus:'manual_structured', rightsStatus:'private_evidence',
-      metadata:{ roundId, contractVersion:EXTERNAL_EVIDENCE_IMPORT_CONTRACT }
+      metadata:{ roundId, contractVersion:EXTERNAL_EVIDENCE_IMPORT_CONTRACT, sourceReference }
     });
     for (const [index, stat] of stats.entries()) {
       const entry = byEntry.get(stat.raceEntryId);
