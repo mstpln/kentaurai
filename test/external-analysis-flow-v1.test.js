@@ -252,6 +252,10 @@ test('recorded-system import persists truthful external lineage and preserves un
   assert.equal(lineage.step1_pack_id, payload.step1.pack_id);
   assert.equal(lineage.step1_facts_fingerprint, payload.step1.facts_fingerprint);
   assert.equal(lineage.step2_market_fingerprint, payload.step2.market_fingerprint);
+  const storedAnalyses = db.prepare("SELECT DISTINCT market_blind,method_note FROM ai_race_analyses WHERE model_version_id=?").all(result.modelVersionId);
+  assert.equal(storedAnalyses.length, 1);
+  assert.equal(storedAnalyses[0].market_blind, 0);
+  assert.equal(storedAnalyses[0].method_note, 'declared_unsealed');
 
   const selection = db.prepare("SELECT market_percent FROM system_selections WHERE system_id=? AND leg_number=1 AND race_entry_id='external-entry-1-1'")
     .get(lineage.main_system_id);
