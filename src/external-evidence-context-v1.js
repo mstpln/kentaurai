@@ -106,7 +106,10 @@ async function loadInterviewRows(env, horseIds, trainerIds) {
 }
 
 export async function buildStep3Context(env, roundId) {
-  const identity=await loadRoundEvidenceIdentity(env,roundId);
+  const [identity,roundContext]=await Promise.all([
+    loadRoundEvidenceIdentity(env,roundId),
+    buildExternalEvidenceImportContext(env,roundId)
+  ]);
   const active=identity.entries.filter((row)=>!row.scratched);
   const horseIds=[...new Set(active.map((row)=>row.horse_id))];
   const trainerIds=[...new Set(active.map((row)=>row.trainer_id).filter(Boolean))];
@@ -119,6 +122,9 @@ export async function buildStep3Context(env, roundId) {
   }
   const horseNames=new Map(active.map((row)=>[row.horse_id,row.horse_name]));
   const trainerNames=new Map(active.filter((row)=>row.trainer_id).map((row)=>[row.trainer_id,row.trainer_name]));
+  const currentContextByHorse=new Map(
+    (roundContext.entries||[]).filter((row)=>!row.scratched).map((row)=>[row.horse.id,row.external_stat_context])
+  );
   return {
     contract_version:STEP3_CONTEXT_CONTRACT,
     generated_at:new Date().toISOString(),
@@ -126,6 +132,7 @@ export async function buildStep3Context(env, roundId) {
     purpose:'historical_external_context_for_step3_only',
     horses:horseIds.map((id)=>({
       horse_id:id,horse_name:horseNames.get(id)||null,
+      current_round_context:currentContextByHorse.get(id)||null,
       external_statistics:stats.get(id)||[],
       interview_history:byHorse.get(id)||[]
     })),
