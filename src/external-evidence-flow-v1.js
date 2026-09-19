@@ -313,9 +313,18 @@ function validatePayload(payload) {
       seconds:numberOrNull(row.seconds, 'statistics[' + index + '].seconds', { integer:true, min:0 }),
       thirds:numberOrNull(row.thirds, 'statistics[' + index + '].thirds', { integer:true, min:0 }),
       winRate:numberOrNull(row.win_rate_percent, 'statistics[' + index + '].win_rate_percent', { min:0, max:100 }),
-      roi:numberOrNull(row.roi_percent, 'statistics[' + index + '].roi_percent'),
+      roi:numberOrNull(row.roi_percent, 'statistics[' + index + '].roi_percent', { min:0 }),
       observedAt:iso(row.observed_at || exportedAt, 'statistics[' + index + '].observed_at')
     };
+  }).map((row, index) => {
+    if (row.starts != null) {
+      for (const [label, value] of [['wins',row.wins],['seconds',row.seconds],['thirds',row.thirds]]) {
+        if (value != null && value > row.starts) throw new Error('statistics[' + index + '].' + label + ' cannot exceed starts');
+      }
+      const placingTotal = [row.wins,row.seconds,row.thirds].filter((value) => value != null).reduce((sum,value) => sum + value, 0);
+      if (placingTotal > row.starts) throw new Error('statistics[' + index + '] placing counts cannot exceed starts');
+    }
+    return row;
   }) : [];
 
   const interviews = Array.isArray(payload.interviews) ? payload.interviews.map((row, index) => {
