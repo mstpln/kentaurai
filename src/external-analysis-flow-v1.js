@@ -36,7 +36,7 @@ function providerKey(value) {
 }
 
 function providerModel(value) {
-  const model = requiredText(value || 'unknown', 'producer.model', 200);
+  const model = requiredText(value, 'producer.model', 200);
   if (/[\u0000-\u001f\u007f]/.test(model)) throw new Error('producer.model contains control characters');
   return model;
 }
@@ -371,7 +371,7 @@ export function getRegistrationPrompt(provider = 'openai') {
     '  "contract_version": "' + RECORDED_SYSTEM_CONTRACT + '",',
     '  "submission_id": "nytt-stabilt-id",',
     '  "round_id": "<exakt från importunderlaget>",',
-    '  "producer": {"provider": "' + key + '", "model": "<verklig modell eller unknown>"},',
+    '  "producer": {"provider": "' + key + '", "model": "<verklig modellbeteckning>"},',
     '  "step1": {"pack_id":"<manifest.pack_id>","facts_fingerprint":"<manifest.facts_fingerprint>","as_of":"<manifest.as_of>","generated_at":"<manifest.generated_at>"},',
     '  "step2": {"market_fingerprint":"<market_fingerprint från Steg 2-filen>","as_of":"<market_as_of>","cutoff":"<market_cutoff>","generated_at":"<generated_at från Steg 2-filen>"},',
     '  "round_summary": "<Steg 1-sammanfattning>",',
