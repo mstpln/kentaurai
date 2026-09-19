@@ -114,6 +114,11 @@ test('external statistics and interviews import append-only and are readable fro
   assert.deepEqual(retry.counts, { statistics:0, interviews:0, signals:0 });
   assert.equal(retry.reused_raw_snapshot, true);
 
+  const sameEvidenceNewExport = payload('manual-export-same-evidence','2099-09-20T11:00:00Z');
+  const sameEvidenceResult = await importExternalEvidence(env, sameEvidenceNewExport);
+  assert.deepEqual(sameEvidenceResult.counts, { statistics:0, interviews:0, signals:0 });
+  assert.equal(sameEvidenceResult.reused_raw_snapshot, false);
+
   const secondPayload = payload('manual-export-2','2099-10-01T11:00:00Z');
   secondPayload.statistics = [secondPayload.statistics[0]];
   secondPayload.statistics[0].starts = 27;
