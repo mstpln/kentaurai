@@ -227,7 +227,8 @@ test('core production detail path is canonical with no final runtime wrapper pre
   }
   assert.deepEqual(document.domAppends.filter((id) => /StatsBuild/.test(id)), []);
   assert.equal(requestedPaths.some((path) => path.startsWith('/horses/horse-1/statistics?')), false);
-  assert.match(document.getElementById('entityDetailStatisticsV2').innerHTML, /Scorecard/);
+  assert.doesNotMatch(document.getElementById('entityDetailStatisticsV2').innerHTML, /Scorecard/);
+  assert.match(document.getElementById('entityDetailStatisticsV2').innerHTML, /^<div class="entity-detail-controls">[\s\S]*?<div class="entity-detail-score">/);
 });
 
 test('actual production click path owns tabs and never paints legacy statistics', async () => {
