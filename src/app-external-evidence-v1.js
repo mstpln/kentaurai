@@ -48,7 +48,8 @@ function evidenceUiClient(){
   function installSettings(){
     const layout=document.querySelector('.settings-layout');if(!layout||document.getElementById('evidenceWorkflow'))return;
     const ai=[...document.querySelectorAll('.tab.active')].some(function(x){return x.textContent.trim()==='AI'});if(!ai)return;
-    layout.innerHTML=workflow();
+    const footer=layout.querySelector('.settings-footer')?.outerHTML||'';
+    layout.innerHTML=workflow()+footer;
     const p=document.getElementById('evidenceProvider');if(p&&state.analysisProvider)p.value=state.analysisProvider;p.onchange=function(){state.analysisProvider=p.value};
     document.getElementById('evidencePack').onclick=function(){const id=val('evidenceAnalysisRound');if(id)dl('/app/api/settings/f3-analysis-pack?round_id='+encodeURIComponent(id))};
     document.getElementById('evidenceP1').onclick=function(ev){copy(ev.currentTarget,'/app/api/settings/external-step1-prompt?provider='+provider())};
