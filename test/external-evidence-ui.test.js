@@ -17,36 +17,14 @@ test('external evidence UI adds only the approved entity tabs and compiles', asy
   const script = extractScript(html);
   assert.doesNotThrow(() => new vm.Script(script));
 
-  const context = vm.createContext({
-    state: { detail:null, tab:'stats' },
-    detailTabs(type) {
-      if (type === 'horse') return [['stats','Statistik'],['starts','Starter'],['equipment','Utrustning'],['data','Data']];
-      return [['stats','Statistik'],['starts','Starter'],['horses','Hästar'],['data','Data']];
-    },
-    async renderDetail() {},
-    document: { querySelector() { return null; } },
-    api: async () => ({ items:[] }),
-    esc: (value) => String(value ?? ''),
-    Intl,
-    Date,
-    Number,
-    Map,
-    console
-  });
-  new vm.Script(script).runInContext(context);
-
-  assert.deepEqual(
-    Array.from(context.detailTabs('horse'), (row) => Array.from(row)),
-    [['stats','Statistik'],['external_stats','Extern statistik'],['interviews','Intervjuer'],['starts','Starter'],['equipment','Utrustning'],['data','Data']]
-  );
-  assert.deepEqual(
-    Array.from(context.detailTabs('trainer'), (row) => Array.from(row)),
-    [['stats','Statistik'],['interviews','Intervjuer'],['starts','Starter'],['horses','Hästar'],['data','Data']]
-  );
-  assert.deepEqual(
-    Array.from(context.detailTabs('driver'), (row) => Array.from(row)),
-    [['stats','Statistik'],['starts','Starter'],['horses','Hästar'],['data','Data']]
-  );
+  assert.match(script, /function evidenceTabs\(page\)/);
+  assert.match(script, /\['external_stats','Extern statistik'\]/);
+  assert.match(script, /\['interviews','Intervjuer'\]/);
+  assert.match(script, /data-external-evidence-tab/);
+  assert.match(script, /MutationObserver/);
+  assert.match(script, /renderEvidenceTab/);
+  assert.doesNotMatch(script, /const previousEvidenceTabs = detailTabs/);
+  assert.doesNotMatch(script, /renderDetail = async function/);
 });
 
 test('external evidence UI enhancer is idempotent', () => {

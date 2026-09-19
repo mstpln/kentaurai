@@ -68,48 +68,83 @@ function externalEvidenceUiClient() {
     }).join('') + '</div>';
   }
 
-  const previousEvidenceTabs = detailTabs;
-  detailTabs = function(type) {
-    const items = previousEvidenceTabs(type).map((row) => [...row]);
-    if (type === 'horse') {
-      const statsIndex = Math.max(0, items.findIndex((row) => row[0] === 'stats'));
-      items.splice(statsIndex + 1, 0, ['external_stats','Extern statistik'], ['interviews','Intervjuer']);
-    } else if (type === 'trainer') {
-      const statsIndex = Math.max(0, items.findIndex((row) => row[0] === 'stats'));
-      items.splice(statsIndex + 1, 0, ['interviews','Intervjuer']);
+  function evidenceTabs(page) {
+    if (page === 'horses') return [['external_stats','Extern statistik'],['interviews','Intervjuer']];
+    if (page === 'trainers') return [['interviews','Intervjuer']];
+    return [];
+  }
+  function ensureEvidenceTabs() {
+    const page = state.detail?.page;
+    const tabBar = document.querySelector('.tabs');
+    if (!tabBar || !page) return;
+    const wanted = evidenceTabs(page);
+    tabBar.querySelectorAll('[data-external-evidence-tab="1"]').forEach((button) => {
+      if (!wanted.some((row) => row[0] === button.dataset.tab)) button.remove();
+    });
+    let anchor = tabBar.querySelector('.tab[data-tab="stats"]');
+    for (const [key,label] of wanted) {
+      let button = tabBar.querySelector('.tab[data-tab="' + key + '"]');
+      if (!button) {
+        button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'tab';
+        button.dataset.tab = key;
+        button.textContent = label;
+        if (anchor?.nextSibling) tabBar.insertBefore(button, anchor.nextSibling);
+        else tabBar.appendChild(button);
+      }
+      button.dataset.externalEvidenceTab = '1';
+      anchor = button;
     }
-    return items;
-  };
-
-  const previousEvidenceRenderDetail = renderDetail;
-  renderDetail = async function() {
-    await previousEvidenceRenderDetail();
-    if (!state.detail) return;
-    const page = state.detail.page;
-    const id = state.detail.id;
-    const requestedTab = state.tab;
-    if (requestedTab === 'external_stats' && page === 'horses') {
-      replaceEvidenceBody('<div class="skeleton"></div>');
-      try {
+    tabBar.querySelectorAll('.tab[data-tab]').forEach((button) => {
+      button.classList.toggle('active', button.dataset.tab === state.tab);
+    });
+  }
+  async function renderEvidenceTab(page, id, requestedTab) {
+    replaceEvidenceBody('<div class="skeleton"></div>');
+    try {
+      if (requestedTab === 'external_stats' && page === 'horses') {
         const data = await api('/horses/' + encodeURIComponent(id) + '/external-statistics');
         if (!state.detail || state.detail.id !== id || state.tab !== requestedTab) return;
         replaceEvidenceBody(statsView(data));
-      } catch (error) {
-        replaceEvidenceBody('<div class="notice">Kunde inte läsa extern statistik: ' + esc(error.message) + '</div>');
+        return;
       }
-    }
-    if (requestedTab === 'interviews' && (page === 'horses' || page === 'trainers')) {
-      replaceEvidenceBody('<div class="skeleton"></div>');
-      try {
+      if (requestedTab === 'interviews' && (page === 'horses' || page === 'trainers')) {
         const endpoint = page === 'horses' ? '/horses/' : '/trainers/';
         const data = await api(endpoint + encodeURIComponent(id) + '/interviews');
         if (!state.detail || state.detail.id !== id || state.tab !== requestedTab) return;
         replaceEvidenceBody(interviewsView(data, page));
-      } catch (error) {
-        replaceEvidenceBody('<div class="notice">Kunde inte läsa intervjuer: ' + esc(error.message) + '</div>');
       }
+    } catch (error) {
+      const label = requestedTab === 'external_stats' ? 'extern statistik' : 'intervjuer';
+      replaceEvidenceBody('<div class="notice">Kunde inte läsa ' + label + ': ' + esc(error.message) + '</div>');
     }
-  };
+  }
+  document.addEventListener('click', function(event) {
+    const target = event.target instanceof Element ? event.target.closest('.tab[data-external-evidence-tab="1"]') : null;
+    if (!target || !state.detail) return;
+    const requestedTab = target.dataset.tab;
+    const page = state.detail.page;
+    if (!evidenceTabs(page).some((row) => row[0] === requestedTab)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    state.tab = requestedTab;
+    ensureEvidenceTabs();
+    void renderEvidenceTab(page, state.detail.id, requestedTab);
+  }, true);
+  const detailHost = document.getElementById('app');
+  if (detailHost) {
+    let scheduled = false;
+    new MutationObserver(function() {
+      if (scheduled) return;
+      scheduled = true;
+      queueMicrotask(function() {
+        scheduled = false;
+        ensureEvidenceTabs();
+      });
+    }).observe(detailHost, { childList:true, subtree:true });
+  }
+  ensureEvidenceTabs();
 }
 
 const externalEvidenceCss = '<style id="kentaurai-external-evidence-ui-style">' +
