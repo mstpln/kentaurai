@@ -7,6 +7,7 @@ export const EXTERNAL_EVIDENCE_PROMPT_VERSION = 'external-evidence-prompt-v1';
 
 const CONTEXT_TYPES = new Set(['all_starts','current_track','season','v85','v86','lead','balance','wagon']);
 const FACT_OR_OPINION = new Set(['fact','opinion','mixed','intention','soft_signal']);
+const INTERVIEW_SIGNAL_TYPES = new Set(['form','training','tactics','distance','start','equipment','expectation','other']);
 const MAX_SUMMARY = 5000;
 const MAX_SIGNAL_VALUE = 1200;
 const ID_CHUNK = 40;
@@ -213,7 +214,7 @@ async function loadInterviews(env, horseIds, trainerIds, asOf = null) {
   const byId = new Map();
   for (const group of chunks([...new Set(horseIds)].filter(Boolean), 35)) {
     const { results } = await env.DB.prepare(
-      "SELECT ei.id,ei.horse_id,ei.trainer_id,ei.race_entry_id,ei.race_id,ei.game_round_id,ei.speaker_name,ei.speaker_role,ei.published_at,ei.summary_text " +
+      "SELECT ei.id,ei.horse_id,ei.trainer_id,ei.race_entry_id,ei.race_id,ei.game_round_id,ei.speaker_name,ei.speaker_role,ei.published_at,ei.summary_text,ei.change_since_last,ei.change_summary " +
       "FROM editorial_items ei JOIN source_records sr ON sr.id=ei.source_record_id " +
       "WHERE sr.source_type='manual_editorial_import' AND ei.horse_id IN (" + placeholders(group) + ") " +
       (asOf ? "AND julianday(COALESCE(ei.published_at,sr.fetched_at))<=julianday(?) " : "") +
@@ -223,7 +224,7 @@ async function loadInterviews(env, horseIds, trainerIds, asOf = null) {
   }
   for (const group of chunks([...new Set(trainerIds)].filter(Boolean), 35)) {
     const { results } = await env.DB.prepare(
-      "SELECT ei.id,ei.horse_id,ei.trainer_id,ei.race_entry_id,ei.race_id,ei.game_round_id,ei.speaker_name,ei.speaker_role,ei.published_at,ei.summary_text " +
+      "SELECT ei.id,ei.horse_id,ei.trainer_id,ei.race_entry_id,ei.race_id,ei.game_round_id,ei.speaker_name,ei.speaker_role,ei.published_at,ei.summary_text,ei.change_since_last,ei.change_summary " +
       "FROM editorial_items ei JOIN source_records sr ON sr.id=ei.source_record_id " +
       "WHERE sr.source_type='manual_editorial_import' AND ei.trainer_id IN (" + placeholders(group) + ") " +
       (asOf ? "AND julianday(COALESCE(ei.published_at,sr.fetched_at))<=julianday(?) " : "") +
@@ -253,6 +254,8 @@ async function loadInterviews(env, horseIds, trainerIds, asOf = null) {
     speaker_role:row.speaker_role || null,
     published_at:row.published_at || null,
     summary:row.summary_text || null,
+    change_since_last:row.change_since_last == null ? null : Boolean(row.change_since_last),
+    change_summary:row.change_summary || null,
     signals:signals.get(row.id) || []
   }));
 }
@@ -348,8 +351,10 @@ function validatePayload(payload) {
       if (!signal || typeof signal !== 'object' || Array.isArray(signal)) throw new Error('interview signal must be an object');
       const fact = requiredText(signal.fact_or_opinion, 'interviews[' + index + '].signals[' + signalIndex + '].fact_or_opinion', 40);
       if (!FACT_OR_OPINION.has(fact)) throw new Error('unsupported fact_or_opinion: ' + fact);
+      const signalType = requiredText(signal.type, 'signal.type', 120);
+      if (!INTERVIEW_SIGNAL_TYPES.has(signalType)) throw new Error('unsupported interview signal type: ' + signalType);
       return {
-        type:requiredText(signal.type, 'signal.type', 120),
+        type:signalType,
         value:optionalText(signal.value, 'signal.value', MAX_SIGNAL_VALUE),
         polarity:optionalText(signal.polarity, 'signal.polarity', 40),
         strength:numberOrNull(signal.strength, 'signal.strength', { min:0, max:1 }),
@@ -460,7 +465,7 @@ export async function importExternalEvidence(env, payload) {
 
   for (const [index, interview] of validated.interviews.entries()) {
     const entry = entries.get(interview.raceEntryId);
-    const interviewDigest = await evidenceDigest({
+    const interviewDigestInput = {
       horseId:interview.horseId,
       trainerId:interview.trainerId || entry.trainer_id || null,
       raceEntryId:interview.raceEntryId,
@@ -468,10 +473,13 @@ export async function importExternalEvidence(env, payload) {
       speakerRole:interview.speakerRole,
       publishedAt:interview.publishedAt,
       summary:interview.summary,
-      changeSinceLast:interview.changeSinceLast,
-      changeSummary:interview.changeSummary,
       signals:interview.signals
-    });
+    };
+    if (interview.changeSinceLast === true) {
+      interviewDigestInput.changeSinceLast = true;
+      interviewDigestInput.changeSummary = interview.changeSummary;
+    }
+    const interviewDigest = await evidenceDigest(interviewDigestInput);
     const itemId = stableId('external-interview', interview.raceEntryId, interviewDigest);
     const result = await env.DB.prepare(
       "INSERT OR IGNORE INTO editorial_items " +
