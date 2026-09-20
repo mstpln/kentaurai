@@ -31,14 +31,14 @@
 
 ## Interface direction
 1. Horse, trainer and driver remain primary detail entities, with V85/V86 system/performance history available in a dedicated Spel area.
-2. Bottom navigation is fixed as **Trend -> Tränare -> Hästar -> Kuskar -> Bana -> Spel**.
+2. Bottom navigation is fixed as **Start -> Statistik -> Spel**. Statistik owns the four-way top selector **Tränare -> Hästar -> Kuskar -> Bana**, shown above the workspace page heading.
 3. Trend is the start workspace and uses category switching for Tränare / Hästar / Kuskar plus rolling periods 2 weeks / 4 weeks / 3 months / 6 months / 1 year.
 4. Trend uses the verified actual starts currently present in D1; an incomplete historical backfill does not create guessed values or a special UI warning. Ranking is deterministic by win rate -> wins -> starts -> stable entity ID and is capped at ten rows.
 5. Trend and individual entity statistics share the same core definitions and denominator rules. Scratched entries are not starts; win rate uses actual starts, top-three rate uses result starts, gallop rate uses only starts with verified gallop status, and missing prize data stays distinguishable from zero.
 6. Trend race level reuses the canonical **All data / Högre prissumma / Vardagstrav** logic. Track, race type, breed type and start method are secondary AND-combined filters behind the horizontal-sliders control.
 7. Trend rows use the approved Version 3 hierarchy: win percentage at left, name plus starts/wins/losses in the main area, and equal Top 3%, Gallop% and Prispengar pills beneath. The whole row navigates to the canonical entity detail page.
 8. A global search bar searches all three primary entity types.
-9. Spel contains exactly three tabs: Översikt / V85 / V86. V85/V86 list saved rounds; each round can open a detailed post-race page.
+9. Spel contains exactly three primary tabs: **Kommande / Historik / Översikt**. V85/V86 are filters inside Kommande and Historik; saved rounds can open detailed round pages.
 10. Entity and round pages should use tabs, collapsible start cards and natural data groups instead of long unstructured field lists.
 11. Entity detail views expose all relevant data families already stored/measured by the current schema, while internal IDs/provenance remain backend concerns rather than normal UI content.
 12. Factual race/start/result/market/equipment/X-Labs/position/condition data is presented separately from calculated features, AI analyses and editorial signals.
@@ -50,8 +50,8 @@
 18. There is no visible logout control; the private session expires normally.
 19. Visual direction is minimal and strongly structured, using black/grey/brown/beige as the base with restrained warm accent color and clear card/divider/tab separation.
 20. The approved Sagittarius KentaurAI brand stays separate from entity navigation symbolism.
-21. Bottom-navigation symbols are Trend = approved chart-line, Tränare = clipboard/pen, Hästar = horse, Kuskar = lightbulb, Bana = map-pin/oval, Spel = ticket. Entity profile tiles use initials rather than category symbols.
-22. Trend uses the approved chart-line symbol and the singular label `Trend` in both navigation and page heading.
+21. Bottom-navigation symbols are Start = the existing approved Trend chart-line, Statistik = Phosphor Table, and Spel = Phosphor Currency Circle Dollar. Entity profile tiles use initials rather than category symbols.
+22. Start keeps the approved chart-line symbol; the Trend workspace and its page content remain unchanged behind Start.
 23. KentaurAI is packaged as an installable PWA scoped to `/app/` with standalone launch and dedicated Sagittarius icons. Its service worker may cache public PWA metadata/icon assets only; authenticated app HTML and API data remain outside the offline cache.
 24. Bana uses **Översikt -> Spårstatistik -> Hemmatränare**. User-facing country codes are localized (for example `SE` -> `Sverige`) while storage/API identities remain unchanged.
 25. Spårstatistik owns Period, Startmetod, Distans, STL-klass and Lopptyp in the canonical lane-statistics flow. Optional filters combine with AND semantics; the literal all-period label is `All data`.

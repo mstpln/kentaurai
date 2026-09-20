@@ -56,22 +56,21 @@ The current build contains:
 
 ## Interface
 Bottom navigation order is:
-1. Trend
-2. Tränare
-3. Hästar
-4. Kuskar
-5. Bana
-6. Spel
+1. Start
+2. Statistik
+3. Spel
+
+Statistik groups the factual entity workspaces under one primary destination. Its top selector uses the approved four-way control: **Tränare / Hästar / Kuskar / Bana**. The selector sits above the current page heading and preserves each workspace's existing content, tabs, detail pages and statistics behavior.
 
 Trend is the start workspace. It switches between Tränare / Hästar / Kuskar and 2 weeks / 4 weeks / 3 months / 6 months / 1 year. Trend output remains unavailable until sufficient verified result history exists; the interface never fabricates rankings.
 
 Entity detail views group profile/activity data and measured start history instead of flattening every field into one page. Stored race/start/result facts, market/odds histories, equipment, X-Labs, positions, conditions, calculated features, AI analyses and structured editorial signals are separated into natural sections. Unknown facts remain null/unknown. Start history is paginated rather than capped to a fixed latest-100 window, so the same interface can support the planned multi-year backfill.
 
-Bana is a separate factual workspace. Track overview presents only stored facts and hides missing contact fields. The user-facing country label is localized while DB/API country codes remain unchanged. Spårstatistik uses deterministic race classifications and applies all selected filters with AND semantics; the all/default period label remains literally `All data`.
+Bana is a factual workspace inside Statistik. Track overview presents only stored facts and hides missing contact fields. The user-facing country label is localized while DB/API country codes remain unchanged. Spårstatistik uses deterministic race classifications and applies all selected filters with AND semantics; the all/default period label remains literally `All data`.
 
-Spel is separate from entity browsing. Översikt shows compact performance statistics, V85/V86 tabs list saved rounds, and each round has a dedicated post-race detail view. Saved systems preserve the exactly-three-spikes system rule. Once all eight legs have one unambiguous factual winner, KentaurAI can automatically write deterministic per-leg post-race reviews. Covered winners are recorded as no change; misses are candidate learning only. Dead heats remain unreviewed automatically until dedicated verified semantics exist.
+Spel is separate from entity browsing. It uses **Kommande / Historik / Översikt** as its primary tabs; V85/V86 are filters inside Kommande and Historik. Each saved round can open its dedicated detail view. Saved systems preserve the exactly-three-spikes system rule. Once all eight legs have one unambiguous factual winner, KentaurAI can automatically write deterministic per-leg post-race reviews. Covered winners are recorded as no change; misses are candidate learning only. Dead heats remain unreviewed automatically until dedicated verified semantics exist.
 
-The visual system is minimal, dark and structured. The approved Sagittarius mark is used for the KentaurAI brand. Bottom navigation uses the approved chart icon for Trend, clipboard/pen for Tränare, horse for Hästar, lightbulb for Kuskar, map-pin/oval for Bana and ticket for Spel. Entity profile tiles use initials rather than category icons.
+The visual system is minimal, dark and structured. The approved Sagittarius mark is used for the KentaurAI brand. Bottom navigation uses the existing Trend chart icon for Start, the Phosphor Table icon for Statistik and the Phosphor Currency Circle Dollar icon for Spel. Tränare, Hästar, Kuskar and Bana are switched through the four-way Statistik selector above the page heading. Entity profile tiles use initials rather than category icons.
 
 KentaurAI is packaged as an installable PWA. Its manifest is scoped to `/app/`, launches standalone and uses dedicated normal/maskable Sagittarius icons. The service worker caches only public PWA metadata/icon assets; authenticated app HTML and `/app/api/*` responses are never placed in its offline cache.
 

@@ -20,6 +20,8 @@ test('performance Worker injects cache, prefetch and immediate loading UI into p
   assert.match(html, /requestIdleCallback/);
   assert.match(html, /inflight\.has\(path\)/);
   assert.match(html, /defaultCalendarPath/);
+  assert.match(html, /closest\('\[data-statistics-page\]'\)/);
+  assert.match(html, /listPath\(statisticsCategory\.dataset\.statisticsPage\)/);
   assert.match(html, /statistics\/filter-options/);
   assert.doesNotMatch(html, /if\(page==='start'\) return '\/summary'/);
   assert.match(html, /Öppnar profil/);

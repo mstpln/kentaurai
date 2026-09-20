@@ -25,13 +25,20 @@ export function formatTrackAddress(detail) {
 
 const trackIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s6-5.2 6-11a6 6 0 1 0-12 0c0 5.8 6 11 6 11z"/><ellipse cx="12" cy="10" rx="3.2" ry="1.8"/></svg>`;
 
+const statisticsNavIcon = `<svg class="nav-icon" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M224,48H32a8,8,0,0,0-8,8V192a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A8,8,0,0,0,224,48ZM40,112H80v32H40Zm56,0H216v32H96ZM216,64V96H40V64ZM40,160H80v32H40Zm176,32H96V160H216v32Z"/></svg>`;
+const gamesNavIcon = `<svg class="nav-icon" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm40-68a28,28,0,0,1-28,28h-4v8a8,8,0,0,1-16,0v-8H104a8,8,0,0,1,0-16h36a12,12,0,0,0,0-24H116a28,28,0,0,1,0-56h4V72a8,8,0,0,1,16,0v8h16a8,8,0,0,1,0,16H116a12,12,0,0,0,0,24h24A28,28,0,0,1,168,148Z"/></svg>`;
+
 const alignedCss = `
 <style id="kentaurai-aligned-ui-v063">
 .shell{padding-bottom:104px!important}
 .bottom-nav{padding-top:10px!important;padding-bottom:calc(10px + env(safe-area-inset-bottom))!important}
-.bottom-inner{max-width:820px!important;grid-template-columns:repeat(6,minmax(0,1fr))!important;gap:3px!important}
+.bottom-inner{max-width:560px!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:3px!important}
 .nav-item{min-width:0!important;padding:9px 3px 8px!important}
-.nav-item[data-page="tracks"] .nav-icon{fill:none!important;stroke:currentColor!important;stroke-width:2!important;stroke-linecap:round!important;stroke-linejoin:round!important}
+.statistics-category-nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:11px;overflow:hidden;margin-bottom:22px}
+.statistics-category-btn{border:0;background:#11110f;color:#8e887f;padding:11px 8px;cursor:pointer;font-size:12px;font-weight:550;min-width:0}
+.statistics-category-btn:hover{color:var(--text);background:#161512}
+.statistics-category-btn.active{background:#1d1913;color:var(--accent-soft);box-shadow:inset 0 -2px 0 var(--accent)}
+@media(max-width:620px){.statistics-category-btn{font-size:10px;padding:10px 3px}}
 .settings-button{width:32px!important;height:32px!important;padding:5px!important;align-self:center!important}
 .settings-button svg{width:21px!important;height:21px!important}
 @media(max-width:760px){.shell{padding-bottom:104px!important}.top-inner{position:relative!important}.settings-button{right:12px!important;top:10px!important;width:32px!important;height:32px!important;padding:5px!important}.settings-button svg{width:21px!important;height:21px!important}.brand{padding-right:42px!important}}
@@ -52,11 +59,67 @@ const alignedScript = `
 <script id="kentaurai-aligned-ui-script-v063">
 (function(){
 const TRACK_ICON=${JSON.stringify(trackIcon)};
+const STATISTICS_NAV_ICON=${JSON.stringify(statisticsNavIcon)};
+const GAMES_NAV_ICON=${JSON.stringify(gamesNavIcon)};
 const TRACK_STL_OPTIONS=${JSON.stringify(STL_CLASS_OPTIONS)};
 const TRACK_RACE_TYPE_OPTIONS=${JSON.stringify(RACE_TYPE_OPTIONS)};
 const TRACK_COUNTRIES={SE:'Sverige',NO:'Norge',DK:'Danmark',FI:'Finland',DE:'Tyskland',FR:'Frankrike',IT:'Italien',NL:'Nederländerna',BE:'Belgien',EE:'Estland',LV:'Lettland',LT:'Litauen',US:'USA',CA:'Kanada'};
-state.trackOffsets=state.trackOffsets||0;state.trackDetail=state.trackDetail||null;state.trackTab=state.trackTab||'overview';state.trackFilters=state.trackFilters||{};state.trackTrainerOffsets=state.trackTrainerOffsets||{};
-function addTrackNavigation(){const inner=document.querySelector('.bottom-inner');if(!inner||inner.querySelector('[data-page="tracks"]'))return;const games=inner.querySelector('[data-page="games"]');const button=document.createElement('button');button.className='nav-item';button.dataset.page='tracks';button.innerHTML=TRACK_ICON+'Bana';button.querySelector('svg')?.classList.add('nav-icon');button.onclick=()=>renderTracks();inner.insertBefore(button,games||null)}addTrackNavigation();
+const STATISTICS_PAGES=['trainers','horses','drivers','tracks'];
+state.trackOffsets=state.trackOffsets||0;state.trackDetail=state.trackDetail||null;state.trackTab=state.trackTab||'overview';state.trackFilters=state.trackFilters||{};state.trackTrainerOffsets=state.trackTrainerOffsets||{};state.statisticsPage=STATISTICS_PAGES.includes(state.statisticsPage)?state.statisticsPage:'horses';
+
+const priorAlignedSetNav=setNav;
+setNav=function(page){priorAlignedSetNav(STATISTICS_PAGES.includes(page)?'statistics':page)};
+
+function statisticsCategoryNav(active){
+  return '<div class="statistics-category-nav" aria-label="Statistikområden">'+[
+    ['trainers','Tränare'],['horses','Hästar'],['drivers','Kuskar'],['tracks','Bana']
+  ].map(([page,label])=>'<button type="button" class="statistics-category-btn '+(page===active?'active':'')+'" data-statistics-page="'+page+'" '+(page===active?'aria-current="page"':'')+'>'+label+'</button>').join('')+'</div>';
+}
+function bindStatisticsCategoryNav(){
+  document.querySelectorAll('[data-statistics-page]').forEach(button=>button.onclick=()=>{
+    const page=button.dataset.statisticsPage;
+    if(!STATISTICS_PAGES.includes(page))return;
+    state.statisticsPage=page;
+    state.detail=null;state.gameDetail=null;state.gameSystemId=null;state.trackDetail=null;
+    if(page==='tracks')renderTracks();
+    else{state.tab='list';renderEntityList(page);}
+  });
+}
+function syncStatisticsCategoryNav(){
+  if(STATISTICS_PAGES.includes(state.page))state.statisticsPage=state.page;
+  const shouldShow=STATISTICS_PAGES.includes(state.page)&&!state.detail&&!state.trackDetail;
+  const existing=app.querySelector('.statistics-category-nav');
+  if(!shouldShow){if(existing)existing.remove();return}
+  if(!existing){app.insertAdjacentHTML('afterbegin',statisticsCategoryNav(state.page));bindStatisticsCategoryNav();return}
+  existing.querySelectorAll('[data-statistics-page]').forEach(button=>{
+    const active=button.dataset.statisticsPage===state.page;
+    button.classList.toggle('active',active);
+    if(active)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');
+  });
+}
+const statisticsNavObserver=new MutationObserver(()=>syncStatisticsCategoryNav());
+statisticsNavObserver.observe(app,{childList:true});
+
+function alignPrimaryNavigation(){
+  const inner=document.querySelector('.bottom-inner');if(!inner)return;
+  inner.innerHTML='<button class="nav-item" data-page="start">'+icon('trend','nav-icon')+'Start</button>'+
+    '<button class="nav-item" data-page="statistics">'+STATISTICS_NAV_ICON+'Statistik</button>'+
+    '<button class="nav-item" data-page="games">'+GAMES_NAV_ICON+'Spel</button>';
+  inner.querySelector('[data-page="start"]').onclick=()=>{state.trackDetail=null;renderStart()};
+  inner.querySelector('[data-page="statistics"]').onclick=()=>{
+    state.detail=null;state.gameDetail=null;state.gameSystemId=null;state.trackDetail=null;
+    const page=STATISTICS_PAGES.includes(state.statisticsPage)?state.statisticsPage:'horses';
+    if(page==='tracks')renderTracks();else renderEntityList(page);
+  };
+  inner.querySelector('[data-page="games"]').onclick=()=>{state.trackDetail=null;state.gameTab=state.gameTab||'upcoming';state.gameSystemId=null;renderGames()};
+  setNav(state.page||'start');
+}
+alignPrimaryNavigation();
+
+const priorAlignedOpenDetail=openDetail;
+openDetail=async function(page,id){if(STATISTICS_PAGES.includes(page))state.statisticsPage=page;return priorAlignedOpenDetail(page,id)};
+const priorAlignedRenderEntityList=renderEntityList;
+renderEntityList=async function(page){if(!['list','stats'].includes(state.tab))state.tab='list';if(STATISTICS_PAGES.includes(page))state.statisticsPage=page;return priorAlignedRenderEntityList(page)};
 function statusWords(status){return ({working:'Fungerar',success:'Klar',warning:'Varning',error:'Fel',running:'Pågår',unknown:'Okänd'})[status]||status}statusText=statusWords;
 function alignSettingsStatuses(){document.querySelectorAll('.settings-row').forEach(row=>{const pill=row.querySelector(':scope > .status-pill');if(!pill||row.querySelector(':scope > .settings-row-status'))return;const status=pill.className.split(/\\s+/).find(x=>['working','success','warning','error','running','unknown'].includes(x));if(status)pill.textContent=statusWords(status);const bottom=document.createElement('div');bottom.className='settings-row-status';const label=document.createElement('span');label.className='settings-row-status-label';label.textContent='Status';bottom.append(label,pill);row.append(bottom)})}
 const priorAlignedRenderData=renderData;renderData=async function(){await priorAlignedRenderData();if(state.settingsOpen&&state.settingsTab==='data')alignSettingsStatuses()};
