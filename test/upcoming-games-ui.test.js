@@ -16,6 +16,8 @@ test('upcoming games UI installs factual Spel navigation and responsive contract
   assert.match(html, /Visa mer/);
   assert.match(html, /Hög prissumma/);
   assert.match(html, /Vardagstrav/);
+  assert.match(html, /state\.gameTab==='v85'\|\|state\.gameTab==='v86'/);
+  assert.match(html, /state\.historyType=state\.gameTab\.toUpperCase\(\)/);
   assert.doesNotMatch(html, /Lopp körs/);
   assert.doesNotMatch(html, /Prestationsnivå efter loppets prissumma/);
   assert.doesNotMatch(html, /Intervjuer/);
