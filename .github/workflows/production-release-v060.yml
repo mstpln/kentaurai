@@ -230,4 +230,4 @@ jobs:
         run: |
           echo 'KentaurAI v0.6.0 production release completed.'
           echo "Worker: $WORKER_URL"
-          echo 'Required production schema through migration 0028, external analysis lineage/evidence storage, external F1/F2 evidence integration, worker-v077 runtime, controlled legacy boundary, exact app version, health, login and private external-analysis route checks passed.'
+          echo 'Required production schema through migration 0029, X-Labs interval repair state, external analysis lineage/evidence storage, external F1/F2 evidence integration, worker-v077 runtime, controlled legacy boundary, exact app version, health, login and private external-analysis route checks passed.'
