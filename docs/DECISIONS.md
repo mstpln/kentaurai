@@ -82,7 +82,7 @@
 1. Newly registered V85/V86 systems may be selected by the external AI, but KentaurAI accepts them only after strict validation that they contain exactly three one-horse spikes in three different legs. Historical legacy systems remain readable even if an older policy allowed a different V85-main spike count.
 2. System row count equals the product of selections across all eight legs.
 3. ABCD represents relative winning strength, not value; value is assessed separately against market percentage.
-4. Saved main/alternative systems are preserved. Overview/list metrics use a deterministic primary system while round detail can inspect all saved proposals.
+4. Saved main/alternative systems are preserved. Historik lists every saved system separately, including multiple systems from the same round, and its sorting/result metrics operate per system. Opening a history row enters the shared round detail with that exact system selected. Översikt may still use the deterministic primary system for round-level aggregate metrics.
 5. Post-race detail may show winner trip classifications only when stored positional evidence supports them. Unsupported trip labels remain unknown.
 6. Round learnings are classified No change / Candidate / Confirmed. A single race or round does not directly change model weights.
 7. Automatic deterministic post-race review runs only for saved V85/V86 rounds where all eight legs have exactly one factual winner. Ambiguous/dead-heat legs fail closed until dedicated verified semantics exist.
