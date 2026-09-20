@@ -255,6 +255,7 @@ test('core production detail path is canonical with no final runtime wrapper pre
   document.domAppends.length = 0;
 
   await vm.runInContext("openDetail('horses','horse-1')", context);
+  for (let i = 0; i < 30 && !/entity-detail-score/.test(document.getElementById('entityDetailStatisticsV2')?.innerHTML || ''); i += 1) await Promise.resolve();
 
   const shell = document.appWrites.at(-1);
   assert.match(shell, /Statistik[\s\S]*Extern statistik[\s\S]*Intervjuer[\s\S]*Starter[\s\S]*Data/);
@@ -292,6 +293,7 @@ test('actual production click path owns tabs and never paints legacy statistics'
   document.domAppends.length = 0;
 
   await vm.runInContext("openDetail('horses','horse-1')", context);
+  for (let i = 0; i < 30 && !/entity-detail-score/.test(document.getElementById('entityDetailStatisticsV2')?.innerHTML || ''); i += 1) await Promise.resolve();
 
   assert.ok(document.appWrites.length >= 2);
   assert.match(document.appWrites[0], /kentaurai-fast-loading/);
@@ -353,9 +355,11 @@ test('stale canonical statistics request cannot repaint after navigation to anot
   assert.ok(requestedPaths.some((path) => path.startsWith('/horses/horse-1/calendar-statistics?')));
 
   await vm.runInContext("openDetail('horses','horse-2')", context);
+  for (let i = 0; i < 30 && !/entity-detail-score/.test(document.getElementById('entityDetailStatisticsV2')?.innerHTML || ''); i += 1) await Promise.resolve();
   const writesBeforeStaleResolution = document.elementWrites.length;
   resolveFirstCalendar({ summary:{}, startMethods:[], distances:[], tracks:[] });
   await firstOpen;
+  for (let i = 0; i < 5; i += 1) await Promise.resolve();
 
   assert.equal(document.elementWrites.length, writesBeforeStaleResolution);
   assert.match(document.appWrites.at(-1), /Second Horse/);

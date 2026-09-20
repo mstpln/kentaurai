@@ -6,6 +6,7 @@ import {
   getCalendarYearDetailSpecialties,
   getDriverCalendarYearDetailStatistics,
   getHorseCalendarYearDetailStatistics,
+  getHorseCalendarYearForm,
   getTrainerCalendarYearDetailStatistics
 } from './entity-detail-calendar-statistics.js';
 import { getTrainerCalendarHomeTrackResults } from './trainer-calendar-home-statistics.js';
@@ -147,6 +148,19 @@ export default {
       if (denied) return denied;
       try { return json(await getHorseFilterOptions(env)); }
       catch (error) { console.error(error); return json({ error: 'request_failed', message: error.message }, 400); }
+    }
+
+    const horseFormMatch = path.match(/^\/app\/api\/horses\/([^/]+)\/calendar-form$/);
+    if (request.method === 'GET' && horseFormMatch) {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        const data = await getHorseCalendarYearForm(env, decodeURIComponent(horseFormMatch[1]), calendarOptions(url));
+        return data ? json(data) : json({ error: 'not_found' }, 404);
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
     }
 
     const calendarSpecialtiesMatch = path.match(/^\/app\/api\/(trainers|drivers|horses)\/([^/]+)\/calendar-specialties$/);
