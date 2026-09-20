@@ -45,11 +45,11 @@ function performanceClient() {
   }
   function defaultRankingPath(page,mode='core'){
     if(!['trainers','horses','drivers'].includes(page))return null;
-    const q=new URLSearchParams({
-      period:'1y',race_scope:'high_prize',race_type:'all',breed_type:'all',sex:'all',age:'all',
-      start_method:'all',distance_group:'all',min_starts:page==='horses'?'3':'10',mode
-    });
-    if(page!=='horses'){q.set('volt_lane','all');q.set('handicap_m','all')}
+    const base={period:'1y',race_scope:'high_prize',race_type:'all',breed_type:'all'};
+    const q=page==='horses'
+      ?new URLSearchParams({...base,start_method:'all',distance_group:'all',sex:'all',age:'all',min_starts:'3'})
+      :new URLSearchParams({...base,sex:'all',age:'all',start_method:'all',distance_group:'all',volt_lane:'all',handicap_m:'all',min_starts:'10'});
+    q.set('mode',mode);
     return '/'+page+'/statistics?'+q.toString();
   }
   function loading(label){ return '<div class="kentaurai-fast-loading" role="status"><div class="kentaurai-fast-line"></div><div class="kentaurai-fast-line short"></div><span>'+esc(label)+'</span></div>'; }
