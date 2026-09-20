@@ -178,8 +178,11 @@ test('canonical horse pattern UI uses natural Swedish labels while the legacy en
   assert.doesNotMatch(legacyHtml, /kentaurai-horse-patterns-ui-script|renderDetail=async function/);
 
   const html = enhanceEntityDetailStatisticsHtmlV2('<html><head></head><body><div id="app"></div></body></html>');
-  for (const text of ['Utveckling & löpstyrka', 'Startpoäng', 'Starttempo', 'Avslutning', 'Extra distans', 'Visar mönster – inte en AI-bedömning.']) {
+  for (const text of ['Toppfart', 'Första 100 m', 'Första 200 m', 'Första 500 m', 'Sista 400 m', 'Sista 1000 m', 'Form (1–100)', 'Startpoäng']) {
     assert.ok(html.includes(text), 'missing ' + text);
+  }
+  for (const removed of ['Utveckling & löpstyrka', 'Starttempo', 'Extra distans']) {
+    assert.ok(!html.includes(removed), 'unexpected legacy label ' + removed);
   }
   assert.doesNotMatch(html, />openingPace</);
   assert.doesNotMatch(html, />closingPace</);

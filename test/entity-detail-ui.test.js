@@ -114,12 +114,12 @@ test('detail layout explicitly supports narrow mobile widths and scrollable tabl
   assert.match(html, /@media\(max-width:650px\)\{\.entity-detail-score-main\{grid-template-columns:1fr\}/);
 });
 
-test('horse-specific verified start-point and pattern sections render directly from canonical data', () => {
+test('horse-specific verified start-point and top-speed sections render directly from canonical data', () => {
   const html = enhanced();
   const script = statsScriptFrom(html);
   assert.match(script, /currentStartPoints/);
-  assert.match(script, /relevantPatterns/);
-  assert.match(script, /horse-special-grid/);
+  assert.match(script, /topSpeed/);
+  assert.match(script, /Toppfart/);
   assert.match(script, /horse-pattern-section/);
   assert.match(script, /api\('\/horses\/'\+encodeURIComponent\(s\.id\)\+'\/statistics'\)/);
   assert.doesNotMatch(script, /captureHorseExtra|horseStatsBuildB/);

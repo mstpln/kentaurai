@@ -25,7 +25,7 @@ test('entity calendar configuration preserves entity-specific form and specialis
   const source = await readFile(new URL('../src/entity-detail-calendar-statistics.js', import.meta.url), 'utf8');
   assert.match(source, /trainers:\{table:'trainers',entryColumn:'trainer_id',resultKey:'trainer',formLimit:30,market:true,rest:true,volt:true\}/);
   assert.match(source, /drivers:\{table:'drivers',entryColumn:'driver_id',resultKey:'driver',formLimit:30,market:true,rest:false,volt:true\}/);
-  assert.match(source, /horses:\{table:'horses',entryColumn:'horse_id',resultKey:'horse',formLimit:10,market:false,rest:true,volt:false\}/);
+  assert.match(source, /horses:\{table:'horses',entryColumn:'horse_id',resultKey:'horse',formLimit:5,market:false,rest:true,volt:false\}/);
   assert.match(source, /voltLaneGood:\[1,6,7\]/);
 });
 
@@ -33,6 +33,21 @@ test('calendar filtering uses YTD for the current year and closed full-year wind
   const source = await readFile(new URL('../src/entity-detail-calendar-statistics.js', import.meta.url), 'utf8');
   assert.match(source, /if\(filters\.year===currentYear\)\{conditions\.push\(`\$\{raceAlias\}\.race_date <= \?`\);bindings\.push\(filters\.asOfDate\);\}/);
   assert.match(source, /bindings\.push\(`\$\{filters\.year\+1\}-01-01`\)/);
+});
+
+test('distance table groups with the same standard buckets as the distance filter', async () => {
+  const source = await readFile(new URL('../src/entity-detail-calendar-statistics.js', import.meta.url), 'utf8');
+  for (const text of [
+    "BETWEEN 540 AND 740 THEN '640'",
+    "BETWEEN 1540 AND 1740 THEN '1640'",
+    "BETWEEN 2040 AND 2240 THEN '2140'",
+    "BETWEEN 2540 AND 2740 THEN '2640'",
+    "BETWEEN 3040 AND 3240 THEN '3140'",
+    "BETWEEN 3540 AND 3740 THEN '3640'",
+    "BETWEEN 4040 AND 4240 THEN '4140'",
+    "distance_m > 2640 THEN 'other-long'",
+    "GROUP BY f.distance_group"
+  ]) assert.ok(source.includes(text), 'missing grouped distance rule ' + text);
 });
 
 test('core calendar response can skip expensive specialty calculations', async () => {
@@ -60,6 +75,38 @@ test('worker keeps expensive trainer specialties outside the core calendar respo
   assert.match(source, /includeSpecials/);
   assert.match(source, /calendar-specialties/);
   assert.match(source, /searchParams\.get\('specials'\)/);
+});
+
+test('horse calendar detail returns Form 1-100 and grouped distance rows', async () => {
+  const { createTestEnv } = await import('./helpers/d1.js');
+  const { env, db } = createTestEnv();
+  db.prepare("INSERT INTO tracks (id,canonical_name,country_code) VALUES ('t','Test','SE')").run();
+  for (const [id,name] of [['h','Häst'],['o1','Motstånd 1'],['o2','Motstånd 2']]) {
+    db.prepare('INSERT INTO horses (id,canonical_name) VALUES (?,?)').run(id,name);
+  }
+  db.prepare(`INSERT INTO races
+    (id,track_id,race_date,race_number,distance_m,start_method,first_prize_sek,status)
+    VALUES ('r','t','2026-09-01',1,2160,'auto',50000,'results')`).run();
+  for (const [entry,horse,start,placing] of [['e','h',1,2],['e1','o1',2,1],['e2','o2',3,3]]) {
+    db.prepare(`INSERT INTO race_entries
+      (id,race_id,horse_id,start_number,actual_start_distance_m,scratched)
+      VALUES (?,'r',?,?,2160,0)`).run(entry,horse,start);
+    db.prepare(`INSERT INTO race_results
+      (race_entry_id,placing,result_status,km_time,gallop,disqualified,prize_sek)
+      VALUES (?,?,'official','1.14,0',0,0,10000)`).run(entry,placing);
+  }
+
+  const data = await getHorseCalendarYearDetailStatistics(env, 'h', {
+    year: 2026,
+    asOfDate: '2026-09-20',
+    includeSpecials: false
+  });
+  assert.equal(data.formLast.usedStarts, 1);
+  assert.ok(Number.isInteger(data.formLast.score));
+  assert.ok(data.formLast.score >= 1 && data.formLast.score <= 100);
+  assert.equal(data.distances.length, 1);
+  assert.equal(data.distances[0].label, '2140');
+  assert.equal(data.distances[0].starts, 1);
 });
 
 test('new calendar detail routes remain private before touching D1', async () => {
