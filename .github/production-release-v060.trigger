@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=82c79446878dbe8516e29972b83084a7fb3fe67d
-release_nonce=2026-09-20-production-interview-accordion-pr207-1
+source_main=405342aaabb235e113f351b5197e280b9c6ea63c
+release_nonce=2026-09-20-production-detail-ui-lock-pr208-1
