@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 
 import { renderAppPage } from '../src/app-page-settings.js';
 
-test('canonical settings renderer owns the approved external analysis workflow', () => {
+test('primary Analysis workspace owns the approved external analysis workflow while Settings is data-only', () => {
   const html = renderAppPage();
 
+  assert.match(html, /window\.__kentauraiAnalysis=\{render:renderAnalysis\}/);
   assert.match(html, /canonicalAnalysisWorkflow/);
+  assert.match(html, /heading\('Analys','Analysera omgångar och registrera underlag'\)/);
   assert.match(html, /Analysera omgång/);
   assert.match(html, /analysisRound/);
   assert.match(html, /analysisProvider/);
@@ -28,6 +30,9 @@ test('canonical settings renderer owns the approved external analysis workflow',
   assert.match(html, /\/app\/api\/settings\/system-import-prompt\?provider=/);
   assert.match(html, /\/app\/api\/settings\/system-import\?round_id=/);
 
+  assert.match(html, /heading\('Inställningar','Hantera data och uppdateringar'\)/);
+  assert.doesNotMatch(html, /tabs\(\[\['ai','AI'\],\['data','Data'\]\]/);
+  assert.doesNotMatch(html, /Hantera AI-utbyte och appdata/);
   assert.doesNotMatch(html, /Exportera marknadsblind data/);
   assert.doesNotMatch(html, /Skapa importfil till KentaurAI/);
   assert.doesNotMatch(html, /kentaurai-analysis-v2/);
