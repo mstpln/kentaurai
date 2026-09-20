@@ -203,7 +203,7 @@ async function chooseRaceSource(env, raceId, options, counts) {
   const source = await sourceForIdentity(env, `race:${raceId}`);
   if (source?.quality_status === NORMALIZED_QUALITY) return source;
 
-  if (source) {
+  if (source && source.quality_status !== 'captured_source_gap') {
     const cachedPayload = await loadJsonObject(env, source, 'official race');
     try {
       if (officialRaceHasFinalResults(cachedPayload)) return source;
