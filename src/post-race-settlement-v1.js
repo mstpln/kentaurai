@@ -292,3 +292,24 @@ export async function runNextPostRaceSettlement(env, options = {}) {
     throw error;
   }
 }
+
+
+export async function runPostRaceSettlementBatch(env, options = {}) {
+  const maxSteps = options.maxSteps == null ? 3 : Number(options.maxSteps);
+  if (!Number.isInteger(maxSteps) || maxSteps < 1 || maxSteps > 3) throw new Error('maxSteps must be between 1 and 3');
+  const results = [];
+  for (let index = 0; index < maxSteps; index += 1) {
+    const result = await runNextPostRaceSettlement(env, options);
+    results.push(result);
+    if (!result || ['idle','busy','waiting','manual_review','completed'].includes(result.status)) break;
+  }
+  const last = results.at(-1) || { status:'idle',settledLegs:0 };
+  return {
+    status:last.status,
+    roundId:last.roundId || options.roundId || null,
+    settledLegs:Number(last.settledLegs || 0),
+    stepCount:results.length,
+    maxSteps,
+    results
+  };
+}
