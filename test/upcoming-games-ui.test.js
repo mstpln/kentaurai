@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { enhanceUpcomingGamesHtml } from '../src/app-upcoming-games-ui.js';
+import worker from '../src/worker-v078.js';
 
 test('upcoming games UI installs factual Spel navigation and responsive contracts', () => {
   const html = enhanceUpcomingGamesHtml('<html><head></head><body><script>const state={};function renderGames(){};</script></body></html>');
@@ -26,4 +27,11 @@ test('upcoming games UI enhancer is idempotent', () => {
   const once = enhanceUpcomingGamesHtml('<html><head></head><body></body></html>');
   const twice = enhanceUpcomingGamesHtml(once);
   assert.equal(twice, once);
+});
+
+
+test('upcoming game app APIs remain session-private', async () => {
+  const response = await worker.fetch(new Request('https://example.test/app/api/games/upcoming'), { APP_PASSWORD:'synthetic-password' }, {});
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error:'unauthorized' });
 });
