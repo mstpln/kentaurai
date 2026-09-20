@@ -54,6 +54,17 @@ test('canonical statistics mount is exposed without wrapping the legacy detail r
   assert.doesNotMatch(script, /renderDetail=async function/);
 });
 
+test('critical detail statistics render defers filter options and specialty reads', () => {
+  const script = statsScriptFrom(enhanced());
+  assert.doesNotMatch(script, /await loadOptions\(s,c\);if\(state\.detail/);
+  assert.match(script, /if\(s\.open&&!s\.options\)await loadOptions\(s,c\)/);
+  assert.match(script, /calendar-statistics\?'.*specials=0/);
+  assert.match(script, /calendar-specialties\?'/);
+  assert.match(script, /id="entityDetailSpecialties"/);
+  assert.match(script, /specialtyPromise\.then/);
+});
+
+
 test('detail pages reuse the exact start-page sliders icon and year-based selector', () => {
   const html = enhanced();
   assert.match(html, /M4 7h10M18 7h2M14 4v6M4 17h2M10 17h10M10 14v6/);
@@ -114,8 +125,8 @@ test('horse-specific verified start-point and pattern sections render directly f
 test('trainer-specific verified home-track summaries remain visible after shared redesign', () => {
   const script = statsScriptFrom(enhanced());
   assert.match(script, /if\(s\.page==='trainers'\)/);
-  assert.match(script, /special\('Hemmabana',data\.homeTrackResults,'Senaste verifierade officiella hemmabana'\)/);
-  assert.match(script, /special\('Övriga banor',data\.otherTrackResults,'Endast tränare med verifierad hemmabana'\)/);
+  assert.match(script, /special\('Hemmabana',data\?\.homeTrackResults,'Senaste verifierade officiella hemmabana'\)/);
+  assert.match(script, /special\('Övriga banor',data\?\.otherTrackResults,'Endast tränare med verifierad hemmabana'\)/);
 });
 
 test('shared summary keeps entity-specific specialized sections without the scorecard kicker', () => {
