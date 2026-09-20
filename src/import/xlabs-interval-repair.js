@@ -1,6 +1,6 @@
 import { normalizeCapturedXlabsIntervalsV2, XLABS_INTERVALS_V2_VERSION } from '../xlabs-intervals-v2.js';
 
-export const XLABS_INTERVAL_REPAIR_BATCH_SIZE = 6;
+export const XLABS_INTERVAL_REPAIR_BATCH_SIZE = 3;
 const MAX_ATTEMPTS = 3;
 
 async function markState(env, sourceRecordId, status, { intervalRows = null, validIntervals = null, error = null } = {}) {
