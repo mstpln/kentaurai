@@ -298,6 +298,24 @@ export async function getTrainerRankings(env,options={}){
       highestWinRate:mapCoreRanking(win,'winRate'),highestTop3Rate:mapCoreRanking(top3,'top3Rate'),mostWins:mapCoreRanking(wins,'wins'),bestFormLast30:mapForm(form)
     }};
   }
+  if(options.mode==='extended'){
+    const [annual,perStart,auto,volt,goodVolt,otherVolt,handicap,home,away,short,medium,long,favorite,longshot,firstRest,secondRest]=await Promise.all([
+      run(env,buildCoreRanking(f,'earnings',[],{includePeriod:false})),run(env,buildCoreRanking(f,'earningsPerVerifiedStart')),
+      run(env,buildCoreRanking(f,'winRate',[`${canonicalStartMethodSql('r')}='auto'`],{applyMinimumStarts:true})),
+      run(env,buildCoreRanking(f,'winRate',[`${canonicalStartMethodSql('r')}='volt'`],{applyMinimumStarts:true})),
+      run(env,buildCoreRanking(f,'winRate',[`${canonicalStartMethodSql('r')}='volt'`,'re.actual_lane IN (1,6,7)'],{applyMinimumStarts:true})),
+      run(env,buildCoreRanking(f,'winRate',[`${canonicalStartMethodSql('r')}='volt'`,'re.actual_lane IS NOT NULL','re.actual_lane NOT IN (1,6,7)'],{applyMinimumStarts:true})),
+      run(env,buildHandicapRanking(f)),run(env,buildHomeRanking(f,true)),run(env,buildHomeRanking(f,false)),
+      run(env,buildDistanceProfileRanking(f,'short')),run(env,buildDistanceProfileRanking(f,'medium')),run(env,buildDistanceProfileRanking(f,'long')),
+      run(env,buildMarketRanking(f,'favorite')),run(env,buildMarketRanking(f,'longshot')),run(env,buildRestRanking(f,'first')),run(env,buildRestRanking(f,'second'))
+    ]);
+    return {filters:f,partial:false,definitions:{longshotPercentMax:DRIVER_LONGSHOT_PERCENT_MAX,market:DRIVER_MARKET_DEFINITION_VERSION,voltLaneGood:[1,6,7],restDays:REST_DAYS,distanceProfile:DISTANCE_PROFILE_VERSION},rankings:{
+      mostEarningsThisYear:mapCoreRanking(annual,'earnings'),highestEarningsPerStart:mapCoreRanking(perStart,'earningsPerVerifiedStart'),bestAuto:mapCoreRanking(auto,'winRate'),bestVolt:mapCoreRanking(volt,'winRate'),
+      bestGoodVoltLane:mapCoreRanking(goodVolt,'winRate'),bestOtherVoltLane:mapCoreRanking(otherVolt,'winRate'),bestWithHandicap:mapCoreRanking(handicap,'winRate'),
+      bestHomeTrack:mapCoreRanking(home,'winRate'),bestOtherTracks:mapCoreRanking(away,'winRate'),bestShortDistance:mapCoreRanking(short,'winRate'),bestMediumDistance:mapCoreRanking(medium,'winRate'),bestLongDistance:mapCoreRanking(long,'winRate'),
+      favoriteResults:mapCoreRanking(favorite,'winRate'),longshotResults:mapCoreRanking(longshot,'winRate'),firstAfterRest:mapRest(firstRest),secondAfterRest:mapRest(secondRest)
+    }};
+  }
   const [win,top3,wins,form,annual,perStart,auto,volt,goodVolt,otherVolt,handicap,home,away,short,medium,long,favorite,longshot,firstRest,secondRest]=await Promise.all([
     run(env,buildCoreRanking(f,'winRate')),run(env,buildCoreRanking(f,'top3Rate')),run(env,buildCoreRanking(f,'wins')),run(env,buildFormQuery(f)),
     run(env,buildCoreRanking(f,'earnings',[],{includePeriod:false})),run(env,buildCoreRanking(f,'earningsPerVerifiedStart')),

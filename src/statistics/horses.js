@@ -142,7 +142,7 @@ function xlabsSecondsSql(column) {
 
 function buildXlabsOpening200Ranking(filters) {
   const conditions = ['re.scratched = 0'];
-  const bindings = [];
+  const bindings = [filters.asOfDate];
   addHorseFilters(conditions, bindings, filters);
   const minimum = filters.minStarts == null ? 'measurements > 0' : 'measurements >= ?';
   if (filters.minStarts != null) bindings.push(filters.minStarts);
@@ -152,6 +152,7 @@ function buildXlabsOpening200Ranking(filters) {
       FROM xlabs_intervals xi
       JOIN source_records sr ON sr.id=xi.source_record_id
       WHERE xi.mapper_version='${XLABS_INTERVALS_V2_VERSION}' AND sr.source_type='xlabs_race_json'
+        AND substr(sr.fetched_at,1,10) <= ?
       GROUP BY xi.race_entry_id,xi.source_record_id,sr.fetched_at
     ), latest_sources AS (
       SELECT *,ROW_NUMBER() OVER(PARTITION BY race_entry_id ORDER BY julianday(fetched_at) DESC,source_record_id DESC) rn
@@ -301,6 +302,26 @@ export async function getHorseRankings(env, options = {}) {
         fastestFirst200:start.map((row,index)=>({rank:index+1,id:row.entity_id,name:row.name,measurements:Number(row.measurements),averageSeconds:Number(row.avg_seconds)}))
       },
       startPointsStatus:'deferred'
+    };
+  }
+  if (options.mode === 'extended') {
+    const [earnings,close,firstRest,secondRest] = await Promise.all([
+      run(env,buildCoreRanking(filters,'earningsPerVerifiedStart')),
+      run(env,buildXlabsRanking(filters,'last_400_time')),
+      run(env,buildRestRanking(filters,'first')),
+      run(env,buildRestRanking(filters,'second'))
+    ]);
+    return {
+      filters,
+      partial:false,
+      rankings:{
+        highestEarningsPerStart:mapCoreRanking(earnings,'earningsPerVerifiedStart'),
+        strongestLast400:close.map((row,index)=>({rank:index+1,id:row.entity_id,name:row.name,measurements:Number(row.measurements),averageSeconds:Number(row.avg_seconds)})),
+        firstAfterRest:mapRestRanking(firstRest),
+        secondAfterRest:mapRestRanking(secondRest),
+        highestStartPoints:null
+      },
+      startPointsStatus:'unverified_official_semantics'
     };
   }
   const [win,top3,earnings,form,start,close,firstRest,secondRest] = await Promise.all([

@@ -128,7 +128,7 @@ async function getHorseFormTrendLeaderboard(env, normalized) {
       LEFT JOIN race_stl_classifications rsc ON rsc.race_id = r.id
       WHERE ${conditions.join(' AND ')}
     ),
-    eligible AS (
+    core_stats AS (
       SELECT
         entity_id,
         COUNT(*) AS starts,
@@ -144,19 +144,30 @@ async function getHorseFormTrendLeaderboard(env, normalized) {
         SUM(prize_sek) AS total_prize_sek
       FROM filtered
       GROUP BY entity_id
+    ),
+    form_eligible AS (
+      SELECT *
+      FROM filtered
+      WHERE placing IS NOT NULL OR disqualified = 1
+    ),
+    eligible AS (
+      SELECT entity_id
+      FROM form_eligible
+      GROUP BY entity_id
       HAVING COUNT(*) >= ?
     ),
     ranked AS (
       SELECT
         f.*,
-        e.starts,e.result_starts,e.wins,e.seconds,e.thirds,e.top3,e.gallops,
-        e.gallop_verified_starts,e.disqualifications,e.prize_verified_starts,e.total_prize_sek,
+        c.starts,c.result_starts,c.wins,c.seconds,c.thirds,c.top3,c.gallops,
+        c.gallop_verified_starts,c.disqualifications,c.prize_verified_starts,c.total_prize_sek,
         ROW_NUMBER() OVER (
           PARTITION BY f.entity_id
           ORDER BY f.race_date DESC,COALESCE(f.race_number,0) DESC,f.race_entry_id DESC
         ) AS rn
-      FROM filtered f
+      FROM form_eligible f
       JOIN eligible e ON e.entity_id = f.entity_id
+      JOIN core_stats c ON c.entity_id = f.entity_id
     )
     SELECT * FROM ranked WHERE rn <= 5 ORDER BY entity_id,rn
   `).bind(...bindings, minimum).all();

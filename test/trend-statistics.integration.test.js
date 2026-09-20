@@ -148,6 +148,28 @@ test('Trend applies period, race level, track, race type, breed and start method
   assert.deepEqual(combined.items.map((item) => item.id), ['horse-a']);
 });
 
+test('horse Trend uses canonical Form-eligible starts for minStarts without dropping factual core starts', async () => {
+  const { db, env } = createTestEnv();
+  insertTrack(db, 'track-a', 'Bana A');
+  insertPerson(db, 'drivers', 'driver-a', 'Kusk A');
+  insertPerson(db, 'trainers', 'trainer-a', 'Tränare A');
+  insertHorse(db, 'horse-form-eligibility', 'Formhäst');
+  for (let i = 0; i < 3; i += 1) insertRace(db, { id: `race-form-${i + 1}`, date: `2026-09-0${i + 1}` });
+  insertEntry(db, { id:'form-e1', raceId:'race-form-1', horseId:'horse-form-eligibility', placing:1 });
+  insertEntry(db, { id:'form-e2', raceId:'race-form-2', horseId:'horse-form-eligibility', placing:4 });
+  insertEntry(db, { id:'form-e3', raceId:'race-form-3', horseId:'horse-form-eligibility', placing:null, disqualified:0 });
+
+  const strict = await getTrendLeaderboard(env, { category:'horses', period:'3m', asOfDate:'2026-09-11', minStarts:'3' });
+  assert.equal(strict.items.some((item) => item.id === 'horse-form-eligibility'), false, 'unknown placing is not a Form-eligible start');
+
+  const relaxed = await getTrendLeaderboard(env, { category:'horses', period:'3m', asOfDate:'2026-09-11', minStarts:'2' });
+  const row = relaxed.items.find((item) => item.id === 'horse-form-eligibility');
+  assert.ok(row);
+  assert.equal(row.formUsedStarts, 2);
+  assert.equal(row.starts, 3, 'supporting core statistics preserve the factual result-row count');
+  assert.equal(row.recentPlacings.includes(null), false, 'Form history contains only canonical eligible starts');
+});
+
 test('Trend supports the same deterministic metrics for trainers and drivers', async () => {
   const { env } = setupCoreFixture();
   const trainers = await getTrendLeaderboard(env, { category: 'trainers', period: '2w', asOfDate: '2026-09-11' });
