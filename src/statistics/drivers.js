@@ -264,6 +264,25 @@ export async function getDriverRankings(env, options = {}) {
   if (!env.DB) throw new Error('DB is not configured');
   const filters = normalizeDriverStatsFilters(options);
   await validateTrack(env, filters.trackId);
+  if (options.mode === 'core') {
+    const [win,top3,wins,form] = await Promise.all([
+      run(env,buildCoreRanking(filters,'winRate')),
+      run(env,buildCoreRanking(filters,'top3Rate')),
+      run(env,buildCoreRanking(filters,'wins')),
+      run(env,buildFormQuery(filters))
+    ]);
+    return {
+      filters,
+      partial:true,
+      definitions:{longshotPercentMax:DRIVER_LONGSHOT_PERCENT_MAX,market:DRIVER_MARKET_DEFINITION_VERSION,positions:DRIVER_POSITION_DEFINITION_VERSION,voltLaneGood:[1,6,7]},
+      rankings:{
+        highestWinRate:mapCoreRanking(win,'winRate'),
+        highestTop3Rate:mapCoreRanking(top3,'top3Rate'),
+        mostWins:mapCoreRanking(wins,'wins'),
+        bestFormLast30:mapForm(form)
+      }
+    };
+  }
   const [win,top3,wins,form,yearEarnings,perStart,leader,death,backRow,auto,volt,favorite,longshot] = await Promise.all([
     run(env,buildCoreRanking(filters,'winRate')),
     run(env,buildCoreRanking(filters,'top3Rate')),
