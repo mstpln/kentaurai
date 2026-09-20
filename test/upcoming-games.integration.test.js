@@ -27,7 +27,7 @@ function seedUpcoming(db) {
 
   db.prepare("INSERT INTO source_records (id,source_type,external_id,fetched_at,quality_status) VALUES ('src_current','official_provider','r1','2099-09-19T09:05:00Z','normalized_verified_subset')").run();
   db.prepare("INSERT INTO normalized_observations (id,entity_type,entity_id,source_record_id,observed_at,fields_json,quality_status) VALUES ('obs_current','race','race_1','src_current','2099-09-19T09:05:00Z','{}','normalized_verified_subset')").run();
-  db.prepare("INSERT INTO betting_snapshots (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id) VALUES ('bet_1','round_up',1,'entry_1','2099-09-19T08:50:00Z',0.21,1,'src_current')").run();
+  db.prepare("INSERT INTO betting_snapshots (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id) VALUES ('bet_1','round_up',1,'entry_1','2099-09-19T08:50:00Z',21,1,'src_current')").run();
   db.prepare("INSERT INTO systems (id,game_round_id,system_type,budget_sek,row_count,spike_count,created_at) VALUES ('system_up','round_up','main',200,100,3,'2099-09-19T09:00:00Z')").run();
 
   const history=[
@@ -80,7 +80,7 @@ test('upcoming leg uses fastest first 200 from matching start method and fastest
   assert.equal(horse.fastestFirst200.observationCount, 2);
   assert.equal(horse.fastestLast400.value, '1.06,3');
   assert.equal(horse.fastestLast400.observationCount, 3);
-  assert.equal(horse.betPercent, 0.21);
+  assert.equal(horse.betPercent, 21);
 });
 
 test('expanded facts use rolling 12 months, canonical distance group, lane type and canonical prize scopes', async () => {
