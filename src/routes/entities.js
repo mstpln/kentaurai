@@ -585,11 +585,15 @@ async function getHorseDetail(env, id, options = {}) {
   if (!horse) return null;
 
   const includeStarts = options.includeStarts !== false;
+  const includeObservation = options.includeObservation !== false;
+  const includeStats = options.includeStats !== false;
+  const includeBreakdowns = options.includeBreakdowns !== false;
+  const includeCoverage = options.includeCoverage !== false;
   const [observation, stats, breakdowns, coverage, baseStarts] = await Promise.all([
-    latestObservation(env, 'horse', id),
-    getStats(env, 'horse_id', id),
-    getBreakdowns(env, 'horse_id', id),
-    getCoverage(env, 'horse_id', id),
+    includeObservation ? latestObservation(env, 'horse', id) : Promise.resolve(null),
+    includeStats ? getStats(env, 'horse_id', id) : Promise.resolve({}),
+    includeBreakdowns ? getBreakdowns(env, 'horse_id', id) : Promise.resolve({ startMethods: [], distances: [], tracks: [] }),
+    includeCoverage ? getCoverage(env, 'horse_id', id) : Promise.resolve({}),
     includeStarts ? getBaseStarts(env, 'horse_id', id) : Promise.resolve([])
   ]);
   const starts = includeStarts ? await enrichStarts(env, baseStarts) : [];
@@ -611,11 +615,15 @@ async function getPersonDetail(env, type, id, options = {}) {
   if (!person) return null;
 
   const includeStarts = options.includeStarts !== false;
+  const includeObservation = options.includeObservation !== false;
+  const includeStats = options.includeStats !== false;
+  const includeBreakdowns = options.includeBreakdowns !== false;
+  const includeCoverage = options.includeCoverage !== false;
   const [observation, stats, breakdowns, coverage, baseStarts] = await Promise.all([
-    latestObservation(env, entityType, id),
-    getStats(env, relationColumn, id),
-    getBreakdowns(env, relationColumn, id),
-    getCoverage(env, relationColumn, id),
+    includeObservation ? latestObservation(env, entityType, id) : Promise.resolve(null),
+    includeStats ? getStats(env, relationColumn, id) : Promise.resolve({}),
+    includeBreakdowns ? getBreakdowns(env, relationColumn, id) : Promise.resolve({ startMethods: [], distances: [], tracks: [] }),
+    includeCoverage ? getCoverage(env, relationColumn, id) : Promise.resolve({}),
     includeStarts ? getBaseStarts(env, relationColumn, id) : Promise.resolve([])
   ]);
   const starts = includeStarts ? await enrichStarts(env, baseStarts) : [];
