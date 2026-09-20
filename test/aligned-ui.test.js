@@ -4,11 +4,12 @@ import vm from 'node:vm';
 
 import { formatTrackAddress, renderAppPage } from '../src/app-page-aligned.js';
 
-test('final aligned app adds Bana as the sixth bottom-navigation area', () => {
+test('final aligned app groups entity browsing under the three-item primary navigation', () => {
   const html = renderAppPage();
-  assert.match(html, /grid-template-columns:repeat\(6,minmax\(0,1fr\)\)/);
-  assert.match(html, /button\.dataset\.page='tracks'/);
-  assert.match(html, /button\.innerHTML=TRACK_ICON\+'Bana'/);
+  assert.match(html, /grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+  assert.match(html, /data-page="statistics"/);
+  assert.match(html, /statisticsCategoryNav/);
+  assert.match(html, /\['trainers','Tränare'\],\['horses','Hästar'\],\['drivers','Kuskar'\],\['tracks','Bana'\]/);
   assert.match(html, /M12 21s6-5\.2 6-11/);
 });
 
