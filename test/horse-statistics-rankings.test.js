@@ -48,3 +48,26 @@ test('horse win ranking is top 10 with deterministic win-rate, wins, starts and 
   assert.deepEqual(data.rankings.highestWinRate.slice(0,3).map(x=>x.id),['h-01','h-02','h-00']);
   assert.deepEqual(data.rankings.highestWinRate.slice(3).map(x=>x.id),['h-03','h-04','h-05','h-06','h-07','h-08','h-09']);
 });
+
+
+test('X-Labs first-200 ranking derives km pace from verified interval-v2 telemetry', async()=>{
+  const {db,env}=createTestEnv();base(db);
+  addHorse(db,'pace-horse');
+  addRace(db,'pace-r','2026-09-01');
+  addStart(db,'pace-e','pace-r','pace-horse',1);
+  db.prepare("INSERT INTO source_records (id,source_type,fetched_at,quality_status) VALUES ('pace-src','xlabs_race_json','2026-09-01T20:00:00Z','normalized_verified_subset')").run();
+  for(const [start,end,elapsed,distance] of [[0,100,6500,100],[100,200,6600,100]]){
+    db.prepare(`INSERT INTO xlabs_intervals
+      (id,race_entry_id,source_record_id,interval_start_m,interval_end_m,elapsed_ms,km_pace_ms,measured_distance_m,
+       local_target_frame_count,local_window_frame_count,local_frame_coverage,start_endpoint_error_m,end_endpoint_error_m,
+       eligibility_status,mapper_version)
+      VALUES (?,?,?,?,?,?,?,?,10,10,1,0,0,'valid','xlabs-intervals-v2')`)
+      .run('pace-'+start,'pace-e','pace-src',start,end,elapsed,elapsed*10,distance);
+  }
+  const data=await getHorseRankings(env,{period:'1y',asOfDate:'2026-09-11',minStarts:'all'});
+  const row=data.rankings.fastestFirst200.find(x=>x.id==='pace-horse');
+  assert.ok(row);
+  assert.equal(row.measurements,1);
+  assert.ok(Math.abs(row.averageSeconds-65.5)<1e-9);
+  assert.ok(row.averageSeconds>60,'opening pace should be realistic km pace, not raw 200m elapsed time');
+});
