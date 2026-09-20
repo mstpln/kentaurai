@@ -9,7 +9,7 @@ import {
   submitAnalysis
 } from './analysis-api.js';
 import { runNextPostRaceReview } from './post-race-review.js';
-import { getPostRaceSettlementJob, runNextPostRaceSettlement, runPostRaceSettlementBatch } from './post-race-settlement-v1.js';
+import { getPostRaceSettlementJob, runNextPostRaceSettlement } from './post-race-settlement-v1.js';
 import { pwaIcon, pwaManifest, pwaServiceWorker } from './pwa.js';
 
 const BACKFILL_CRON = '* * * * *';
@@ -129,20 +129,18 @@ export default {
     return worker.fetch(request, env);
   },
   async scheduled(controller, env, ctx) {
-    worker.scheduled(controller, env, ctx);
-    if (controller.cron === BACKFILL_CRON) {
-      ctx.waitUntil((async () => {
-        try {
-          await runPostRaceSettlementBatch(env);
-        } catch (error) {
-          console.error(error);
-        }
+    const task = (async () => {
+      const result = await worker.scheduled(controller, env, ctx);
+      if (controller.cron === BACKFILL_CRON) {
         try {
           await runNextPostRaceReview(env);
         } catch (error) {
           console.error(error);
         }
-      })());
-    }
+      }
+      return result;
+    })();
+    if (ctx?.waitUntil) ctx.waitUntil(task);
+    return task;
   }
 };
