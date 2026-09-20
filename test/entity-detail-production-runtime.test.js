@@ -371,12 +371,15 @@ test('stale canonical statistics request cannot repaint after navigation to anot
 
 test('production statistics runtime hydrates the same Form 1-100 card lazily for horse trainer and driver and supports abort', async () => {
   const html = await productionHtml();
-  assert.match(html, /Form \(1–100\)/);
-  assert.match(html, /id="entityDetailForm"/);
-  assert.match(html, /calendar-form/);
-  assert.match(html, /new AbortController\(\)/);
-  assert.match(html, /abortActive\(\)/);
-  assert.doesNotMatch(html, /Form '\+c\.form|averagePlacing/);
+  const match = html.match(/<script id="kentaurai-entity-detail-statistics-v2-script">([\s\S]*?)<\/script>/);
+  assert.ok(match);
+  const script = match[1];
+  assert.match(script, /Form \(1–100\)/);
+  assert.match(script, /id="entityDetailForm"/);
+  assert.match(script, /calendar-form/);
+  assert.match(script, /new AbortController\(\)/);
+  assert.match(script, /abortActive\(\)/);
+  assert.doesNotMatch(script, /Form '\+c\.form|averagePlacing/);
 });
 
 test('base API accepts request options so detail cancellation reaches fetch', async () => {
