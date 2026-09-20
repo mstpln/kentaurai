@@ -431,9 +431,12 @@ async function loadMarket(env,entityId,filters,config,kind){
   `).bind(...targetBindings,...marketBindings).first();
   return mapCoreMetricRow(row||{});
 }
-function restCte(config,filters){
+function filterDateBounds(filters){
+  if(filters.period)return{start:filters.periodStartDate,end:filters.periodEndDate};
   const currentYear=Number(filters.asOfDate.slice(0,4));
-  const upper=filters.year===currentYear?'r0.race_date<=?':'r0.race_date<?';
+  return{start:`${filters.year}-01-01`,end:filters.year===currentYear?filters.asOfDate:`${filters.year}-12-31`};
+}
+function restCte(config,filters){
   return`relevant_horses AS (
   SELECT DISTINCT re0.horse_id
   FROM race_entries re0 INDEXED BY ${config.entryIndex}
@@ -441,7 +444,7 @@ function restCte(config,filters){
   WHERE re0.${config.entryColumn}=?
     AND re0.scratched=0
     AND r0.race_date>=?
-    AND ${upper}
+    AND r0.race_date<=?
 ),actual AS (
   SELECT h.id horse_id,h.sex,h.birth_year,h.breed,re.trainer_id,re.driver_id,r.id,r.track_id,r.race_date,r.race_number,r.distance_m,r.start_method,r.first_prize_sek,r.race_name,r.main_class,r.class_flags_json,re.id race_entry_id,re.actual_lane,re.handicap_m,re.actual_start_distance_m,rr.placing,rr.prize_sek,rr.gallop,rr.disqualified,
     CAST(julianday(r.race_date)-julianday(LAG(r.race_date) OVER(PARTITION BY h.id ORDER BY r.race_date,r.race_number,re.id)) AS INTEGER) days_since_previous
@@ -455,14 +458,13 @@ function restCte(config,filters){
   SELECT *,LAG(days_since_previous) OVER(PARTITION BY horse_id ORDER BY race_date,race_number,race_entry_id) previous_gap FROM actual
 )`;}
 function addStagedFilters(conditions,bindings,filters,config){
-  addYearCondition(conditions,bindings,filters,'s');if(filters.trackId){conditions.push('s.track_id=?');bindings.push(filters.trackId);}if(filters.startMethod!=='all')conditions.push(`${canonicalStartMethodSql('s')}='${filters.startMethod}'`);if(filters.raceType==='monte')conditions.push(monteRaceCondition('s'));if(filters.raceType==='sulky')conditions.push(`NOT ${monteRaceCondition('s')}`);if(filters.breedType==='warmblood')conditions.push("(LOWER(COALESCE(s.breed,'')) LIKE '%varmblod%' OR LOWER(COALESCE(s.breed,'')) LIKE '%warmblood%')");if(filters.breedType==='coldblood')conditions.push("(LOWER(COALESCE(s.breed,'')) LIKE '%kallblod%' OR LOWER(COALESCE(s.breed,'')) LIKE '%coldblood%')");if(filters.sex==='mare')conditions.push("LOWER(COALESCE(s.sex,'')) IN ('sto','mare','female','f')");if(filters.sex==='stallion')conditions.push("LOWER(COALESCE(s.sex,'')) IN ('hingst','stallion','male','m')");if(filters.sex==='gelding')conditions.push("LOWER(COALESCE(s.sex,'')) IN ('valack','gelding')");if(filters.age!=null){conditions.push('? - s.birth_year=?');bindings.push(filters.year,filters.age);}addDistanceCondition(conditions,bindings,filters.distanceGroup,'s');addCanonicalRaceScopeCondition(conditions,filters.raceScope,'s');if(config.volt&&filters.voltLane!=='all'){conditions.push(`${canonicalStartMethodSql('s')}='volt'`);conditions.push(filters.voltLane==='good'?'s.actual_lane IN (1,6,7)':'s.actual_lane IS NOT NULL AND s.actual_lane NOT IN (1,6,7)');}if(config.volt&&filters.handicapM!=null){conditions.push(`${canonicalStartMethodSql('s')}='volt'`,'s.handicap_m=?','s.actual_start_distance_m IS NOT NULL','s.distance_m IS NOT NULL','s.actual_start_distance_m-s.distance_m=s.handicap_m');bindings.push(filters.handicapM);}
+  addPeriodCondition(conditions,bindings,filters,'s');if(filters.trackId){conditions.push('s.track_id=?');bindings.push(filters.trackId);}if(filters.startMethod!=='all')conditions.push(`${canonicalStartMethodSql('s')}='${filters.startMethod}'`);if(filters.raceType==='monte')conditions.push(monteRaceCondition('s'));if(filters.raceType==='sulky')conditions.push(`NOT ${monteRaceCondition('s')}`);if(filters.breedType==='warmblood')conditions.push("(LOWER(COALESCE(s.breed,'')) LIKE '%varmblod%' OR LOWER(COALESCE(s.breed,'')) LIKE '%warmblood%')");if(filters.breedType==='coldblood')conditions.push("(LOWER(COALESCE(s.breed,'')) LIKE '%kallblod%' OR LOWER(COALESCE(s.breed,'')) LIKE '%coldblood%')");if(filters.sex==='mare')conditions.push("LOWER(COALESCE(s.sex,'')) IN ('sto','mare','female','f')");if(filters.sex==='stallion')conditions.push("LOWER(COALESCE(s.sex,'')) IN ('hingst','stallion','male','m')");if(filters.sex==='gelding')conditions.push("LOWER(COALESCE(s.sex,'')) IN ('valack','gelding')");if(filters.age!=null){conditions.push('? - s.birth_year=?');bindings.push(Number(filters.asOfDate.slice(0,4)),filters.age);}addDistanceCondition(conditions,bindings,filters.distanceGroup,'s');addCanonicalRaceScopeCondition(conditions,filters.raceScope,'s');if(config.volt&&filters.voltLane!=='all'){conditions.push(`${canonicalStartMethodSql('s')}='volt'`);conditions.push(filters.voltLane==='good'?'s.actual_lane IN (1,6,7)':'s.actual_lane IS NOT NULL AND s.actual_lane NOT IN (1,6,7)');}if(config.volt&&filters.handicapM!=null){conditions.push(`${canonicalStartMethodSql('s')}='volt'`,'s.handicap_m=?','s.actual_start_distance_m IS NOT NULL','s.distance_m IS NOT NULL','s.actual_start_distance_m-s.distance_m=s.handicap_m');bindings.push(filters.handicapM);}
 }
 async function loadRest(env,entityId,filters,config,kind){
   if(!config.rest)return null;
-  const currentYear=Number(filters.asOfDate.slice(0,4));
-  const upper=filters.year===currentYear?filters.asOfDate:`${filters.year+1}-01-01`;
+  const bounds=filterDateBounds(filters);
   const column=config.entryColumn==='horse_id'?'horse_id':config.entryColumn;
-  const conditions=[`s.${column}=?`],bindings=[entityId,`${filters.year}-01-01`,upper,entityId];
+  const conditions=[`s.${column}=?`],bindings=[entityId,bounds.start,bounds.end,entityId];
   addStagedFilters(conditions,bindings,filters,config);conditions.push(kind==='first'?`s.days_since_previous>=${REST_DAYS}`:`s.previous_gap>=${REST_DAYS} AND s.days_since_previous<${REST_DAYS}`);
   const row=await env.DB.prepare(`WITH ${restCte(config,filters)} SELECT COUNT(*) starts,SUM(CASE WHEN s.placing=1 THEN 1 ELSE 0 END) wins,SUM(CASE WHEN s.placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) top3 FROM staged s WHERE ${conditions.join(' AND ')}`).bind(...bindings).first();
   const starts=Number(row?.starts||0),wins=Number(row?.wins||0),top3=Number(row?.top3||0);return{starts,wins,top3,winRate:starts?wins/starts:null,top3Rate:starts?top3/starts:null};
