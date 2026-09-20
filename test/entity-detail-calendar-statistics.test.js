@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 import {
+  getCalendarYearDetailSpecialties,
   getCalendarYearDetailStatistics,
   getDriverCalendarYearDetailStatistics,
   getHorseCalendarYearDetailStatistics,
@@ -13,6 +14,7 @@ import worker from '../src/worker-v065.js';
 
 test('shared calendar statistics exports one implementation for all supported detail entities', () => {
   assert.equal(typeof getCalendarYearDetailStatistics, 'function');
+  assert.equal(typeof getCalendarYearDetailSpecialties, 'function');
   assert.equal(typeof getTrainerCalendarYearDetailStatistics, 'function');
   assert.equal(typeof getDriverCalendarYearDetailStatistics, 'function');
   assert.equal(typeof getHorseCalendarYearDetailStatistics, 'function');
@@ -33,6 +35,13 @@ test('calendar filtering uses YTD for the current year and closed full-year wind
   assert.match(source, /bindings\.push\(`\$\{filters\.year\+1\}-01-01`\)/);
 });
 
+test('core calendar response can skip expensive specialty calculations', async () => {
+  const source = await readFile(new URL('../src/entity-detail-calendar-statistics.js', import.meta.url), 'utf8');
+  assert.match(source, /includeSpecials/);
+  assert.match(source, /loadSpecialties/);
+  assert.match(source, /getCalendarYearDetailSpecialties/);
+});
+
 test('trainer calendar detail preserves verified home-track and other-track summaries with active filters', async () => {
   const source = await readFile(new URL('../src/trainer-calendar-home-statistics.js', import.meta.url), 'utf8');
   assert.match(source, /normalized_observations/);
@@ -45,18 +54,21 @@ test('trainer calendar detail preserves verified home-track and other-track summ
   assert.match(source, /re\.actual_lane IN \(1,6,7\)/);
 });
 
-test('worker enriches only trainer calendar detail with verified home-track summaries', async () => {
+test('worker keeps expensive trainer specialties outside the core calendar response', async () => {
   const source = await readFile(new URL('../src/worker-v065.js', import.meta.url), 'utf8');
   assert.match(source, /getTrainerCalendarHomeTrackResults/);
-  assert.match(source, /entityType !== 'trainers'/);
-  assert.match(source, /return \{ \.\.\.data, \.\.\.home \}/);
+  assert.match(source, /includeSpecials/);
+  assert.match(source, /calendar-specialties/);
+  assert.match(source, /searchParams\.get\('specials'\)/);
 });
 
 test('new calendar detail routes remain private before touching D1', async () => {
   for (const page of ['trainers', 'drivers', 'horses']) {
-    const response = await worker.fetch(new Request(`https://example.test/app/api/${page}/example/calendar-statistics?year=2026`), {}, {});
-    assert.equal(response.status, 503);
-    assert.deepEqual(await response.json(), { error: 'service_unavailable' });
+    for (const route of ['calendar-statistics', 'calendar-specialties']) {
+      const response = await worker.fetch(new Request(`https://example.test/app/api/${page}/example/${route}?year=2026`), {}, {});
+      assert.equal(response.status, 503);
+      assert.deepEqual(await response.json(), { error: 'service_unavailable' });
+    }
   }
 });
 

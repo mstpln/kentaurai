@@ -145,12 +145,47 @@ async function loadRest(env,entityId,filters,config,kind){
   const starts=Number(row?.starts||0),wins=Number(row?.wins||0),top3=Number(row?.top3||0);return{starts,wins,top3,winRate:starts?wins/starts:null,top3Rate:starts?top3/starts:null};
 }
 
-export async function getCalendarYearDetailStatistics(env,entityType,entityId,options={}){
-  if(!env.DB)throw new Error('DB is not configured');const config=configFor(entityType),id=String(entityId||'').trim();if(!id)return null;
+function definitions(){return{longshotPercentMax:DRIVER_LONGSHOT_PERCENT_MAX,market:DRIVER_MARKET_DEFINITION_VERSION,voltLaneGood:[1,6,7],restDays:REST_DAYS}}
+
+async function loadSpecialties(env,id,filters,config){
+  const [favorite,longshot,firstAfterRest,secondAfterRest]=await Promise.all([
+    loadMarket(env,id,filters,config,'favorite'),
+    loadMarket(env,id,filters,config,'longshot'),
+    loadRest(env,id,filters,config,'first'),
+    loadRest(env,id,filters,config,'second')
+  ]);
+  return{favoriteResults:favorite,longshotResults:longshot,firstAfterRest,secondAfterRest};
+}
+
+async function prepareDetail(env,entityType,entityId,options={}){
+  if(!env.DB)throw new Error('DB is not configured');
+  const config=configFor(entityType),id=String(entityId||'').trim();if(!id)return null;
   const entity=await env.DB.prepare(`SELECT id,canonical_name AS name FROM ${config.table} WHERE id=? LIMIT 1`).bind(id).first();if(!entity)return null;
   const filters=normalizeFilters(options);await validateTrack(env,filters.trackId);
-  const [core,form,favorite,longshot,firstAfterRest,secondAfterRest]=await Promise.all([loadCore(env,id,filters,config),loadForm(env,id,filters,config),loadMarket(env,id,filters,config,'favorite'),loadMarket(env,id,filters,config,'longshot'),loadRest(env,id,filters,config,'first'),loadRest(env,id,filters,config,'second')]);
-  return{entityType,[config.resultKey]:entity,filters,...core,formLast:form,favoriteResults:favorite,longshotResults:longshot,firstAfterRest,secondAfterRest,definitions:{longshotPercentMax:DRIVER_LONGSHOT_PERCENT_MAX,market:DRIVER_MARKET_DEFINITION_VERSION,voltLaneGood:[1,6,7],restDays:REST_DAYS}};
+  return{config,id,entity,filters};
+}
+
+export async function getCalendarYearDetailStatistics(env,entityType,entityId,options={}){
+  if(!env.DB)throw new Error('DB is not configured');
+  const config=configFor(entityType),id=String(entityId||'').trim();if(!id)return null;
+  const filters=normalizeFilters(options);
+  const [entity,,core,form]=await Promise.all([
+    env.DB.prepare(`SELECT id,canonical_name AS name FROM ${config.table} WHERE id=? LIMIT 1`).bind(id).first(),
+    validateTrack(env,filters.trackId),
+    loadCore(env,id,filters,config),
+    loadForm(env,id,filters,config)
+  ]);
+  if(!entity)return null;
+  const specialties=options.includeSpecials===false
+    ? {favoriteResults:null,longshotResults:null,firstAfterRest:null,secondAfterRest:null}
+    : await loadSpecialties(env,id,filters,config);
+  return{entityType,[config.resultKey]:entity,filters,...core,formLast:form,...specialties,definitions:definitions()};
+}
+
+export async function getCalendarYearDetailSpecialties(env,entityType,entityId,options={}){
+  const prepared=await prepareDetail(env,entityType,entityId,options);if(!prepared)return null;
+  const {config,id,filters}=prepared;
+  return{entityType,filters,...await loadSpecialties(env,id,filters,config),definitions:definitions()};
 }
 
 export const getTrainerCalendarYearDetailStatistics=(env,id,options)=>getCalendarYearDetailStatistics(env,'trainers',id,options);

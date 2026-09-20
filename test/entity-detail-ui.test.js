@@ -54,6 +54,20 @@ test('canonical statistics mount is exposed without wrapping the legacy detail r
   assert.doesNotMatch(script, /renderDetail=async function/);
 });
 
+test('critical detail statistics render defers filter options and specialty reads', () => {
+  const script = statsScriptFrom(enhanced());
+  const mountStart = script.indexOf('async function mount()');
+  const mountEnd = script.indexOf('window.__kentauraiEntityDetailStatistics', mountStart);
+  assert.ok(mountStart >= 0 && mountEnd > mountStart);
+  assert.doesNotMatch(script.slice(mountStart, mountEnd), /loadOptions\(/);
+  assert.match(script, /if\(s\.open&&!s\.options\)await loadOptions\(s,c\)/);
+  assert.match(script, /calendar-statistics\?'.*specials=0/);
+  assert.match(script, /calendar-specialties\?'/);
+  assert.match(script, /id="entityDetailSpecialties"/);
+  assert.match(script, /calendar-specialties\?'.*\.then\(specialties=>/);
+});
+
+
 test('detail pages reuse the exact start-page sliders icon and year-based selector', () => {
   const html = enhanced();
   assert.match(html, /M4 7h10M18 7h2M14 4v6M4 17h2M10 17h10M10 14v6/);
@@ -83,7 +97,7 @@ test('horse age options follow the selected calendar year rather than the device
 
 test('year and filter controls are rendered above the score summary because they affect the full view', () => {
   const script = statsScriptFrom(enhanced());
-  assert.match(script, /host\.innerHTML='<div class="entity-detail-controls">'\+toolbar\(s,c\)\+panel\(s,c\)\+'<\/div>'\+content\(data,s,c,extra\)/);
+  assert.match(script, /host\.innerHTML='<div class="entity-detail-controls">'\+toolbar\(s,c\)\+panel\(s,c\)\+'<\/div>'\+content\(data,s,c\)/);
   assert.doesNotMatch(script, /scoreNode\.after\(controlsNode\)/);
 });
 
@@ -114,8 +128,8 @@ test('horse-specific verified start-point and pattern sections render directly f
 test('trainer-specific verified home-track summaries remain visible after shared redesign', () => {
   const script = statsScriptFrom(enhanced());
   assert.match(script, /if\(s\.page==='trainers'\)/);
-  assert.match(script, /special\('Hemmabana',data\.homeTrackResults,'Senaste verifierade officiella hemmabana'\)/);
-  assert.match(script, /special\('Övriga banor',data\.otherTrackResults,'Endast tränare med verifierad hemmabana'\)/);
+  assert.match(script, /special\('Hemmabana',data\?\.homeTrackResults,'Senaste verifierade officiella hemmabana'\)/);
+  assert.match(script, /special\('Övriga banor',data\?\.otherTrackResults,'Endast tränare med verifierad hemmabana'\)/);
 });
 
 test('shared summary keeps entity-specific specialized sections without the scorecard kicker', () => {

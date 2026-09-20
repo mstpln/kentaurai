@@ -3,6 +3,7 @@ import { appAuthConfigured, hasValidAppSession } from './app-auth.js';
 import { createDataCoverageExportResponse } from './data-coverage-v2.js';
 import { getHorseFilterOptions } from './statistics/horses-complete.js';
 import {
+  getCalendarYearDetailSpecialties,
   getDriverCalendarYearDetailStatistics,
   getHorseCalendarYearDetailStatistics,
   getTrainerCalendarYearDetailStatistics
@@ -115,6 +116,13 @@ const calendarHandlers = {
 
 async function calendarDetail(env, entityType, entityId, options) {
   const data = await calendarHandlers[entityType](env, entityId, options);
+  if (!data || entityType !== 'trainers' || options.includeSpecials === false) return data;
+  const home = await getTrainerCalendarHomeTrackResults(env, entityId, data.filters);
+  return { ...data, ...home };
+}
+
+async function calendarSpecialties(env, entityType, entityId, options) {
+  const data = await getCalendarYearDetailSpecialties(env, entityType, entityId, options);
   if (!data || entityType !== 'trainers') return data;
   const home = await getTrainerCalendarHomeTrackResults(env, entityId, data.filters);
   return { ...data, ...home };
@@ -141,13 +149,29 @@ export default {
       catch (error) { console.error(error); return json({ error: 'request_failed', message: error.message }, 400); }
     }
 
+    const calendarSpecialtiesMatch = path.match(/^\/app\/api\/(trainers|drivers|horses)\/([^/]+)\/calendar-specialties$/);
+    if (request.method === 'GET' && calendarSpecialtiesMatch) {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        const entityType = calendarSpecialtiesMatch[1];
+        const data = await calendarSpecialties(env, entityType, decodeURIComponent(calendarSpecialtiesMatch[2]), calendarOptions(url));
+        return data ? json(data) : json({ error: 'not_found' }, 404);
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
     const calendarMatch = path.match(/^\/app\/api\/(trainers|drivers|horses)\/([^/]+)\/calendar-statistics$/);
     if (request.method === 'GET' && calendarMatch) {
       const denied = await requireSession(request, env);
       if (denied) return denied;
       try {
         const entityType = calendarMatch[1];
-        const data = await calendarDetail(env, entityType, decodeURIComponent(calendarMatch[2]), calendarOptions(url));
+        const options = calendarOptions(url);
+        options.includeSpecials = url.searchParams.get('specials') !== '0';
+        const data = await calendarDetail(env, entityType, decodeURIComponent(calendarMatch[2]), options);
         return data ? json(data) : json({ error: 'not_found' }, 404);
       } catch (error) {
         console.error(error);

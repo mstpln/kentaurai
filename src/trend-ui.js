@@ -67,7 +67,6 @@ function trendRows(items){if(!items.length)return '<div class="trend-no-data"><s
 async function renderTrendBuildA(){
   state.detail=null;state.gameDetail=null;state.gameSystemId=null;state.page='start';setNav('start');
   const token=++trendRequestToken;
-  await loadTrendFilterOptions();
   const f=state.trendDetailFilters;
   app.innerHTML='<div class="start-heading"><h1>Trend</h1><p>Topplistor baserade på verifierade resultat och valda filter.</p></div>'+trendPageControls()+'<section class="trend-panel"><div class="trend-panel-head"><div><div class="trend-panel-kicker">'+esc(trendLabel(TREND_CATEGORIES,state.trendCategory))+'</div><h2>Högst segerprocent</h2></div><div class="trend-panel-period">'+esc(trendLabel(TREND_PERIODS,state.trendRange))+'</div></div><div id="trendResults" class="trend-loading">Läser statistik…</div></section>';
   bindTrendBuildA();
@@ -86,7 +85,7 @@ function bindTrendBuildA(){
   document.querySelectorAll('[data-trend-category]').forEach(button=>button.onclick=()=>{state.trendCategory=button.dataset.trendCategory;renderTrendBuildA()});
   const period=document.getElementById('trendPeriodSelect');if(period)period.onchange=()=>{state.trendRange=period.value;renderTrendBuildA()};
   document.querySelectorAll('[data-trend-scope]').forEach(button=>button.onclick=()=>{state.trendRaceScope=button.dataset.trendScope;renderTrendBuildA()});
-  const toggle=document.getElementById('trendFilterToggle');if(toggle)toggle.onclick=()=>{state.trendFilterOpen=!state.trendFilterOpen;renderTrendBuildA()};
+  const toggle=document.getElementById('trendFilterToggle');if(toggle)toggle.onclick=async()=>{state.trendFilterOpen=!state.trendFilterOpen;if(state.trendFilterOpen&&!state.trendFilterOptions)await loadTrendFilterOptions();renderTrendBuildA()};
   document.querySelectorAll('[data-trend-detail]').forEach(select=>select.onchange=()=>{state.trendDetailFilters[select.dataset.trendDetail]=select.value;renderTrendBuildA()});
   const reset=document.getElementById('trendReset');if(reset)reset.onclick=()=>{state.trendRaceScope='all';state.trendDetailFilters={trackId:'all',raceType:'all',breedType:'all',startMethod:'all',minStarts:'all'};renderTrendBuildA()};
   document.querySelectorAll('[data-trend-id]').forEach(button=>button.onclick=()=>openDetail(state.trendCategory,button.dataset.trendId));

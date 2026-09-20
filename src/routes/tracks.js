@@ -156,39 +156,41 @@ export async function getTrackDetail(env, id, options = {}) {
   if (!env.DB) throw new Error('DB is not configured');
   const trackId = String(id || '').trim();
   if (!trackId) return null;
-  const track = await env.DB.prepare(`
+  const trackPromise = env.DB.prepare(`
     SELECT id, canonical_name, city, country_code, lap_length_m, home_stretch_m,
       curve_radius_m, banking_degrees, width_m, surface, open_stretch_lanes,
       angled_mobile_wing, start_notes, track_notes, street_address, postal_code, website_url
     FROM tracks WHERE id = ? LIMIT 1
   `).bind(trackId).first();
+  const summaryPromise = env.DB.prepare(`
+    SELECT
+      COUNT(DISTINCT r.id) AS races,
+      COUNT(DISTINCT CASE WHEN rr.race_entry_id IS NOT NULL THEN r.id END) AS races_with_results,
+      SUM(CASE WHEN re.scratched = 0 THEN 1 ELSE 0 END) AS starts,
+      SUM(CASE WHEN re.scratched = 0 AND rr.race_entry_id IS NOT NULL THEN 1 ELSE 0 END) AS result_starts,
+      MIN(r.race_date) AS first_race_date,
+      MAX(r.race_date) AS last_race_date
+    FROM races r
+    LEFT JOIN race_entries re ON re.race_id = r.id
+    LEFT JOIN race_results rr ON rr.race_entry_id = re.id
+    WHERE r.track_id = ?
+  `).bind(trackId).first();
+  const distancePromise = env.DB.prepare(`
+    SELECT r.distance_m, COUNT(*) AS starts
+    FROM race_entries re
+    JOIN races r ON r.id = re.race_id
+    WHERE r.track_id = ? AND re.scratched = 0 AND r.distance_m IS NOT NULL
+    GROUP BY r.distance_m
+    ORDER BY r.distance_m ASC
+  `).bind(trackId).all();
+
+  const [track, summary, distanceRows] = await Promise.all([trackPromise, summaryPromise, distancePromise]);
   if (!track) return null;
 
   const includeHomeTrainerCount = options.includeHomeTrainerCount !== false;
-  const [summary, distanceRows, homeTrainerCountRow] = await Promise.all([
-    env.DB.prepare(`
-      SELECT
-        COUNT(DISTINCT r.id) AS races,
-        COUNT(DISTINCT CASE WHEN rr.race_entry_id IS NOT NULL THEN r.id END) AS races_with_results,
-        SUM(CASE WHEN re.scratched = 0 THEN 1 ELSE 0 END) AS starts,
-        SUM(CASE WHEN re.scratched = 0 AND rr.race_entry_id IS NOT NULL THEN 1 ELSE 0 END) AS result_starts,
-        MIN(r.race_date) AS first_race_date,
-        MAX(r.race_date) AS last_race_date
-      FROM races r
-      LEFT JOIN race_entries re ON re.race_id = r.id
-      LEFT JOIN race_results rr ON rr.race_entry_id = re.id
-      WHERE r.track_id = ?
-    `).bind(trackId).first(),
-    env.DB.prepare(`
-      SELECT r.distance_m, COUNT(*) AS starts
-      FROM race_entries re
-      JOIN races r ON r.id = re.race_id
-      WHERE r.track_id = ? AND re.scratched = 0 AND r.distance_m IS NOT NULL
-      GROUP BY r.distance_m
-      ORDER BY r.distance_m ASC
-    `).bind(trackId).all(),
-    includeHomeTrainerCount ? countHomeTrainers(env, trackId, track.canonical_name) : Promise.resolve(null)
-  ]);
+  const homeTrainerCountRow = includeHomeTrainerCount
+    ? await countHomeTrainers(env, trackId, track.canonical_name)
+    : null;
 
   return {
     id: track.id,

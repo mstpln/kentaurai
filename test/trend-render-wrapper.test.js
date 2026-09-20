@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import { readFile } from 'node:fs/promises';
 
 import { enhanceTrendHtml } from '../src/trend-ui.js';
 
@@ -14,6 +15,22 @@ test('Trend enhancement preserves previously composed renderStart wrappers', () 
   assert.match(match[1], /return renderTrendBuildA\(\);/);
   assert.match(match[1], /data-trend-category[\s\S]*renderTrendBuildA\(\)/);
   assert.doesNotMatch(match[1], /renderStart=async function\(\)\{\s*state\.detail=null/);
+});
+
+test('Trend critical path renders without summary or filter-option reads first', async () => {
+  const baseSource = await readFile(new URL('../src/app-page.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(baseSource, /state\.cache\.summary\|\|await api\('\/summary'\)/);
+
+  const html = enhanceTrendHtml('<html><head></head><body></body></html>');
+  const match = html.match(/<script id="kentaurai-trend-build-a-script">([\s\S]*?)<\/script>/);
+  assert.ok(match);
+  const script = match[1];
+  const renderStart = script.indexOf('async function renderTrendBuildA()');
+  const bindStart = script.indexOf('function bindTrendBuildA()', renderStart);
+  assert.ok(renderStart >= 0 && bindStart > renderStart);
+  const renderBlock = script.slice(renderStart, bindStart);
+  assert.doesNotMatch(renderBlock, /loadTrendFilterOptions\(\)/);
+  assert.match(script, /toggle\.onclick=async\(\)=>\{[^}]*state\.trendFilterOpen[^}]*await loadTrendFilterOptions\(\)/);
 });
 
 test('Trend opens with the requested period and filter defaults', () => {

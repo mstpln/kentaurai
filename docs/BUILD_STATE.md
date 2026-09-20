@@ -1,13 +1,13 @@
 # Build state
 
 Version: 0.6.0
-Updated: 2026-09-19
+Updated: 2026-09-20
 
 ## Current production truth
 - Worker: `kentaurai-api`.
 - D1: `kentaurai`.
 - R2: `kentaurai-raw`.
-- Current deployed main head before PR #202 is `650d882ad7bf9e03038ff43fee6671662332be12`.
+- Current deployed main head before PR #204 is `f4cf8e0b1cddae94ad48df45a65179f397022a96`.
 - Worker entrypoint is `src/worker-v077.js` with `ANALYSIS_WORKFLOW_MODE=v3`; the default mode serves the external-AI workflow while historical sealed-v3 artifacts remain read-compatible.
 - The latest production release completed successfully with full QA, Cloudflare validation, migration/schema/index verification, Worker deploy, `/health`, `/app/login` and private analysis/evidence route protection.
 - Production schema is current through migration `0028_external_evidence_v1.sql`.
@@ -44,6 +44,17 @@ Updated: 2026-09-19
 - Production-entrypoint regression tests execute the composed `worker-v077` scripts in order, record visible writes, verify no late tab reversion or legacy detail hosts, and check that no legacy async detail writer remains.
 - `/health/entity-detail-ui` performs a safe structural probe of the actual authenticated app payload inside the Worker and returns only boolean checks. The production release workflow verifies this probe after deployment without exposing `APP_PASSWORD` or private app HTML.
 - This candidate is not production-accepted until PR #202 is explicitly authorized, merged, released and then verified on the stable production app.
+
+## App critical-path performance candidate
+- Branch: `perf/app-critical-path-v2` / PR #204.
+- Goal: materially reduce first useful paint time for app startup and horse/trainer/driver/track detail pages without changing factual/statistical semantics.
+- Startup no longer blocks on the legacy summary read, and Trend filter options are loaded only when the filter panel is opened.
+- Normal entity profile reads are identity-only; Data explicitly requests the full observation/statistics/breakdown/coverage payload.
+- Trainer/driver cross-role lookup no longer blocks the detail header.
+- Entity score/table statistics use a core-first route. Slower market/rest/home-track specialties plus horse Startpoäng/X-Labs sections load after the core statistics are visible.
+- Stable filter/stat reads use longer in-memory TTLs, and entity hover/focus prefetches the exact default core-statistics request.
+- Track overview identity, coverage and distance-group reads are parallelized while the existing indexed track-list query remains unchanged.
+- No migration or private-data change is required. Production remains unchanged until PR #204 is reviewed, explicitly authorized, merged and released.
 
 ## App performance live
 - `worker-v077` adds only the private-app HTML performance layer; racing/analysis semantics and auth boundaries are unchanged.
