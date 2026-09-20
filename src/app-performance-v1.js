@@ -2,6 +2,9 @@ function performanceClient() {
   const cache = new Map();
   const inflight = new Map();
   function ttl(path) {
+    if (/\/statistics\/filter-options(?:\?|$)/.test(path) || path.startsWith('/trend/filter-options')) return 600000;
+    if (/\/calendar-statistics(?:\?|$)/.test(path)) return 180000;
+    if (path.startsWith('/trend?')) return 60000;
     if (/^\/entities\/(horses|trainers|drivers)\/[^/?]+(?:\?|$)/.test(path) || /^\/tracks\/[^/?]+(?:\?|$)/.test(path)) return 90000;
     if (/^\/entities\/(horses|trainers|drivers)(?:\?|$)/.test(path) || /^\/tracks(?:\?|$)/.test(path)) return 180000;
     if (/\/starts(?:\?|$)|\/horses(?:\?|$)|\/home-trainers(?:\?|$)|\/lane-stats(?:\?|$)/.test(path)) return 90000;
@@ -23,8 +26,13 @@ function performanceClient() {
     if(page==='tracks') return '/tracks?limit=20&offset='+Number(state.trackOffsets||0);
     if(page==='games') return state.gameTab==='overview'?'/games/summary':'/games?type='+String(state.gameTab||'v85').toUpperCase()+'&sort='+encodeURIComponent(state.gameSort||'latest')+'&limit=20&offset='+Number(state.gameOffsets?.[String(state.gameTab||'v85').toUpperCase()]||0);
     if(['trainers','horses','drivers'].includes(page)) return '/entities/'+page+'?limit='+PAGE_SIZE+'&offset='+Number(state.listOffsets?.[page]||0);
-    if(page==='start') return '/summary';
     return null;
+  }
+  function defaultCalendarPath(page,id){
+    if(!['trainers','horses','drivers'].includes(page)||!id)return null;
+    const q=new URLSearchParams({year:String(new Date().getFullYear()),race_scope:'all',race_type:'all',breed_type:'all',sex:'all',age:'all',start_method:'all',distance_group:'all'});
+    if(page!=='horses'){q.set('volt_lane','all');q.set('handicap_m','all')}
+    return '/'+page+'/'+encodeURIComponent(id)+'/calendar-statistics?'+q.toString();
   }
   function loading(label){ return '<div class="kentaurai-fast-loading" role="status"><div class="kentaurai-fast-line"></div><div class="kentaurai-fast-line short"></div><span>'+esc(label)+'</span></div>'; }
   function show(page,label){ setNav(page); app.innerHTML=loading(label); }
@@ -46,18 +54,18 @@ function performanceClient() {
   document.addEventListener('pointerover',event=>{
     const target=event.target instanceof Element?event.target:null;
     const row=target?.closest('.entity-row[data-id]');
-    if(row&&['trainers','horses','drivers'].includes(state.page)){ warm('/entities/'+state.page+'/'+encodeURIComponent(row.dataset.id)); const name=row.querySelector('.entity-name')?.textContent?.trim(); if(name&&(state.page==='trainers'||state.page==='drivers')) warm('/search?q='+encodeURIComponent(name)+'&limit=40'); }
+    if(row&&['trainers','horses','drivers'].includes(state.page)){ warm('/entities/'+state.page+'/'+encodeURIComponent(row.dataset.id)); warm(defaultCalendarPath(state.page,row.dataset.id)); const name=row.querySelector('.entity-name')?.textContent?.trim(); if(name&&(state.page==='trainers'||state.page==='drivers')) warm('/search?q='+encodeURIComponent(name)+'&limit=40'); }
     const track=target?.closest('[data-track-id]'); if(track) warm('/tracks/'+encodeURIComponent(track.dataset.trackId));
     const nav=target?.closest('.nav-item[data-page]'); if(nav) warm(listPath(nav.dataset.page));
   },{passive:true});
   document.addEventListener('focusin',event=>{
     const target=event.target instanceof Element?event.target:null;
-    const row=target?.closest('.entity-row[data-id]'); if(row&&['trainers','horses','drivers'].includes(state.page)){ warm('/entities/'+state.page+'/'+encodeURIComponent(row.dataset.id)); const name=row.querySelector('.entity-name')?.textContent?.trim(); if(name&&(state.page==='trainers'||state.page==='drivers')) warm('/search?q='+encodeURIComponent(name)+'&limit=40'); }
+    const row=target?.closest('.entity-row[data-id]'); if(row&&['trainers','horses','drivers'].includes(state.page)){ warm('/entities/'+state.page+'/'+encodeURIComponent(row.dataset.id)); warm(defaultCalendarPath(state.page,row.dataset.id)); const name=row.querySelector('.entity-name')?.textContent?.trim(); if(name&&(state.page==='trainers'||state.page==='drivers')) warm('/search?q='+encodeURIComponent(name)+'&limit=40'); }
     const track=target?.closest('[data-track-id]'); if(track) warm('/tracks/'+encodeURIComponent(track.dataset.trackId));
   });
   const idle=window.requestIdleCallback||((fn)=>setTimeout(fn,250));
   idle(()=>{
-    const paths=['/entities/trainers?limit=20&offset=0','/entities/horses?limit=20&offset=0','/entities/drivers?limit=20&offset=0','/tracks?limit=20&offset=0','/games/summary'];
+    const paths=['/entities/trainers?limit=20&offset=0','/entities/horses?limit=20&offset=0','/entities/drivers?limit=20&offset=0','/tracks?limit=20&offset=0','/games/summary','/horses/statistics/filter-options','/trainers/statistics/filter-options','/drivers/statistics/filter-options','/trend/filter-options'];
     paths.forEach((path,index)=>setTimeout(()=>warm(path),index*120));
   },{timeout:1500});
   window.__kentauraiApiCache={hasFresh:fresh,clear:()=>cache.clear(),size:()=>cache.size};
