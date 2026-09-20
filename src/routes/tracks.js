@@ -125,11 +125,10 @@ export async function listTracks(env, options = {}) {
   const like = escapedLike(q);
   const filter = q ? `WHERE t.canonical_name LIKE ? ESCAPE '\\' OR COALESCE(t.city, '') LIKE ? ESCAPE '\\'` : '';
   const list = env.DB.prepare(`
-    SELECT t.id, t.canonical_name AS name, t.city, t.country_code, COUNT(r.id) AS races
+    SELECT t.id, t.canonical_name AS name, t.city, t.country_code,
+      (SELECT COUNT(*) FROM races r WHERE r.track_id = t.id) AS races
     FROM tracks t
-    LEFT JOIN races r ON r.track_id = t.id
     ${filter}
-    GROUP BY t.id, t.canonical_name, t.city, t.country_code
     ORDER BY t.canonical_name COLLATE NOCASE ASC, t.id ASC
     LIMIT ? OFFSET ?
   `);
