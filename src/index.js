@@ -10,6 +10,7 @@ import { normalizeCapturedOfficialRace } from './import/official-historical-race
 import { ensureDailyOfficialHistoryJobs, getHistoricalBackfill, runHistoricalBackfillBatch, runHistoricalBackfillStep, startHistoricalBackfill } from './import/official-historical-backfill.js';
 import { ensureDailyXlabsJob, getXlabsBackfill, runXlabsBackfillBatch, runXlabsBackfillStep, startXlabsBackfill } from './import/xlabs-backfill.js';
 import { captureCalendar, captureGame, captureRace } from './provider/official.js';
+import { runPostRaceSettlementBatch } from './post-race-settlement-v1.js';
 import { captureXlabsDate } from './provider/xlabs.js';
 import { captureXlabsRaceJson } from './provider/xlabs-race.js';
 import { captureReferencedXlabsScript, captureXlabsContextScripts, XLABS_SCRIPT_SELECTOR_VERSION } from './provider/xlabs-script.js';
@@ -332,6 +333,7 @@ async function handleScheduled(controller, env) {
   const parts = [];
 
   if (controller.cron === BACKFILL_CRON) {
+    parts.push(await runScheduledPart('post_race_settlement', () => runPostRaceSettlementBatch(env)));
     parts.push(await runScheduledPart('live_normalize', () => normalizeNextPendingOfficialGame(env)));
     parts.push(await runScheduledPart('historical_backfill', () => runHistoricalBackfillBatch(env)));
     parts.push(await runScheduledPart('xlabs_backfill', () => runXlabsBackfillBatch(env)));
@@ -373,6 +375,8 @@ export default {
     }
   },
   async scheduled(controller, env, ctx) {
-    ctx.waitUntil(handleScheduled(controller, env));
+    const scheduled = handleScheduled(controller, env);
+    if (ctx?.waitUntil) ctx.waitUntil(scheduled);
+    return scheduled;
   }
 };
