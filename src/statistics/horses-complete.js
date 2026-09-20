@@ -6,6 +6,7 @@ import {
 } from './horses.js';
 import { getHorseStartPointHistory, getHorseStartPointRanking } from './horse-start-points.js';
 import { getHorseRelevantPatterns } from './horse-patterns.js';
+import { getHorseTopSpeedProfile } from './horse-top-speed.js';
 
 export { getHorseFilterOptions, normalizeHorseStatsFilters };
 
@@ -25,15 +26,17 @@ export async function getHorseRankings(env, options = {}) {
 export async function getHorseDetailStatistics(env, horseId, options = {}) {
   const data = await getBaseHorseDetailStatistics(env, horseId, options);
   if (!data) return null;
-  const [startPoints, patterns] = await Promise.all([
+  const [startPoints, patterns, topSpeed] = await Promise.all([
     getHorseStartPointHistory(env, data.horseId, data.filters.asOfDate),
-    getHorseRelevantPatterns(env, data.horseId, data.filters.asOfDate)
+    getHorseRelevantPatterns(env, data.horseId, data.filters.asOfDate),
+    getHorseTopSpeedProfile(env, data.horseId, data.filters.asOfDate)
   ]);
   return {
     ...data,
     currentStartPoints: startPoints.current,
     startPointHistory: startPoints.history,
     startPointsStatus: 'verified_official_life_statistics',
-    relevantPatterns: patterns
+    relevantPatterns: patterns,
+    topSpeed
   };
 }
