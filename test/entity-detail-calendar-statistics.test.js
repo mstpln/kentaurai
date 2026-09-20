@@ -147,7 +147,7 @@ test('person Form 1-100 endpoints stay separate from core and preserve market bl
   db.prepare("INSERT INTO tracks (id,canonical_name,country_code) VALUES ('tf','Formbana','SE')").run();
   db.prepare("INSERT INTO drivers (id,canonical_name) VALUES ('d','Kusk')").run();
   db.prepare("INSERT INTO trainers (id,canonical_name) VALUES ('tr','Tränare')").run();
-  for (let i=1;i<=4;i++) db.prepare('INSERT INTO horses (id,canonical_name) VALUES (?,?)').run('h'+i,'Häst '+i);
+  for (let i=1;i<=5;i++) db.prepare('INSERT INTO horses (id,canonical_name) VALUES (?,?)').run('h'+i,'Häst '+i);
   for (let i=1;i<=4;i++) {
     db.prepare(`INSERT INTO races (id,track_id,race_date,race_number,distance_m,start_method,status)
       VALUES (?, 'tf', ?, ?, 2140, 'auto', 'results')`).run('rf'+i,'2026-09-0'+i,i);
@@ -157,6 +157,12 @@ test('person Form 1-100 endpoints stay separate from core and preserve market bl
     db.prepare(`INSERT INTO race_results
       (race_entry_id,placing,result_status,gallop,disqualified,prize_sek)
       VALUES (?,?,'official',0,0,1000)`).run('ef'+i,i===1?1:2);
+    db.prepare(`INSERT INTO race_entries
+      (id,race_id,horse_id,start_number,actual_start_distance_m,scratched)
+      VALUES (?, ?, 'h5', 2, 2140, 0)`).run('of'+i,'rf'+i);
+    db.prepare(`INSERT INTO race_results
+      (race_entry_id,placing,result_status,gallop,disqualified,prize_sek)
+      VALUES (?,?,'official',0,0,500)`).run('of'+i,i===1?2:1);
   }
   const driverCore = await getDriverCalendarYearDetailStatistics(env,'d',{year:2026,asOfDate:'2026-09-20',includeSpecials:false});
   const trainerCore = await getTrainerCalendarYearDetailStatistics(env,'tr',{year:2026,asOfDate:'2026-09-20',includeSpecials:false});
