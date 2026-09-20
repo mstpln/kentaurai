@@ -26,10 +26,10 @@ test('Trend critical path renders without summary or filter-option reads first',
   assert.ok(match);
   const script = match[1];
   const renderStart = script.indexOf('async function renderTrendBuildA()');
-  const loadOptions = script.indexOf('async function loadTrendFilterOptions()');
-  assert.ok(renderStart >= 0 && loadOptions > renderStart);
-  const renderBlock = script.slice(renderStart, loadOptions);
-  assert.doesNotMatch(renderBlock, /await loadTrendFilterOptions\(\)/);
+  const bindStart = script.indexOf('function bindTrendBuildA()', renderStart);
+  assert.ok(renderStart >= 0 && bindStart > renderStart);
+  const renderBlock = script.slice(renderStart, bindStart);
+  assert.doesNotMatch(renderBlock, /loadTrendFilterOptions\(\)/);
   assert.match(script, /toggle\.onclick=async\(\)=>\{[^}]*state\.trendFilterOpen[^}]*await loadTrendFilterOptions\(\)/);
 });
 
