@@ -1,4 +1,4 @@
-import { getCalendarYearDetailForm } from '../entity-detail-calendar-statistics.js';
+import { getHorseTrendForms } from '../entity-detail-calendar-statistics.js';
 import {
   addTrendRaceFilters,
   coreMetricSelectSql,
@@ -118,26 +118,16 @@ function buildHorseTrendCandidates(options = {}) {
 }
 
 async function mapHorseForms(env, rows, normalized) {
-  const output = new Array(rows.length);
-  let next = 0;
-  async function worker() {
-    while (next < rows.length) {
-      const index = next++;
-      const row = rows[index];
-      const form = await getCalendarYearDetailForm(env,'horses',row.entity_id,{
-        period:normalized.period,
-        asOfDate:normalized.endDate,
-        raceScope:normalized.raceScope,
-        trackId:normalized.trackId,
-        raceType:normalized.raceType,
-        breedType:normalized.breedType,
-        startMethod:normalized.startMethod
-      });
-      output[index] = { row, form:form?.formLast || null };
-    }
-  }
-  await Promise.all(Array.from({length:Math.min(6,rows.length)},()=>worker()));
-  return output;
+  const forms=await getHorseTrendForms(env,rows.map(row=>row.entity_id),{
+    period:normalized.period,
+    asOfDate:normalized.endDate,
+    raceScope:normalized.raceScope,
+    trackId:normalized.trackId,
+    raceType:normalized.raceType,
+    breedType:normalized.breedType,
+    startMethod:normalized.startMethod
+  });
+  return rows.map(row=>({row,form:forms.get(row.entity_id)||null}));
 }
 
 async function getHorseTrendLeaderboard(env, options = {}) {
