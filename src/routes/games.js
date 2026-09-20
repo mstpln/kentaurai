@@ -89,6 +89,123 @@ const ROUND_HISTORY_SELECT = `
   LEFT JOIN systems s ON s.id = rb.primary_system_id
 `;
 
+const SYSTEM_HISTORY_SELECT = `
+  WITH system_base AS (
+    SELECT
+      gr.id AS round_id,
+      gr.game_type,
+      gr.round_date,
+      gr.status AS round_status,
+      s.id AS system_id,
+      s.system_type,
+      s.budget_sek,
+      s.row_count,
+      s.spike_count,
+      s.created_at AS system_created_at,
+      ${PRIMARY_SYSTEM_ID} AS primary_system_id,
+      (SELECT COUNT(*) FROM systems sx WHERE sx.game_round_id = gr.id) AS system_count,
+      (
+        SELECT GROUP_CONCAT(name, ' · ')
+        FROM (
+          SELECT DISTINCT t.canonical_name AS name
+          FROM game_legs glt
+          JOIN races rt ON rt.id = glt.race_id
+          LEFT JOIN tracks t ON t.id = rt.track_id
+          WHERE glt.game_round_id = gr.id AND t.canonical_name IS NOT NULL
+          ORDER BY t.canonical_name COLLATE NOCASE ASC
+        )
+      ) AS track_names
+    FROM systems s
+    JOIN game_rounds gr ON gr.id = s.game_round_id
+  ),
+  ranked_systems AS (
+    SELECT
+      sb.*,
+      ROW_NUMBER() OVER (
+        PARTITION BY sb.round_id
+        ORDER BY
+          CASE WHEN sb.system_id = sb.primary_system_id THEN 0 ELSE 1 END,
+          CASE WHEN sb.system_type = 'main' THEN 0 ELSE 1 END,
+          datetime(sb.system_created_at) DESC,
+          sb.system_id ASC
+      ) AS system_position
+    FROM system_base sb
+  )
+  SELECT
+    rs.*,
+    (
+      SELECT COUNT(DISTINCT gl.leg_number)
+      FROM game_legs gl
+      JOIN race_entries re ON re.race_id = gl.race_id
+      JOIN race_results rr ON rr.race_entry_id = re.id AND rr.placing = 1
+      WHERE gl.game_round_id = rs.round_id
+    ) AS settled_legs,
+    (
+      SELECT COUNT(DISTINCT ss.leg_number)
+      FROM system_selections ss
+      JOIN race_results rr ON rr.race_entry_id = ss.race_entry_id AND rr.placing = 1
+      WHERE ss.system_id = rs.system_id
+    ) AS correct_legs,
+    (
+      SELECT COUNT(DISTINCT ss.leg_number)
+      FROM system_selections ss
+      JOIN race_results rr ON rr.race_entry_id = ss.race_entry_id AND rr.placing = 1
+      WHERE ss.system_id = rs.system_id AND ss.is_spike = 1
+    ) AS correct_spikes,
+    (
+      SELECT COUNT(*)
+      FROM post_race_reviews prr
+      WHERE prr.system_id = rs.system_id AND prr.error_type IS NOT NULL
+    ) AS reviewed_errors,
+    (
+      SELECT COUNT(*)
+      FROM learning_observations lo
+      WHERE lo.game_round_id = rs.round_id
+    ) AS learning_count
+  FROM ranked_systems rs
+`;
+
+function historySystemLabel(systemType, position) {
+  const index = Math.max(0, Number(position || 1) - 1);
+  if (index === 0) return systemType === 'main' ? 'Huvudsystem' : 'System 1';
+  if (systemType === 'main') return `Tidigare huvudsystem ${index}`;
+  return `Alternativ ${index}`;
+}
+
+function mapSystemHistoryRow(row) {
+  const settledLegs = Number(row.settled_legs ?? 0);
+  const correctLegs = Number(row.correct_legs ?? 0);
+  const spikeCount = Number(row.spike_count ?? 0);
+  const correctSpikes = Number(row.correct_spikes ?? 0);
+  const systemPosition = Number(row.system_position ?? 1);
+  return {
+    id: row.round_id,
+    roundId: row.round_id,
+    gameType: row.game_type,
+    roundDate: row.round_date,
+    roundStatus: row.round_status,
+    trackNames: row.track_names || null,
+    systemCount: Number(row.system_count ?? 0),
+    primarySystemId: row.primary_system_id || null,
+    systemId: row.system_id,
+    systemType: row.system_type,
+    systemPosition,
+    systemLabel: historySystemLabel(row.system_type, systemPosition),
+    budgetSek: row.budget_sek == null ? null : Number(row.budget_sek),
+    rowCount: row.row_count == null ? null : Number(row.row_count),
+    spikeCount,
+    systemCreatedAt: row.system_created_at || null,
+    settledLegs,
+    correctLegs: settledLegs ? correctLegs : null,
+    wrongLegs: settledLegs ? settledLegs - correctLegs : null,
+    correctSpikes: settledLegs ? correctSpikes : null,
+    spikeHitRate: settledLegs && spikeCount ? correctSpikes / spikeCount : null,
+    resultComplete: settledLegs === 8,
+    reviewedErrors: Number(row.reviewed_errors ?? 0),
+    learningCount: Number(row.learning_count ?? 0)
+  };
+}
+
 function mapRoundRow(row) {
   const settledLegs = Number(row.settled_legs ?? 0);
   const correctLegs = Number(row.correct_legs ?? 0);
@@ -190,10 +307,10 @@ function classifyWinnerTrip(observations) {
 }
 
 function sortClause(sort) {
-  if (sort === 'correct_desc') return 'CASE WHEN settled_legs = 8 THEN 0 ELSE 1 END, correct_legs DESC, round_date DESC, id ASC';
-  if (sort === 'correct_asc') return 'CASE WHEN settled_legs = 8 THEN 0 ELSE 1 END, correct_legs ASC, round_date DESC, id ASC';
-  if (sort === 'spikes_desc') return 'CASE WHEN settled_legs = 8 THEN 0 ELSE 1 END, correct_spikes DESC, correct_legs DESC, round_date DESC, id ASC';
-  return 'round_date DESC, id ASC';
+  if (sort === 'correct_desc') return 'CASE WHEN settled_legs = 8 THEN 0 ELSE 1 END, correct_legs DESC, round_date DESC, system_position ASC, system_id ASC';
+  if (sort === 'correct_asc') return 'CASE WHEN settled_legs = 8 THEN 0 ELSE 1 END, correct_legs ASC, round_date DESC, system_position ASC, system_id ASC';
+  if (sort === 'spikes_desc') return 'CASE WHEN settled_legs = 8 THEN 0 ELSE 1 END, correct_spikes DESC, correct_legs DESC, round_date DESC, system_position ASC, system_id ASC';
+  return 'round_date DESC, system_position ASC, system_id ASC';
 }
 
 export async function listGameHistory(env, options = {}) {
@@ -202,8 +319,13 @@ export async function listGameHistory(env, options = {}) {
   const limit = clampLimit(options.limit);
   const offset = clampOffset(options.offset);
   const filter = gameType ? 'WHERE game_type = ?' : '';
-  const statement = env.DB.prepare(`${ROUND_HISTORY_SELECT}\n${filter}\nORDER BY ${sortClause(sort)}\nLIMIT ? OFFSET ?`);
-  const countStatement = env.DB.prepare(`SELECT COUNT(*) AS total FROM game_rounds gr WHERE EXISTS (SELECT 1 FROM systems sx WHERE sx.game_round_id = gr.id) ${gameType ? 'AND gr.game_type = ?' : ''}`);
+  const statement = env.DB.prepare(`${SYSTEM_HISTORY_SELECT}\n${filter}\nORDER BY ${sortClause(sort)}\nLIMIT ? OFFSET ?`);
+  const countStatement = env.DB.prepare(`
+    SELECT COUNT(*) AS total
+    FROM systems s
+    JOIN game_rounds gr ON gr.id = s.game_round_id
+    ${gameType ? 'WHERE gr.game_type = ?' : ''}
+  `);
 
   const [{ results }, countRow] = gameType
     ? await Promise.all([statement.bind(gameType, limit, offset).all(), countStatement.bind(gameType).first()])
@@ -213,7 +335,7 @@ export async function listGameHistory(env, options = {}) {
   return {
     gameType,
     sort,
-    items: results.map(mapRoundRow),
+    items: results.map(mapSystemHistoryRow),
     total,
     limit,
     offset,
