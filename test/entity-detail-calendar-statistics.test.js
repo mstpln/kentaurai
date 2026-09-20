@@ -7,6 +7,7 @@ import {
   getCalendarYearDetailStatistics,
   getDriverCalendarYearDetailStatistics,
   getHorseCalendarYearDetailStatistics,
+  getHorseCalendarYearForm,
   getTrainerCalendarYearDetailStatistics
 } from '../src/entity-detail-calendar-statistics.js';
 import { getTrainerCalendarHomeTrackResults } from '../src/trainer-calendar-home-statistics.js';
@@ -18,6 +19,7 @@ test('shared calendar statistics exports one implementation for all supported de
   assert.equal(typeof getTrainerCalendarYearDetailStatistics, 'function');
   assert.equal(typeof getDriverCalendarYearDetailStatistics, 'function');
   assert.equal(typeof getHorseCalendarYearDetailStatistics, 'function');
+  assert.equal(typeof getHorseCalendarYearForm, 'function');
   assert.equal(typeof getTrainerCalendarHomeTrackResults, 'function');
 });
 
@@ -77,7 +79,7 @@ test('worker keeps expensive trainer specialties outside the core calendar respo
   assert.match(source, /searchParams\.get\('specials'\)/);
 });
 
-test('horse calendar detail returns Form 1-100 and grouped distance rows', async () => {
+test('horse core calendar stays fast while Form 1-100 loads separately and distance rows stay grouped', async () => {
   const { createTestEnv } = await import('./helpers/d1.js');
   const { env, db } = createTestEnv();
   db.prepare("INSERT INTO tracks (id,canonical_name,country_code) VALUES ('t','Test','SE')").run();
@@ -101,9 +103,11 @@ test('horse calendar detail returns Form 1-100 and grouped distance rows', async
     asOfDate: '2026-09-20',
     includeSpecials: false
   });
-  assert.equal(data.formLast.usedStarts, 1);
-  assert.ok(Number.isInteger(data.formLast.score));
-  assert.ok(data.formLast.score >= 1 && data.formLast.score <= 100);
+  assert.equal(data.formLast, null);
+  const formData = await getHorseCalendarYearForm(env, 'h', { year:2026, asOfDate:'2026-09-20' });
+  assert.equal(formData.formLast.usedStarts, 1);
+  assert.ok(Number.isInteger(formData.formLast.score));
+  assert.ok(formData.formLast.score >= 1 && formData.formLast.score <= 100);
   assert.equal(data.distances.length, 1);
   assert.equal(data.distances[0].label, '2140');
   assert.equal(data.distances[0].starts, 1);
@@ -111,7 +115,7 @@ test('horse calendar detail returns Form 1-100 and grouped distance rows', async
 
 test('new calendar detail routes remain private before touching D1', async () => {
   for (const page of ['trainers', 'drivers', 'horses']) {
-    for (const route of ['calendar-statistics', 'calendar-specialties']) {
+    for (const route of ['calendar-statistics', 'calendar-specialties', ...(page==='horses'?['calendar-form']:[])]) {
       const response = await worker.fetch(new Request(`https://example.test/app/api/${page}/example/${route}?year=2026`), {}, {});
       assert.equal(response.status, 503);
       assert.deepEqual(await response.json(), { error: 'service_unavailable' });
