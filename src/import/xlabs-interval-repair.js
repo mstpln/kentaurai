@@ -8,7 +8,7 @@ async function markState(env, sourceRecordId, status, { intervalRows = null, val
     INSERT INTO xlabs_interval_source_state
       (source_record_id, mapper_version, status, attempts, interval_rows, valid_intervals, last_error, updated_at)
     VALUES (?, ?, ?, 1, ?, ?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(source_record_id) DO UPDATE SET
+    ON CONFLICT(source_record_id, mapper_version) DO UPDATE SET
       mapper_version = excluded.mapper_version,
       status = excluded.status,
       attempts = xlabs_interval_source_state.attempts + 1,
