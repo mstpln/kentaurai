@@ -148,6 +148,23 @@ test('Trend applies period, race level, track, race type, breed and start method
   assert.deepEqual(combined.items.map((item) => item.id), ['horse-a']);
 });
 
+test('horse Trend ranks by deterministic Form and exposes recent results with core metrics', async () => {
+  const { env } = setupCoreFixture();
+  const data = await getTrendLeaderboard(env, { category:'horses', period:'3m', asOfDate:'2026-09-11' });
+  assert.equal(data.rankingMetric, 'form');
+  assert.ok(data.items.length > 0);
+  assert.ok(data.items.every((item) => Number.isInteger(item.formScore) && item.formScore >= 1 && item.formScore <= 100));
+  assert.ok(data.items.every((item) => Array.isArray(item.recentResults)));
+  for (let index = 1; index < data.items.length; index += 1) {
+    assert.ok(data.items[index - 1].formScore >= data.items[index].formScore);
+  }
+  const horse = data.items.find((item) => item.id === 'horse-a');
+  assert.ok(horse);
+  assert.deepEqual(horse.recentResults, [1, 2, 1]);
+  assert.equal(horse.starts, 3);
+  assert.equal(horse.wins, 2);
+});
+
 test('Trend supports the same deterministic metrics for trainers and drivers', async () => {
   const { env } = setupCoreFixture();
   const trainers = await getTrendLeaderboard(env, { category: 'trainers', period: '2w', asOfDate: '2026-09-11' });
@@ -183,7 +200,7 @@ test('Trend rejects unknown enums and track IDs instead of silently ignoring the
   await assert.rejects(() => getTrendLeaderboard(env, { ...base, trackId: 'not-stored' }), /track_id does not identify/);
 });
 
-test('Trend orders win rate, wins, starts and stable ID and returns exactly top 10', async () => {
+test('trainer Trend still orders win rate, wins, starts and stable ID and returns exactly top 10', async () => {
   const { db, env } = createTestEnv();
   insertTrack(db, 'track-a', 'Bana A');
   insertPerson(db, 'drivers', 'driver-a', 'Kusk A');
@@ -199,7 +216,7 @@ test('Trend orders win rate, wins, starts and stable ID and returns exactly top 
   addHorseStarts('horse-c', 2, 4);
   for (let i = 0; i < 10; i += 1) addHorseStarts(`horse-z${i}`, 0, 1);
 
-  const data = await getTrendLeaderboard(env, { category: 'horses', period: '2w', asOfDate: '2026-09-11' });
+  const data = await getTrendLeaderboard(env, { category: 'trainers', period: '2w', asOfDate: '2026-09-11' });
   assert.equal(data.items.length, 10);
   assert.deepEqual(data.items.slice(0, 3).map((item) => item.id), ['horse-b', 'horse-c', 'horse-a']);
   assert.equal(data.items[0].winRate, 0.5);
