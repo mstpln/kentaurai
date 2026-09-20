@@ -28,21 +28,22 @@ async function markState(env, sourceRecordId, status, { intervalRows = null, val
 
 async function nextCandidates(env, limit) {
   const { results } = await env.DB.prepare(`
-    SELECT sr.id, sr.fetched_at
+    SELECT sr.id, sr.fetched_at, MAX(r.race_date) AS race_date
     FROM source_records sr
+    JOIN xlabs_data x ON x.source_record_id = sr.id
+    JOIN race_entries re ON re.id = x.race_entry_id
+    JOIN races r ON r.id = re.race_id
     WHERE sr.source_type = 'xlabs_race_json'
       AND sr.quality_status = 'normalized_verified_subset'
       AND sr.raw_object_key IS NOT NULL
-      AND EXISTS (
-        SELECT 1 FROM xlabs_data x WHERE x.source_record_id = sr.id
-      )
       AND NOT EXISTS (
         SELECT 1 FROM xlabs_interval_source_state s
         WHERE s.source_record_id = sr.id
           AND s.mapper_version = ?
           AND (s.status = 'success' OR (s.status = 'failed' AND s.attempts >= ?))
       )
-    ORDER BY julianday(sr.fetched_at) DESC, sr.id DESC
+    GROUP BY sr.id, sr.fetched_at
+    ORDER BY race_date DESC, julianday(sr.fetched_at) DESC, sr.id DESC
     LIMIT ?
   `).bind(XLABS_INTERVALS_V2_VERSION, MAX_ATTEMPTS, limit).all();
   return results || [];
