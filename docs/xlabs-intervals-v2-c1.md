@@ -9,7 +9,7 @@ C1 adds an additive numeric interval layer over already captured X-Labs race tel
 - Raw telemetry remains in private R2.
 - D1 stores compact derived 100 m interval rows in `xlabs_intervals`.
 - The existing `xlabs_data` table and v1 `quality_status` semantics are unchanged.
-- No scheduler, replay or historical backfill is started by this build.
+- The original C1 build did not start a scheduler or historical interval backfill. The production repair now derives the same v2 interval rows from already captured immutable X-Labs race telemetry, processes existing normalized sources in bounded recent-first batches, and normalizes intervals during all new X-Labs race ingestion.
 
 ## Local interval eligibility
 
