@@ -11,7 +11,6 @@ import {
   upsertTrack
 } from './official-live-chunked.js';
 import { validateRaceId } from '../provider/official.js';
-import { markOfficialSourceNormalized, officialSourceCanNormalize } from './official-source-gap.js';
 
 const SOURCE_TYPE = 'official_provider';
 const EXTERNAL_SOURCE = 'official';
@@ -157,6 +156,16 @@ async function findExistingEntry(env, race, start, horseId) {
   return results[0] || null;
 }
 
+async function preflightMissingHorseIdentityStarts(env, race) {
+  for (const start of race.starts) {
+    const horseName = maybeText(start.horse?.name);
+    const horseExternalId = start.horse?.id == null ? null : String(start.horse.id);
+    if (horseExternalId != null && horseName != null) continue;
+    const existing = await findExistingEntry(env, race, start, null);
+    if (!existing) throw new Error(`official race start ${start.number} is missing horse identity`);
+  }
+}
+
 async function mapHistoricalStart(env, race, start, ctx) {
   const horseName = maybeText(start.horse?.name);
   const horseExternalId = start.horse?.id == null ? null : String(start.horse.id);
@@ -295,7 +304,7 @@ export async function normalizeCapturedOfficialRace(env, sourceRecordId) {
   const id = String(sourceRecordId || '').trim();
   if (!id) throw new Error('source_record_id is required');
   const source = await env.DB.prepare(`
-    SELECT source_type, external_id, fetched_at, raw_object_key, quality_status, metadata_json
+    SELECT source_type, external_id, fetched_at, raw_object_key, quality_status
     FROM source_records WHERE id = ? AND source_type = ? LIMIT 1
   `).bind(id, SOURCE_TYPE).first();
   if (!source?.raw_object_key || !String(source.external_id || '').startsWith('race:')) {
@@ -304,7 +313,7 @@ export async function normalizeCapturedOfficialRace(env, sourceRecordId) {
   if (source.quality_status === NORMALIZED_QUALITY) {
     return { sourceRecordId: id, raceId: source.external_id.slice(5), qualityStatus: NORMALIZED_QUALITY, done: true, reused: true };
   }
-  if (!officialSourceCanNormalize(source)) throw new Error(`source record has unsupported quality status: ${source.quality_status}`);
+  if (source.quality_status !== 'captured_unmapped') throw new Error(`source record has unsupported quality status: ${source.quality_status}`);
 
   const object = await env.RAW_BUCKET.get(source.raw_object_key);
   if (!object) throw new Error('captured raw object was not found');
@@ -324,9 +333,10 @@ export async function normalizeCapturedOfficialRace(env, sourceRecordId) {
   };
   try {
     if (!officialRaceHasFinalResults(race)) throw new Error('official race results are not final');
+    await preflightMissingHorseIdentityStarts(env, race);
     await ensureHistoricalRace(env, race, ctx);
     for (const start of race.starts) await mapHistoricalStart(env, race, start, ctx);
-    await markOfficialSourceNormalized(env, { ...source, id });
+    await env.DB.prepare('UPDATE source_records SET quality_status = ? WHERE id = ?').bind(NORMALIZED_QUALITY, id).run();
     await finishImportRun(env, run.id, counts);
     return {
       importRunId: run.id,
