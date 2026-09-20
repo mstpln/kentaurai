@@ -94,7 +94,7 @@ function currentView(){
     startHistoryOffsets:copyObject(state.startHistoryOffsets),
     linkedHorseOffsets:copyObject(state.linkedHorseOffsets),
     settingsOpen:Boolean(state.settingsOpen),
-    settingsTab:state.settingsTab||'ai'
+    settingsTab:state.settingsTab||'data'
   };
 }
 function makeHistoryState(depth){const view=currentView();return {marker:NAV_MARKER,depth,signature:JSON.stringify(view),view}}
@@ -118,7 +118,7 @@ function restoreShared(view){
   state.gameSystemId=view.gameSystemId||null;
   state.startHistoryOffsets=copyObject(view.startHistoryOffsets);
   state.linkedHorseOffsets=copyObject(view.linkedHorseOffsets);
-  state.settingsTab=view.settingsTab||'ai';
+  state.settingsTab='data';
 }
 async function restoreView(view){
   if(!view)return;
@@ -154,6 +154,7 @@ async function restoreView(view){
     state.gameDetail=null;
     state.gameSystemId=null;
     if(view.page==='games'){await renderGames();return}
+    if(view.page==='analysis'&&window.__kentauraiAnalysis?.render){window.__kentauraiAnalysis.render();return}
     if(view.page==='start'||!view.page){await renderStart();return}
     if(['trainers','horses','drivers'].includes(view.page)){await renderEntityList(view.page);return}
     await renderStart();
