@@ -58,7 +58,7 @@ function racePayload(raceNumber,{final=true,countryCode='NO'}={}) {
   };
 }
 
-function seedUnsettledRound(db,{countryCode='NO'}={}) {
+function seedUnsettledRound(db,{countryCode='NO',liveEntryIds=false}={}) {
   db.prepare("INSERT INTO tracks (id,canonical_name,country_code) VALUES ('track_settlement','Synthetic Foreign Park',?)").run(countryCode);
   db.prepare(`INSERT INTO game_rounds
     (id,game_type,round_date,scheduled_start_at,status)
@@ -72,7 +72,8 @@ function seedUnsettledRound(db,{countryCode='NO'}={}) {
   for(let leg=1;leg<=8;leg++){
     const raceId=`${DATE}_96_${leg}`;
     const horseId=stableId('horse','official',String(7000+leg));
-    const entryId=stableId('entry',raceId,horseId);
+    const sourceStartId=`${raceId}_1`;
+    const entryId=liveEntryIds?stableId('entry','official',raceId,sourceStartId):stableId('entry',raceId,horseId);
     db.prepare(`INSERT INTO races
       (id,track_id,race_date,race_number,scheduled_start_at,distance_m,start_method,status,source_quality)
       VALUES (?,'track_settlement',?,?,?,2140,'auto','scheduled','normalized_verified_subset')`)
@@ -81,8 +82,8 @@ function seedUnsettledRound(db,{countryCode='NO'}={}) {
     db.prepare(`INSERT INTO horses (id,canonical_name) VALUES (?,?)`).run(horseId,`Synthetic Winner ${leg}`);
     db.prepare(`INSERT INTO horse_external_ids (horse_id,source_type,external_id) VALUES (?,'official',?)`).run(horseId,String(7000+leg));
     db.prepare(`INSERT INTO race_entries
-      (id,race_id,horse_id,start_number,actual_start_distance_m,scratched,data_quality)
-      VALUES (?,?,?,1,2140,0,'official_declared_start_scratch_unverified')`).run(entryId,raceId,horseId);
+      (id,race_id,horse_id,source_start_id,start_number,actual_start_distance_m,scratched,data_quality)
+      VALUES (?,?,?,?,1,2140,0,'official_declared_start_scratch_unverified')`).run(entryId,raceId,horseId,liveEntryIds?sourceStartId:null);
     db.prepare(`INSERT INTO system_selections (system_id,leg_number,race_entry_id,is_spike)
       VALUES (?,?,?,?)`).run(systemId,leg,entryId,leg<=3?1:0);
   }
@@ -186,4 +187,40 @@ test('post-race settlement operational routes remain behind ADMIN_TOKEN', async(
 
   const statusDenied=await worker.fetch(new Request('https://example.test/v1/post-race/settlement/missing'),env);
   assert.equal(statusDenied.status,401);
+});
+
+
+test('post-race settlement preserves existing live race-entry identity when ordinary-race results are normalized', async()=>{
+  const {env,db}=createTestEnv();
+  seedUnsettledRound(db,{liveEntryIds:true});
+  const raceId=`${DATE}_96_1`;
+  const sourceStartId=`${raceId}_1`;
+  const expectedEntryId=stableId('entry','official',raceId,sourceStartId);
+  const result=await runNextPostRaceSettlement(env,{
+    roundId:ROUND_ID,
+    now:'2099-05-11T00:00:00Z',
+    fetchImpl:async()=>response(racePayload(1))
+  });
+  assert.equal(result.status,'running');
+  assert.equal(db.prepare('SELECT id FROM race_entries WHERE race_id=?').get(raceId).id,expectedEntryId);
+  assert.equal(db.prepare('SELECT race_entry_id FROM race_results WHERE race_entry_id=?').get(expectedEntryId).race_entry_id,expectedEntryId);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM race_entries WHERE race_id=?').get(raceId).n,1);
+});
+
+test('final official results without exactly one winner fail closed for manual review', async()=>{
+  const {env,db}=createTestEnv();
+  seedUnsettledRound(db);
+  const payload=racePayload(1);
+  payload.starts[0].result={place:null,finishOrder:null,disqualified:true,galloped:false,prizeMoney:0,finalOdds:9};
+  const result=await runNextPostRaceSettlement(env,{
+    roundId:ROUND_ID,
+    now:'2099-05-11T00:00:00Z',
+    fetchImpl:async()=>response(payload)
+  });
+  assert.equal(result.status,'manual_review');
+  assert.equal(result.reason,'missing_unique_winner');
+  assert.equal(result.legNumber,1);
+  const job=await getPostRaceSettlementJob(env,ROUND_ID);
+  assert.equal(job.status,'manual_review');
+  assert.match(job.last_error,/final official results but no unique factual winner/);
 });
