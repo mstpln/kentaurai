@@ -107,6 +107,7 @@ function runtimeContext() {
     Headers,
     TextEncoder,
     TextDecoder,
+    AbortController,
     Intl,
     Date,
     Number,
@@ -365,4 +366,21 @@ test('stale canonical statistics request cannot repaint after navigation to anot
   assert.match(document.appWrites.at(-1), /Second Horse/);
   assert.doesNotMatch(document.appWrites.at(-1), /First Horse/);
   assert.deepEqual(document.domAppends.filter((id) => /StatsBuild/.test(id)), []);
+});
+
+
+test('production statistics runtime hydrates the same Form 1-100 card lazily for horse trainer and driver and supports abort', async () => {
+  const html = await productionHtml();
+  assert.match(html, /Form \(1–100\)/);
+  assert.match(html, /id="entityDetailForm"/);
+  assert.match(html, /calendar-form/);
+  assert.match(html, /new AbortController\(\)/);
+  assert.match(html, /abortActive\(\)/);
+  assert.doesNotMatch(html, /Form '\+c\.form|averagePlacing/);
+});
+
+test('base API accepts request options so detail cancellation reaches fetch', async () => {
+  const html = await productionHtml();
+  assert.match(html, /async function api\(path,options=\{\}\)/);
+  assert.match(html, /signal:controller\.signal/);
 });
