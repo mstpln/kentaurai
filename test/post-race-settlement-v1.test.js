@@ -9,6 +9,7 @@ import {
   runPostRaceSettlementBatch
 } from '../src/post-race-settlement-v1.js';
 import { createTestEnv } from './helpers/d1.js';
+import worker from '../src/worker-pwa.js';
 
 const DATE='2099-05-10';
 const ROUND_ID='V85_2099-05-10_96_1';
@@ -168,4 +169,21 @@ test('same-day settlement starts only after the latest known race start plus saf
   assert.equal(created.created,0);
   created=await ensurePostRaceSettlementJobs(env,`${DATE}T18:46:00Z`);
   assert.equal(created.created,1);
+});
+
+
+test('post-race settlement operational routes remain behind ADMIN_TOKEN', async()=>{
+  const {env}=createTestEnv();
+  env.ADMIN_TOKEN='synthetic-admin';
+  const denied=await worker.fetch(new Request('https://example.test/v1/post-race/settle-next',{method:'POST'}),env);
+  assert.equal(denied.status,401);
+  const allowed=await worker.fetch(new Request('https://example.test/v1/post-race/settle-next',{
+    method:'POST',
+    headers:{authorization:'Bearer synthetic-admin'}
+  }),env);
+  assert.equal(allowed.status,200);
+  assert.equal((await allowed.json()).status,'idle');
+
+  const statusDenied=await worker.fetch(new Request('https://example.test/v1/post-race/settlement/missing'),env);
+  assert.equal(statusDenied.status,401);
 });
