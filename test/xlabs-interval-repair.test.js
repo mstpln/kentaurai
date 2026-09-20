@@ -7,7 +7,7 @@ import {
   runXlabsIntervalRepairBatch
 } from '../src/import/xlabs-interval-repair.js';
 import { XLABS_INTERVALS_V2_VERSION } from '../src/xlabs-intervals-v2.js';
-import worker from '../src/worker-v077.js';
+import worker from '../src/index.js';
 
 const DATE = '2099-01-02';
 
