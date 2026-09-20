@@ -75,7 +75,21 @@ export async function startXlabsBackfill(env, startDate, endDate, options = {}) 
 
 export async function ensureXlabsDailyDateJob(env, date) {
   const normalized = validateXlabsDate(date);
-  return startScopedXlabsBackfill(env, DAILY_SCOPE, normalized, normalized);
+  let job = await startScopedXlabsBackfill(env, DAILY_SCOPE, normalized, normalized);
+  const eligibleRaceCount = (await dailyGameRacesForDate(env, normalized)).length;
+  const shouldRestart = job.status === 'failed'
+    || (job.status === 'completed' && eligibleRaceCount > Number(job.processed_races || 0));
+  if (shouldRestart) {
+    await env.DB.prepare(`
+      UPDATE xlabs_backfill_jobs
+      SET next_date=?,next_race_index=0,status='running',
+          consecutive_errors=0,last_error=NULL,retry_after=NULL,
+          lease_token=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP
+      WHERE id=?
+    `).bind(normalized,job.id).run();
+    job = await getXlabsBackfill(env, job.id);
+  }
+  return job;
 }
 
 export async function ensureDailyXlabsJob(env, scheduledTime = Date.now()) {
