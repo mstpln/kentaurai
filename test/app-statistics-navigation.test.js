@@ -38,10 +38,12 @@ test('statistics navigation groups trainer horse driver and track browsing with 
   assert.match(html, /aria-current="page"/);
 });
 
-test('bottom navigation uses the approved trend, table and currency-circle-dollar icons', () => {
+test('bottom navigation reuses the rendered Trend icon and never calls the server-only icon helper in browser runtime', () => {
   const html = renderAppPage();
   const runtimeNav = primaryNavigationRuntime(html);
-  assert.match(runtimeNav, /icon\('trend','nav-icon'\)/);
+  assert.match(html, /const startIcon=inner\.querySelector\('\[data-page="start"\] \.nav-icon'\)\?\.outerHTML\|\|''/);
+  assert.match(runtimeNav, /startIcon\+'Start/);
+  assert.doesNotMatch(runtimeNav, /icon\(/);
   assert.match(html, /M224,48H32a8,8,0,0,0-8,8V192/);
   assert.match(html, /M128,24A104,104,0,1,0,232,128/);
   assert.match(html, /A28,28,0,0,1,168,148Z/);
@@ -67,6 +69,8 @@ test('full production-composed app keeps the grouped primary navigation after la
   const pages = [...runtimeNav.matchAll(/data-page="([^"]+)"/g)].map((match) => match[1]);
 
   assert.deepEqual(pages, ['start', 'statistics', 'games']);
+  assert.match(runtimeNav, /startIcon\+'Start/);
+  assert.doesNotMatch(runtimeNav, /icon\(/);
   assert.doesNotMatch(runtimeNav, /data-page="(?:trainers|horses|drivers|tracks)"/);
   assert.match(html, /id="kentaurai-performance-v1-script"/);
   assert.match(html, /id="kentaurai-upcoming-games-v1-script"/);

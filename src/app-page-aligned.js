@@ -102,7 +102,8 @@ statisticsNavObserver.observe(app,{childList:true});
 
 function alignPrimaryNavigation(){
   const inner=document.querySelector('.bottom-inner');if(!inner)return;
-  inner.innerHTML='<button class="nav-item" data-page="start">'+icon('trend','nav-icon')+'Start</button>'+
+  const startIcon=inner.querySelector('[data-page="start"] .nav-icon')?.outerHTML||'';
+  inner.innerHTML='<button class="nav-item" data-page="start">'+startIcon+'Start</button>'+
     '<button class="nav-item" data-page="statistics">'+STATISTICS_NAV_ICON+'Statistik</button>'+
     '<button class="nav-item" data-page="games">'+GAMES_NAV_ICON+'Spel</button>';
   inner.querySelector('[data-page="start"]').onclick=()=>{state.trackDetail=null;renderStart()};
