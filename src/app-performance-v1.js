@@ -36,7 +36,7 @@ function performanceClient() {
   }
   function defaultCalendarPath(page,id){
     if(!['trainers','horses','drivers'].includes(page)||!id)return null;
-    const q=new URLSearchParams({year:String(new Date().getFullYear()),race_scope:'all',race_type:'all',breed_type:'all',sex:'all',age:'all',start_method:'all',distance_group:'all'});
+    const q=new URLSearchParams({period:'1y',race_scope:'high_prize',race_type:'all',breed_type:'all',sex:'all',age:'all',start_method:'all',distance_group:'all'});
     if(page!=='horses'){q.set('volt_lane','all');q.set('handicap_m','all')}
     q.set('specials','0');
     return '/'+page+'/'+encodeURIComponent(id)+'/calendar-statistics?'+q.toString();
