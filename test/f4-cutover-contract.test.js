@@ -11,6 +11,7 @@ const decisions = readFileSync(new URL('../docs/DECISIONS.md', import.meta.url),
 const buildState = readFileSync(new URL('../docs/BUILD_STATE.md', import.meta.url), 'utf8');
 const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
 const runbook = readFileSync(new URL('../docs/V3_CUTOVER_RUNBOOK.md', import.meta.url), 'utf8');
+const upcomingWorker = readFileSync(new URL('../src/worker-v078.js', import.meta.url), 'utf8');
 
 test('F4 authoritative game config supplies current V85/V86 line prices and fails closed when missing', () => {
   const env = { V85_LINE_PRICE_SEK: '0.50', V86_LINE_PRICE_SEK: '0.25' };
@@ -22,8 +23,9 @@ test('F4 authoritative game config supplies current V85/V86 line prices and fail
   assert.throws(() => canonicalOptimizerPolicyForGameType({}, 'V85'), /V85_LINE_PRICE_SEK is not configured/);
 });
 
-test('repository default keeps F4 v3 mode behind the worker-v077 performance layer', () => {
-  assert.match(wrangler, /"main": "\.\/src\/worker-v077\.js"/);
+test('repository default keeps F4 v3 mode behind the worker-v078 app layer wrapping worker-v077', () => {
+  assert.match(wrangler, /"main": "\.\/src\/worker-v078\.js"/);
+  assert.match(upcomingWorker, /import worker from '\.\/worker-v077\.js'/);
   assert.match(wrangler, /"ANALYSIS_WORKFLOW_MODE": "v3"/);
 });
 
