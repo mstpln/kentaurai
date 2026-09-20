@@ -1,3 +1,11 @@
+## App/statistics responsiveness candidate
+- Trainer/driver ranking core now derives win rate, top-3 rate and wins from one materialized filtered sample instead of three repeated scans.
+- Horse ranking core shares win/top-3 aggregation, keeps Start Points out of the fast core response, scopes X-Labs reads to eligible entries and combines both rest rankings into one history pass.
+- Trainer extended rankings consolidate performance, home/away, distance, market and rest families; driver extended rankings consolidate performance and market families.
+- Ranking UI starts extended work shortly after core work begins, while still painting the core response first. Entity-detail statistics uses the same overlap for specialties, Form and horse top speed.
+- Statistics ranking responses use the app read cache for three minutes and default statistics paths are prefetched with cache keys matching the actual UI defaults.
+- Statistics JSON responses are compact rather than pretty-printed. No factual definitions, model weights or private/public boundaries are intentionally changed.
+
 ## Trend and statistics filter/performance candidate
 - Trend keeps **Tränare / Hästar / Kuskar**.
 - Trainer/driver Trend remains win-rate-led; horse Trend is ranked by the canonical **Form 1–100** calculation with **3 months** and **min 3 starts** as horse defaults.
