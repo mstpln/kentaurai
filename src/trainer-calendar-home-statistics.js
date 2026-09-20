@@ -9,7 +9,12 @@ import {
 const DISTANCE_STANDARDS = [640,1640,2140,2640,3140,3640,4140];
 const DISTANCE_TOLERANCE_M = 100;
 
-function addYearCondition(conditions, bindings, filters) {
+function addPeriodCondition(conditions, bindings, filters) {
+  if (filters.period && filters.periodStartDate && filters.periodEndDate) {
+    conditions.push('r.race_date >= ?', 'r.race_date <= ?');
+    bindings.push(filters.periodStartDate, filters.periodEndDate);
+    return;
+  }
   const currentYear = Number(filters.asOfDate.slice(0, 4));
   conditions.push('r.race_date >= ?');
   bindings.push(`${filters.year}-01-01`);
@@ -36,7 +41,7 @@ function addDistanceCondition(conditions, bindings, distance) {
 }
 
 function addFilters(conditions, bindings, filters) {
-  addYearCondition(conditions, bindings, filters);
+  addPeriodCondition(conditions, bindings, filters);
   if (filters.trackId) {
     conditions.push('r.track_id = ?');
     bindings.push(filters.trackId);
@@ -51,7 +56,7 @@ function addFilters(conditions, bindings, filters) {
   if (filters.sex === 'gelding') conditions.push("LOWER(COALESCE(h.sex,'')) IN ('valack','gelding')");
   if (filters.age != null) {
     conditions.push('? - h.birth_year = ?');
-    bindings.push(filters.year, filters.age);
+    bindings.push(Number(filters.asOfDate.slice(0, 4)), filters.age);
   }
   addDistanceCondition(conditions, bindings, filters.distanceGroup);
   addCanonicalRaceScopeCondition(conditions, filters.raceScope, 'r');
