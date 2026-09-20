@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=06c5fc3fc0e7cc98327d2974091bacc03be1bd86
-release_nonce=2026-09-20-production-statistics-navigation-runtime-hotfix-pr219-1
+source_main=ca6334df1876b0b6840c55a93cf32fab80a88579
+release_nonce=2026-09-20-production-analysis-primary-navigation-pr220-1
