@@ -29,7 +29,8 @@ test('horse top speed uses fastest verified opening segments and whole-race clos
 
   for (const [raceId, entryId, date, number] of [
     ['r1','e1','2026-08-01',1],
-    ['r2','e2','2026-08-10',2]
+    ['r2','e2','2026-08-10',2],
+    ['r3','e3','2026-08-15',3]
   ]) {
     db.prepare(`INSERT INTO races
       (id,track_id,race_date,race_number,distance_m,start_method,status)
@@ -41,8 +42,10 @@ test('horse top speed uses fastest verified opening segments and whole-race clos
 
   source(db, 'x1', '2026-08-01T20:00:00Z');
   source(db, 'x2', '2026-08-10T20:00:00Z');
+  source(db, 'x3', '2026-08-15T20:00:00Z');
   addIntervals(db, 'e1', 'x1', 7000);
   addIntervals(db, 'e2', 'x2', 6500);
+  addIntervals(db, 'e3', 'x3', 2000);
 
   db.prepare(`INSERT INTO xlabs_data
     (id,race_entry_id,last_400_time,last_1000_time,quality_status,source_record_id)
@@ -57,7 +60,7 @@ test('horse top speed uses fastest verified opening segments and whole-race clos
   assert.equal(profile.first500.bestSecondsPerKm, 65);
   assert.equal(profile.last400.bestSecondsPerKm, 66);
   assert.equal(profile.last1000.bestSecondsPerKm, 67);
-  assert.equal(profile.first500.measurements, 2);
+  assert.equal(profile.first500.measurements, 2, 'implausible persisted opening pace is excluded');
   assert.equal(profile.last1000.measurements, 2);
 });
 
