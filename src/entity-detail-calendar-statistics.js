@@ -156,7 +156,7 @@ function stlDifficultyScore(value){
 }
 
 async function loadHorseForm(env,entityId,filters,config){
-  const conditions=['re.scratched=0','re.horse_id=?'],bindings=[entityId];
+  const conditions=['re.scratched=0','re.horse_id=?','(rr.placing IS NOT NULL OR rr.disqualified=1)'],bindings=[entityId];
   addCommonFilters(conditions,bindings,filters,{includeVolt:false});
   const {results:targetRows}=await env.DB.prepare(`
     SELECT re.id race_entry_id,r.id race_id,r.race_date,r.race_number,r.scheduled_start_at,
@@ -245,8 +245,8 @@ async function loadHorseForm(env,entityId,filters,config){
     const context=contextByRace.get(target.race_id)||[];
     const self=context.find(row=>row.horse_id===entityId)||null;
     const opponents=context.filter(row=>row.horse_id!==entityId);
-    const pointValues=opponents.map(row=>Number(row.start_points)).filter(Number.isFinite).sort((a,b)=>a-b);
-    const earningValues=opponents.map(row=>Number(row.earnings_raw)).filter(Number.isFinite).sort((a,b)=>a-b);
+    const pointValues=opponents.filter(row=>row.start_points!=null).map(row=>Number(row.start_points)).filter(Number.isFinite).sort((a,b)=>a-b);
+    const earningValues=opponents.filter(row=>row.earnings_raw!=null).map(row=>Number(row.earnings_raw)).filter(Number.isFinite).sort((a,b)=>a-b);
     const median=values=>values.length?values[Math.floor((values.length-1)/2)]:null;
     const pointChallenge=relativeChallengeScore(median(pointValues),self?.start_points);
     const earningChallenge=relativeChallengeScore(median(earningValues),self?.earnings_raw);
