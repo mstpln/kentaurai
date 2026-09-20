@@ -158,3 +158,13 @@ A single race must not directly change model weights. Candidate learnings are re
 - Trainer Form does not use betting/odds, race/opposition difficulty or X-Labs merely to mirror the horse formula.
 - Person Form requires at least three verified result starts for a score. Missing secondary evidence remains null; it is never treated as a zero-performance assumption.
 - Core entity statistics must not wait for any Form calculation. Horse, trainer and driver Form all load through separate private lazy endpoints after core paint.
+
+
+## Saved V85/V86 systems settle from exact official race ids before post-race learning
+- Pre-race automatic capture still stops at the race-day morning boundary. Post-race settlement is a separate factual pipeline and is allowed to fetch final official race results after racing.
+- Settlement is anchored to the eight race ids already stored in `game_legs`; it must not rediscover the round through Swedish-only historical calendar filtering.
+- Same-day automatic settlement becomes eligible only after the latest known race start plus 45 minutes. Older unresolved saved rounds are recovery candidates immediately.
+- A race is settled only from an archived official ordinary-race payload that passes the existing final-result validator and normalizer. Not-final source data is retried; unknown is never replaced by a guessed result.
+- Exactly one factual winner per leg is required for automatic round completion. Multiple winners/dead-heat ambiguity fails closed to `manual_review` until dedicated verified semantics exist.
+- Up to three legs may settle sequentially per minute invocation. Job state is lease-protected and idempotent.
+- Full eight-leg settlement queues/reopens exact-date X-Labs enrichment and only then allows the existing post-race diagnostic/learning flow to consume the completed factual outcomes. One result or round still never changes model weights automatically.
