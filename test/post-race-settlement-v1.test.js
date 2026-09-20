@@ -224,3 +224,54 @@ test('final official results without exactly one winner fail closed for manual r
   assert.equal(job.status,'manual_review');
   assert.match(job.last_error,/final official results but no unique factual winner/);
 });
+
+
+test('post-race settlement safely binds final results to an existing start when horse identity is missing', async()=>{
+  const {env,db}=createTestEnv();
+  seedUnsettledRound(db,{liveEntryIds:true});
+  const raceId=`${DATE}_96_1`;
+  const sourceStartId=`${raceId}_1`;
+  const entryId=stableId('entry','official',raceId,sourceStartId);
+
+  db.prepare('UPDATE race_entries SET horse_id=NULL, declared_horse_name=? WHERE id=?')
+    .run('Synthetic Winner 1',entryId);
+
+  const payload=racePayload(1);
+  payload.starts[0].horse={};
+
+  const result=await runNextPostRaceSettlement(env,{
+    roundId:ROUND_ID,
+    now:'2099-05-11T00:00:00Z',
+    fetchImpl:async()=>response(payload)
+  });
+
+  assert.equal(result.status,'running');
+  assert.equal(result.settledLegs,1);
+  const stored=db.prepare('SELECT id,horse_id,declared_horse_name FROM race_entries WHERE race_id=? AND start_number=1').get(raceId);
+  assert.equal(stored.id,entryId);
+  assert.equal(stored.horse_id,null);
+  assert.equal(stored.declared_horse_name,'Synthetic Winner 1');
+  assert.equal(db.prepare('SELECT placing FROM race_results WHERE race_entry_id=?').get(entryId).placing,1);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM race_entries WHERE race_id=?').get(raceId).n,1);
+});
+
+test('post-race settlement fails closed when missing horse identity cannot be matched uniquely', async()=>{
+  const {env,db}=createTestEnv();
+  seedUnsettledRound(db,{liveEntryIds:true});
+  const raceId=`${DATE}_96_1`;
+  const payload=racePayload(1);
+  payload.starts[0].id='unknown_source_start';
+  payload.starts[0].number=99;
+  payload.starts[0].horse={ name:'Unknown horse' };
+  delete payload.starts[0].horse.id;
+
+  await assert.rejects(
+    ()=>runNextPostRaceSettlement(env,{
+      roundId:ROUND_ID,
+      now:'2099-05-11T00:00:00Z',
+      fetchImpl:async()=>response(payload)
+    }),
+    /missing horse identity/
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM race_results').get().n,0);
+});

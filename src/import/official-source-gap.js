@@ -37,7 +37,7 @@ export async function markOfficialSourceNormalized(env, source) {
 
 export function officialRaceSourceGap(error) {
   const message = String(error?.message || '');
-  const match = /^official race start (\d+) is missing horse identity$/.exec(message);
+  const match = /^official race start (\d+) is missing horse identity(?: and has no unique stored pre-race entry)?$/.exec(message);
   if (!match) return null;
   return {
     code: 'missing_horse_identity',
