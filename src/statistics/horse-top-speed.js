@@ -1,4 +1,4 @@
-import { XLABS_INTERVALS_V2_VERSION } from '../xlabs-intervals-v2.js';
+import { XLABS_INTERVALS_V2_POLICY, XLABS_INTERVALS_V2_VERSION } from '../xlabs-intervals-v2.js';
 
 function parsePaceSeconds(value) {
   if (typeof value !== 'string') return null;
@@ -24,8 +24,12 @@ function segmentPace(rows, startM, endM) {
   return distance > 0 ? (elapsed / 1000) * (1000 / distance) : null;
 }
 
+function plausiblePace(value) {
+  return Number.isFinite(value) && value * 1000 >= XLABS_INTERVALS_V2_POLICY.minPlausibleKmPaceMs;
+}
+
 function best(values) {
-  const measured = values.filter((value) => Number.isFinite(value) && value > 0);
+  const measured = values.filter((value) => plausiblePace(value));
   return measured.length ? Math.min(...measured) : null;
 }
 
@@ -97,9 +101,9 @@ export async function getHorseTopSpeedProfile(env, horseId, asOfDate) {
     const p100 = segmentPace(rows, 0, 100);
     const p200 = segmentPace(rows, 0, 200);
     const p500 = segmentPace(rows, 0, 500);
-    if (p100 != null) first100.push(p100);
-    if (p200 != null) first200.push(p200);
-    if (p500 != null) first500.push(p500);
+    if (plausiblePace(p100)) first100.push(p100);
+    if (plausiblePace(p200)) first200.push(p200);
+    if (plausiblePace(p500)) first500.push(p500);
   }
 
   const last400 = [];
@@ -107,8 +111,8 @@ export async function getHorseTopSpeedProfile(env, horseId, asOfDate) {
   for (const row of wholeRows || []) {
     const p400 = parsePaceSeconds(row.last_400_time);
     const p1000 = parsePaceSeconds(row.last_1000_time);
-    if (p400 != null) last400.push(p400);
-    if (p1000 != null) last1000.push(p1000);
+    if (plausiblePace(p400)) last400.push(p400);
+    if (plausiblePace(p1000)) last1000.push(p1000);
   }
 
   return {

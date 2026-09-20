@@ -77,6 +77,7 @@ function canonicalAppRedirect(request, url) {
 
 function calendarOptions(url) {
   return {
+    period: url.searchParams.get('period'),
     year: url.searchParams.get('year'),
     raceScope: url.searchParams.get('race_scope'),
     trackId: url.searchParams.get('track_id'),
@@ -186,6 +187,7 @@ export default {
         const entityType = calendarMatch[1];
         const options = calendarOptions(url);
         options.includeSpecials = url.searchParams.get('specials') !== '0';
+        options.includeStartPoints = url.searchParams.get('start_points') !== '0';
         const data = await calendarDetail(env, entityType, decodeURIComponent(calendarMatch[2]), options);
         return data ? json(data) : json({ error: 'not_found' }, 404);
       } catch (error) {

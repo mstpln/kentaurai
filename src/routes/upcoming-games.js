@@ -98,7 +98,7 @@ function formatBest(rows, field, predicate = () => true) {
   for (const row of rows) {
     if (!predicate(row)) continue;
     const seconds = parsePaceSeconds(row[field]);
-    if (seconds == null) continue;
+    if (seconds == null || seconds < 50) continue;
     count += 1;
     if (!best || seconds < best.seconds) best = { seconds, value:row[field] };
   }

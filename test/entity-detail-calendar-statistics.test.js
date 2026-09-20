@@ -10,6 +10,7 @@ import {
   getDriverCalendarYearForm,
   getHorseCalendarYearDetailStatistics,
   getHorseCalendarYearForm,
+  getHorseTrendForms,
   getTrainerCalendarYearDetailStatistics,
   getTrainerCalendarYearForm
 } from '../src/entity-detail-calendar-statistics.js';
@@ -24,6 +25,7 @@ test('shared calendar statistics exports one implementation for all supported de
   assert.equal(typeof getDriverCalendarYearDetailStatistics, 'function');
   assert.equal(typeof getHorseCalendarYearDetailStatistics, 'function');
   assert.equal(typeof getHorseCalendarYearForm, 'function');
+  assert.equal(typeof getHorseTrendForms, 'function');
   assert.equal(typeof getDriverCalendarYearForm, 'function');
   assert.equal(typeof getTrainerCalendarYearForm, 'function');
   assert.equal(typeof getTrainerCalendarHomeTrackResults, 'function');
@@ -37,9 +39,11 @@ test('entity calendar configuration preserves entity-specific form and specialis
   assert.match(source, /voltLaneGood:\[1,6,7\]/);
 });
 
-test('calendar filtering uses YTD for the current year and closed full-year windows for prior years', async () => {
+test('calendar filtering supports rolling Trend periods while retaining the year fallback contract', async () => {
   const source = await readFile(new URL('../src/entity-detail-calendar-statistics.js', import.meta.url), 'utf8');
-  assert.match(source, /if\(filters\.year===currentYear\)\{conditions\.push\(`\$\{raceAlias\}\.race_date <= \?`\);bindings\.push\(filters\.asOfDate\);\}/);
+  assert.match(source, /trendDateWindow\(options\.period,asOfDate\)/);
+  assert.match(source, /if\(filters\.period\)\{/);
+  assert.match(source, /bindings\.push\(filters\.periodStartDate,filters\.periodEndDate\)/);
   assert.match(source, /bindings\.push\(`\$\{filters\.year\+1\}-01-01`\)/);
 });
 
@@ -76,7 +80,8 @@ test('trainer calendar detail preserves verified home-track and other-track summ
   assert.match(source, /addFilters\(conditions, bindings, filters\)/);
   assert.match(source, /homeTrackResults/);
   assert.match(source, /otherTrackResults/);
-  assert.match(source, /filters\.year === currentYear/);
+  assert.match(source, /filters\.periodStartDate/);
+  assert.match(source, /filters\.periodEndDate/);
   assert.match(source, /re\.actual_lane IN \(1,6,7\)/);
 });
 
@@ -120,6 +125,45 @@ test('horse core calendar stays fast while Form 1-100 loads separately and dista
   assert.equal(data.distances.length, 1);
   assert.equal(data.distances[0].label, '2140');
   assert.equal(data.distances[0].starts, 1);
+});
+
+test('rolling 1y detail period excludes older starts and keeps the selected race level', async () => {
+  const { createTestEnv } = await import('./helpers/d1.js');
+  const { env, db } = createTestEnv();
+  db.prepare("INSERT INTO tracks (id,canonical_name,country_code) VALUES ('rp-track','Rolling','SE')").run();
+  db.prepare("INSERT INTO trainers (id,canonical_name) VALUES ('rp-tr','Rolling Trainer')").run();
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('rp-h','Rolling Horse')").run();
+  for (const [id,date,prize] of [['rp-old','2025-08-01',150000],['rp-low','2026-09-01',30000],['rp-high','2026-09-02',150000]]) {
+    db.prepare("INSERT INTO races (id,track_id,race_date,race_number,distance_m,start_method,first_prize_sek,status) VALUES (?,'rp-track',?,1,2140,'auto',?,'results')").run(id,date,prize);
+    db.prepare("INSERT INTO race_entries (id,race_id,horse_id,trainer_id,start_number,scratched) VALUES (?,?, 'rp-h','rp-tr',1,0)").run(id+'-e',id);
+    db.prepare("INSERT INTO race_results (race_entry_id,placing,gallop,disqualified,result_status) VALUES (?,1,0,0,'official')").run(id+'-e');
+  }
+  const data=await getTrainerCalendarYearDetailStatistics(env,'rp-tr',{period:'1y',raceScope:'high_prize',asOfDate:'2026-09-20',includeSpecials:false,includeStartPoints:false});
+  assert.equal(data.summary.starts,1);
+  assert.equal(data.summary.wins,1);
+  assert.equal(data.filters.period,'1y');
+  assert.equal(data.filters.raceScope,'high_prize');
+});
+
+test('batched horse Trend Form returns the existing deterministic Form contract for multiple horses', async () => {
+  const { createTestEnv } = await import('./helpers/d1.js');
+  const { env, db } = createTestEnv();
+  db.prepare("INSERT INTO tracks (id,canonical_name,country_code) VALUES ('bt-track','Batch','SE')").run();
+  for (const [id,name] of [['bt-a','Batch A'],['bt-b','Batch B']]) db.prepare("INSERT INTO horses (id,canonical_name) VALUES (?,?)").run(id,name);
+  for (let i=1;i<=3;i++) {
+    const race='bt-r'+i;
+    db.prepare("INSERT INTO races (id,track_id,race_date,race_number,distance_m,start_method,first_prize_sek,status) VALUES (?,'bt-track',?, ?,2140,'auto',150000,'results')").run(race,'2026-09-0'+i,i);
+    for (const [horse,start,placing] of [['bt-a',1,i===1?1:2],['bt-b',2,i===3?1:3]]) {
+      const entry=race+'-'+horse;
+      db.prepare("INSERT INTO race_entries (id,race_id,horse_id,start_number,actual_start_distance_m,scratched) VALUES (?,?,?,?,2140,0)").run(entry,race,horse,start);
+      db.prepare("INSERT INTO race_results (race_entry_id,placing,gallop,disqualified,result_status) VALUES (?,?,0,0,'official')").run(entry,placing);
+    }
+  }
+  const forms=await getHorseTrendForms(env,['bt-a','bt-b'],{period:'3m',raceScope:'high_prize',asOfDate:'2026-09-20'});
+  assert.equal(forms.size,2);
+  assert.ok(forms.get('bt-a').score>=1&&forms.get('bt-a').score<=100);
+  assert.ok(forms.get('bt-b').score>=1&&forms.get('bt-b').score<=100);
+  assert.deepEqual(forms.get('bt-a').recentResults,[2,2,1]);
 });
 
 test('new calendar detail routes remain private before touching D1', async () => {

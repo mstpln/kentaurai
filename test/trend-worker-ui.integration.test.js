@@ -70,9 +70,10 @@ test('actual Worker app HTML contains the canonical Trend Build A enhancement', 
   assert.match(html, /aria-label="Detaljfilter"/);
   assert.match(html, /id="trendPeriodSelect"/);
   assert.match(html, /class="trend-period-chevron"/);
-  assert.match(html, /state\.trendRange='2w'/);
+  assert.match(html, /TREND_DEFAULTS=\{trainers:\{range:'2w',minStarts:'10'\},horses:\{range:'3m',minStarts:'3'\},drivers:\{range:'2w',minStarts:'10'\}\}/);
   assert.match(html, /state\.trendRaceScope=state\.trendRaceScope\|\|'high_prize'/);
-  assert.match(html, /minStarts:'10'/);
+  assert.match(html, /id="trendRaceScopeSelect"/);
+  assert.match(html, /Starkast form/);
   assert.match(html, /function activeFilterCount\(\)/);
   assert.match(html, /M4 7h10M18 7h2M14 4v6M4 17h2M10 17h10M10 14v6/);
   assert.match(html, /@media\(max-width:430px\)/);

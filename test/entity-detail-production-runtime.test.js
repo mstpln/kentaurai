@@ -309,6 +309,7 @@ test('actual production click path owns tabs and never paints legacy statistics'
   assert.doesNotMatch(document.getElementById('entityDetailStatisticsV2').innerHTML, /Scorecard/);
   assert.match(document.getElementById('entityDetailStatisticsV2').innerHTML, /^<div class="entity-detail-controls">[\s\S]*?<div class="entity-detail-score">/);
   assert.match(document.getElementById('entityDetailStatisticsV2').innerHTML, /Segerprocent/);
+  assert.ok(requestedPaths.some((path) => path.includes('/horses/horse-1/calendar-statistics?') && path.includes('period=1y') && path.includes('race_scope=high_prize')));
 
   document.appWrites.length = 0;
   await vm.runInContext("openDetail('trainers','trainer-1')", context);
@@ -377,6 +378,12 @@ test('production statistics runtime hydrates the same Form 1-100 card lazily for
   assert.match(script, /Form \(1–100\)/);
   assert.match(script, /id="entityDetailForm"/);
   assert.match(script, /calendar-form/);
+  assert.match(script, /period:'1y'/);
+  assert.match(script, /raceScope:'high_prize'/);
+  assert.match(script, /field\('Loppnivå','raceScope',SCOPES,s\)/);
+  assert.match(script, /id="entityDetailToggle"/);
+  assert.doesNotMatch(script, /data-ed-scope/);
+  assert.match(script, /requestIdleCallback/);
   assert.match(script, /new AbortController\(\)/);
   assert.match(script, /abortActive\(\)/);
   assert.match(script, /async function render\(host,s,c\)\{abortActive\(\);const token=\+\+requestToken/);

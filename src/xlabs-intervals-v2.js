@@ -15,6 +15,7 @@ export const XLABS_INTERVALS_V2_POLICY = Object.freeze({
   maxEndpointErrorM: 20,
   minMeasuredDistanceRatio: 0.80,
   maxMeasuredDistanceRatio: 1.20,
+  minPlausibleKmPaceMs: 50_000,
   wholeRaceSummarySource: 'xlabs-telemetry-v1'
 });
 
@@ -158,6 +159,7 @@ function intervalMeasurement(frames, readings, startNumber, startDistance, start
   const measuredDistanceM = startReading.distanceToFinish - endReading.distanceToFinish;
   const elapsedMs = endReading.timestampMs - startReading.timestampMs;
   const ratio = expectedDistanceM > 0 ? measuredDistanceM / expectedDistanceM : null;
+  const rawKmPaceMs = elapsedMs > 0 && measuredDistanceM > 0 ? elapsedMs * (1000 / measuredDistanceM) : null;
 
   let status = 'valid';
   if (startReading.frameIndex >= endReading.frameIndex || !(elapsedMs > 0) || !(measuredDistanceM > 0)) {
@@ -174,9 +176,11 @@ function intervalMeasurement(frames, readings, startNumber, startDistance, start
     status = 'distance_mismatch';
   } else if (localFrameCoverage < XLABS_INTERVALS_V2_POLICY.localMinFrameCoverage) {
     status = 'insufficient_local_coverage';
+  } else if (Number.isFinite(rawKmPaceMs) && rawKmPaceMs < XLABS_INTERVALS_V2_POLICY.minPlausibleKmPaceMs) {
+    status = 'pace_outlier';
   }
 
-  const kmPaceMs = status === 'valid' ? elapsedMs * (1000 / measuredDistanceM) : null;
+  const kmPaceMs = status === 'valid' ? rawKmPaceMs : null;
   return {
     status,
     elapsedMs: status === 'valid' ? elapsedMs : null,

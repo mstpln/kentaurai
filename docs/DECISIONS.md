@@ -33,10 +33,10 @@
 1. Horse, trainer and driver remain primary detail entities, with V85/V86 system/performance history available in a dedicated Spel area.
 2. Bottom navigation is fixed as **Trend -> Statistik -> Analys -> Spel**. Statistik owns the four-way top selector **Tränare -> Hästar -> Kuskar -> Bana**, shown above the workspace page heading and only on those four list/workspace views.
 3. Trend is the start workspace and uses category switching for Tränare / Hästar / Kuskar plus rolling periods 2 weeks / 4 weeks / 3 months / 6 months / 1 year.
-4. Trend uses the verified actual starts currently present in D1; an incomplete historical backfill does not create guessed values or a special UI warning. Ranking is deterministic by win rate -> wins -> starts -> stable entity ID and is capped at ten rows.
+4. Trend uses verified actual starts currently present in D1; an incomplete historical backfill never creates guessed values. Tränare and Kuskar rank deterministically by win rate -> wins -> starts -> stable entity ID. Hästar instead rank by the existing deterministic horse Form (1–100), with Form score -> wins -> starts -> stable entity ID as tie-break order. All Trend lists are capped at ten rows.
 5. Trend and individual entity statistics share the same core definitions and denominator rules. Scratched entries are not starts; win rate uses actual starts, top-three rate uses result starts, gallop rate uses only starts with verified gallop status, and missing prize data stays distinguishable from zero.
-6. Trend race level reuses the canonical **All data / Högre prissumma / Vardagstrav** logic. Track, race type, breed type and start method are secondary AND-combined filters behind the horizontal-sliders control.
-7. Trend rows use the approved Version 3 hierarchy: win percentage at left, name plus starts/wins/losses in the main area, and equal Top 3%, Gallop% and Prispengar pills beneath. The whole row navigates to the canonical entity detail page.
+6. Trend race level reuses the canonical **All data / Högre prissumma / Vardagstrav** logic and is presented as a dropdown inside the horizontal-sliders filter panel. Track, race type, breed type and start method remain secondary AND-combined dropdown filters.
+7. Tränare/Kuskar Trend rows keep win percentage as the primary value. Hästar use Form (1–100) as the primary value, show recent placings plus starts/wins, and use Seger %, Topp 3 % and Prispengar as supporting facts. Hästar default to 3 months and minimum 3 starts; Tränare/Kuskar default to 2 weeks and minimum 10 starts. The whole row navigates to the canonical entity detail page.
 8. A global search bar searches all three primary entity types.
 9. Spel contains exactly three primary tabs: **Kommande / Historik / Översikt**. V85/V86 are filters inside Kommande and Historik; saved rounds can open detailed round pages.
 10. Entity and round pages should use tabs, collapsible start cards and natural data groups instead of long unstructured field lists.
@@ -128,6 +128,15 @@
 ## Learning registry
 A single race must not directly change model weights. Candidate learnings are recorded as hypotheses and accumulate supporting/contradicting observations. Actual model/rule changes are stored in `model_change_log` and tied to `model_versions`.
 
+
+## Entity detail statistics filter and loading contract
+- Tränare, Hästar and Kuskar statistics open with rolling 1 year and canonical Högre prissumma selected. Other applicable filters default to all.
+- The period control remains visible; detailed filters are behind the same sliders icon as Trend. Loppnivå is a dropdown, not a pill/tab group.
+- Core factual tables render before heavier Form, specialty and horse-extra reads. Secondary reads may hydrate lazily but must remain filter-consistent and abort stale navigation work.
+
+## X-Labs pace plausibility
+- Verified telemetry geometry/coverage checks remain the primary validity gate. In addition, a local/legacy pace faster than 50.0 seconds per kilometre is outside the accepted harness-racing presentation envelope and is treated as an invalid `pace_outlier`/unavailable value.
+- The plausibility guard is applied both when deriving new interval rows and when reading already persisted opening/closing pace facts, so legacy impossible values are not displayed as verified facts. It does not clamp or replace the observation.
 
 ## Horse profile Form is a deterministic current-performance index
 - The horse profile label is `Form (1–100)`, not average placing.

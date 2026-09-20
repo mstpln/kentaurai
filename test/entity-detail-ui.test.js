@@ -70,15 +70,13 @@ test('critical detail statistics render defers filter options and specialty read
 });
 
 
-test('detail pages reuse the exact start-page sliders icon and year-based selector', () => {
+test('detail pages reuse the exact Trend sliders icon and rolling period selector', () => {
   const html = enhanced();
   assert.match(html, /M4 7h10M18 7h2M14 4v6M4 17h2M10 17h10M10 14v6/);
   assert.match(html, />Tidsperiod</);
-  assert.match(html, /Array\.from\(\{length:5\}/);
+  assert.match(html, /PERIODS=\[\['2w','2 veckor'\],\['4w','4 veckor'\],\['3m','3 månader'\],\['6m','6 månader'\],\['1y','1 år'\]\]/);
   assert.match(html, /aria-label="Tidsperiod"/);
-  assert.doesNotMatch(html, /2 veckor/);
-  assert.doesNotMatch(html, /4 veckor/);
-  assert.doesNotMatch(html, /3 mån/);
+  assert.match(html, /period:'1y'/);
 });
 
 test('detail filters preserve canonical choices and reset is rendered last', () => {
@@ -88,13 +86,16 @@ test('detail filters preserve canonical choices and reset is rendered last', () 
   assert.match(script, /\['all','All data'\],\['high_prize','Högre prissumma'\],\['weekday','Vardagstrav'\]/);
   assert.match(script, /fields\+=field\('Voltspår'[\s\S]*field\('Tillägg'[\s\S]*Återställ filter/);
   assert.match(script, /function count\(s,c\)/);
-  assert.match(script, /k!=='year'/);
+  assert.match(script, /k!=='period'/);
+  assert.match(script, /field\('Loppnivå','raceScope',SCOPES,s\)/);
+  assert.doesNotMatch(script, /data-ed-scope/);
 });
 
-test('horse age options follow the selected calendar year rather than the device current year', () => {
+test('horse age options use the current as-of year while period selection stays rolling', () => {
   const script = statsScriptFrom(enhanced());
-  assert.match(script, /const y=Number\(s\.filters\.year\)\|\|new Date\(\)\.getFullYear\(\)/);
+  assert.match(script, /const y=new Date\(\)\.getFullYear\(\)/);
   assert.match(script, /s\.options\.birthYears\.map\(v=>y-Number\(v\)\)/);
+  assert.doesNotMatch(script, /s\.filters\.year/);
 });
 
 test('year and filter controls are rendered above the score summary because they affect the full view', () => {
