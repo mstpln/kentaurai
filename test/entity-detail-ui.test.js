@@ -61,7 +61,7 @@ test('critical detail statistics render defers filter options and specialty read
   assert.match(script, /calendar-statistics\?'.*specials=0/);
   assert.match(script, /calendar-specialties\?'/);
   assert.match(script, /id="entityDetailSpecialties"/);
-  assert.match(script, /specialtyPromise\.then/);
+  assert.match(script, /calendar-specialties\?'.*\.then\(specialties=>/);
 });
 
 
