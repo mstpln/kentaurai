@@ -325,7 +325,7 @@ export async function getCalendarYearDetailStatistics(env,entityType,entityId,op
     env.DB.prepare(`SELECT id,canonical_name AS name FROM ${config.table} WHERE id=? LIMIT 1`).bind(id).first(),
     validateTrack(env,filters.trackId),
     loadCore(env,id,filters,config),
-    loadForm(env,id,filters,config),
+    config.resultKey==='horse'?Promise.resolve(null):loadForm(env,id,filters,config),
     config.resultKey==='horse'?getHorseCurrentStartPoint(env,id,filters.asOfDate):Promise.resolve(null)
   ]);
   if(!entity)return null;
@@ -339,6 +339,12 @@ export async function getCalendarYearDetailSpecialties(env,entityType,entityId,o
   const prepared=await prepareDetail(env,entityType,entityId,options);if(!prepared)return null;
   const {config,id,filters}=prepared;
   return{entityType,filters,...await loadSpecialties(env,id,filters,config),definitions:definitions()};
+}
+
+export async function getHorseCalendarYearForm(env,entityId,options={}){
+  const prepared=await prepareDetail(env,'horses',entityId,options);if(!prepared)return null;
+  const {config,id,filters}=prepared;
+  return{entityType:'horses',filters,formLast:await loadHorseForm(env,id,filters,config)};
 }
 
 export const getTrainerCalendarYearDetailStatistics=(env,id,options)=>getCalendarYearDetailStatistics(env,'trainers',id,options);
