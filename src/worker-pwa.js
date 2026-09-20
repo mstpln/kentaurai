@@ -9,7 +9,7 @@ import {
   submitAnalysis
 } from './analysis-api.js';
 import { runNextPostRaceReview } from './post-race-review.js';
-import { getPostRaceSettlementJob, runNextPostRaceSettlement } from './post-race-settlement-v1.js';
+import { getPostRaceSettlementJob, runNextPostRaceSettlement, runPostRaceSettlementBatch } from './post-race-settlement-v1.js';
 import { pwaIcon, pwaManifest, pwaServiceWorker } from './pwa.js';
 
 const BACKFILL_CRON = '* * * * *';
@@ -133,7 +133,7 @@ export default {
     if (controller.cron === BACKFILL_CRON) {
       ctx.waitUntil((async () => {
         try {
-          await runNextPostRaceSettlement(env);
+          await runPostRaceSettlementBatch(env);
         } catch (error) {
           console.error(error);
         }
