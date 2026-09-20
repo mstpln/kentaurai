@@ -9,7 +9,8 @@ import {
   normalizeTrendRaceScope,
   normalizeTrendRaceType,
   normalizeTrendStartMethod,
-  swedenDateKey
+  swedenDateKey,
+  trendDateWindow
 } from './statistics/core.js';
 import { DRIVER_LONGSHOT_PERCENT_MAX, DRIVER_MARKET_DEFINITION_VERSION } from './statistics/driver-features.js';
 import { getHorseCurrentStartPoint } from './statistics/horse-start-points.js';
@@ -66,14 +67,21 @@ function normalizeHandicap(value){if(value==null||value===''||value==='all')retu
 
 function normalizeFilters(options={}){
   const asOfDate=options.asOfDate||swedenDateKey();
+  const period=options.period?trendDateWindow(options.period,asOfDate):null;
   return{
-    asOfDate,year:normalizeYear(options.year,asOfDate),raceScope:normalizeTrendRaceScope(options.raceScope),trackId:normalizeTrackId(options.trackId),
+    asOfDate,period:period?.period||null,periodStartDate:period?.startDate||null,periodEndDate:period?.endDate||null,
+    year:normalizeYear(options.year,asOfDate),raceScope:normalizeTrendRaceScope(options.raceScope),trackId:normalizeTrackId(options.trackId),
     raceType:normalizeTrendRaceType(options.raceType),breedType:normalizeTrendBreed(options.breedType),sex:normalizeSex(options.sex),age:normalizeAge(options.age),
     startMethod:normalizeTrendStartMethod(options.startMethod),distanceGroup:normalizeDistance(options.distanceGroup),voltLane:normalizeVoltLane(options.voltLane),handicapM:normalizeHandicap(options.handicapM)
   };
 }
 
-function addYearCondition(conditions,bindings,filters,raceAlias='r'){
+function addPeriodCondition(conditions,bindings,filters,raceAlias='r'){
+  if(filters.period){
+    conditions.push(`${raceAlias}.race_date >= ?`,`${raceAlias}.race_date <= ?`);
+    bindings.push(filters.periodStartDate,filters.periodEndDate);
+    return;
+  }
   const currentYear=Number(filters.asOfDate.slice(0,4));
   conditions.push(`${raceAlias}.race_date >= ?`);
   bindings.push(`${filters.year}-01-01`);
@@ -104,7 +112,7 @@ function addDistanceCondition(conditions,bindings,distance,raceAlias='r'){
   const meters=Number(distance);conditions.push(`${raceAlias}.distance_m BETWEEN ? AND ?`);bindings.push(meters-DISTANCE_TOLERANCE_M,meters+DISTANCE_TOLERANCE_M);
 }
 function addCommonFilters(conditions,bindings,filters,{raceAlias='r',entryAlias='re',horseAlias='h',includeVolt=true}={}){
-  addYearCondition(conditions,bindings,filters,raceAlias);
+  addPeriodCondition(conditions,bindings,filters,raceAlias);
   if(filters.trackId){conditions.push(`${raceAlias}.track_id = ?`);bindings.push(filters.trackId);}
   if(filters.startMethod!=='all')conditions.push(`${canonicalStartMethodSql(raceAlias)} = '${filters.startMethod}'`);
   if(filters.raceType==='monte')conditions.push(monteRaceCondition(raceAlias));
@@ -114,7 +122,7 @@ function addCommonFilters(conditions,bindings,filters,{raceAlias='r',entryAlias=
   if(filters.sex==='mare')conditions.push(`LOWER(COALESCE(${horseAlias}.sex,'')) IN ('sto','mare','female','f')`);
   if(filters.sex==='stallion')conditions.push(`LOWER(COALESCE(${horseAlias}.sex,'')) IN ('hingst','stallion','male','m')`);
   if(filters.sex==='gelding')conditions.push(`LOWER(COALESCE(${horseAlias}.sex,'')) IN ('valack','gelding')`);
-  if(filters.age!=null){conditions.push(`?-${horseAlias}.birth_year=?`);bindings.push(filters.year,filters.age);}
+  if(filters.age!=null){conditions.push(`?-${horseAlias}.birth_year=?`);bindings.push(Number(filters.asOfDate.slice(0,4)),filters.age);}
   addDistanceCondition(conditions,bindings,filters.distanceGroup,raceAlias);
   addCanonicalRaceScopeCondition(conditions,filters.raceScope,raceAlias);
   if(includeVolt&&filters.voltLane!=='all'){
@@ -273,7 +281,8 @@ async function loadHorseForm(env,entityId,filters,config){
       resultScore,difficultyScore,workScore,speedScore
     };
   });
-  return calculateHorseFormIndex(scored);
+  const form=calculateHorseFormIndex(scored);
+  return {...form,recentResults:targets.map(row=>row.disqualified?null:(row.placing==null?null:Number(row.placing))).filter(value=>value!=null).slice(0,5)};
 }
 
 async function loadPersonTargetStarts(env,entityId,filters,config){
@@ -487,7 +496,7 @@ export async function getCalendarYearDetailStatistics(env,entityType,entityId,op
     env.DB.prepare(`SELECT id,canonical_name AS name FROM ${config.table} WHERE id=? LIMIT 1`).bind(id).first(),
     validateTrack(env,filters.trackId),
     loadCore(env,id,filters,config),
-    config.resultKey==='horse'?getHorseCurrentStartPoint(env,id,filters.asOfDate):Promise.resolve(null)
+    config.resultKey==='horse'&&options.includeStartPoints!==false?getHorseCurrentStartPoint(env,id,filters.asOfDate):Promise.resolve(null)
   ]);
   if(!entity)return null;
   const specialties=options.includeSpecials===false
