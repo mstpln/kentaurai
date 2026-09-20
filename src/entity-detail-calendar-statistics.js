@@ -12,6 +12,15 @@ import {
   swedenDateKey
 } from './statistics/core.js';
 import { DRIVER_LONGSHOT_PERCENT_MAX, DRIVER_MARKET_DEFINITION_VERSION } from './statistics/driver-features.js';
+import { getHorseCurrentStartPoint } from './statistics/horse-start-points.js';
+import {
+  calculateHorseFormIndex,
+  fieldPercentileScore,
+  parsePaceSeconds,
+  relativeChallengeScore,
+  resultPerformanceScore,
+  weightedAvailable
+} from './statistics/horse-form-index.js';
 
 const DISTANCES = new Set(['all','640','1640','2140','2640','3140','3640','4140','other-long']);
 const DISTANCE_STANDARDS = [640,1640,2140,2640,3140,3640,4140];
@@ -23,7 +32,7 @@ const REST_DAYS = 60;
 const ENTITY_CONFIG = Object.freeze({
   trainers:{table:'trainers',entryColumn:'trainer_id',resultKey:'trainer',formLimit:30,market:true,rest:true,volt:true},
   drivers:{table:'drivers',entryColumn:'driver_id',resultKey:'driver',formLimit:30,market:true,rest:false,volt:true},
-  horses:{table:'horses',entryColumn:'horse_id',resultKey:'horse',formLimit:10,market:false,rest:true,volt:false}
+  horses:{table:'horses',entryColumn:'horse_id',resultKey:'horse',formLimit:5,market:false,rest:true,volt:false}
 });
 
 function configFor(entityType){
@@ -62,6 +71,19 @@ function addYearCondition(conditions,bindings,filters,raceAlias='r'){
   bindings.push(`${filters.year}-01-01`);
   if(filters.year===currentYear){conditions.push(`${raceAlias}.race_date <= ?`);bindings.push(filters.asOfDate);}
   else {conditions.push(`${raceAlias}.race_date < ?`);bindings.push(`${filters.year+1}-01-01`);}
+}
+function distanceGroupSql(raceAlias='r'){
+  return `CASE
+    WHEN ${raceAlias}.distance_m BETWEEN 540 AND 740 THEN '640'
+    WHEN ${raceAlias}.distance_m BETWEEN 1540 AND 1740 THEN '1640'
+    WHEN ${raceAlias}.distance_m BETWEEN 2040 AND 2240 THEN '2140'
+    WHEN ${raceAlias}.distance_m BETWEEN 2540 AND 2740 THEN '2640'
+    WHEN ${raceAlias}.distance_m BETWEEN 3040 AND 3240 THEN '3140'
+    WHEN ${raceAlias}.distance_m BETWEEN 3540 AND 3740 THEN '3640'
+    WHEN ${raceAlias}.distance_m BETWEEN 4040 AND 4240 THEN '4140'
+    WHEN ${raceAlias}.distance_m > 2640 THEN 'other-long'
+    ELSE 'unknown'
+  END`;
 }
 function addDistanceCondition(conditions,bindings,distance,raceAlias='r'){
   if(distance==='all')return;
@@ -105,20 +127,20 @@ function sortTracks(rows){return rows.sort((a,b)=>b.starts-a.starts||String(a.la
 async function loadCore(env,entityId,filters,config){
   const conditions=['re.scratched=0',`re.${config.entryColumn}=?`],bindings=[entityId];
   addCommonFilters(conditions,bindings,filters,{includeVolt:config.volt});
-  const methodSql=canonicalStartMethodSql('r'),metrics=coreMetricSelectSql('f');
+  const methodSql=canonicalStartMethodSql('r'),distanceSql=distanceGroupSql('r'),metrics=coreMetricSelectSql('f');
   const {results}=await env.DB.prepare(`WITH filtered AS MATERIALIZED (
-    SELECT rr.race_entry_id,rr.placing,rr.gallop,rr.disqualified,rr.prize_sek,r.distance_m,${methodSql} AS start_method_group,COALESCE(tr.canonical_name,'Okänd bana') AS track_label
+    SELECT rr.race_entry_id,rr.placing,rr.gallop,rr.disqualified,rr.prize_sek,${distanceSql} AS distance_group,${methodSql} AS start_method_group,COALESCE(tr.canonical_name,'Okänd bana') AS track_label
     FROM races r INDEXED BY idx_races_date JOIN race_entries re ON re.race_id=r.id JOIN race_results rr ON rr.race_entry_id=re.id JOIN horses h ON h.id=re.horse_id LEFT JOIN tracks tr ON tr.id=r.track_id
     WHERE ${conditions.join(' AND ')}
   )
   SELECT 'summary' section,'all' label,${metrics} FROM filtered f
   UNION ALL SELECT 'method',f.start_method_group,${metrics} FROM filtered f GROUP BY f.start_method_group
-  UNION ALL SELECT 'distance',COALESCE(CAST(f.distance_m AS TEXT),'unknown'),${metrics} FROM filtered f GROUP BY f.distance_m
+  UNION ALL SELECT 'distance',f.distance_group,${metrics} FROM filtered f GROUP BY f.distance_group
   UNION ALL SELECT 'track',f.track_label,${metrics} FROM filtered f GROUP BY f.track_label`).bind(...bindings).all();
   const rows=results||[],summaryRow=rows.find(r=>r.section==='summary');
   return{summary:mapCoreMetricRow(summaryRow||{}),startMethods:sortMethods(mapRows(rows,'method')),distances:sortDistances(mapRows(rows,'distance')),tracks:sortTracks(mapRows(rows,'track'))};
 }
-async function loadForm(env,entityId,filters,config){
+async function loadLegacyForm(env,entityId,filters,config){
   const conditions=['re.scratched=0',`re.${config.entryColumn}=?`,'rr.placing IS NOT NULL','rr.placing>0'],bindings=[entityId];
   addCommonFilters(conditions,bindings,filters,{includeVolt:config.volt});
   const row=await env.DB.prepare(`SELECT COUNT(*) used_starts,AVG(placing) avg_placing FROM (
@@ -126,6 +148,145 @@ async function loadForm(env,entityId,filters,config){
     WHERE ${conditions.join(' AND ')} ORDER BY r.race_date DESC,r.race_number DESC,re.id DESC LIMIT ${config.formLimit}
   )`).bind(...bindings).first();
   const used=Number(row?.used_starts||0);return used?{usedStarts:used,averagePlacing:Number(row.avg_placing),limit:config.formLimit}:null;
+}
+
+function stlDifficultyScore(value){
+  const scores={class_iii:35,class_ii:45,class_i:55,bronze:65,silver:75,gold:90};
+  return value&&Object.prototype.hasOwnProperty.call(scores,value)?scores[value]:null;
+}
+
+async function loadHorseForm(env,entityId,filters,config){
+  const conditions=['re.scratched=0','re.horse_id=?'],bindings=[entityId];
+  addCommonFilters(conditions,bindings,filters,{includeVolt:false});
+  const {results:targetRows}=await env.DB.prepare(`
+    SELECT re.id race_entry_id,r.id race_id,r.race_date,r.race_number,r.scheduled_start_at,
+      r.first_prize_sek,r.distance_m,re.actual_start_distance_m,rr.placing,rr.disqualified,rsc.stl_class
+    FROM races r INDEXED BY idx_races_date
+    JOIN race_entries re ON re.race_id=r.id
+    JOIN race_results rr ON rr.race_entry_id=re.id
+    JOIN horses h ON h.id=re.horse_id
+    LEFT JOIN race_stl_classifications rsc ON rsc.race_id=r.id
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY r.race_date DESC,r.race_number DESC,re.id DESC
+    LIMIT ${config.formLimit}
+  `).bind(...bindings).all();
+  const targets=targetRows||[];
+  if(!targets.length)return null;
+  const raceIds=[...new Set(targets.map(row=>row.race_id))],racePlaceholders=raceIds.map(()=>'?').join(',');
+
+  const [{results:fieldRows},{results:prizeRows}]=await Promise.all([
+    env.DB.prepare(`
+      WITH latest_x AS (
+        SELECT x.*,ROW_NUMBER() OVER (
+          PARTITION BY x.race_entry_id
+          ORDER BY julianday(sr.fetched_at) DESC,x.source_record_id DESC
+        ) rn
+        FROM xlabs_data x
+        JOIN source_records sr ON sr.id=x.source_record_id
+        WHERE x.quality_status='xlabs-telemetry-v1' AND sr.source_type='xlabs_race_json'
+          AND substr(sr.fetched_at,1,10)<=?
+      )
+      SELECT re.race_id,re.id race_entry_id,re.horse_id,re.actual_start_distance_m,r.distance_m,
+        rr.placing,rr.disqualified,rr.km_time,
+        x.last_400_time,x.extra_distance_m
+      FROM race_entries re
+      JOIN races r ON r.id=re.race_id
+      LEFT JOIN race_results rr ON rr.race_entry_id=re.id
+      LEFT JOIN latest_x x ON x.race_entry_id=re.id AND x.rn=1
+      WHERE re.scratched=0 AND re.race_id IN (${racePlaceholders})
+      ORDER BY re.race_id,re.start_number,re.id
+    `).bind(filters.asOfDate,...raceIds).all(),
+    env.DB.prepare(`
+      WITH population AS (
+        SELECT id,first_prize_sek,PERCENT_RANK() OVER (ORDER BY first_prize_sek) prize_percentile
+        FROM races
+        WHERE first_prize_sek IS NOT NULL AND first_prize_sek>=0 AND race_date<=?
+      )
+      SELECT id,prize_percentile FROM population WHERE id IN (${racePlaceholders})
+    `).bind(filters.asOfDate,...raceIds).all()
+  ]);
+
+  const prizeScore=new Map((prizeRows||[]).map(row=>[row.id,Number(row.prize_percentile)*100]));
+  const byRace=new Map();
+  for(const row of fieldRows||[]){if(!byRace.has(row.race_id))byRace.set(row.race_id,[]);byRace.get(row.race_id).push(row);}
+
+  const opponentRows=await env.DB.prepare(`
+    SELECT re.race_id,re.horse_id,
+      (
+        SELECT hss.start_points FROM horse_stat_snapshots hss
+        JOIN official_snapshot_source_sync os ON os.source_record_id=hss.source_record_id AND os.status='complete'
+        JOIN source_records sr ON sr.id=hss.source_record_id
+        WHERE hss.horse_id=re.horse_id AND hss.snapshot_scope='life'
+          AND julianday(hss.observed_at)<=julianday(COALESCE(r.scheduled_start_at,r.race_date||'T23:59:59Z'))
+          AND julianday(sr.fetched_at)<=julianday(COALESCE(r.scheduled_start_at,r.race_date||'T23:59:59Z'))
+        ORDER BY julianday(hss.observed_at) DESC,hss.id DESC LIMIT 1
+      ) start_points,
+      (
+        SELECT hss.earnings_raw FROM horse_stat_snapshots hss
+        JOIN official_snapshot_source_sync os ON os.source_record_id=hss.source_record_id AND os.status='complete'
+        JOIN source_records sr ON sr.id=hss.source_record_id
+        WHERE hss.horse_id=re.horse_id AND hss.snapshot_scope='life'
+          AND julianday(hss.observed_at)<=julianday(COALESCE(r.scheduled_start_at,r.race_date||'T23:59:59Z'))
+          AND julianday(sr.fetched_at)<=julianday(COALESCE(r.scheduled_start_at,r.race_date||'T23:59:59Z'))
+        ORDER BY julianday(hss.observed_at) DESC,hss.id DESC LIMIT 1
+      ) earnings_raw
+    FROM race_entries re JOIN races r ON r.id=re.race_id
+    WHERE re.scratched=0 AND re.race_id IN (${racePlaceholders})
+  `).bind(...raceIds).all();
+  const contextByRace=new Map();
+  for(const row of opponentRows||[]){if(!contextByRace.has(row.race_id))contextByRace.set(row.race_id,[]);contextByRace.get(row.race_id).push(row);}
+
+  const scored=targets.map(target=>{
+    const field=byRace.get(target.race_id)||[];
+    const targetField=field.find(row=>row.race_entry_id===target.race_entry_id)||null;
+    const fieldSize=field.length;
+    const resultScore=resultPerformanceScore({placing:target.placing,disqualified:target.disqualified,fieldSize});
+
+    const context=contextByRace.get(target.race_id)||[];
+    const self=context.find(row=>row.horse_id===entityId)||null;
+    const opponents=context.filter(row=>row.horse_id!==entityId);
+    const pointValues=opponents.map(row=>Number(row.start_points)).filter(Number.isFinite).sort((a,b)=>a-b);
+    const earningValues=opponents.map(row=>Number(row.earnings_raw)).filter(Number.isFinite).sort((a,b)=>a-b);
+    const median=values=>values.length?values[Math.floor((values.length-1)/2)]:null;
+    const pointChallenge=relativeChallengeScore(median(pointValues),self?.start_points);
+    const earningChallenge=relativeChallengeScore(median(earningValues),self?.earnings_raw);
+    const difficultyScore=weightedAvailable([
+      {value:prizeScore.get(target.race_id),weight:0.55},
+      {value:stlDifficultyScore(target.stl_class),weight:0.15},
+      {value:pointChallenge,weight:0.20},
+      {value:earningChallenge,weight:0.10}
+    ]);
+
+    const extraValues=field.map(row=>{
+      const distance=Number(row.actual_start_distance_m??row.distance_m);
+      const extra=Number(row.extra_distance_m);
+      return Number.isFinite(extra)&&distance>0?(extra/distance)*100:null;
+    }).filter(value=>value!=null);
+    const targetDistance=Number(targetField?.actual_start_distance_m??targetField?.distance_m);
+    const targetExtra=Number(targetField?.extra_distance_m);
+    const targetExtraPct=Number.isFinite(targetExtra)&&targetDistance>0?(targetExtra/targetDistance)*100:null;
+    const workScore=fieldPercentileScore(targetExtraPct,extraValues);
+
+    const officialPaces=field.map(row=>parsePaceSeconds(row.km_time)).filter(value=>value!=null);
+    const closingPaces=field.map(row=>parsePaceSeconds(row.last_400_time)).filter(value=>value!=null);
+    const officialScore=fieldPercentileScore(parsePaceSeconds(targetField?.km_time),officialPaces,{lowerIsBetter:true});
+    const closingScore=fieldPercentileScore(parsePaceSeconds(targetField?.last_400_time),closingPaces,{lowerIsBetter:true});
+    const speedScore=weightedAvailable([{value:officialScore,weight:0.5},{value:closingScore,weight:0.5}]);
+
+    return {
+      raceEntryId:target.race_entry_id,
+      raceId:target.race_id,
+      raceDate:target.race_date,
+      resultScore,difficultyScore,workScore,speedScore
+    };
+  });
+  return calculateHorseFormIndex(scored);
+}
+
+async function loadForm(env,entityId,filters,config){
+  return config.resultKey==='horse'
+    ? loadHorseForm(env,entityId,filters,config)
+    : loadLegacyForm(env,entityId,filters,config);
 }
 function marketCte(){return`market_candidates AS (SELECT bs.race_entry_id,bs.bet_percent,bs.market_rank,bs.captured_at,bs.id,ROW_NUMBER() OVER(PARTITION BY bs.race_entry_id ORDER BY julianday(bs.captured_at) DESC,bs.id DESC) rn FROM betting_snapshots bs JOIN game_rounds gr ON gr.id=bs.game_round_id JOIN game_legs gl ON gl.game_round_id=gr.id AND gl.leg_number=bs.leg_number JOIN race_entries mre ON mre.id=bs.race_entry_id AND mre.race_id=gl.race_id WHERE gr.bet_stop_at IS NOT NULL AND bs.source_record_id IS NOT NULL AND julianday(bs.captured_at)<=julianday(gr.bet_stop_at)),market_at_stop AS (SELECT race_entry_id,bet_percent,market_rank,captured_at FROM market_candidates WHERE rn=1)`;}
 async function loadMarket(env,entityId,filters,config,kind){
@@ -169,17 +330,18 @@ export async function getCalendarYearDetailStatistics(env,entityType,entityId,op
   if(!env.DB)throw new Error('DB is not configured');
   const config=configFor(entityType),id=String(entityId||'').trim();if(!id)return null;
   const filters=normalizeFilters(options);
-  const [entity,,core,form]=await Promise.all([
+  const [entity,,core,form,currentStartPoints]=await Promise.all([
     env.DB.prepare(`SELECT id,canonical_name AS name FROM ${config.table} WHERE id=? LIMIT 1`).bind(id).first(),
     validateTrack(env,filters.trackId),
     loadCore(env,id,filters,config),
-    loadForm(env,id,filters,config)
+    loadForm(env,id,filters,config),
+    config.resultKey==='horse'?getHorseCurrentStartPoint(env,id,filters.asOfDate):Promise.resolve(null)
   ]);
   if(!entity)return null;
   const specialties=options.includeSpecials===false
     ? {favoriteResults:null,longshotResults:null,firstAfterRest:null,secondAfterRest:null}
     : await loadSpecialties(env,id,filters,config);
-  return{entityType,[config.resultKey]:entity,filters,...core,formLast:form,...specialties,definitions:definitions()};
+  return{entityType,[config.resultKey]:entity,filters,...core,formLast:form,currentStartPoints,...specialties,definitions:definitions()};
 }
 
 export async function getCalendarYearDetailSpecialties(env,entityType,entityId,options={}){
