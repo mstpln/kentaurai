@@ -60,5 +60,7 @@ test('rendered app shell has a borderless data-only settings gear and in-app his
   assert.match(html, /state\.settingsTab='data'/);
   assert.match(html, /view\.page==='analysis'/);
   assert.match(html, /__kentauraiAnalysis/);
+  assert.match(html, /async function openGameDetail\(id,systemId=null\)/);
+  assert.match(html, /if\(systemId&&data\.systems\.some\(s=>s\.id===systemId\)\)state\.gameSystemId=systemId/);
   assert.match(html, /groupDistanceRows/);
 });
