@@ -33,10 +33,14 @@ test('mobile polish keeps wide tables locally scrollable', () => {
   assert.doesNotMatch(html, /\.table-wrap\{max-width:100%!important;overflow-x:hidden!important/);
 });
 
-test('mobile polish keeps six navigation items in viewport without overriding compact Trend period control', () => {
+test('mobile polish keeps the four primary navigation items large, centered and in viewport without overriding compact Trend period control', () => {
   const html = enhanceMobileLayoutPolish('<html><head></head><body><div id="app"></div></body></html>');
-  assert.match(html, /grid-template-columns:repeat\(6,minmax\(0,1fr\)\)!important/);
-  assert.match(html, /padding-bottom:calc\(7px \+ env\(safe-area-inset-bottom\)\)!important/);
+  assert.match(html, /grid-template-columns:repeat\(4,minmax\(0,1fr\)\)!important/);
+  assert.match(html, /max-width:none!important/);
+  assert.match(html, /min-height:90px/);
+  assert.match(html, /font-size:13px!important/);
+  assert.match(html, /width:28px!important;height:28px!important/);
+  assert.match(html, /padding-bottom:calc\(9px \+ env\(safe-area-inset-bottom\)\)!important/);
   assert.doesNotMatch(html, /\.range-group\{/);
   assert.doesNotMatch(html, /\.range-btn\{/);
 });

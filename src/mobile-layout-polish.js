@@ -14,7 +14,7 @@ const mobileLayoutPolishCss = `
   }
   .shell{
     width:100%;max-width:100vw;min-height:100vh;min-height:100dvh;height:auto!important;
-    padding-bottom:calc(84px + env(safe-area-inset-bottom))!important;display:block!important;overflow:visible!important
+    padding-bottom:calc(110px + env(safe-area-inset-bottom))!important;display:block!important;overflow:visible!important
   }
   .topbar{
     position:sticky!important;top:0!important;z-index:60;min-width:0;max-width:100%;
@@ -26,13 +26,13 @@ const mobileLayoutPolishCss = `
   }
   .bottom-nav{
     position:fixed!important;left:0!important;right:0!important;bottom:0!important;width:100%;
-    min-height:74px;padding-top:7px!important;padding-bottom:calc(7px + env(safe-area-inset-bottom))!important;
-    padding-left:max(6px,env(safe-area-inset-left))!important;padding-right:max(6px,env(safe-area-inset-right))!important;
+    min-height:90px;padding-top:9px!important;padding-bottom:calc(9px + env(safe-area-inset-bottom))!important;
+    padding-left:max(8px,env(safe-area-inset-left))!important;padding-right:max(8px,env(safe-area-inset-right))!important;
     z-index:70;flex:none
   }
-  .bottom-inner{width:100%!important;max-width:820px!important;grid-template-columns:repeat(6,minmax(0,1fr))!important;gap:1px!important}
-  .nav-item{min-width:0!important;font-size:10px!important;padding:7px 0 6px!important;line-height:1.1!important;overflow:hidden}
-  .nav-icon{width:21px!important;height:21px!important;margin-bottom:4px!important}
+  .bottom-inner{width:100%!important;max-width:none!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:4px!important;align-items:center!important}
+  .nav-item{min-width:0!important;min-height:72px!important;font-size:13px!important;font-weight:600!important;padding:9px 2px 8px!important;border-radius:15px!important;line-height:1.1!important;display:flex!important;flex-direction:column!important;align-items:center!important;justify-content:center!important;gap:7px!important;overflow:visible!important}
+  .nav-icon{width:28px!important;height:28px!important;margin:0!important;flex:0 0 auto!important}
 
   /* Other pills and tabs may wrap rather than widening the page. */
   .tabs,.segment-group,.system-switcher,.stat-pills,.trip-chips{
@@ -86,8 +86,11 @@ const mobileLayoutPolishCss = `
 }
 
 @media(max-width:360px){
-  .nav-item{font-size:9px!important;padding-left:0!important;padding-right:0!important}
-  .nav-icon{width:20px!important;height:20px!important}
+  .shell{padding-bottom:calc(106px + env(safe-area-inset-bottom))!important}
+  .bottom-nav{min-height:86px;padding-top:8px!important;padding-bottom:calc(8px + env(safe-area-inset-bottom))!important}
+  .bottom-inner{gap:3px!important}
+  .nav-item{min-height:68px!important;font-size:12px!important;padding:8px 1px 7px!important;gap:6px!important}
+  .nav-icon{width:26px!important;height:26px!important}
 }
 </style>`;
 
