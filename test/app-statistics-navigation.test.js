@@ -28,6 +28,19 @@ test('primary bottom navigation is Trend, Statistik, Analys and Spel', () => {
   assert.doesNotMatch(html, /addTrackNavigation\(\)/);
 });
 
+test('four-item bottom navigation keeps icons and labels legible and centered responsively', () => {
+  const html = renderAppPage();
+  assert.match(html, /\.bottom-inner\{width:100%!important;max-width:720px!important;grid-template-columns:repeat\(4,minmax\(0,1fr\)\)!important;gap:6px!important;align-items:center!important\}/);
+  assert.match(html, /\.nav-item\{min-width:0!important;min-height:70px!important;[^}]*font-size:13px!important;[^}]*display:flex!important;[^}]*justify-content:center!important;[^}]*gap:7px!important\}/);
+  assert.match(html, /\.nav-icon\{width:27px!important;height:27px!important;margin:0!important/);
+  assert.match(html, /@media\(max-width:760px\)\{[^}]*\.shell\{padding-bottom:calc\(110px \+ env\(safe-area-inset-bottom\)\)!important\}[^}]*\.bottom-nav\{padding-top:9px!important;padding-bottom:calc\(9px \+ env\(safe-area-inset-bottom\)\)!important\}/);
+  assert.match(html, /\.nav-item\{min-height:72px!important;padding:9px 2px 8px!important;border-radius:15px!important;font-size:13px!important;line-height:1\.1!important;gap:7px!important\}/);
+  assert.match(html, /\.nav-icon\{width:28px!important;height:28px!important;margin:0!important\}/);
+  assert.match(html, /@media\(max-width:420px\)/);
+  assert.match(html, /\.nav-item\{min-height:68px!important;font-size:12px!important;gap:6px!important\}/);
+  assert.match(html, /\.nav-icon\{width:26px!important;height:26px!important\}/);
+});
+
 test('statistics navigation groups trainer horse driver and track browsing with selector variant 5', () => {
   const html = renderAppPage();
   assert.match(html, /class="statistics-category-nav"/);
