@@ -33,8 +33,11 @@ test('scheduled breakdown work is guarded against stale navigation and missing D
 test('horse detail statistics and patterns are owned only by the canonical detail layer', () => {
   assert.doesNotMatch(horseStats, /previousHorseRenderDetail|appendDetailStats|horseStatsBuildB|renderDetail=async function/);
   assert.doesNotMatch(horsePatterns, /previousHorsePatternsRenderDetail|renderDetail=async function|horseStatsBuildB/);
-  assert.match(entityDetailStats, /Utveckling & löpstyrka/);
-  assert.match(entityDetailStats, /Starttempo/);
-  assert.match(entityDetailStats, /Avslutning/);
-  assert.match(entityDetailStats, /Extra distans/);
+  assert.match(entityDetailStats, /Toppfart/);
+  assert.match(entityDetailStats, /Första 100 m/);
+  assert.match(entityDetailStats, /Första 200 m/);
+  assert.match(entityDetailStats, /Första 500 m/);
+  assert.match(entityDetailStats, /Sista 400 m/);
+  assert.match(entityDetailStats, /Sista 1000 m/);
+  assert.doesNotMatch(entityDetailStats, /Utveckling & löpstyrka|Extra distans/);
 });
