@@ -76,9 +76,11 @@ test('statistics UIs overlap core and extended reads while keeping core paint fi
   ]) {
     const source = fs.readFileSync(new URL(file, import.meta.url), 'utf8');
     assert.match(source, /const corePromise=api\([^;]+mode=core/);
-    assert.match(source, /const extendedPromise=new Promise\(\(resolve,reject\)=>setTimeout\(\(\)=>api\([^;]+mode=extended/);
+    assert.match(source, /const extendedPromise=new Promise\(resolve=>setTimeout\(\(\)=>\{if\(token!==/);
+    assert.match(source, /mode=extended/);
     assert.match(source, /const core=await corePromise/);
-    assert.ok(source.includes('const data='+mergeName+'(core,extended)'));
+    assert.match(source, /const extendedResult=await extendedPromise/);
+    assert.ok(source.includes('const data='+mergeName+'(core,extendedResult.data)'));
   }
 });
 
@@ -86,6 +88,8 @@ test('entity detail statistics overlap lazy secondary reads and prewarm the real
   const detail = fs.readFileSync(new URL('../src/entity-detail-statistics-ui-v2.js', import.meta.url), 'utf8');
   const performance = fs.readFileSync(new URL('../src/app-performance-v1.js', import.meta.url), 'utf8');
   assert.match(detail, /function delayedRequest\(path,token,delay=75\)/);
+  assert.match(detail, /if\(token!==requestToken\)\{resolve\(null\);return\}/);
+  assert.match(detail, /calendar-specialties\?'\+qs,token\)\.catch\(\(\)=>null\)/);
   assert.match(detail, /const corePromise=request\(base\+'\/calendar-statistics\?'/);
   assert.match(detail, /const specialtiesPromise=delayedRequest\(base\+'\/calendar-specialties\?'/);
   assert.match(detail, /const formPromise=delayedRequest\(base\+'\/calendar-form\?'/);
