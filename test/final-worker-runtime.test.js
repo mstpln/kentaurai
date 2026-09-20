@@ -35,7 +35,7 @@ async function authenticatedAppHtml() {
   return response.text();
 }
 
-test('F4 actual Wrangler worker runs the canonical external-analysis Settings workflow', async () => {
+test('F4 actual Wrangler worker runs the canonical external-analysis Analys workspace and data-only Settings', async () => {
   const html = await authenticatedAppHtml();
   const script = extractScript(html, 'kentaurai-settings-script');
 
@@ -68,7 +68,7 @@ test('F4 actual Wrangler worker runs the canonical external-analysis Settings wo
 
   const context = vm.createContext({
     app,
-    state: { settingsTab: 'ai', settingsOpen: false, detail: null, gameDetail: null, gameSystemId: null },
+    state: { page: 'start', settingsTab: 'data', settingsOpen: false, detail: null, gameDetail: null, gameSystemId: null },
     document: {
       getElementById(id) { return elements.get(id) || null; },
       querySelectorAll() { return []; },
@@ -108,7 +108,18 @@ test('F4 actual Wrangler worker runs the canonical external-analysis Settings wo
 
   elements.get('settingsButton').onclick();
   await new Promise((resolve) => setImmediate(resolve));
+  assert.match(app.innerHTML, /Inställningar/);
+  assert.match(app.innerHTML, /Hantera data och uppdateringar/);
+  assert.doesNotMatch(app.innerHTML, /Analysera omgång/);
+  assert.equal(context.state.settingsTab, 'data');
 
+  assert.equal(typeof context.window.__kentauraiAnalysis?.render, 'function');
+  context.window.__kentauraiAnalysis.render();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(context.state.page, 'analysis');
+  assert.equal(context.state.settingsOpen, false);
+  assert.match(app.innerHTML, /<h1>Analys<\/h1>/);
   assert.match(app.innerHTML, /Analysera omgång/);
   assert.match(app.innerHTML, /Marknadsblind analys/);
   assert.match(app.innerHTML, /Hämta analysdata/);
