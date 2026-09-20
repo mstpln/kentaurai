@@ -5,6 +5,7 @@ import {
   HORSE_FORM_RECENCY_WEIGHTS,
   calculateHorseFormIndex,
   fieldPercentileScore,
+  prizeDifficultyScore,
   relativeChallengeScore,
   resultPerformanceScore,
   weightedAvailable
@@ -23,6 +24,13 @@ test('horse form field percentile rewards stronger measured work and faster pace
   assert.equal(fieldPercentileScore(60, [60, 65, 70, 75], { lowerIsBetter: true }), 100);
   assert.equal(fieldPercentileScore(75, [60, 65, 70, 75], { lowerIsBetter: true }), 0);
   assert.equal(fieldPercentileScore(60, [60]), null);
+});
+
+test('horse form prize difficulty uses a stable bounded logarithmic scale', () => {
+  assert.equal(prizeDifficultyScore(null), null);
+  assert.equal(prizeDifficultyScore(10_000), 0);
+  assert.equal(prizeDifficultyScore(1_000_000), 100);
+  assert.ok(prizeDifficultyScore(100_000) > 49 && prizeDifficultyScore(100_000) < 51);
 });
 
 test('horse form challenge compares opposition level with the target without inventing missing data', () => {
