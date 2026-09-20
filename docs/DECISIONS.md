@@ -38,7 +38,7 @@
 6. Trend race level reuses the canonical **All data / Högre prissumma / Vardagstrav** logic. Track, race type, breed type and start method are secondary AND-combined filters behind the horizontal-sliders control.
 7. Trend rows use the approved Version 3 hierarchy: win percentage at left, name plus starts/wins/losses in the main area, and equal Top 3%, Gallop% and Prispengar pills beneath. The whole row navigates to the canonical entity detail page.
 8. A global search bar searches all three primary entity types.
-9. Spel contains exactly three tabs: Översikt / V85 / V86. V85/V86 list saved rounds; each round can open a detailed post-race page.
+9. Spel contains exactly three primary tabs: **Kommande / Historik / Översikt**. V85/V86 are filters inside Kommande and Historik; saved rounds can open detailed round pages.
 10. Entity and round pages should use tabs, collapsible start cards and natural data groups instead of long unstructured field lists.
 11. Entity detail views expose all relevant data families already stored/measured by the current schema, while internal IDs/provenance remain backend concerns rather than normal UI content.
 12. Factual race/start/result/market/equipment/X-Labs/position/condition data is presented separately from calculated features, AI analyses and editorial signals.
