@@ -181,5 +181,5 @@ The external-analysis production release was accepted after:
 - Distance context uses the existing ±100 m canonical groups; e.g. 2100 m and 2140 m both belong to the 2140 group.
 - Higher-prize versus weekday statistics reuse the existing `race-scope.js` definition, including the 100,000 SEK first-prize threshold and stored high-level game/STL evidence.
 - The view contains no AI strength, ranking, ABCD, scenario, lead prediction, value, spike recommendation, external tips or interviews. Current market remains a displayed factual input only.
-- Existing historical grading/detail, pagination and overview/learning statistics remain available under Historik and Översikt.
+- Historik is system-granular: every saved main/alternative system is one list row even when multiple systems share a round. V85/V86 filters, pagination and `Senaste / Flest rätt / Färst rätt / Bästa spikar` sorting operate on systems; row click opens the shared round detail with that system preselected. Översikt/learning aggregates remain round-oriented where already defined.
 

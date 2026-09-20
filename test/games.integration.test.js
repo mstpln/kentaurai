@@ -48,7 +48,7 @@ function seedPartialRound(db) {
   }
 }
 
-test('game history lists one row per round with result and spike metrics', async () => {
+test('game history lists one row per saved system with result and spike metrics', async () => {
   const { env, db } = createTestEnv();
   seedRound(db);
   const data = await listGameHistory(env, { gameType: 'V86', sort: 'correct_desc' });
@@ -59,6 +59,41 @@ test('game history lists one row per round with result and spike metrics', async
   assert.equal(data.items[0].correctLegs, 6);
   assert.equal(data.items[0].correctSpikes, 3);
   assert.equal(data.items[0].resultComplete, true);
+});
+
+test('game history keeps multiple systems from the same round as separate rows', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  db.prepare(`INSERT INTO systems (id, game_round_id, system_type, budget_sek, row_count, spike_count, created_at) VALUES ('system_alt','round_1','alternative',108,72,3,'2099-01-02T10:30:00Z')`).run();
+  for (let leg = 1; leg <= 8; leg += 1) {
+    const selectedEntryId = leg <= 4 ? `winner_${leg}` : `other_${leg}`;
+    db.prepare(`INSERT INTO system_selections (system_id, leg_number, race_entry_id, is_spike) VALUES ('system_alt', ${leg}, '${selectedEntryId}', ${leg <= 3 ? 1 : 0})`).run();
+  }
+
+  const data = await listGameHistory(env, { gameType: 'V86', sort: 'latest' });
+  assert.equal(data.total, 2);
+  assert.equal(data.items.length, 2);
+  assert.deepEqual(data.items.map((item) => item.roundId), ['round_1', 'round_1']);
+  assert.deepEqual(data.items.map((item) => item.systemId), ['system_main', 'system_alt']);
+  assert.deepEqual(data.items.map((item) => item.systemLabel), ['Huvudsystem', 'Alternativ 1']);
+  assert.deepEqual(data.items.map((item) => item.budgetSek), [216, 108]);
+  assert.deepEqual(data.items.map((item) => item.correctLegs), [6, 4]);
+  assert.deepEqual(data.items.map((item) => item.correctSpikes), [3, 3]);
+});
+
+test('game history sorting ranks individual systems instead of grouped rounds', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  db.prepare(`INSERT INTO systems (id, game_round_id, system_type, budget_sek, row_count, spike_count, created_at) VALUES ('system_alt','round_1','alternative',108,72,3,'2099-01-02T10:30:00Z')`).run();
+  for (let leg = 1; leg <= 8; leg += 1) {
+    const selectedEntryId = leg <= 8 ? `winner_${leg}` : `other_${leg}`;
+    db.prepare(`INSERT INTO system_selections (system_id, leg_number, race_entry_id, is_spike) VALUES ('system_alt', ${leg}, '${selectedEntryId}', ${leg <= 3 ? 1 : 0})`).run();
+  }
+
+  const mostCorrect = await listGameHistory(env, { gameType: 'V86', sort: 'correct_desc' });
+  assert.equal(mostCorrect.items[0].systemId, 'system_alt');
+  assert.equal(mostCorrect.items[0].correctLegs, 8);
+  assert.equal(mostCorrect.items[1].systemId, 'system_main');
 });
 
 test('game history detail exposes eight legs and factual winner-trip classification', async () => {

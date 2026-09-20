@@ -30,6 +30,14 @@ test('upcoming games UI installs factual Spel navigation and responsive contract
   assert.match(html, /grid-template-columns:22px minmax\(82px,1fr\) 42px 48px 48px 42px/);
 });
 
+test('Spel history renders one row per system and opens the selected system directly', () => {
+  const html = enhanceUpcomingGamesHtml('<html><head></head><body><script>const state={};function renderGames(){};</script></body></html>');
+  assert.ok(html.includes(`data-system-id="'+esc(r.systemId)+'"`));
+  assert.ok(html.includes("esc(r.systemLabel||'System')"));
+  assert.ok(!html.includes("num(r.systemCount)+' system"));
+  assert.match(html, /openGameDetail\(b\.dataset\.roundId,b\.dataset\.systemId\)/);
+});
+
 test('upcoming games UI enhancer is idempotent', () => {
   const once = enhanceUpcomingGamesHtml('<html><head></head><body></body></html>');
   const twice = enhanceUpcomingGamesHtml(once);
