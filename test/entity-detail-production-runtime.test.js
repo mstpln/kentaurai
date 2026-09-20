@@ -355,9 +355,11 @@ test('stale canonical statistics request cannot repaint after navigation to anot
   assert.ok(requestedPaths.some((path) => path.startsWith('/horses/horse-1/calendar-statistics?')));
 
   await vm.runInContext("openDetail('horses','horse-2')", context);
+  for (let i = 0; i < 30 && !/entity-detail-score/.test(document.getElementById('entityDetailStatisticsV2')?.innerHTML || ''); i += 1) await Promise.resolve();
   const writesBeforeStaleResolution = document.elementWrites.length;
   resolveFirstCalendar({ summary:{}, startMethods:[], distances:[], tracks:[] });
   await firstOpen;
+  for (let i = 0; i < 5; i += 1) await Promise.resolve();
 
   assert.equal(document.elementWrites.length, writesBeforeStaleResolution);
   assert.match(document.appWrites.at(-1), /Second Horse/);
