@@ -136,79 +136,124 @@ function buildCoreRanking(filters, metric) {
   return { sql, bindings };
 }
 
+function buildCoreRankingSet(filters) {
+  const conditions = ['re.scratched = 0'];
+  const bindings = [];
+  addHorseFilters(conditions, bindings, filters);
+  const minimum = filters.minStarts == null ? 1 : Number(filters.minStarts);
+  bindings.push(minimum);
+  return {
+    sql: `WITH horse_stats AS MATERIALIZED (
+      SELECT h.id AS entity_id,h.canonical_name AS name,${coreMetricSelectSql('rr')}
+      FROM races r INDEXED BY idx_races_date
+      JOIN race_entries re ON re.race_id=r.id
+      JOIN race_results rr ON rr.race_entry_id=re.id
+      JOIN horses h ON h.id=re.horse_id
+      WHERE ${conditions.join(' AND ')}
+      GROUP BY h.id,h.canonical_name
+    ), ranked AS (
+      SELECT 'winRate' AS ranking_metric,hs.*,
+        ROW_NUMBER() OVER(ORDER BY (wins*1.0/starts) DESC,wins DESC,starts DESC,entity_id ASC) rn
+      FROM horse_stats hs WHERE starts>=?
+      UNION ALL
+      SELECT 'top3Rate' AS ranking_metric,hs.*,
+        ROW_NUMBER() OVER(ORDER BY (top3*1.0/result_starts) DESC,top3 DESC,result_starts DESC,entity_id ASC) rn
+      FROM horse_stats hs WHERE starts>=? AND result_starts>0
+    )
+    SELECT * FROM ranked WHERE rn<=10 ORDER BY ranking_metric,rn`,
+    bindings:[...bindings, minimum]
+  };
+}
+
 function xlabsSecondsSql(column) {
   return `(CAST(substr(${column},1,instr(${column},'.')-1) AS REAL)*60 + CAST(substr(${column},instr(${column},'.')+1,2) AS REAL) + CAST(substr(${column},instr(${column},',')+1,1) AS REAL)/10.0)`;
 }
 
 function buildXlabsOpening200Ranking(filters) {
   const conditions = ['re.scratched = 0'];
-  const bindings = [filters.asOfDate];
+  const bindings = [];
   addHorseFilters(conditions, bindings, filters);
-  const minimum = filters.minStarts == null ? 'measurements > 0' : 'measurements >= ?';
-  if (filters.minStarts != null) bindings.push(filters.minStarts);
+  bindings.push(filters.asOfDate);
+  const minimum = filters.minStarts == null ? 1 : Number(filters.minStarts);
+  bindings.push(minimum);
   return {
-    sql: `WITH source_candidates AS (
+    sql: `WITH eligible_entries AS MATERIALIZED (
+      SELECT re.id AS race_entry_id,h.id AS entity_id,h.canonical_name AS name
+      FROM races r INDEXED BY idx_races_date
+      JOIN race_entries re ON re.race_id=r.id
+      JOIN race_results rr ON rr.race_entry_id=re.id
+      JOIN horses h ON h.id=re.horse_id
+      WHERE ${conditions.join(' AND ')}
+    ), source_candidates AS (
       SELECT xi.race_entry_id,xi.source_record_id,sr.fetched_at
-      FROM xlabs_intervals xi
+      FROM eligible_entries ee
+      JOIN xlabs_intervals xi ON xi.race_entry_id=ee.race_entry_id
       JOIN source_records sr ON sr.id=xi.source_record_id
-      WHERE xi.mapper_version='${XLABS_INTERVALS_V2_VERSION}' AND sr.source_type='xlabs_race_json'
-        AND substr(sr.fetched_at,1,10) <= ?
+      WHERE xi.mapper_version='${XLABS_INTERVALS_V2_VERSION}'
+        AND sr.source_type='xlabs_race_json'
+        AND substr(sr.fetched_at,1,10)<=?
       GROUP BY xi.race_entry_id,xi.source_record_id,sr.fetched_at
     ), latest_sources AS (
       SELECT *,ROW_NUMBER() OVER(PARTITION BY race_entry_id ORDER BY julianday(fetched_at) DESC,source_record_id DESC) rn
       FROM source_candidates
     ), segment AS (
-      SELECT xi.race_entry_id,
-        SUM(xi.elapsed_ms) elapsed_ms,
-        SUM(xi.measured_distance_m) measured_distance_m,
-        COUNT(*) interval_count,
-        SUM(CASE WHEN xi.eligibility_status='valid' THEN 1 ELSE 0 END) valid_count
+      SELECT xi.race_entry_id,SUM(xi.elapsed_ms) elapsed_ms,SUM(xi.measured_distance_m) measured_distance_m,
+        COUNT(*) interval_count,SUM(CASE WHEN xi.eligibility_status='valid' THEN 1 ELSE 0 END) valid_count
       FROM latest_sources ls
       JOIN xlabs_intervals xi ON xi.race_entry_id=ls.race_entry_id AND xi.source_record_id=ls.source_record_id AND xi.mapper_version='${XLABS_INTERVALS_V2_VERSION}'
       WHERE ls.rn=1 AND xi.interval_start_m IN (0,100) AND xi.interval_end_m IN (100,200)
       GROUP BY xi.race_entry_id
       HAVING interval_count=2 AND valid_count=2 AND elapsed_ms>0 AND measured_distance_m>0
     ), measured AS (
-      SELECT h.id entity_id,h.canonical_name name,COUNT(*) measurements,
+      SELECT ee.entity_id,ee.name,COUNT(*) measurements,
         AVG((segment.elapsed_ms/1000.0)*(1000.0/segment.measured_distance_m)) avg_seconds
+      FROM eligible_entries ee
+      JOIN segment ON segment.race_entry_id=ee.race_entry_id
+      GROUP BY ee.entity_id,ee.name
+    )
+    SELECT * FROM measured WHERE measurements>=?
+    ORDER BY avg_seconds ASC,measurements DESC,entity_id ASC LIMIT 10`,
+    bindings
+  };
+}
+function buildXlabsRanking(filters, column) {
+  const conditions = ['re.scratched = 0'];
+  const bindings = [];
+  addHorseFilters(conditions, bindings, filters);
+  bindings.push(filters.asOfDate);
+  const minimum = filters.minStarts == null ? 1 : Number(filters.minStarts);
+  bindings.push(minimum);
+  return {
+    sql: `WITH eligible_entries AS MATERIALIZED (
+      SELECT re.id AS race_entry_id,h.id AS entity_id,h.canonical_name AS name
       FROM races r INDEXED BY idx_races_date
       JOIN race_entries re ON re.race_id=r.id
       JOIN race_results rr ON rr.race_entry_id=re.id
       JOIN horses h ON h.id=re.horse_id
-      JOIN segment ON segment.race_entry_id=re.id
       WHERE ${conditions.join(' AND ')}
-      GROUP BY h.id,h.canonical_name
-    ) SELECT * FROM measured WHERE ${minimum} ORDER BY avg_seconds ASC,measurements DESC,entity_id ASC LIMIT 10`,
-    bindings
-  };
-}
-
-function buildXlabsRanking(filters, column) {
-  const conditions = ['re.scratched = 0', `x.${column} IS NOT NULL`];
-  const bindings = [];
-  addHorseFilters(conditions, bindings, filters);
-  const minimum = filters.minStarts == null ? 'measurements > 0' : 'measurements >= ?';
-  if (filters.minStarts != null) bindings.push(filters.minStarts);
-  return {
-    sql: `WITH latest_x AS (
-      SELECT x.*, ROW_NUMBER() OVER(PARTITION BY x.race_entry_id ORDER BY sr.fetched_at DESC, x.id DESC) AS observation_rank
-      FROM xlabs_data x
-      JOIN source_records sr ON sr.id = x.source_record_id
-      WHERE x.quality_status = 'xlabs-telemetry-v1'
+    ), latest_x AS (
+      SELECT x.*,ROW_NUMBER() OVER(
+        PARTITION BY x.race_entry_id
+        ORDER BY julianday(sr.fetched_at) DESC,x.id DESC
+      ) AS observation_rank
+      FROM eligible_entries ee
+      JOIN xlabs_data x ON x.race_entry_id=ee.race_entry_id
+      JOIN source_records sr ON sr.id=x.source_record_id
+      WHERE x.quality_status='xlabs-telemetry-v1'
+        AND sr.source_type='xlabs_race_json'
+        AND substr(sr.fetched_at,1,10)<=?
     ), measured AS (
-      SELECT h.id AS entity_id,h.canonical_name AS name,COUNT(*) AS measurements,AVG(${xlabsSecondsSql(`x.${column}`)}) AS avg_seconds
-      FROM races r INDEXED BY idx_races_date
-      JOIN race_entries re ON re.race_id = r.id
-      JOIN race_results rr ON rr.race_entry_id = re.id
-      JOIN horses h ON h.id = re.horse_id
-      JOIN latest_x x ON x.race_entry_id = re.id AND x.observation_rank = 1
-      WHERE ${conditions.join(' AND ')}
-      GROUP BY h.id,h.canonical_name
-    ) SELECT * FROM measured WHERE ${minimum} ORDER BY avg_seconds ASC,measurements DESC,entity_id ASC LIMIT 10`,
+      SELECT ee.entity_id,ee.name,COUNT(*) measurements,AVG(${xlabsSecondsSql(`x.${column}`)}) avg_seconds
+      FROM eligible_entries ee
+      JOIN latest_x x ON x.race_entry_id=ee.race_entry_id AND x.observation_rank=1
+      WHERE x.${column} IS NOT NULL
+      GROUP BY ee.entity_id,ee.name
+    )
+    SELECT * FROM measured WHERE measurements>=?
+    ORDER BY avg_seconds ASC,measurements DESC,entity_id ASC LIMIT 10`,
     bindings
   };
 }
-
 function buildFormQuery(filters, horseId = null, limit = true) {
   const conditions = ['re.scratched = 0', 'rr.placing IS NOT NULL', 'rr.placing > 0'];
   const bindings = [];
@@ -265,6 +310,36 @@ function buildRestRanking(filters, kind) {
   };
 }
 
+function buildRestRankingSet(filters) {
+  const conditions = [];
+  const bindings = [];
+  addHorseFilters(conditions, bindings, filters, { raceAlias:'s', horseAlias:'s' });
+  const minimum = filters.minStarts == null ? 1 : Number(filters.minStarts);
+  bindings.push(minimum);
+  return {
+    sql: `${restSequenceCte()}, filtered AS MATERIALIZED (
+      SELECT * FROM staged s WHERE ${conditions.join(' AND ')}
+    ), classified AS (
+      SELECT 'first' ranking_kind,* FROM filtered WHERE days_since_previous>=60
+      UNION ALL
+      SELECT 'second' ranking_kind,* FROM filtered WHERE previous_gap>=60 AND days_since_previous<60
+    ), stats AS (
+      SELECT ranking_kind,entity_id,name,COUNT(*) starts,
+        SUM(CASE WHEN placing=1 THEN 1 ELSE 0 END) wins,
+        SUM(CASE WHEN placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) top3
+      FROM classified
+      GROUP BY ranking_kind,entity_id,name
+      HAVING COUNT(*)>=?
+    ), ranked AS (
+      SELECT *,wins*1.0/starts win_rate,top3*1.0/starts top3_rate,
+        ROW_NUMBER() OVER(PARTITION BY ranking_kind ORDER BY wins*1.0/starts DESC,wins DESC,starts DESC,entity_id ASC) rn
+      FROM stats
+    )
+    SELECT * FROM ranked WHERE rn<=10 ORDER BY ranking_kind,rn`,
+    bindings
+  };
+}
+
 async function run(env, query) {
   const { results } = await env.DB.prepare(query.sql).bind(...query.bindings).all();
   return results || [];
@@ -280,15 +355,15 @@ function mapCoreRanking(rows, metric) {
 function mapRestRanking(rows) {
   return rows.map((row,index)=>({rank:index+1,id:row.entity_id,name:row.name,starts:Number(row.starts),wins:Number(row.wins),top3:Number(row.top3),winRate:Number(row.win_rate),top3Rate:Number(row.top3_rate)}));
 }
+function rowsFor(rows,key,value){return rows.filter((row)=>row[key]===value);}
 
 export async function getHorseRankings(env, options = {}) {
   if (!env.DB) throw new Error('DB is not configured');
   const filters = normalizeHorseStatsFilters(options);
   await validateTrack(env, filters.trackId);
   if (options.mode === 'core') {
-    const [win,top3,form,start] = await Promise.all([
-      run(env,buildCoreRanking(filters,'winRate')),
-      run(env,buildCoreRanking(filters,'top3Rate')),
+    const [coreRows,form,start] = await Promise.all([
+      run(env,buildCoreRankingSet(filters)),
       run(env,buildFormQuery(filters)),
       run(env,buildXlabsOpening200Ranking(filters))
     ]);
@@ -296,8 +371,8 @@ export async function getHorseRankings(env, options = {}) {
       filters,
       partial:true,
       rankings:{
-        highestWinRate:mapCoreRanking(win,'winRate'),
-        highestTop3Rate:mapCoreRanking(top3,'top3Rate'),
+        highestWinRate:mapCoreRanking(rowsFor(coreRows,'ranking_metric','winRate'),'winRate'),
+        highestTop3Rate:mapCoreRanking(rowsFor(coreRows,'ranking_metric','top3Rate'),'top3Rate'),
         bestFormLast10:form.map((row,index)=>({rank:index+1,id:row.entity_id,name:row.name,usedStarts:Number(row.used_starts),averagePlacing:Number(row.avg_placing)})),
         fastestFirst200:start.map((row,index)=>({rank:index+1,id:row.entity_id,name:row.name,measurements:Number(row.measurements),averageSeconds:Number(row.avg_seconds)}))
       },
@@ -305,11 +380,10 @@ export async function getHorseRankings(env, options = {}) {
     };
   }
   if (options.mode === 'extended') {
-    const [earnings,close,firstRest,secondRest] = await Promise.all([
+    const [earnings,close,restRows] = await Promise.all([
       run(env,buildCoreRanking(filters,'earningsPerVerifiedStart')),
       run(env,buildXlabsRanking(filters,'last_400_time')),
-      run(env,buildRestRanking(filters,'first')),
-      run(env,buildRestRanking(filters,'second'))
+      run(env,buildRestRankingSet(filters))
     ]);
     return {
       filters,
@@ -317,8 +391,8 @@ export async function getHorseRankings(env, options = {}) {
       rankings:{
         highestEarningsPerStart:mapCoreRanking(earnings,'earningsPerVerifiedStart'),
         strongestLast400:close.map((row,index)=>({rank:index+1,id:row.entity_id,name:row.name,measurements:Number(row.measurements),averageSeconds:Number(row.avg_seconds)})),
-        firstAfterRest:mapRestRanking(firstRest),
-        secondAfterRest:mapRestRanking(secondRest),
+        firstAfterRest:mapRestRanking(rowsFor(restRows,'ranking_kind','first')),
+        secondAfterRest:mapRestRanking(rowsFor(restRows,'ranking_kind','second')),
         highestStartPoints:null
       },
       startPointsStatus:'unverified_official_semantics'
