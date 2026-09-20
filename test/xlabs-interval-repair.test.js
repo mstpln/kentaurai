@@ -42,7 +42,7 @@ function seedSource(db, objects, { id = 'src_x', fetchedAt = DATE + 'T13:00:00Z'
       VALUES (?,'race',?,?,2140,0)`).run(entry,horse,start);
   }
   const key='raw/x.json';
-  objects.set(key, JSON.stringify(telemetryPayload()));
+  objects.set(key, { body: JSON.stringify(telemetryPayload()), options: {} });
   db.prepare(`INSERT INTO source_records
     (id,source_type,external_id,raw_object_key,fetched_at,quality_status,metadata_json)
     VALUES (?, 'xlabs_race_json', 'race:test', ?, ?, 'normalized_verified_subset', ?)`)
@@ -92,7 +92,7 @@ test('bounded repair batch prioritizes newest normalized sources and reports rem
   seedSource(db, objects, { id:'src_old', fetchedAt:DATE+'T12:00:00Z' });
 
   const key='raw/new.json';
-  objects.set(key, JSON.stringify(telemetryPayload()));
+  objects.set(key, { body: JSON.stringify(telemetryPayload()), options: {} });
   db.prepare(`INSERT INTO source_records
     (id,source_type,external_id,raw_object_key,fetched_at,quality_status,metadata_json)
     VALUES ('src_new','xlabs_race_json','race:new',?,?,'normalized_verified_subset',?)`)
@@ -113,10 +113,11 @@ test('bounded repair batch prioritizes newest normalized sources and reports rem
 
 
 test('interval repair admin route is private before database work', async () => {
+  const env = { ADMIN_TOKEN: 'synthetic-admin-token' };
   const response = await worker.fetch(new Request('https://example.test/v1/xlabs/interval-repair', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ limit: 1 })
-  }), {}, {});
+  }), env);
   assert.equal(response.status, 401);
 });
