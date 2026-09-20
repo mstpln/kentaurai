@@ -1,7 +1,7 @@
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS xlabs_interval_source_state (
-  source_record_id TEXT PRIMARY KEY REFERENCES source_records(id),
+  source_record_id TEXT NOT NULL REFERENCES source_records(id),
   mapper_version TEXT NOT NULL,
   status TEXT NOT NULL,
   attempts INTEGER NOT NULL DEFAULT 0,
@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS xlabs_interval_source_state (
   CHECK(status IN ('pending','success','failed')),
   CHECK(attempts >= 0),
   CHECK(interval_rows IS NULL OR interval_rows >= 0),
-  CHECK(valid_intervals IS NULL OR valid_intervals >= 0)
+  CHECK(valid_intervals IS NULL OR valid_intervals >= 0),
+  PRIMARY KEY(source_record_id, mapper_version)
 );
 
 CREATE INDEX IF NOT EXISTS idx_xlabs_interval_source_state_status
