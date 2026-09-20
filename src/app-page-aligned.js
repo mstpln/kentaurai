@@ -26,14 +26,16 @@ export function formatTrackAddress(detail) {
 const trackIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s6-5.2 6-11a6 6 0 1 0-12 0c0 5.8 6 11 6 11z"/><ellipse cx="12" cy="10" rx="3.2" ry="1.8"/></svg>`;
 
 const statisticsNavIcon = `<svg class="nav-icon" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M224,48H32a8,8,0,0,0-8,8V192a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A8,8,0,0,0,224,48ZM40,112H80v32H40Zm56,0H216v32H96ZM216,64V96H40V64ZM40,160H80v32H40Zm176,32H96V160H216v32Z"/></svg>`;
+const analysisNavIcon = `<svg class="nav-icon" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z"/></svg>`;
 const gamesNavIcon = `<svg class="nav-icon" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm40-68a28,28,0,0,1-28,28h-4v8a8,8,0,0,1-16,0v-8H104a8,8,0,0,1,0-16h36a12,12,0,0,0,0-24H116a28,28,0,0,1,0-56h4V72a8,8,0,0,1,16,0v8h16a8,8,0,0,1,0,16H116a12,12,0,0,0,0,24h24A28,28,0,0,1,168,148Z"/></svg>`;
 
 const alignedCss = `
 <style id="kentaurai-aligned-ui-v063">
-.shell{padding-bottom:104px!important}
-.bottom-nav{padding-top:10px!important;padding-bottom:calc(10px + env(safe-area-inset-bottom))!important}
-.bottom-inner{max-width:560px!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:3px!important}
-.nav-item{min-width:0!important;padding:9px 3px 8px!important}
+.shell{padding-bottom:100px!important}
+.bottom-nav{padding-top:8px!important;padding-bottom:calc(8px + env(safe-area-inset-bottom))!important}
+.bottom-inner{max-width:680px!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:6px!important}
+.nav-item{min-width:0!important;min-height:62px!important;padding:8px 4px 7px!important;border-radius:13px!important;font-size:11px!important}
+.nav-icon{width:23px!important;height:23px!important;margin-bottom:6px!important}
 .statistics-category-nav{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:11px;overflow:hidden;margin-bottom:22px}
 .statistics-category-btn{border:0;background:#11110f;color:#8e887f;padding:11px 8px;cursor:pointer;font-size:12px;font-weight:550;min-width:0}
 .statistics-category-btn:hover{color:var(--text);background:#161512}
@@ -41,7 +43,7 @@ const alignedCss = `
 @media(max-width:620px){.statistics-category-btn{font-size:10px;padding:10px 3px}}
 .settings-button{width:32px!important;height:32px!important;padding:5px!important;align-self:center!important}
 .settings-button svg{width:21px!important;height:21px!important}
-@media(max-width:760px){.shell{padding-bottom:104px!important}.top-inner{position:relative!important}.settings-button{right:12px!important;top:10px!important;width:32px!important;height:32px!important;padding:5px!important}.settings-button svg{width:21px!important;height:21px!important}.brand{padding-right:42px!important}}
+@media(max-width:760px){.shell{padding-bottom:96px!important}.bottom-nav{padding-top:7px!important;padding-bottom:calc(7px + env(safe-area-inset-bottom))!important}.bottom-inner{gap:3px!important}.nav-item{min-height:58px!important;padding:7px 2px 6px!important;font-size:10px!important}.nav-icon{width:22px!important;height:22px!important;margin-bottom:5px!important}.top-inner{position:relative!important}.settings-button{right:12px!important;top:10px!important;width:32px!important;height:32px!important;padding:5px!important}.settings-button svg{width:21px!important;height:21px!important}.brand{padding-right:42px!important}}
 @media(max-width:620px){.stat-table-scroll{overflow-x:visible!important}.stat-filter-table{width:100%!important;table-layout:fixed!important}.stat-filter-table th,.stat-filter-table td{padding:9px 3px!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:clip!important}.stat-filter-table th{font-size:6.8px!important;letter-spacing:.025em!important}.stat-filter-table td{font-size:9px!important;font-variant-numeric:tabular-nums!important}.stat-filter-table th:first-child,.stat-filter-table td:first-child{width:27%!important;padding-left:7px!important}.stat-filter-table th:not(:first-child),.stat-filter-table td:not(:first-child){width:14.6%!important;text-align:right!important}.stat-filter-table th:last-child,.stat-filter-table td:last-child{padding-right:7px!important}}
 .settings-row{grid-template-columns:1fr!important;gap:7px!important;align-items:stretch!important;padding:14px 0!important}
 .settings-row-output{grid-column:auto!important;color:#aaa39a!important}
@@ -60,6 +62,7 @@ const alignedScript = `
 (function(){
 const TRACK_ICON=${JSON.stringify(trackIcon)};
 const STATISTICS_NAV_ICON=${JSON.stringify(statisticsNavIcon)};
+const ANALYSIS_NAV_ICON=${JSON.stringify(analysisNavIcon)};
 const GAMES_NAV_ICON=${JSON.stringify(gamesNavIcon)};
 const TRACK_STL_OPTIONS=${JSON.stringify(STL_CLASS_OPTIONS)};
 const TRACK_RACE_TYPE_OPTIONS=${JSON.stringify(RACE_TYPE_OPTIONS)};
@@ -87,7 +90,7 @@ function bindStatisticsCategoryNav(){
 }
 function syncStatisticsCategoryNav(){
   if(STATISTICS_PAGES.includes(state.page))state.statisticsPage=state.page;
-  const shouldShow=STATISTICS_PAGES.includes(state.page)&&!state.detail&&!state.trackDetail;
+  const shouldShow=STATISTICS_PAGES.includes(state.page)&&!state.settingsOpen&&!state.detail&&!state.trackDetail;
   const existing=app.querySelector('.statistics-category-nav');
   if(!shouldShow){if(existing)existing.remove();return}
   if(!existing){app.insertAdjacentHTML('afterbegin',statisticsCategoryNav(state.page));bindStatisticsCategoryNav();return}
@@ -103,8 +106,9 @@ statisticsNavObserver.observe(app,{childList:true});
 function alignPrimaryNavigation(){
   const inner=document.querySelector('.bottom-inner');if(!inner)return;
   const startIcon=inner.querySelector('[data-page="start"] .nav-icon')?.outerHTML||'';
-  inner.innerHTML='<button class="nav-item" data-page="start">'+startIcon+'Start</button>'+
+  inner.innerHTML='<button class="nav-item" data-page="start">'+startIcon+'Trend</button>'+
     '<button class="nav-item" data-page="statistics">'+STATISTICS_NAV_ICON+'Statistik</button>'+
+    '<button class="nav-item" data-page="analysis">'+ANALYSIS_NAV_ICON+'Analys</button>'+
     '<button class="nav-item" data-page="games">'+GAMES_NAV_ICON+'Spel</button>';
   inner.querySelector('[data-page="start"]').onclick=()=>{state.trackDetail=null;renderStart()};
   inner.querySelector('[data-page="statistics"]').onclick=()=>{
@@ -112,6 +116,7 @@ function alignPrimaryNavigation(){
     const page=STATISTICS_PAGES.includes(state.statisticsPage)?state.statisticsPage:'horses';
     if(page==='tracks')renderTracks();else renderEntityList(page);
   };
+  inner.querySelector('[data-page="analysis"]').onclick=()=>{state.trackDetail=null;window.__kentauraiAnalysis?.render()};
   inner.querySelector('[data-page="games"]').onclick=()=>{state.trackDetail=null;state.gameTab=state.gameTab||'upcoming';state.gameSystemId=null;renderGames()};
   setNav(state.page||'start');
 }

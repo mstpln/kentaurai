@@ -4,13 +4,18 @@ import vm from 'node:vm';
 
 import { formatTrackAddress, renderAppPage } from '../src/app-page-aligned.js';
 
-test('final aligned app groups entity browsing under the three-item primary navigation', () => {
+test('final aligned app uses four primary workspaces and keeps entity browsing grouped under Statistik', () => {
   const html = renderAppPage();
-  assert.match(html, /grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
+  assert.match(html, /grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
+  assert.match(html, /data-page="analysis"/);
+  assert.match(html, /Trend<\/button>/);
+  assert.match(html, /Analys<\/button>/);
   assert.match(html, /data-page="statistics"/);
   assert.match(html, /statisticsCategoryNav/);
   assert.match(html, /\['trainers','Tränare'\],\['horses','Hästar'\],\['drivers','Kuskar'\],\['tracks','Bana'\]/);
   assert.match(html, /M12 21s6-5\.2 6-11/);
+  assert.match(html, /M229\.66,218\.34l-50\.07-50\.06/);
+  assert.match(html, /STATISTICS_PAGES\.includes\(state\.page\)&&!state\.settingsOpen&&!state\.detail&&!state\.trackDetail/);
 });
 
 test('horse detail uses one compact expandable Starter history instead of a duplicate equipment tab', () => {

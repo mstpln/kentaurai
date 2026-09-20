@@ -1,11 +1,15 @@
-## Statistics navigation candidate
-- Branch: `feat/statistics-navigation`.
-- Primary bottom navigation is reduced to **Start / Statistik / Spel**.
-- Start keeps the existing Trend chart icon and current Trend workspace behavior.
+## Primary navigation candidate
+- Branch: `feat/analysis-primary-navigation`.
+- Primary bottom navigation is **Trend / Statistik / Analys / Spel**.
+- Trend keeps the existing Trend chart icon and current Trend workspace behavior.
 - Statistik uses the Phosphor **Table** icon and groups **Tränare / Hästar / Kuskar / Bana** under one four-way selector above the workspace heading.
 - The selected top-navigation design is the full-width segmented selector with shared border, subtle active background and warm accent underline.
+- The Statistik selector is restricted to those four workspace/list views and must not appear in Settings, Analys, Trend, Spel or entity/track detail views.
+- Analys uses the Phosphor **Magnifying Glass** icon and owns the existing external-AI workflow previously shown under the Settings AI tab.
+- Settings is data-only and has no redundant single Data tab.
 - Spel uses the Phosphor **Currency Circle Dollar** icon.
-- Entity lists, detail pages, statistics tabs, track pages, Spel tabs, search, settings and all underlying data/API behavior remain unchanged; this is navigation/information-architecture work only.
+- Bottom navigation is rebalanced for four equal responsive items with a modest bar height and compact active state.
+- Entity lists, detail pages, statistics tabs, track pages, Spel tabs, search and all underlying data/API behavior remain unchanged.
 - No schema migration or private-data change is required.
 
 # Build state
@@ -37,7 +41,7 @@ Updated: 2026-09-20
 - Exact-head CI passed with 809/809 tests before merge. Production release #64 then reran full QA, verified migration 0027 and the external schema, deployed the Worker and passed health/login/private-route verification.
 
 ## External evidence workflow production live
-- The Settings flow is Step 1 blind analysis -> Step 2 market analysis only -> Step 3 interviews/external horse statistics -> Step 4 user/AI system dialogue -> Step 5 separate external-evidence registration -> Step 6 separate system registration.
+- The Analys workspace flow is Step 1 blind analysis -> Step 2 market analysis only -> Step 3 interviews/external horse statistics -> Step 4 user/AI system dialogue -> Step 5 separate external-evidence registration -> Step 6 separate system registration.
 - Step 1 excludes editorial/interview signals entirely.
 - External horse statistics use append-only dated snapshots with canonical contexts for track/balance/wagon where known. Historical values are never overwritten.
 - Interview records link to horse plus trainer/stable context with actual speaker/role and structured signals/summary. Drivers remain intentionally outside this workflow.
