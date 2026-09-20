@@ -379,6 +379,7 @@ test('production statistics runtime hydrates the same Form 1-100 card lazily for
   assert.match(script, /calendar-form/);
   assert.match(script, /new AbortController\(\)/);
   assert.match(script, /abortActive\(\)/);
+  assert.match(script, /async function render\(host,s,c\)\{abortActive\(\);const token=\+\+requestToken/);
   assert.doesNotMatch(script, /Form '\+c\.form|averagePlacing/);
 });
 
