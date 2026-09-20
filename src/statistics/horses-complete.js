@@ -12,6 +12,7 @@ export { getHorseFilterOptions, normalizeHorseStatsFilters };
 
 export async function getHorseRankings(env, options = {}) {
   const data = await getBaseHorseRankings(env, options);
+  if (options.mode === 'core') return data;
   const highestStartPoints = await getHorseStartPointRanking(env, data.filters);
   return {
     ...data,
