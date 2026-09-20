@@ -94,7 +94,8 @@ export function createTestEnv() {
     '../../migrations/0026_app_read_performance.sql',
     '../../migrations/0027_external_analysis_lineage_v1.sql',
     '../../migrations/0028_external_evidence_v1.sql',
-    '../../migrations/0029_xlabs_interval_backfill.sql'
+    '../../migrations/0029_xlabs_interval_backfill.sql',
+    '../../migrations/0030_interview_change_marker.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }
