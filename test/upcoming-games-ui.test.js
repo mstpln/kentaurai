@@ -12,6 +12,10 @@ test('upcoming games UI installs factual Spel navigation and responsive contract
   assert.match(html, /Senast hämtat/);
   assert.match(html, /X-Labs/);
   assert.match(html, /Första 200/);
+  assert.match(html, /ugMarketPercent/);
+  assert.match(html, /format\(n\)\+' %'/);
+  assert.match(html, /return full\[1\]\+'\.'\+full\[2\]/);
+  assert.match(html, /\/horses\/\'+encodeURIComponent\(e\.horseId\)\+'\/calendar-form/);
   assert.match(html, /Sista 400/);
   assert.match(html, /Visa mer/);
   assert.match(html, /Hög prissumma/);
