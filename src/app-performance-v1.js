@@ -71,12 +71,14 @@ function performanceClient() {
     }
     const track=target?.closest('[data-track-id]'); if(track) warm('/tracks/'+encodeURIComponent(track.dataset.trackId));
     const nav=target?.closest('.nav-item[data-page]'); if(nav) warm(listPath(nav.dataset.page));
+    const statisticsCategory=target?.closest('[data-statistics-page]'); if(statisticsCategory) warm(listPath(statisticsCategory.dataset.statisticsPage));
   },{passive:true});
   document.addEventListener('pointerout',event=>{const target=event.target instanceof Element?event.target:null;if(target?.closest('.entity-row[data-id]'))clearTimeout(entityStatsWarmTimer)},{passive:true});
   document.addEventListener('focusin',event=>{
     const target=event.target instanceof Element?event.target:null;
     const row=target?.closest('.entity-row[data-id]'); if(row&&['trainers','horses','drivers'].includes(state.page)){ warm('/entities/'+state.page+'/'+encodeURIComponent(row.dataset.id)); warm(defaultCalendarPath(state.page,row.dataset.id)); const name=row.querySelector('.entity-name')?.textContent?.trim(); if(name&&(state.page==='trainers'||state.page==='drivers')) warm('/search?q='+encodeURIComponent(name)+'&limit=40'); }
     const track=target?.closest('[data-track-id]'); if(track) warm('/tracks/'+encodeURIComponent(track.dataset.trackId));
+    const statisticsCategory=target?.closest('[data-statistics-page]'); if(statisticsCategory) warm(listPath(statisticsCategory.dataset.statisticsPage));
   });
   const idle=window.requestIdleCallback||((fn)=>setTimeout(fn,250));
   idle(()=>setTimeout(()=>{
