@@ -102,3 +102,12 @@ test('expanded facts use rolling 12 months, canonical distance group, lane type 
   assert.equal(data.metrics.weekday.starts, 2);
   assert.match(data.metrics.laneType.explanation, /framspår 1–8/);
 });
+
+
+test('upcoming round treats null scratch state as active until an official scratch is verified', async () => {
+  const { env, db } = createTestEnv();
+  seedUpcoming(db);
+  db.prepare("UPDATE race_entries SET scratched=NULL WHERE id='entry_1'").run();
+  const data = await listUpcomingGames(env, { asOfDate:'2099-09-01', asOfNow:'2099-09-01T00:00:00Z' });
+  assert.equal(data.items[0].xlabsCoverage.activeEntries, 8);
+});
