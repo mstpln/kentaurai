@@ -51,6 +51,16 @@ export function resultPerformanceScore({ placing, disqualified, fieldSize }) {
   return clamp(((size - place) / (size - 1)) * 100);
 }
 
+export function prizeDifficultyScore(firstPrizeSek) {
+  const prize = finite(firstPrizeSek);
+  if (prize == null || prize < 0) return null;
+  const floor = 10_000;
+  const ceiling = 1_000_000;
+  if (prize <= floor) return 0;
+  if (prize >= ceiling) return 100;
+  return clamp((Math.log(prize / floor) / Math.log(ceiling / floor)) * 100);
+}
+
 export function relativeChallengeScore(opponentValue, targetValue) {
   const opponent = finite(opponentValue);
   const target = finite(targetValue);
