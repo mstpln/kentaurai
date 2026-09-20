@@ -105,8 +105,11 @@ test('favorite and longshot use the final source-backed pre-stop snapshot and fa
   race(db,'race-no-stop','2026-09-06',{number:2});entry(db,'entry-no-stop','race-no-stop','driver-b',{placing:1});
   marketRound(db,{round:'round-no-stop',raceId:'race-no-stop',stop:null});market(db,'m-no-stop','entry-no-stop',{round:'round-no-stop',captured:'2026-09-06T11:00:00Z',percent:1,rank:1});
   const data=await getDriverRankings(env,{period:'1y',asOfDate:'2026-09-11'});
+  const extended=await getDriverRankings(env,{period:'1y',asOfDate:'2026-09-11',mode:'extended'});
   assert.equal(data.rankings.favoriteResults[0].id,'driver-a');
   assert.equal(data.rankings.longshotResults[0].id,'driver-a');
+  assert.deepEqual(extended.rankings.favoriteResults,data.rankings.favoriteResults);
+  assert.deepEqual(extended.rankings.longshotResults,data.rankings.longshotResults);
   assert.equal(data.rankings.favoriteResults.some(x=>x.id==='driver-b'),false);
   assert.equal(data.rankings.longshotResults.some(x=>x.id==='driver-b'),false);
   assert.equal(data.definitions.longshotPercentMax,5);
@@ -121,7 +124,12 @@ test('position rankings require source-backed verified flags and annual earnings
   race(db,'rp2','2026-09-02',{number:2});entry(db,'ep2','rp2','driver-b',{placing:1,prize:20000});position(db,'p2','ep2',{death:1,sourceId:null});
   race(db,'rp-old','2025-12-31',{number:3});entry(db,'ep-old','rp-old','driver-c',{placing:1,prize:999999});
   const data=await getDriverRankings(env,{period:'2w',asOfDate:'2026-09-11'});
+  const extended=await getDriverRankings(env,{period:'2w',asOfDate:'2026-09-11',mode:'extended'});
   assert.equal(data.rankings.bestFromLead[0].id,'driver-a');
   assert.equal(data.rankings.bestFromDeathSeat.some(x=>x.id==='driver-b'),false,'unprovenanced position flag must not qualify');
+  assert.deepEqual(extended.rankings.bestFromLead,data.rankings.bestFromLead);
+  assert.deepEqual(extended.rankings.bestFromDeathSeat,data.rankings.bestFromDeathSeat);
+  assert.deepEqual(extended.rankings.bestAuto,data.rankings.bestAuto);
+  assert.deepEqual(extended.rankings.bestVolt,data.rankings.bestVolt);
   assert.equal(data.rankings.mostEarningsThisYear.some(x=>x.id==='driver-c'),false,'prior calendar year must not count');
 });
