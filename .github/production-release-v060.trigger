@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=feb611270b2a2a3f6be409b380d798fbd3a97d43
-release_nonce=2026-09-19-production-entity-detail-year-toolbar-pr203-1
+source_main=7cf10b2ea4b745aecc1a59b6902b8b322afafd56
+release_nonce=2026-09-20-production-app-critical-path-pr204-1
