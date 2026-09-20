@@ -127,3 +127,11 @@
 
 ## Learning registry
 A single race must not directly change model weights. Candidate learnings are recorded as hypotheses and accumulate supporting/contradicting observations. Actual model/rule changes are stored in `model_change_log` and tied to `model_versions`.
+
+
+## Horse profile Form is a deterministic current-performance index
+- The horse profile label is `Form (1–100)`, not average placing.
+- Form uses up to the five latest eligible starts in the active calendar/filter context. Each start is scored from result quality, verified race/opposition difficulty, measured extra running distance and measured field-relative speed/closing evidence, then recent starts receive greater weight.
+- Missing verified evidence is null and causes weight renormalization; it never becomes a zero-performance assumption.
+- Opposition Start Points/earnings may contribute only when an official snapshot existed by the historical race cutoff. Current values are never projected backwards.
+- Form is market-blind and deterministic. It is a calculated feature shown in the factual/statistical UI, not an AI judgment or a replacement for the broader KentaurAI strength analysis.
