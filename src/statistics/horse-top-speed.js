@@ -1,10 +1,5 @@
 import { XLABS_INTERVALS_V2_VERSION } from '../xlabs-intervals-v2.js';
 
-function paceSecondsFromMsPerKm(value) {
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n / 1000 : null;
-}
-
 function parsePaceSeconds(value) {
   if (typeof value !== 'string') return null;
   const text = value.trim().replace(/\s*min\/km$/i, '');
