@@ -73,11 +73,16 @@ export async function startXlabsBackfill(env, startDate, endDate, options = {}) 
   return startScopedXlabsBackfill(env, HISTORICAL_SCOPE, startDate, endDate, options);
 }
 
+export async function ensureXlabsDailyDateJob(env, date) {
+  const normalized = validateXlabsDate(date);
+  return startScopedXlabsBackfill(env, DAILY_SCOPE, normalized, normalized);
+}
+
 export async function ensureDailyXlabsJob(env, scheduledTime = Date.now()) {
   const instant = new Date(scheduledTime);
   if (Number.isNaN(instant.getTime())) throw new Error('scheduled time is invalid');
   const yesterday = addDays(instant.toISOString().slice(0, 10), -1);
-  return startScopedXlabsBackfill(env, DAILY_SCOPE, yesterday, yesterday);
+  return ensureXlabsDailyDateJob(env, yesterday);
 }
 
 async function acquireLease(env, job) {
