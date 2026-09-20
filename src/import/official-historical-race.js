@@ -39,7 +39,9 @@ export function validateOfficialRacePayload(value) {
       throw new Error('official race start numbers must be unique integers');
     }
     numbers.add(number);
-    if (start.horse?.id == null || !maybeText(start.horse?.name)) throw new Error(`official race start ${number} is missing horse identity`);
+    // Some final-result payloads (notably foreign races) omit canonical horse identity.
+    // Keep that fact unknown here; normalization may still bind the result safely to the
+    // already stored pre-race entry by source_start_id / race + start number.
     if (start.scratched != null && typeof start.scratched !== 'boolean') throw new Error(`official race start ${number} has invalid scratched status`);
     if (start.result != null) requireObject(start.result, `official race start ${number} result`);
   }
@@ -120,42 +122,108 @@ async function ensureHistoricalRace(env, race, ctx) {
   return trackId;
 }
 
+async function findExistingEntry(env, race, start, horseId) {
+  const sourceStartId = maybeText(start.id);
+  if (sourceStartId) {
+    const { results } = await env.DB.prepare(`
+      SELECT id, horse_id, declared_horse_name
+      FROM race_entries
+      WHERE race_id = ? AND source_start_id = ?
+      LIMIT 2
+    `).bind(race.id, sourceStartId).all();
+    if (results.length > 1) throw new Error(`official race start ${start.number} matches multiple stored source_start_id entries`);
+    if (results.length === 1) return results[0];
+  }
+
+  if (horseId) {
+    const { results } = await env.DB.prepare(`
+      SELECT id, horse_id, declared_horse_name
+      FROM race_entries
+      WHERE race_id = ? AND horse_id = ?
+      LIMIT 2
+    `).bind(race.id, horseId).all();
+    if (results.length > 1) throw new Error(`official race start ${start.number} matches multiple stored horse entries`);
+    if (results.length === 1) return results[0];
+  }
+
+  const { results } = await env.DB.prepare(`
+    SELECT id, horse_id, declared_horse_name
+    FROM race_entries
+    WHERE race_id = ? AND start_number = ?
+    LIMIT 2
+  `).bind(race.id, start.number).all();
+  if (results.length > 1) throw new Error(`official race start ${start.number} is ambiguous in stored pre-race entries`);
+  return results[0] || null;
+}
+
 async function mapHistoricalStart(env, race, start, ctx) {
-  const trainerId = await upsertPerson(env, 'trainer', start.horse?.trainer, ctx);
-  const driverId = await upsertPerson(env, 'driver', start.driver, ctx);
-  const horseId = await upsertHorse(env, start.horse, trainerId, ctx);
-  const existingEntry = await env.DB.prepare(
-    'SELECT id FROM race_entries WHERE race_id = ? AND horse_id = ? LIMIT 1'
-  ).bind(race.id, horseId).first();
+  const horseName = maybeText(start.horse?.name);
+  const horseExternalId = start.horse?.id == null ? null : String(start.horse.id);
+  const hasCanonicalHorseIdentity = horseExternalId != null && horseName != null;
+
+  const trainerId = start.horse?.trainer
+    ? await upsertPerson(env, 'trainer', start.horse.trainer, ctx)
+    : null;
+  const driverId = start.driver
+    ? await upsertPerson(env, 'driver', start.driver, ctx)
+    : null;
+  const horseId = hasCanonicalHorseIdentity
+    ? await upsertHorse(env, start.horse, trainerId, ctx)
+    : null;
+
+  const existingEntry = await findExistingEntry(env, race, start, horseId);
+  if (!existingEntry && !horseId) {
+    throw new Error(`official race start ${start.number} is missing horse identity and has no unique stored pre-race entry`);
+  }
+
   const entryId = existingEntry?.id || stableId('entry', race.id, horseId);
+  const storedHorseId = horseId || existingEntry?.horse_id || null;
+  const declaredHorseName = horseName || maybeText(existingEntry?.declared_horse_name);
   const pos = startPosition(race, start);
   const scratched = start.scratched === true;
 
   await env.DB.prepare(`
     INSERT INTO race_entries
-      (id, race_id, horse_id, driver_id, trainer_id, start_number, actual_lane, start_tier,
-       handicap_m, actual_start_distance_m, scratched, scratch_reason, data_quality)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
+      (id, race_id, horse_id, driver_id, trainer_id, source_start_id, declared_horse_name,
+       start_number, actual_lane, start_tier, handicap_m, actual_start_distance_m,
+       scratched, scratch_reason, data_quality)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
     ON CONFLICT(id) DO UPDATE SET
-      driver_id = excluded.driver_id,
-      trainer_id = excluded.trainer_id,
+      horse_id = COALESCE(excluded.horse_id, race_entries.horse_id),
+      driver_id = COALESCE(excluded.driver_id, race_entries.driver_id),
+      trainer_id = COALESCE(excluded.trainer_id, race_entries.trainer_id),
+      source_start_id = COALESCE(excluded.source_start_id, race_entries.source_start_id),
+      declared_horse_name = COALESCE(excluded.declared_horse_name, race_entries.declared_horse_name),
       start_number = excluded.start_number,
-      actual_lane = excluded.actual_lane,
-      start_tier = excluded.start_tier,
-      handicap_m = excluded.handicap_m,
-      actual_start_distance_m = excluded.actual_start_distance_m,
+      actual_lane = COALESCE(excluded.actual_lane, race_entries.actual_lane),
+      start_tier = COALESCE(excluded.start_tier, race_entries.start_tier),
+      handicap_m = COALESCE(excluded.handicap_m, race_entries.handicap_m),
+      actual_start_distance_m = COALESCE(excluded.actual_start_distance_m, race_entries.actual_start_distance_m),
       scratched = excluded.scratched,
       data_quality = excluded.data_quality,
       updated_at = CURRENT_TIMESTAMP
   `).bind(
-    entryId, race.id, horseId, driverId, trainerId, start.number, pos.lane, pos.tier,
-    pos.handicapM, pos.actualDistance, Number(scratched), ENTRY_QUALITY
+    entryId,
+    race.id,
+    storedHorseId,
+    driverId,
+    trainerId,
+    maybeText(start.id),
+    declaredHorseName,
+    start.number,
+    pos.lane,
+    pos.tier,
+    pos.handicapM,
+    pos.actualDistance,
+    Number(scratched),
+    ENTRY_QUALITY
   ).run();
 
   await recordObservation(env, ctx.counts, 'race_entry', entryId, ctx.sourceRecordId, ctx.observedAt, {
     externalStartId: maybeText(start.id),
     raceExternalId: race.id,
-    horseExternalId: String(start.horse.id),
+    horseExternalId,
+    horseName: declaredHorseName,
     driverExternalId: start.driver?.id == null ? null : String(start.driver.id),
     trainerExternalId: start.horse?.trainer?.id == null ? null : String(start.horse.trainer.id),
     startNumber: start.number,
@@ -164,9 +232,12 @@ async function mapHistoricalStart(env, race, start, ctx) {
     handicapM: pos.handicapM,
     startTier: pos.tier,
     scratched,
-    scratchSemanticsVerified: true
+    scratchSemanticsVerified: true,
+    matchedStoredEntryWithoutHorseIdentity: !hasCanonicalHorseIdentity && Boolean(existingEntry)
   });
-  await insertEquipment(env, entryId, start.horse, ctx);
+  if (start.horse && typeof start.horse === 'object') {
+    await insertEquipment(env, entryId, start.horse, ctx);
+  }
 
   const result = start.result && typeof start.result === 'object' ? start.result : null;
   if (!result) return;
