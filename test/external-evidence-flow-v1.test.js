@@ -188,6 +188,7 @@ test('Step 3 historical context excludes evidence unavailable at the round cutof
   assert.equal(context.historical_external_statistics.length, 2);
   assert.deepEqual(context.historical_external_statistics.map((row) => row.starts), [24,25]);
   assert.equal(context.historical_interviews.length, 2);
+  assert.ok(context.historical_interviews.every((row) => row.change_since_last === true && row.change_summary));
   assert.deepEqual(context.historical_interviews.map((row) => row.published_at), [
     '2026-09-19T13:00:00.000Z',
     '2026-09-19T12:00:00.000Z'
@@ -226,6 +227,11 @@ test('external evidence import fails closed on mismatched context, trainer and f
   const invalidChangeType = payload('invalid-change-type');
   invalidChangeType.interviews[0].change_since_last = 'yes';
   await assert.rejects(() => importExternalEvidence(env, invalidChangeType), /change_since_last must be boolean or null/);
+
+  const invalidSignalType = payload('invalid-signal-type');
+  invalidSignalType.interviews[0].signals[0].type = 'mood';
+  await assert.rejects(() => importExternalEvidence(env, invalidSignalType), /unsupported interview signal type/);
+
 
   const missingChangeSummary = payload('missing-change-summary');
   missingChangeSummary.interviews[0].change_summary = null;
