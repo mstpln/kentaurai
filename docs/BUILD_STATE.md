@@ -12,6 +12,16 @@
 - Entity lists, detail pages, statistics tabs, track pages, Spel tabs, search and all underlying data/API behavior remain unchanged.
 - No schema migration or private-data change is required.
 
+## Trend and detail-statistics refresh candidate
+- Branch: `feat/trend-detail-statistics-refresh`.
+- Trend remains **Tränare / Hästar / Kuskar**. Tränare/Kuskar retain deterministic win-rate ranking.
+- Hästar uses the existing deterministic **Form (1–100)** as the ranking metric, with **3 months** and **minimum 3 starts** as category defaults. Rows show recent placings, starts, wins, Seger %, Topp 3 % and Prispengar.
+- Trend Loppnivå is a dropdown inside the existing sliders-filter panel.
+- Tränare/Hästar/Kuskar detail Statistik uses **1 year + Högre prissumma** as defaults, the Trend sliders icon for secondary filters, and a Loppnivå dropdown.
+- Core detail statistics paint before Form/specialty/horse-extra hydration; prefetch uses the exact default filter request.
+- X-Labs local interval derivation rejects sub-50.0-second/km pace as `pace_outlier`. Read paths also suppress already-persisted impossible opening/closing values instead of clamping them.
+- No schema migration, market contamination, AI judgment or model-weight change is introduced.
+
 # Build state
 
 Version: 0.6.0
