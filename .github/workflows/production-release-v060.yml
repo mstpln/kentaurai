@@ -114,7 +114,7 @@ jobs:
           grep -q '0029_xlabs_interval_backfill.sql' /tmp/migration-check.txt
           grep -q '0030_interview_change_marker.sql' /tmp/migration-check.txt
 
-          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT id,game_round_id,status,settled_legs,attempt_count,next_check_at,last_error,started_at,completed_at,created_at,updated_at FROM post_race_settlement_jobs LIMIT 0; SELECT name FROM d1_migrations WHERE name='0031_post_race_settlement.sql'; SELECT name FROM sqlite_master WHERE type='index' AND name='idx_post_race_settlement_due';" > /tmp/post-race-settlement-schema-check.txt
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT id,game_round_id,status,settled_legs,attempt_count,next_check_at,last_error,started_at,completed_at,created_at,updated_at FROM post_race_settlement_jobs LIMIT 0; SELECT name FROM sqlite_master WHERE type='table' AND name='post_race_settlement_jobs'; SELECT name FROM d1_migrations WHERE name='0031_post_race_settlement.sql'; SELECT name FROM sqlite_master WHERE type='index' AND name='idx_post_race_settlement_due';" > /tmp/post-race-settlement-schema-check.txt
           grep -q 'post_race_settlement_jobs' /tmp/post-race-settlement-schema-check.txt
           grep -q '0031_post_race_settlement.sql' /tmp/post-race-settlement-schema-check.txt
           grep -q 'idx_post_race_settlement_due' /tmp/post-race-settlement-schema-check.txt
