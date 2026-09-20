@@ -74,6 +74,8 @@ function payload(exportId = 'manual-export-1', exportedAt = '2099-09-20T11:00:00
       speaker_role:'stable_representative',
       published_at:exportedAt,
       summary:'Hästen uppges träna bra och stallet planerar ett offensivt upplägg. Utrustningen är oförändrad.',
+      change_since_last:true,
+      change_summary:'Träningsintrycket uppges vara bättre än inför föregående start.',
       signals:[
         { type:'training',value:'Tränar bra',polarity:'positive',strength:0.7,fact_or_opinion:'soft_signal',confidence:0.8,evidence_excerpt:'Kort syntetiskt utdrag.' },
         { type:'tactics',value:'Offensivt upplägg',polarity:'positive',strength:0.6,fact_or_opinion:'intention',confidence:0.7,evidence_excerpt:null }
@@ -142,6 +144,13 @@ test('external statistics and interviews import append-only and are readable fro
   assert.equal(horseInterviews.items[0].id, trainerInterviews.items[0].id);
   assert.equal(trainerInterviews.items[0].speakerName, 'Synthetic Speaker');
   assert.equal(trainerInterviews.items[0].signals.length, 2);
+  assert.equal(horseInterviews.items[0].raceDate, '2099-09-20');
+  assert.equal(horseInterviews.items[0].trackName, 'Synthetic Track');
+  assert.equal(horseInterviews.items[0].raceNumber, 1);
+  assert.equal(horseInterviews.items[0].startMethod, 'auto');
+  assert.equal(horseInterviews.items[0].postPosition, 1);
+  assert.equal(horseInterviews.items[0].changeSinceLast, true);
+  assert.equal(horseInterviews.items[0].changeSummary, 'Träningsintrycket uppges vara bättre än inför föregående start.');
 
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM external_horse_stat_snapshots WHERE horse_id=?").get(HORSE_ID).n, 3);
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM editorial_items WHERE trainer_id=?").get(TRAINER_ID).n, 1);
@@ -213,6 +222,18 @@ test('external evidence import fails closed on mismatched context, trainer and f
   const fullText = payload('full-text');
   fullText.interviews[0].full_text = 'Synthetic paid text must not be persisted.';
   await assert.rejects(() => importExternalEvidence(env, fullText), /full interview text is not accepted/);
+
+  const invalidChangeType = payload('invalid-change-type');
+  invalidChangeType.interviews[0].change_since_last = 'yes';
+  await assert.rejects(() => importExternalEvidence(env, invalidChangeType), /change_since_last must be boolean or null/);
+
+  const missingChangeSummary = payload('missing-change-summary');
+  missingChangeSummary.interviews[0].change_summary = null;
+  await assert.rejects(() => importExternalEvidence(env, missingChangeSummary), /change_summary is required/);
+
+  const orphanChangeSummary = payload('orphan-change-summary');
+  orphanChangeSummary.interviews[0].change_since_last = null;
+  await assert.rejects(() => importExternalEvidence(env, orphanChangeSummary), /change_summary requires change_since_last=true/);
 
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM external_horse_stat_snapshots").get().n, 0);
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM editorial_items").get().n, 0);
