@@ -161,6 +161,41 @@ function buildCoreRanking(filters, metric, extraConditions = [], { includePeriod
   };
 }
 
+function buildCoreRankingSet(filters) {
+  const conditions = ['re.scratched = 0', 're.trainer_id IS NOT NULL'];
+  const bindings = [];
+  addTrainerFilters(conditions, bindings, filters);
+  const minimum = filters.minStarts == null ? 1 : Number(filters.minStarts);
+  bindings.push(minimum, minimum);
+  return {
+    sql:`WITH trainer_stats AS MATERIALIZED (
+      SELECT t.id AS entity_id,t.canonical_name AS name,${coreMetricSelectSql('rr')}
+      FROM races r INDEXED BY idx_races_date
+      JOIN race_entries re ON re.race_id=r.id
+      JOIN race_results rr ON rr.race_entry_id=re.id
+      JOIN horses h ON h.id=re.horse_id
+      JOIN trainers t ON t.id=re.trainer_id
+      WHERE ${conditions.join(' AND ')}
+      GROUP BY t.id,t.canonical_name
+    ), ranked AS (
+      SELECT 'winRate' ranking_metric,ts.*,
+        ROW_NUMBER() OVER(ORDER BY wins*1.0/starts DESC,wins DESC,starts DESC,entity_id ASC) rn
+      FROM trainer_stats ts WHERE starts>=?
+      UNION ALL
+      SELECT 'top3Rate' ranking_metric,ts.*,
+        ROW_NUMBER() OVER(ORDER BY top3*1.0/result_starts DESC,top3 DESC,result_starts DESC,entity_id ASC) rn
+      FROM trainer_stats ts WHERE starts>=? AND result_starts>0
+      UNION ALL
+      SELECT 'wins' ranking_metric,ts.*,
+        ROW_NUMBER() OVER(ORDER BY wins DESC,wins*1.0/starts DESC,starts DESC,entity_id ASC) rn
+      FROM trainer_stats ts WHERE starts>0
+    )
+    SELECT * FROM ranked WHERE rn<=10 ORDER BY ranking_metric,rn`,
+    bindings
+  };
+}
+function rankingRows(rows,metric){return rows.filter(row=>row.ranking_metric===metric);}
+
 function buildFormQuery(filters, trainerId = null, limit = true) {
   const conditions = ['re.scratched=0','re.trainer_id IS NOT NULL','rr.placing IS NOT NULL','rr.placing > 0'];
   const bindings = [];
@@ -283,6 +318,112 @@ function profileCondition(kind) {
 function buildDistanceProfileRanking(filters,kind){return buildCoreRanking({...filters,distanceGroup:'all'},'winRate',[profileCondition(kind)],{applyMinimumStarts:true});}
 function buildHandicapRanking(filters){return buildCoreRanking(filters,'winRate',[`${canonicalStartMethodSql('r')}='volt'`,'re.handicap_m>0','re.actual_start_distance_m IS NOT NULL','r.distance_m IS NOT NULL','re.actual_start_distance_m-r.distance_m=re.handicap_m'],{applyMinimumStarts:true});}
 
+function buildPerformanceRankingSet(filters){
+  const conditions=['re.scratched=0','re.trainer_id IS NOT NULL'];const bindings=[];
+  addTrainerFilters(conditions,bindings,filters);
+  const minimum=filters.minStarts==null?1:Number(filters.minStarts);bindings.push(minimum);
+  return{sql:`WITH filtered AS MATERIALIZED (
+    SELECT t.id entity_id,t.canonical_name name,rr.race_entry_id,rr.placing,rr.gallop,rr.disqualified,rr.prize_sek,
+      ${canonicalStartMethodSql('r')} start_method_group,re.actual_lane,re.handicap_m,re.actual_start_distance_m,r.distance_m
+    FROM races r INDEXED BY idx_races_date
+    JOIN race_entries re ON re.race_id=r.id
+    JOIN race_results rr ON rr.race_entry_id=re.id
+    JOIN horses h ON h.id=re.horse_id
+    JOIN trainers t ON t.id=re.trainer_id
+    WHERE ${conditions.join(' AND ')}
+  ), categorized AS (
+    SELECT 'auto' category,* FROM filtered WHERE start_method_group='auto'
+    UNION ALL SELECT 'volt',* FROM filtered WHERE start_method_group='volt'
+    UNION ALL SELECT 'goodVolt',* FROM filtered WHERE start_method_group='volt' AND actual_lane IN (1,6,7)
+    UNION ALL SELECT 'otherVolt',* FROM filtered WHERE start_method_group='volt' AND actual_lane IS NOT NULL AND actual_lane NOT IN (1,6,7)
+    UNION ALL SELECT 'handicap',* FROM filtered WHERE start_method_group='volt' AND handicap_m>0 AND actual_start_distance_m IS NOT NULL AND distance_m IS NOT NULL AND actual_start_distance_m-distance_m=handicap_m
+  ), stats AS (
+    SELECT category,entity_id,name,${coreMetricSelectSql('c')}
+    FROM categorized c GROUP BY category,entity_id,name HAVING COUNT(*)>=?
+  ), ranked AS (
+    SELECT *,ROW_NUMBER() OVER(PARTITION BY category ORDER BY wins*1.0/starts DESC,wins DESC,starts DESC,entity_id ASC) rn
+    FROM stats
+  ) SELECT * FROM ranked WHERE rn<=10 ORDER BY category,rn`,bindings};
+}
+function buildDistanceProfileRankingSet(filters){
+  const scoped={...filters,distanceGroup:'all'};const conditions=['re.scratched=0','re.trainer_id IS NOT NULL'];const bindings=[];
+  addTrainerFilters(conditions,bindings,scoped);const minimum=filters.minStarts==null?1:Number(filters.minStarts);bindings.push(minimum);
+  return{sql:`WITH filtered AS MATERIALIZED (
+    SELECT t.id entity_id,t.canonical_name name,rr.race_entry_id,rr.placing,rr.gallop,rr.disqualified,rr.prize_sek,r.distance_m
+    FROM races r INDEXED BY idx_races_date
+    JOIN race_entries re ON re.race_id=r.id JOIN race_results rr ON rr.race_entry_id=re.id
+    JOIN horses h ON h.id=re.horse_id JOIN trainers t ON t.id=re.trainer_id
+    WHERE ${conditions.join(' AND ')}
+  ), categorized AS (
+    SELECT 'short' category,* FROM filtered WHERE distance_m BETWEEN 540 AND 740 OR distance_m BETWEEN 1540 AND 1740
+    UNION ALL SELECT 'medium',* FROM filtered WHERE distance_m BETWEEN 2040 AND 2240
+    UNION ALL SELECT 'long',* FROM filtered WHERE distance_m>=2540
+  ), stats AS (
+    SELECT category,entity_id,name,${coreMetricSelectSql('c')} FROM categorized c
+    GROUP BY category,entity_id,name HAVING COUNT(*)>=?
+  ), ranked AS (
+    SELECT *,ROW_NUMBER() OVER(PARTITION BY category ORDER BY wins*1.0/starts DESC,wins DESC,starts DESC,entity_id ASC) rn FROM stats
+  ) SELECT * FROM ranked WHERE rn<=10 ORDER BY category,rn`,bindings};
+}
+function buildHomeRankingSet(filters){
+  const conditions=['re.scratched=0','re.trainer_id IS NOT NULL'];const bindings=[];
+  addTrainerFilters(conditions,bindings,filters);const minimum=filters.minStarts==null?1:Number(filters.minStarts);bindings.push(minimum);
+  return{sql:`WITH ${verifiedHomeTrackCte()}, filtered AS MATERIALIZED (
+    SELECT t.id entity_id,t.canonical_name name,rr.race_entry_id,rr.placing,rr.gallop,rr.disqualified,rr.prize_sek,r.track_id,th.home_track_id
+    FROM races r INDEXED BY idx_races_date
+    JOIN race_entries re ON re.race_id=r.id JOIN race_results rr ON rr.race_entry_id=re.id
+    JOIN horses h ON h.id=re.horse_id JOIN trainers t ON t.id=re.trainer_id
+    JOIN trainer_home th ON th.trainer_id=re.trainer_id AND th.home_track_id IS NOT NULL
+    WHERE ${conditions.join(' AND ')}
+  ), categorized AS (
+    SELECT 'home' category,* FROM filtered WHERE track_id=home_track_id
+    UNION ALL SELECT 'away',* FROM filtered WHERE track_id<>home_track_id
+  ), stats AS (
+    SELECT category,entity_id,name,${coreMetricSelectSql('c')} FROM categorized c
+    GROUP BY category,entity_id,name HAVING COUNT(*)>=?
+  ), ranked AS (
+    SELECT *,ROW_NUMBER() OVER(PARTITION BY category ORDER BY wins*1.0/starts DESC,wins DESC,starts DESC,entity_id ASC) rn FROM stats
+  ) SELECT * FROM ranked WHERE rn<=10 ORDER BY category,rn`,bindings};
+}
+function buildMarketRankingSet(filters){
+  const conditions=['re.scratched=0','re.trainer_id IS NOT NULL'];const bindings=[];
+  addTrainerFilters(conditions,bindings,filters);const minimum=filters.minStarts==null?1:Number(filters.minStarts);bindings.push(DRIVER_LONGSHOT_PERCENT_MAX,minimum);
+  return{sql:`WITH ${marketAtStopCte()}, filtered AS MATERIALIZED (
+    SELECT t.id entity_id,t.canonical_name name,rr.race_entry_id,rr.placing,rr.gallop,rr.disqualified,rr.prize_sek,m.market_rank,m.bet_percent
+    FROM races r INDEXED BY idx_races_date
+    JOIN race_entries re ON re.race_id=r.id JOIN race_results rr ON rr.race_entry_id=re.id
+    JOIN horses h ON h.id=re.horse_id JOIN trainers t ON t.id=re.trainer_id
+    JOIN market_at_stop m ON m.race_entry_id=re.id
+    WHERE ${conditions.join(' AND ')}
+  ), categorized AS (
+    SELECT 'favorite' category,* FROM filtered WHERE market_rank=1
+    UNION ALL SELECT 'longshot',* FROM filtered WHERE bet_percent IS NOT NULL AND bet_percent>=0 AND bet_percent<=?
+  ), stats AS (
+    SELECT category,entity_id,name,${coreMetricSelectSql('c')} FROM categorized c
+    GROUP BY category,entity_id,name HAVING COUNT(*)>=?
+  ), ranked AS (
+    SELECT *,ROW_NUMBER() OVER(PARTITION BY category ORDER BY wins*1.0/starts DESC,wins DESC,starts DESC,entity_id ASC) rn FROM stats
+  ) SELECT * FROM ranked WHERE rn<=10 ORDER BY category,rn`,bindings};
+}
+function buildRestRankingSet(filters){
+  const conditions=[];const bindings=[];addStagedFilters(conditions,bindings,filters);
+  const minimum=filters.minStarts==null?1:Number(filters.minStarts);bindings.push(minimum);
+  return{sql:`WITH ${restSequenceCte()}, filtered AS MATERIALIZED (
+    SELECT * FROM staged s WHERE ${conditions.join(' AND ')}
+  ), categorized AS (
+    SELECT 'first' category,* FROM filtered WHERE days_since_previous>=${REST_DAYS}
+    UNION ALL SELECT 'second',* FROM filtered WHERE previous_gap>=${REST_DAYS} AND days_since_previous<${REST_DAYS}
+  ), stats AS (
+    SELECT category,entity_id,name,COUNT(*) starts,SUM(CASE WHEN placing=1 THEN 1 ELSE 0 END) wins,SUM(CASE WHEN placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) top3
+    FROM categorized GROUP BY category,entity_id,name HAVING COUNT(*)>=?
+  ), ranked AS (
+    SELECT *,wins*1.0/starts win_rate,top3*1.0/starts top3_rate,
+      ROW_NUMBER() OVER(PARTITION BY category ORDER BY wins*1.0/starts DESC,wins DESC,starts DESC,entity_id ASC) rn
+    FROM stats
+  ) SELECT * FROM ranked WHERE rn<=10 ORDER BY category,rn`,bindings};
+}
+function categoryRows(rows,category){return rows.filter(row=>row.category===category);}
+
 async function run(env,q){const {results}=await env.DB.prepare(q.sql).bind(...q.bindings).all();return results||[];}
 function mapCoreRanking(rows,metric){return rows.map((row,index)=>{const core=mapCoreMetricRow(row);return{rank:index+1,id:row.entity_id,name:row.name,...core,earningsPerVerifiedStart:core.prizeVerifiedStarts?core.prizeSek/core.prizeVerifiedStarts:null,rankingMetric:metric};});}
 function mapRest(rows){return rows.map((row,index)=>({rank:index+1,id:row.entity_id,name:row.name,starts:Number(row.starts),wins:Number(row.wins),top3:Number(row.top3),winRate:Number(row.win_rate),top3Rate:Number(row.top3_rate)}));}
@@ -291,29 +432,27 @@ function mapForm(rows){return rows.map((row,index)=>({rank:index+1,id:row.entity
 export async function getTrainerRankings(env,options={}){
   if(!env.DB)throw new Error('DB is not configured');const f=normalizeTrainerStatsFilters(options);await validateTrack(env,f.trackId);
   if(options.mode==='core'){
-    const [win,top3,wins,form]=await Promise.all([
-      run(env,buildCoreRanking(f,'winRate')),run(env,buildCoreRanking(f,'top3Rate')),run(env,buildCoreRanking(f,'wins')),run(env,buildFormQuery(f))
+    const [coreRows,form]=await Promise.all([
+      run(env,buildCoreRankingSet(f)),run(env,buildFormQuery(f))
     ]);
     return {filters:f,partial:true,definitions:{longshotPercentMax:DRIVER_LONGSHOT_PERCENT_MAX,market:DRIVER_MARKET_DEFINITION_VERSION,voltLaneGood:[1,6,7],restDays:REST_DAYS,distanceProfile:DISTANCE_PROFILE_VERSION},rankings:{
-      highestWinRate:mapCoreRanking(win,'winRate'),highestTop3Rate:mapCoreRanking(top3,'top3Rate'),mostWins:mapCoreRanking(wins,'wins'),bestFormLast30:mapForm(form)
+      highestWinRate:mapCoreRanking(rankingRows(coreRows,'winRate'),'winRate'),highestTop3Rate:mapCoreRanking(rankingRows(coreRows,'top3Rate'),'top3Rate'),mostWins:mapCoreRanking(rankingRows(coreRows,'wins'),'wins'),bestFormLast30:mapForm(form)
     }};
   }
   if(options.mode==='extended'){
-    const [annual,perStart,auto,volt,goodVolt,otherVolt,handicap,home,away,short,medium,long,favorite,longshot,firstRest,secondRest]=await Promise.all([
+    const [annual,perStart,performance,home,distance,market,rest]=await Promise.all([
       run(env,buildCoreRanking(f,'earnings',[],{includePeriod:false})),run(env,buildCoreRanking(f,'earningsPerVerifiedStart')),
-      run(env,buildCoreRanking(f,'winRate',[`${canonicalStartMethodSql('r')}='auto'`],{applyMinimumStarts:true})),
-      run(env,buildCoreRanking(f,'winRate',[`${canonicalStartMethodSql('r')}='volt'`],{applyMinimumStarts:true})),
-      run(env,buildCoreRanking(f,'winRate',[`${canonicalStartMethodSql('r')}='volt'`,'re.actual_lane IN (1,6,7)'],{applyMinimumStarts:true})),
-      run(env,buildCoreRanking(f,'winRate',[`${canonicalStartMethodSql('r')}='volt'`,'re.actual_lane IS NOT NULL','re.actual_lane NOT IN (1,6,7)'],{applyMinimumStarts:true})),
-      run(env,buildHandicapRanking(f)),run(env,buildHomeRanking(f,true)),run(env,buildHomeRanking(f,false)),
-      run(env,buildDistanceProfileRanking(f,'short')),run(env,buildDistanceProfileRanking(f,'medium')),run(env,buildDistanceProfileRanking(f,'long')),
-      run(env,buildMarketRanking(f,'favorite')),run(env,buildMarketRanking(f,'longshot')),run(env,buildRestRanking(f,'first')),run(env,buildRestRanking(f,'second'))
+      run(env,buildPerformanceRankingSet(f)),run(env,buildHomeRankingSet(f)),run(env,buildDistanceProfileRankingSet(f)),
+      run(env,buildMarketRankingSet(f)),run(env,buildRestRankingSet(f))
     ]);
     return {filters:f,partial:false,definitions:{longshotPercentMax:DRIVER_LONGSHOT_PERCENT_MAX,market:DRIVER_MARKET_DEFINITION_VERSION,voltLaneGood:[1,6,7],restDays:REST_DAYS,distanceProfile:DISTANCE_PROFILE_VERSION},rankings:{
-      mostEarningsThisYear:mapCoreRanking(annual,'earnings'),highestEarningsPerStart:mapCoreRanking(perStart,'earningsPerVerifiedStart'),bestAuto:mapCoreRanking(auto,'winRate'),bestVolt:mapCoreRanking(volt,'winRate'),
-      bestGoodVoltLane:mapCoreRanking(goodVolt,'winRate'),bestOtherVoltLane:mapCoreRanking(otherVolt,'winRate'),bestWithHandicap:mapCoreRanking(handicap,'winRate'),
-      bestHomeTrack:mapCoreRanking(home,'winRate'),bestOtherTracks:mapCoreRanking(away,'winRate'),bestShortDistance:mapCoreRanking(short,'winRate'),bestMediumDistance:mapCoreRanking(medium,'winRate'),bestLongDistance:mapCoreRanking(long,'winRate'),
-      favoriteResults:mapCoreRanking(favorite,'winRate'),longshotResults:mapCoreRanking(longshot,'winRate'),firstAfterRest:mapRest(firstRest),secondAfterRest:mapRest(secondRest)
+      mostEarningsThisYear:mapCoreRanking(annual,'earnings'),highestEarningsPerStart:mapCoreRanking(perStart,'earningsPerVerifiedStart'),
+      bestAuto:mapCoreRanking(categoryRows(performance,'auto'),'winRate'),bestVolt:mapCoreRanking(categoryRows(performance,'volt'),'winRate'),
+      bestGoodVoltLane:mapCoreRanking(categoryRows(performance,'goodVolt'),'winRate'),bestOtherVoltLane:mapCoreRanking(categoryRows(performance,'otherVolt'),'winRate'),bestWithHandicap:mapCoreRanking(categoryRows(performance,'handicap'),'winRate'),
+      bestHomeTrack:mapCoreRanking(categoryRows(home,'home'),'winRate'),bestOtherTracks:mapCoreRanking(categoryRows(home,'away'),'winRate'),
+      bestShortDistance:mapCoreRanking(categoryRows(distance,'short'),'winRate'),bestMediumDistance:mapCoreRanking(categoryRows(distance,'medium'),'winRate'),bestLongDistance:mapCoreRanking(categoryRows(distance,'long'),'winRate'),
+      favoriteResults:mapCoreRanking(categoryRows(market,'favorite'),'winRate'),longshotResults:mapCoreRanking(categoryRows(market,'longshot'),'winRate'),
+      firstAfterRest:mapRest(categoryRows(rest,'first')),secondAfterRest:mapRest(categoryRows(rest,'second'))
     }};
   }
   const [win,top3,wins,form,annual,perStart,auto,volt,goodVolt,otherVolt,handicap,home,away,short,medium,long,favorite,longshot,firstRest,secondRest]=await Promise.all([

@@ -71,8 +71,11 @@ test('trainer home and away rankings require latest verified official home-track
   race(db,'ra','2026-09-02',{track:'track-b',number:2});entry(db,'ea','ra','trainer-a',{placing:2});
   race(db,'ru','2026-09-03',{track:'track-a',number:3});entry(db,'eu','ru','trainer-b',{placing:1});
   const data=await getTrainerRankings(env,{period:'1y',asOfDate:'2026-09-11'});
+  const extended=await getTrainerRankings(env,{period:'1y',asOfDate:'2026-09-11',mode:'extended'});
   assert.equal(data.rankings.bestHomeTrack[0].id,'trainer-a');
   assert.equal(data.rankings.bestOtherTracks[0].id,'trainer-a');
+  assert.deepEqual(extended.rankings.bestHomeTrack,data.rankings.bestHomeTrack);
+  assert.deepEqual(extended.rankings.bestOtherTracks,data.rankings.bestOtherTracks);
   assert.equal(data.rankings.bestHomeTrack.some(x=>x.id==='trainer-b'),false,'unknown home track must not be inferred');
   const detail=await getTrainerDetailStatistics(env,'trainer-a',{period:'1y',asOfDate:'2026-09-11'});
   assert.equal(detail.homeTrackResults.starts,1);assert.equal(detail.homeTrackResults.wins,1);assert.equal(detail.otherTrackResults.starts,1);
@@ -96,8 +99,13 @@ test('trainer favorite/longshot and rest blocks use factual source-backed sample
   race(db,'r2','2026-07-10',{number:3});entry(db,'e2','r2','trainer-a',{placing:2});
   race(db,'race-market','2026-09-05',{number:4});entry(db,'entry-market','race-market','trainer-a',{placing:1,prize:25000});market(db,'entry-market',{percent:5,rank:1});
   const data=await getTrainerRankings(env,{period:'1y',asOfDate:'2026-09-11'});
+  const extended=await getTrainerRankings(env,{period:'1y',asOfDate:'2026-09-11',mode:'extended'});
   assert.equal(data.rankings.favoriteResults[0].id,'trainer-a');assert.equal(data.rankings.longshotResults[0].id,'trainer-a');
   assert.equal(data.rankings.firstAfterRest[0].id,'trainer-a');assert.equal(data.rankings.secondAfterRest[0].id,'trainer-a');
+  assert.deepEqual(extended.rankings.favoriteResults,data.rankings.favoriteResults);
+  assert.deepEqual(extended.rankings.longshotResults,data.rankings.longshotResults);
+  assert.deepEqual(extended.rankings.firstAfterRest,data.rankings.firstAfterRest);
+  assert.deepEqual(extended.rankings.secondAfterRest,data.rankings.secondAfterRest);
   const detail=await getTrainerDetailStatistics(env,'trainer-a',{period:'1y',asOfDate:'2026-09-11'});
   assert.equal(detail.firstAfterRest.starts,1);assert.equal(detail.secondAfterRest.starts,1);assert.equal(detail.favoriteResults.starts,1);
 });
@@ -108,6 +116,10 @@ test('trainer distance profiles use canonical short/medium/long groups', async (
   race(db,'rm','2026-09-02',{distance:2140,number:2});entry(db,'em','rm','trainer-b',{placing:1,actualDistance:2140});
   race(db,'rl','2026-09-03',{distance:2640,number:3});entry(db,'el','rl','trainer-a',{placing:1,actualDistance:2640});
   const data=await getTrainerRankings(env,{period:'1y',asOfDate:'2026-09-11'});
+  const extended=await getTrainerRankings(env,{period:'1y',asOfDate:'2026-09-11',mode:'extended'});
   assert.equal(data.rankings.bestShortDistance[0].id,'trainer-a');assert.equal(data.rankings.bestMediumDistance[0].id,'trainer-b');assert.equal(data.rankings.bestLongDistance[0].id,'trainer-a');
+  assert.deepEqual(extended.rankings.bestShortDistance,data.rankings.bestShortDistance);
+  assert.deepEqual(extended.rankings.bestMediumDistance,data.rankings.bestMediumDistance);
+  assert.deepEqual(extended.rankings.bestLongDistance,data.rankings.bestLongDistance);
   assert.equal(data.definitions.distanceProfile,'canonical-distance-profile-v1');
 });

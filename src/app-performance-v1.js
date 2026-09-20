@@ -3,7 +3,9 @@ function performanceClient() {
   const inflight = new Map();
   function ttl(path) {
     if (/\/statistics\/filter-options(?:\?|$)/.test(path) || path.startsWith('/trend/filter-options')) return 600000;
+    if (/^\/(horses|trainers|drivers)\/statistics(?:\?|$)/.test(path)) return 180000;
     if (/\/calendar-(statistics|specialties|form)(?:\?|$)/.test(path)) return 180000;
+    if (/\/top-speed(?:\?|$)/.test(path)) return 180000;
     if (path.startsWith('/trend?')) return 60000;
     if (/^\/entities\/(horses|trainers|drivers)\/[^/?]+(?:\?|$)/.test(path) || /^\/tracks\/[^/?]+(?:\?|$)/.test(path)) return 90000;
     if (/^\/entities\/(horses|trainers|drivers)(?:\?|$)/.test(path) || /^\/tracks(?:\?|$)/.test(path)) return 180000;
@@ -36,10 +38,19 @@ function performanceClient() {
   }
   function defaultCalendarPath(page,id){
     if(!['trainers','horses','drivers'].includes(page)||!id)return null;
-    const q=new URLSearchParams({year:String(new Date().getFullYear()),race_scope:'all',race_type:'all',breed_type:'all',sex:'all',age:'all',start_method:'all',distance_group:'all'});
+    const q=new URLSearchParams({year:String(new Date().getFullYear()),race_scope:'high_prize',race_type:'all',breed_type:'all',sex:'all',age:'all',start_method:'all',distance_group:'all'});
     if(page!=='horses'){q.set('volt_lane','all');q.set('handicap_m','all')}
     q.set('specials','0');
     return '/'+page+'/'+encodeURIComponent(id)+'/calendar-statistics?'+q.toString();
+  }
+  function defaultRankingPath(page,mode='core'){
+    if(!['trainers','horses','drivers'].includes(page))return null;
+    const base={period:'1y',race_scope:'high_prize',race_type:'all',breed_type:'all'};
+    const q=page==='horses'
+      ?new URLSearchParams({...base,start_method:'all',distance_group:'all',sex:'all',age:'all',min_starts:'3'})
+      :new URLSearchParams({...base,sex:'all',age:'all',start_method:'all',distance_group:'all',volt_lane:'all',handicap_m:'all',min_starts:'10'});
+    q.set('mode',mode);
+    return '/'+page+'/statistics?'+q.toString();
   }
   function loading(label){ return '<div class="kentaurai-fast-loading" role="status"><div class="kentaurai-fast-line"></div><div class="kentaurai-fast-line short"></div><span>'+esc(label)+'</span></div>'; }
   function show(page,label){ setNav(page); app.innerHTML=loading(label); }
@@ -71,14 +82,14 @@ function performanceClient() {
     }
     const track=target?.closest('[data-track-id]'); if(track) warm('/tracks/'+encodeURIComponent(track.dataset.trackId));
     const nav=target?.closest('.nav-item[data-page]'); if(nav) warm(listPath(nav.dataset.page));
-    const statisticsCategory=target?.closest('[data-statistics-page]'); if(statisticsCategory) warm(listPath(statisticsCategory.dataset.statisticsPage));
+    const statisticsCategory=target?.closest('[data-statistics-page]'); if(statisticsCategory){const page=statisticsCategory.dataset.statisticsPage;warm(listPath(page));warm(defaultRankingPath(page,'core'));}
   },{passive:true});
   document.addEventListener('pointerout',event=>{const target=event.target instanceof Element?event.target:null;if(target?.closest('.entity-row[data-id]'))clearTimeout(entityStatsWarmTimer)},{passive:true});
   document.addEventListener('focusin',event=>{
     const target=event.target instanceof Element?event.target:null;
     const row=target?.closest('.entity-row[data-id]'); if(row&&['trainers','horses','drivers'].includes(state.page)){ warm('/entities/'+state.page+'/'+encodeURIComponent(row.dataset.id)); warm(defaultCalendarPath(state.page,row.dataset.id)); const name=row.querySelector('.entity-name')?.textContent?.trim(); if(name&&(state.page==='trainers'||state.page==='drivers')) warm('/search?q='+encodeURIComponent(name)+'&limit=40'); }
     const track=target?.closest('[data-track-id]'); if(track) warm('/tracks/'+encodeURIComponent(track.dataset.trackId));
-    const statisticsCategory=target?.closest('[data-statistics-page]'); if(statisticsCategory) warm(listPath(statisticsCategory.dataset.statisticsPage));
+    const statisticsCategory=target?.closest('[data-statistics-page]'); if(statisticsCategory){const page=statisticsCategory.dataset.statisticsPage;warm(listPath(page));warm(defaultRankingPath(page,'core'));}
   });
   const idle=window.requestIdleCallback||((fn)=>setTimeout(fn,250));
   idle(()=>setTimeout(()=>{

@@ -30,7 +30,7 @@ test('horse statistics period queries reuse existing indexes and rest query keep
   await getHorseRankings(env, { period: '3m', asOfDate: '2026-09-11' });
 
   const core = captures.find((item) => item.sql.includes('WITH horse_stats AS'));
-  const xlabs = captures.find((item) => item.sql.includes('WITH latest_x AS'));
+  const xlabs = captures.find((item) => item.sql.includes('latest_x AS') && item.sql.includes('eligible_entries AS MATERIALIZED'));
   const rest = captures.find((item) => item.sql.includes('WITH actual AS'));
   assert.ok(core); assert.ok(xlabs); assert.ok(rest);
 

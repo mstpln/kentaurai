@@ -58,13 +58,14 @@ export async function getHorseStartPointRanking(env, filters) {
       JOIN horses h ON h.id = re.horse_id
       WHERE ${conditions.join(' AND ')}
     ), point_history AS (
-      SELECT horse_id, points, observed_at,
+      SELECT hp.horse_id, hp.points, hp.observed_at,
         ROW_NUMBER() OVER (
-          PARTITION BY horse_id
-          ORDER BY observed_at DESC, id DESC
+          PARTITION BY hp.horse_id
+          ORDER BY hp.observed_at DESC, hp.id DESC
         ) AS rn
-      FROM horse_start_points
-      WHERE substr(observed_at, 1, 10) <= ?
+      FROM eligible e
+      JOIN horse_start_points hp ON hp.horse_id = e.horse_id
+      WHERE substr(hp.observed_at, 1, 10) <= ?
     )
     SELECT e.horse_id AS id, e.name, p.points, p.observed_at
     FROM eligible e

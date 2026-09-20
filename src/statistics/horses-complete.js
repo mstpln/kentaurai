@@ -11,8 +11,12 @@ import { getHorseTopSpeedProfile } from './horse-top-speed.js';
 export { getHorseFilterOptions, normalizeHorseStatsFilters };
 
 export async function getHorseRankings(env, options = {}) {
-  const data = await getBaseHorseRankings(env, options);
-  const highestStartPoints = await getHorseStartPointRanking(env, data.filters);
+  if (options.mode === 'core') return getBaseHorseRankings(env, options);
+  const filters = normalizeHorseStatsFilters(options);
+  const [data, highestStartPoints] = await Promise.all([
+    getBaseHorseRankings(env, options),
+    getHorseStartPointRanking(env, filters)
+  ]);
   return {
     ...data,
     rankings: {

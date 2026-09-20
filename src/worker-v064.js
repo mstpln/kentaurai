@@ -23,7 +23,7 @@ import { getDriverDetailStatistics, getDriverFilterOptions, getDriverRankings } 
 import { getTrainerDetailStatistics, getTrainerFilterOptions, getTrainerRankings } from './statistics/trainers.js';
 
 function json(data, status = 200) {
-  return new Response(JSON.stringify(data, null, 2), {
+  return new Response(JSON.stringify(data), {
     status,
     headers: {
       'content-type': 'application/json; charset=utf-8',
