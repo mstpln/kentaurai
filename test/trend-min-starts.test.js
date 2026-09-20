@@ -31,15 +31,16 @@ function seed(db) {
     VALUES ('entry-4', 4, 0, 0, 0, 'official')`).run();
 }
 
-test('Trend minimum-starts filter prevents a one-start 100% entity from dominating', async () => {
+test('horse Trend minimum-starts filter excludes horses below the selected evidence floor', async () => {
   const { db, env } = createTestEnv();
   seed(db);
   const base = { category: 'horses', period: '2w', asOfDate: '2026-09-11' };
 
   const all = await getTrendLeaderboard(env, base);
-  assert.equal(all.items[0].id, 'horse-one');
-  assert.equal(all.items[0].starts, 1);
-  assert.equal(all.items[0].winRate, 1);
+  assert.deepEqual(new Set(all.items.map((item) => item.id)), new Set(['horse-one','horse-three']));
+  assert.equal(all.items.find((item) => item.id === 'horse-one').starts, 1);
+  assert.equal(all.items.find((item) => item.id === 'horse-one').winRate, 1);
+  assert.equal(all.rankingMetric, 'form');
 
   const minimumThree = await getTrendLeaderboard(env, { ...base, minStarts: '3' });
   assert.deepEqual(minimumThree.items.map((item) => item.id), ['horse-three']);
@@ -65,5 +66,6 @@ test('Trend UI exposes and sends the minimum-starts filter', () => {
   assert.match(html, /Minst 3/);
   assert.match(html, /Minst 20/);
   assert.match(html, /min_starts:f\.minStarts/);
+  assert.match(html, /horses:\{range:'3m',minStarts:'3'\}/);
   assert.match(html, /minStarts:'all'/);
 });
