@@ -1,3 +1,13 @@
+## Statistics navigation candidate
+- Branch: `feat/statistics-navigation`.
+- Primary bottom navigation is reduced to **Start / Statistik / Spel**.
+- Start keeps the existing Trend chart icon and current Trend workspace behavior.
+- Statistik uses the Phosphor **Table** icon and groups **Tränare / Hästar / Kuskar / Bana** under one four-way selector above the workspace heading.
+- The selected top-navigation design is the full-width segmented selector with shared border, subtle active background and warm accent underline.
+- Spel uses the Phosphor **Currency Circle Dollar** icon.
+- Entity lists, detail pages, statistics tabs, track pages, Spel tabs, search, settings and all underlying data/API behavior remain unchanged; this is navigation/information-architecture work only.
+- No schema migration or private-data change is required.
+
 # Build state
 
 Version: 0.6.0
