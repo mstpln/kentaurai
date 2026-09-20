@@ -279,6 +279,68 @@ function buildPositionRanking(filters, kind) {
   return buildCoreRanking(filters, 'winRate', [`EXISTS (SELECT 1 FROM race_positions rp WHERE rp.race_entry_id=re.id AND rp.${flag}=1 AND rp.source_record_id IS NOT NULL)`], { applyMinimumStarts: true });
 }
 
+function buildPerformanceRankingSet(filters) {
+  const conditions=['re.scratched=0','re.driver_id IS NOT NULL'];const bindings=[];
+  addDriverFilters(conditions,bindings,filters);
+  const minimum=filters.minStarts==null?1:Number(filters.minStarts);bindings.push(minimum);
+  return {
+    sql:`WITH filtered AS MATERIALIZED (
+      SELECT d.id entity_id,d.canonical_name name,rr.race_entry_id,rr.placing,rr.gallop,rr.disqualified,rr.prize_sek,
+        ${canonicalStartMethodSql('r')} start_method_group,re.back_row,
+        EXISTS (SELECT 1 FROM race_positions rp WHERE rp.race_entry_id=re.id AND rp.leader=1 AND rp.source_record_id IS NOT NULL) has_leader,
+        EXISTS (SELECT 1 FROM race_positions rp WHERE rp.race_entry_id=re.id AND rp.death_seat=1 AND rp.source_record_id IS NOT NULL) has_death
+      FROM races r INDEXED BY idx_races_date
+      JOIN race_entries re ON re.race_id=r.id
+      JOIN race_results rr ON rr.race_entry_id=re.id
+      JOIN horses h ON h.id=re.horse_id
+      JOIN drivers d ON d.id=re.driver_id
+      WHERE ${conditions.join(' AND ')}
+    ), categorized AS (
+      SELECT 'leader' category,* FROM filtered WHERE has_leader=1
+      UNION ALL SELECT 'death',* FROM filtered WHERE has_death=1
+      UNION ALL SELECT 'backRow',* FROM filtered WHERE start_method_group='auto' AND back_row=1
+      UNION ALL SELECT 'auto',* FROM filtered WHERE start_method_group='auto'
+      UNION ALL SELECT 'volt',* FROM filtered WHERE start_method_group='volt'
+    ), stats AS (
+      SELECT category,entity_id,name,${coreMetricSelectSql('c')}
+      FROM categorized c GROUP BY category,entity_id,name HAVING COUNT(*)>=?
+    ), ranked AS (
+      SELECT *,ROW_NUMBER() OVER(PARTITION BY category ORDER BY wins*1.0/starts DESC,wins DESC,starts DESC,entity_id ASC) rn
+      FROM stats
+    ) SELECT * FROM ranked WHERE rn<=10 ORDER BY category,rn`,
+    bindings
+  };
+}
+function buildMarketRankingSet(filters) {
+  const conditions=['re.scratched=0','re.driver_id IS NOT NULL'];const bindings=[];
+  addDriverFilters(conditions,bindings,filters);
+  const minimum=filters.minStarts==null?1:Number(filters.minStarts);
+  bindings.push(DRIVER_LONGSHOT_PERCENT_MAX,minimum);
+  return {
+    sql:`WITH ${marketAtStopCte()}, filtered AS MATERIALIZED (
+      SELECT d.id entity_id,d.canonical_name name,rr.race_entry_id,rr.placing,rr.gallop,rr.disqualified,rr.prize_sek,m.market_rank,m.bet_percent
+      FROM races r INDEXED BY idx_races_date
+      JOIN race_entries re ON re.race_id=r.id
+      JOIN race_results rr ON rr.race_entry_id=re.id
+      JOIN horses h ON h.id=re.horse_id
+      JOIN drivers d ON d.id=re.driver_id
+      JOIN market_at_stop m ON m.race_entry_id=re.id
+      WHERE ${conditions.join(' AND ')}
+    ), categorized AS (
+      SELECT 'favorite' category,* FROM filtered WHERE market_rank=1
+      UNION ALL SELECT 'longshot',* FROM filtered WHERE bet_percent IS NOT NULL AND bet_percent>=0 AND bet_percent<=?
+    ), stats AS (
+      SELECT category,entity_id,name,${coreMetricSelectSql('c')}
+      FROM categorized c GROUP BY category,entity_id,name HAVING COUNT(*)>=?
+    ), ranked AS (
+      SELECT *,ROW_NUMBER() OVER(PARTITION BY category ORDER BY wins*1.0/starts DESC,wins DESC,starts DESC,entity_id ASC) rn
+      FROM stats
+    ) SELECT * FROM ranked WHERE rn<=10 ORDER BY category,rn`,
+    bindings
+  };
+}
+function categoryRows(rows,category){return rows.filter(row=>row.category===category);}
+
 async function run(env, query) {
   const { results } = await env.DB.prepare(query.sql).bind(...query.bindings).all();
   return results || [];
@@ -317,16 +379,11 @@ export async function getDriverRankings(env, options = {}) {
     };
   }
   if (options.mode === 'extended') {
-    const [yearEarnings,perStart,leader,death,backRow,auto,volt,favorite,longshot] = await Promise.all([
+    const [yearEarnings,perStart,performance,market] = await Promise.all([
       run(env,buildCoreRanking(filters,'earnings',[],{includePeriod:false})),
       run(env,buildCoreRanking(filters,'earningsPerVerifiedStart')),
-      run(env,buildPositionRanking(filters,'leader')),
-      run(env,buildPositionRanking(filters,'death')),
-      run(env,buildCoreRanking(filters,'winRate',[`${canonicalStartMethodSql('r')}='auto'`,'re.back_row=1'],{applyMinimumStarts:true})),
-      run(env,buildCoreRanking(filters,'winRate',[`${canonicalStartMethodSql('r')}='auto'`],{applyMinimumStarts:true})),
-      run(env,buildCoreRanking(filters,'winRate',[`${canonicalStartMethodSql('r')}='volt'`],{applyMinimumStarts:true})),
-      run(env,buildMarketRanking(filters,'favorite')),
-      run(env,buildMarketRanking(filters,'longshot'))
+      run(env,buildPerformanceRankingSet(filters)),
+      run(env,buildMarketRankingSet(filters))
     ]);
     return {
       filters,
@@ -335,13 +392,13 @@ export async function getDriverRankings(env, options = {}) {
       rankings:{
         mostEarningsThisYear:mapCoreRanking(yearEarnings,'earnings'),
         highestEarningsPerStart:mapCoreRanking(perStart,'earningsPerVerifiedStart'),
-        bestFromLead:mapCoreRanking(leader,'winRate'),
-        bestFromDeathSeat:mapCoreRanking(death,'winRate'),
-        bestFromBackRow:mapCoreRanking(backRow,'winRate'),
-        bestAuto:mapCoreRanking(auto,'winRate'),
-        bestVolt:mapCoreRanking(volt,'winRate'),
-        favoriteResults:mapCoreRanking(favorite,'winRate'),
-        longshotResults:mapCoreRanking(longshot,'winRate')
+        bestFromLead:mapCoreRanking(categoryRows(performance,'leader'),'winRate'),
+        bestFromDeathSeat:mapCoreRanking(categoryRows(performance,'death'),'winRate'),
+        bestFromBackRow:mapCoreRanking(categoryRows(performance,'backRow'),'winRate'),
+        bestAuto:mapCoreRanking(categoryRows(performance,'auto'),'winRate'),
+        bestVolt:mapCoreRanking(categoryRows(performance,'volt'),'winRate'),
+        favoriteResults:mapCoreRanking(categoryRows(market,'favorite'),'winRate'),
+        longshotResults:mapCoreRanking(categoryRows(market,'longshot'),'winRate')
       }
     };
   }
