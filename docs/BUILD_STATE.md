@@ -156,3 +156,16 @@ The external-analysis production release was accepted after:
 - The minute scheduler processes at most three settlement checkpoints sequentially, then runs the existing deterministic post-race review. No model changes are made automatically.
 - Once all eight legs have exactly one factual winner, the round becomes naturally rightable in Spel and an exact-date `daily_v85_v86` X-Labs job is created/reopened for post-race enrichment. Settled saved rounds can provide that X-Labs prerequisite even when a calendar snapshot is unavailable.
 - Migration `0031_post_race_settlement.sql` adds only durable settlement orchestration state; factual results remain in the existing source-backed race tables.
+
+## Upcoming Spel factual view candidate
+- Branch: `feat/upcoming-games-factual-view` / PR #212.
+- Spel navigation becomes `Kommande / Historik / Översikt`; V85/V86 become filters inside Kommande and Historik rather than top-level tabs.
+- Kommande lists stored future V85/V86 rounds before authoritative bet stop, grouped by a muted date heading. Each full-width responsive card shows only factual operational context: game type, track, start/bet-stop, saved-system status, historical X-Labs coverage and latest source-backed fetch time.
+- Opening a round exposes the eight stored game legs and a factual horse row only: start number/name/post, existing horse Form, fastest verified first 200 m from historical races with the same start method, fastest verified last 400 m, and current market percentage.
+- Expanded horse facts remain deterministic/statistical: driver/trainer Form, rolling-12-month wins, gallop rate, today's driver/track/start method/distance group/lane category, and canonical higher-prize versus weekday race scopes. Every rate carries its sample size.
+- Autostart lane context is front row 1–8 versus back row 9–12. Voltstart lane context is advantage lanes 1/6/7 versus other lanes within the volt.
+- Distance context uses the existing ±100 m canonical groups; e.g. 2100 m and 2140 m both belong to the 2140 group.
+- Higher-prize versus weekday statistics reuse the existing `race-scope.js` definition, including the 100,000 SEK first-prize threshold and stored high-level game/STL evidence.
+- The view contains no AI strength, ranking, ABCD, scenario, lead prediction, value, spike recommendation, external tips or interviews. Current market remains a displayed factual input only.
+- Existing historical grading/detail, pagination and overview/learning statistics remain available under Historik and Översikt.
+

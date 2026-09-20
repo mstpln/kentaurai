@@ -182,3 +182,9 @@ See `fixtures/editorial-import.example.json` for the public synthetic contract. 
 Saved V85/V86 systems have a separate post-race factual pipeline. After the last known race start plus a safety delay, KentaurAI checks unresolved saved rounds, captures the exact linked official race ids, archives each final-result snapshot privately, and normalizes verified results through the ordinary-race mapper. This path is independent of the Swedish-only long historical discovery flow, so saved foreign rounds can also settle when the official race endpoint provides them.
 
 The minute scheduler advances at most three post-race race checkpoints sequentially. Incomplete results remain unknown and are retried; ambiguous winner states fail closed. When all eight legs have exactly one factual winner, Spel can calculate system/spike results from the stored facts, an exact-date X-Labs enrichment job is queued or reopened, and the existing deterministic post-race review/learning pipeline runs afterward.
+
+### Upcoming V85/V86 factual Spel view
+The private Spel UI has a pre-analysis `Kommande` surface alongside `Historik` and `Översikt`. Upcoming stored V85/V86 rounds are grouped by date and remain factual: game/track timing, saved-system state, historical X-Labs coverage and latest fetch timestamp.
+
+Opening a round shows its eight stored legs. Horse rows expose only deterministic facts/features needed for inspection before analysis: existing horse Form, fastest verified first-200 pace from the same start method, fastest verified last-400 pace, market share, and expandable historical context for driver/trainer Form, rolling wins, gallop, current driver/track/start method/distance/lane category and canonical higher-prize/weekday scopes. No AI ranking, probability, scenario, value, spike recommendation, tips or interview/editorial evidence is introduced by this view.
+
