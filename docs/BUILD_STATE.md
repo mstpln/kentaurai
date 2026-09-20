@@ -146,3 +146,13 @@ The external-analysis production release was accepted after:
 - Core trainer/driver reads are entity-index-first; deferred market/rest/home-track queries are scoped to the active entity before expensive ranking/window work where applicable.
 - Statistics requests use AbortController in addition to stale-write tokens, so navigation cancels browser requests instead of only suppressing late paint.
 - No schema migration or private-data change is required.
+
+
+## Automatic post-race settlement candidate
+- Branch: `feat/post-race-settlement-v1` / PR #210.
+- Saved unresolved V85/V86 rounds now get durable post-race settlement jobs after the last known race start plus a 45-minute safety delay; older unresolved saved rounds are recovered immediately.
+- Settlement targets the exact eight already-linked race ids and therefore does not depend on the Swedish-only historical race-discovery path. This allows saved non-Swedish rounds to settle when the official ordinary-race endpoint supports those race ids.
+- Each checkpoint captures a fresh official race snapshot to private R2 and normalizes it through the existing verified ordinary-race result mapper. Missing/not-final results stay unknown and retry later; ambiguous/dead-heat winner state fails closed to manual review.
+- The minute scheduler processes at most three settlement checkpoints sequentially, then runs the existing deterministic post-race review. No model changes are made automatically.
+- Once all eight legs have exactly one factual winner, the round becomes naturally rightable in Spel and an exact-date `daily_v85_v86` X-Labs job is created/reopened for post-race enrichment. Settled saved rounds can provide that X-Labs prerequisite even when a calendar snapshot is unavailable.
+- Migration `0031_post_race_settlement.sql` adds only durable settlement orchestration state; factual results remain in the existing source-backed race tables.

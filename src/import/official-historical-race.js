@@ -124,7 +124,10 @@ async function mapHistoricalStart(env, race, start, ctx) {
   const trainerId = await upsertPerson(env, 'trainer', start.horse?.trainer, ctx);
   const driverId = await upsertPerson(env, 'driver', start.driver, ctx);
   const horseId = await upsertHorse(env, start.horse, trainerId, ctx);
-  const entryId = stableId('entry', race.id, horseId);
+  const existingEntry = await env.DB.prepare(
+    'SELECT id FROM race_entries WHERE race_id = ? AND horse_id = ? LIMIT 1'
+  ).bind(race.id, horseId).first();
+  const entryId = existingEntry?.id || stableId('entry', race.id, horseId);
   const pos = startPosition(race, start);
   const scratched = start.scratched === true;
 

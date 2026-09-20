@@ -73,11 +73,30 @@ export async function startXlabsBackfill(env, startDate, endDate, options = {}) 
   return startScopedXlabsBackfill(env, HISTORICAL_SCOPE, startDate, endDate, options);
 }
 
+export async function ensureXlabsDailyDateJob(env, date) {
+  const normalized = validateXlabsDate(date);
+  let job = await startScopedXlabsBackfill(env, DAILY_SCOPE, normalized, normalized);
+  const eligibleRaceCount = (await dailyGameRacesForDate(env, normalized)).length;
+  const shouldRestart = job.status === 'failed'
+    || (job.status === 'completed' && eligibleRaceCount > Number(job.processed_races || 0));
+  if (shouldRestart) {
+    await env.DB.prepare(`
+      UPDATE xlabs_backfill_jobs
+      SET next_date=?,next_race_index=0,status='running',
+          consecutive_errors=0,last_error=NULL,retry_after=NULL,
+          lease_token=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP
+      WHERE id=?
+    `).bind(normalized,job.id).run();
+    job = await getXlabsBackfill(env, job.id);
+  }
+  return job;
+}
+
 export async function ensureDailyXlabsJob(env, scheduledTime = Date.now()) {
   const instant = new Date(scheduledTime);
   if (Number.isNaN(instant.getTime())) throw new Error('scheduled time is invalid');
   const yesterday = addDays(instant.toISOString().slice(0, 10), -1);
-  return startScopedXlabsBackfill(env, DAILY_SCOPE, yesterday, yesterday);
+  return ensureXlabsDailyDateJob(env, yesterday);
 }
 
 async function acquireLease(env, job) {
@@ -189,12 +208,15 @@ async function dailyGameRacesForDate(env, date) {
       AND tx.source_type = 'official'
       AND r.race_number IS NOT NULL
       AND EXISTS (SELECT 1 FROM race_entries re WHERE re.race_id = r.id)
-      AND EXISTS (
-        SELECT 1 FROM source_records sr
-        WHERE sr.source_type = 'official_provider'
-          AND sr.external_id = 'game:' || gr.id
-          AND sr.quality_status = 'normalized_verified_subset'
-          AND sr.raw_object_key IS NOT NULL
+      AND (
+        EXISTS (
+          SELECT 1 FROM source_records sr
+          WHERE sr.source_type = 'official_provider'
+            AND sr.external_id = 'game:' || gr.id
+            AND sr.quality_status = 'normalized_verified_subset'
+            AND sr.raw_object_key IS NOT NULL
+        )
+        OR EXISTS (SELECT 1 FROM systems s WHERE s.game_round_id=gr.id)
       )
     ORDER BY CAST(tx.external_id AS INTEGER), r.race_number, r.id
   `).bind(date, date).all();
@@ -237,17 +259,51 @@ async function readJsonSource(env, source, label) {
   return payload;
 }
 
+async function storedSettledRoundReadiness(env, date, roundId = null) {
+  const filter=roundId?'AND gr.id=?':'';
+  const statement=env.DB.prepare(`
+    SELECT gr.id,
+      (SELECT COUNT(*) FROM game_legs gl WHERE gl.game_round_id=gr.id) leg_count,
+      (SELECT COUNT(*) FROM game_legs gl
+       WHERE gl.game_round_id=gr.id
+         AND (SELECT COUNT(*) FROM race_entries re
+              JOIN race_results rr ON rr.race_entry_id=re.id AND rr.placing=1
+              WHERE re.race_id=gl.race_id)=1) settled_legs
+    FROM game_rounds gr
+    WHERE gr.round_date=? AND gr.game_type IN ('V85','V86')
+      AND EXISTS (SELECT 1 FROM systems s WHERE s.game_round_id=gr.id)
+      ${filter}
+    ORDER BY gr.id
+  `);
+  const { results } = roundId ? await statement.bind(date,roundId).all() : await statement.bind(date).all();
+  if (!(results || []).length) return null;
+  const ready=(results || []).every(row=>Number(row.leg_count)===8 && Number(row.settled_legs)===8);
+  return {
+    ready,
+    reason:ready?null:'saved_round_settlement_pending',
+    gameCount:(results || []).length,
+    pendingGameCount:ready?0:(results || []).filter(row=>Number(row.leg_count)!==8 || Number(row.settled_legs)!==8).length
+  };
+}
+
 async function dailyOfficialReadiness(env, date) {
+  const stored=await storedSettledRoundReadiness(env,date);
+  if (stored) return stored;
+
   const calendar = await latestSourceByTime(env, 'official_provider', `calendar:${date}`);
-  if (!calendar) return { ready: false, reason: 'calendar_missing', gameCount: null, pendingGameCount: null };
+  if (!calendar) {
+    return { ready:false,reason:'calendar_missing',gameCount:null,pendingGameCount:null };
+  }
   const payload = await readJsonSource(env, calendar, 'official calendar');
   const gameIds = v85V86GameIdsFromCalendar(payload, date);
-  if (gameIds.length === 0) return { ready: true, gameCount: 0, pendingGameCount: 0 };
+  if (gameIds.length === 0) return { ready:true,gameCount:0,pendingGameCount:0 };
 
   let pendingGameCount = 0;
   for (const gameId of gameIds) {
     const source = await latestSourceByTime(env, 'official_provider', `game:${gameId}`);
     if (!source || source.quality_status !== NORMALIZED_QUALITY) {
+      const settled = await storedSettledRoundReadiness(env,date,gameId);
+      if (settled?.ready) continue;
       pendingGameCount += 1;
       continue;
     }

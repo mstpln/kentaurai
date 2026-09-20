@@ -115,6 +115,7 @@ test('Spel remains available with overview, V85 and V86', () => {
   assert.match(html, /Så vann loppen/);
   assert.match(html, /Var missar vi\?/);
   assert.match(html, /Avdelning för avdelning/);
+  assert.match(html, /Rättas '\+r\.settledLegs\+'\/8/);
 });
 
 test('production interface remains factual and localized', () => {
