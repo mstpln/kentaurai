@@ -36,7 +36,7 @@ jobs:
           test "$(printf '%s' "$source_main" | wc -c)" -eq 40 || { echo 'source_main must be a full 40-character lowercase commit SHA'; exit 1; }
           git cat-file -e "$source_main^{commit}"
           git merge-base --is-ancestor "$source_main" HEAD
-          grep -Fq '"main": "./src/worker-v077.js"' wrangler.jsonc
+          grep -Fq '"main": "./src/worker-v078.js"' wrangler.jsonc
           grep -Fq '"ANALYSIS_WORKFLOW_MODE": "v3"' wrangler.jsonc
           grep -Fq '"V85_LINE_PRICE_SEK": "0.50"' wrangler.jsonc
           grep -Fq '"V86_LINE_PRICE_SEK": "0.25"' wrangler.jsonc
@@ -237,4 +237,4 @@ jobs:
         run: |
           echo 'KentaurAI v0.6.0 production release completed.'
           echo "Worker: $WORKER_URL"
-          echo 'Required production schema through migration 0031, X-Labs interval repair state, external analysis lineage/evidence storage, external F1/F2 evidence integration, worker-v077 runtime, controlled legacy boundary, exact app version, health, login and private external-analysis route checks passed.'
+          echo 'Required production schema through migration 0031, X-Labs interval repair state, external analysis lineage/evidence storage, external F1/F2 evidence integration, worker-v078 runtime, controlled legacy boundary, exact app version, health, login and private external-analysis route checks passed.'
