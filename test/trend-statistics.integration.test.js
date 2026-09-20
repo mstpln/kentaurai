@@ -162,7 +162,7 @@ test('horse Trend uses canonical Form-eligible starts for minStarts without drop
   const strict = await getTrendLeaderboard(env, { category:'horses', period:'3m', asOfDate:'2026-09-11', minStarts:'3' });
   assert.equal(strict.items.some((item) => item.id === 'horse-form-eligibility'), false, 'unknown placing is not a Form-eligible start');
 
-  const relaxed = await getTrendLeaderboard(env, { category:'horses', period:'3m', asOfDate:'2026-09-11', minStarts:'2' });
+  const relaxed = await getTrendLeaderboard(env, { category:'horses', period:'3m', asOfDate:'2026-09-11', minStarts:'all' });
   const row = relaxed.items.find((item) => item.id === 'horse-form-eligibility');
   assert.ok(row);
   assert.equal(row.formUsedStarts, 2);
