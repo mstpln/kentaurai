@@ -370,26 +370,34 @@ export async function getUpcomingGameLeg(env, roundId, legNumber) {
 }
 
 export async function getUpcomingLegHorseForms(env, roundId, legNumber, options = {}) {
-  const data = await getUpcomingGameLeg(env, roundId, legNumber);
-  if (!data) return null;
+  const round = await getUpcomingGameRound(env, roundId);
+  if (!round) return null;
+  const leg = round.legs.find((item) => item.legNumber === Number(legNumber));
+  if (!leg) return null;
+  const { results } = await env.DB.prepare(`
+    SELECT id race_entry_id, horse_id
+    FROM race_entries
+    WHERE race_id=? AND scratched=0
+    ORDER BY start_number ASC,id ASC
+  `).bind(leg.raceId).all();
   const asOfDate = String(options.asOfDate || swedenDateKey());
-  const forms = [];
-  for (const entry of data.entries.filter((item) => !item.scratched)) {
-    const form = await getCalendarYearDetailForm(env, 'horses', entry.horseId, {
-      asOfDate,
-      year:Number(asOfDate.slice(0, 4)),
-      raceScope:'all',
-      startMethod:'all',
-      distanceGroup:'all'
-    });
-    forms.push({
-      raceEntryId:entry.raceEntryId,
-      horseId:entry.horseId,
+  const formOptions = {
+    asOfDate,
+    year:Number(asOfDate.slice(0, 4)),
+    raceScope:'all',
+    startMethod:'all',
+    distanceGroup:'all'
+  };
+  const forms = await Promise.all((results || []).map(async (entry) => {
+    const form = await getCalendarYearDetailForm(env, 'horses', entry.horse_id, formOptions);
+    return {
+      raceEntryId:entry.race_entry_id,
+      horseId:entry.horse_id,
       score:form?.formLast?.score ?? null,
       usedStarts:form?.formLast?.usedStarts ?? 0
-    });
-  }
-  return { roundId:data.round.id, legNumber:data.leg.legNumber, forms };
+    };
+  }));
+  return { roundId:round.id, legNumber:leg.legNumber, forms };
 }
 
 function laneSql(context) {
