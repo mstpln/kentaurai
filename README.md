@@ -46,7 +46,7 @@ The current build contains:
 - F2 post-race probability/system diagnostics for both historical sealed-v3 and external-analysis lineage, with repeated eligible misses recorded as candidate learning only and no automatic model changes
 - guided private four-stage external-AI workflow, separate external-evidence registration and sanitized coverage/backfill observability
 - complete presentation of currently stored measurement families on entity/start detail, including horse External statistics / Interviews and trainer Interviews tabs, while internal provenance remains backend-only
-- verified X-Labs race-telemetry capture, normalization and raw-vs-normalized checks; exact payloads remain private
+- verified X-Labs race-telemetry capture, whole-race and 100 m interval normalization, bounded repair of previously captured telemetry, and raw-vs-normalized checks; exact payloads remain private
 - scheduled previous-day X-Labs catch-up for stored V85/V86 game legs
 - a separate three-year-capable historical X-Labs job that follows verified official-history readiness rather than outrunning it
 - persistent official and X-Labs backfill jobs with idempotent source reuse, checkpoints, leases and bounded retries
