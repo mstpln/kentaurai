@@ -17,6 +17,7 @@ import {
   calculateHorseFormIndex,
   fieldPercentileScore,
   parsePaceSeconds,
+  prizeDifficultyScore,
   relativeChallengeScore,
   resultPerformanceScore,
   weightedAvailable
@@ -174,7 +175,7 @@ async function loadHorseForm(env,entityId,filters,config){
   if(!targets.length)return null;
   const raceIds=[...new Set(targets.map(row=>row.race_id))],racePlaceholders=raceIds.map(()=>'?').join(',');
 
-  const [{results:fieldRows},{results:prizeRows}]=await Promise.all([
+  const [{results:fieldRows},{results:opponentRows}]=await Promise.all([
     env.DB.prepare(`
       WITH latest_x AS (
         SELECT x.*,ROW_NUMBER() OVER (
@@ -197,42 +198,32 @@ async function loadHorseForm(env,entityId,filters,config){
       ORDER BY re.race_id,re.start_number,re.id
     `).bind(filters.asOfDate,...raceIds).all(),
     env.DB.prepare(`
-      WITH population AS (
-        SELECT id,first_prize_sek,PERCENT_RANK() OVER (ORDER BY first_prize_sek) prize_percentile
-        FROM races
-        WHERE first_prize_sek IS NOT NULL AND first_prize_sek>=0 AND race_date<=?
-      )
-      SELECT id,prize_percentile FROM population WHERE id IN (${racePlaceholders})
-    `).bind(filters.asOfDate,...raceIds).all()
+      SELECT re.race_id,re.horse_id,
+        (
+          SELECT hss.start_points FROM horse_stat_snapshots hss
+          JOIN official_snapshot_source_sync os ON os.source_record_id=hss.source_record_id AND os.status='complete'
+          JOIN source_records sr ON sr.id=hss.source_record_id
+          WHERE hss.horse_id=re.horse_id AND hss.snapshot_scope='life'
+            AND julianday(hss.observed_at)<=julianday(COALESCE(r.scheduled_start_at,r.race_date||'T23:59:59Z'))
+            AND julianday(sr.fetched_at)<=julianday(COALESCE(r.scheduled_start_at,r.race_date||'T23:59:59Z'))
+          ORDER BY julianday(hss.observed_at) DESC,hss.id DESC LIMIT 1
+        ) start_points,
+        (
+          SELECT hss.earnings_raw FROM horse_stat_snapshots hss
+          JOIN official_snapshot_source_sync os ON os.source_record_id=hss.source_record_id AND os.status='complete'
+          JOIN source_records sr ON sr.id=hss.source_record_id
+          WHERE hss.horse_id=re.horse_id AND hss.snapshot_scope='life'
+            AND julianday(hss.observed_at)<=julianday(COALESCE(r.scheduled_start_at,r.race_date||'T23:59:59Z'))
+            AND julianday(sr.fetched_at)<=julianday(COALESCE(r.scheduled_start_at,r.race_date||'T23:59:59Z'))
+          ORDER BY julianday(hss.observed_at) DESC,hss.id DESC LIMIT 1
+        ) earnings_raw
+      FROM race_entries re JOIN races r ON r.id=re.race_id
+      WHERE re.scratched=0 AND re.race_id IN (${racePlaceholders})
+    `).bind(...raceIds).all()
   ]);
 
-  const prizeScore=new Map((prizeRows||[]).map(row=>[row.id,Number(row.prize_percentile)*100]));
   const byRace=new Map();
   for(const row of fieldRows||[]){if(!byRace.has(row.race_id))byRace.set(row.race_id,[]);byRace.get(row.race_id).push(row);}
-
-  const opponentRows=await env.DB.prepare(`
-    SELECT re.race_id,re.horse_id,
-      (
-        SELECT hss.start_points FROM horse_stat_snapshots hss
-        JOIN official_snapshot_source_sync os ON os.source_record_id=hss.source_record_id AND os.status='complete'
-        JOIN source_records sr ON sr.id=hss.source_record_id
-        WHERE hss.horse_id=re.horse_id AND hss.snapshot_scope='life'
-          AND julianday(hss.observed_at)<=julianday(COALESCE(r.scheduled_start_at,r.race_date||'T23:59:59Z'))
-          AND julianday(sr.fetched_at)<=julianday(COALESCE(r.scheduled_start_at,r.race_date||'T23:59:59Z'))
-        ORDER BY julianday(hss.observed_at) DESC,hss.id DESC LIMIT 1
-      ) start_points,
-      (
-        SELECT hss.earnings_raw FROM horse_stat_snapshots hss
-        JOIN official_snapshot_source_sync os ON os.source_record_id=hss.source_record_id AND os.status='complete'
-        JOIN source_records sr ON sr.id=hss.source_record_id
-        WHERE hss.horse_id=re.horse_id AND hss.snapshot_scope='life'
-          AND julianday(hss.observed_at)<=julianday(COALESCE(r.scheduled_start_at,r.race_date||'T23:59:59Z'))
-          AND julianday(sr.fetched_at)<=julianday(COALESCE(r.scheduled_start_at,r.race_date||'T23:59:59Z'))
-        ORDER BY julianday(hss.observed_at) DESC,hss.id DESC LIMIT 1
-      ) earnings_raw
-    FROM race_entries re JOIN races r ON r.id=re.race_id
-    WHERE re.scratched=0 AND re.race_id IN (${racePlaceholders})
-  `).bind(...raceIds).all();
   const contextByRace=new Map();
   for(const row of opponentRows||[]){if(!contextByRace.has(row.race_id))contextByRace.set(row.race_id,[]);contextByRace.get(row.race_id).push(row);}
 
@@ -251,7 +242,7 @@ async function loadHorseForm(env,entityId,filters,config){
     const pointChallenge=relativeChallengeScore(median(pointValues),self?.start_points);
     const earningChallenge=relativeChallengeScore(median(earningValues),self?.earnings_raw);
     const difficultyScore=weightedAvailable([
-      {value:prizeScore.get(target.race_id),weight:0.55},
+      {value:prizeDifficultyScore(target.first_prize_sek),weight:0.55},
       {value:stlDifficultyScore(target.stl_class),weight:0.15},
       {value:pointChallenge,weight:0.20},
       {value:earningChallenge,weight:0.10}
