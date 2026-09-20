@@ -52,23 +52,31 @@ function performanceClient() {
     const trackRow=target?.closest('[data-track-id]');
     if(trackRow){ const path='/tracks/'+encodeURIComponent(trackRow.dataset.trackId); if(!fresh(path)) show('tracks','Öppnar bana…'); }
   },true);
+  let entityStatsWarmTimer=null;
   document.addEventListener('pointerover',event=>{
     const target=event.target instanceof Element?event.target:null;
     const row=target?.closest('.entity-row[data-id]');
-    if(row&&['trainers','horses','drivers'].includes(state.page)){ warm('/entities/'+state.page+'/'+encodeURIComponent(row.dataset.id)); warm(defaultCalendarPath(state.page,row.dataset.id)); const name=row.querySelector('.entity-name')?.textContent?.trim(); if(name&&(state.page==='trainers'||state.page==='drivers')) warm('/search?q='+encodeURIComponent(name)+'&limit=40'); }
+    if(row&&['trainers','horses','drivers'].includes(state.page)){
+      const page=state.page,id=row.dataset.id;
+      warm('/entities/'+page+'/'+encodeURIComponent(id));
+      clearTimeout(entityStatsWarmTimer);
+      entityStatsWarmTimer=setTimeout(()=>warm(defaultCalendarPath(page,id)),140);
+      const name=row.querySelector('.entity-name')?.textContent?.trim(); if(name&&(page==='trainers'||page==='drivers')) warm('/search?q='+encodeURIComponent(name)+'&limit=40');
+    }
     const track=target?.closest('[data-track-id]'); if(track) warm('/tracks/'+encodeURIComponent(track.dataset.trackId));
     const nav=target?.closest('.nav-item[data-page]'); if(nav) warm(listPath(nav.dataset.page));
   },{passive:true});
+  document.addEventListener('pointerout',event=>{const target=event.target instanceof Element?event.target:null;if(target?.closest('.entity-row[data-id]'))clearTimeout(entityStatsWarmTimer)},{passive:true});
   document.addEventListener('focusin',event=>{
     const target=event.target instanceof Element?event.target:null;
     const row=target?.closest('.entity-row[data-id]'); if(row&&['trainers','horses','drivers'].includes(state.page)){ warm('/entities/'+state.page+'/'+encodeURIComponent(row.dataset.id)); warm(defaultCalendarPath(state.page,row.dataset.id)); const name=row.querySelector('.entity-name')?.textContent?.trim(); if(name&&(state.page==='trainers'||state.page==='drivers')) warm('/search?q='+encodeURIComponent(name)+'&limit=40'); }
     const track=target?.closest('[data-track-id]'); if(track) warm('/tracks/'+encodeURIComponent(track.dataset.trackId));
   });
   const idle=window.requestIdleCallback||((fn)=>setTimeout(fn,250));
-  idle(()=>{
-    const paths=['/entities/trainers?limit=20&offset=0','/entities/horses?limit=20&offset=0','/entities/drivers?limit=20&offset=0','/tracks?limit=20&offset=0','/games/summary','/horses/statistics/filter-options','/trainers/statistics/filter-options','/drivers/statistics/filter-options','/trend/filter-options'];
-    paths.forEach((path,index)=>setTimeout(()=>warm(path),index*120));
-  },{timeout:1500});
+  idle(()=>setTimeout(()=>{
+    const paths=['/entities/trainers?limit=20&offset=0','/entities/horses?limit=20&offset=0','/entities/drivers?limit=20&offset=0','/tracks?limit=20&offset=0','/games/summary'];
+    paths.forEach((path,index)=>setTimeout(()=>warm(path),index*220));
+  },1500),{timeout:3000});
   window.__kentauraiApiCache={hasFresh:fresh,clear:()=>cache.clear(),size:()=>cache.size};
 }
 
