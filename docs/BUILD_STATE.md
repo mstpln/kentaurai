@@ -121,3 +121,9 @@ The external-analysis production release was accepted after:
 - Horse `Toppfart` presents fastest verified X-Labs first 100 m, first 200 m, first 500 m, last 400 m and last 1000 m. Opening segments are reconstructed from valid 100 m interval measurements; closing segments use the verified whole-race telemetry facts already persisted from the same X-Labs race source.
 - The Distans table now groups rows with the same canonical buckets as the Distans filter instead of splitting exact race distances.
 - No market/odds/editorial data enters Form. No model weights or Step 1 analysis semantics change in this candidate.
+
+
+## X-Labs interval production repair
+- Existing historical X-Labs backfill originally normalized only the trusted whole-race `xlabs-telemetry-v1` rows, while `xlabs_intervals-v2` remained additive and unscheduled. This left horse Toppfart opening 100/200/500 values empty even when the immutable raw race telemetry already existed.
+- The repair is code-only plus migration `0029_xlabs_interval_backfill.sql`: it adds durable per-source interval-repair state, derives v2 interval rows from already captured R2 telemetry, processes old normalized sources in bounded recent-first batches, and wires v2 interval normalization into every new X-Labs race backfill checkpoint and manual normalize call.
+- Missing/invalid local intervals remain explicit null/eligibility states; no opening speed is guessed from closing or whole-race data.
