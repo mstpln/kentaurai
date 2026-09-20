@@ -118,7 +118,7 @@ async function selectJob(env, roundId, nowIso) {
       AND (j.next_check_at IS NULL OR j.next_check_at<=?)
       AND (j.lease_until IS NULL OR j.lease_until<?)
       ${filter}
-    ORDER BY gr.round_date ASC,j.created_at ASC,j.id ASC
+    ORDER BY gr.round_date DESC,j.created_at ASC,j.id ASC
     LIMIT 1
   `;
   return roundId
