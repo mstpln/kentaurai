@@ -53,7 +53,7 @@ Updated: 2026-09-20
 - Trainer/driver cross-role lookup no longer blocks the detail header.
 - Entity score/table statistics use a core-first route. Slower market/rest/home-track specialties plus horse Startpoäng/X-Labs sections load after the core statistics are visible.
 - Stable filter/stat reads use longer in-memory TTLs, and entity hover/focus prefetches the exact default core-statistics request.
-- Track overview identity/coverage/distance reads are parallelized; track-list race counts use an indexed join/group rather than one correlated race-count subquery per row.
+- Track overview identity, coverage and distance-group reads are parallelized while the existing indexed track-list query remains unchanged.
 - No migration or private-data change is required. Production remains unchanged until PR #204 is reviewed, explicitly authorized, merged and released.
 
 ## App performance live
