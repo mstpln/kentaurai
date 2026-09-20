@@ -9,6 +9,7 @@ import {
   submitAnalysis
 } from './analysis-api.js';
 import { runNextPostRaceReview } from './post-race-review.js';
+import { getPostRaceSettlementJob, runNextPostRaceSettlement } from './post-race-settlement-v1.js';
 import { pwaIcon, pwaManifest, pwaServiceWorker } from './pwa.js';
 
 const BACKFILL_CRON = '* * * * *';
@@ -90,6 +91,30 @@ export default {
 
     if (url.pathname.startsWith('/v1/analysis/')) return handleAnalysisApi(request, env, url);
 
+    if (request.method === 'POST' && url.pathname === '/v1/post-race/settle-next') {
+      const denied = requireAdmin(request, env);
+      if (denied) return denied;
+      try {
+        return json(await runNextPostRaceSettlement(env));
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    const settlementMatch = url.pathname.match(/^\/v1\/post-race\/settlement\/([^/]+)$/);
+    if (request.method === 'GET' && settlementMatch) {
+      const denied = requireAdmin(request, env);
+      if (denied) return denied;
+      try {
+        const result = await getPostRaceSettlementJob(env, decodeURIComponent(settlementMatch[1]));
+        return result ? json(result) : json({ error: 'not_found' }, 404);
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
     if (request.method === 'POST' && url.pathname === '/v1/post-race/review-next') {
       const denied = requireAdmin(request, env);
       if (denied) return denied;
@@ -106,7 +131,18 @@ export default {
   async scheduled(controller, env, ctx) {
     worker.scheduled(controller, env, ctx);
     if (controller.cron === BACKFILL_CRON) {
-      ctx.waitUntil(runNextPostRaceReview(env).catch((error) => console.error(error)));
+      ctx.waitUntil((async () => {
+        try {
+          await runNextPostRaceSettlement(env);
+        } catch (error) {
+          console.error(error);
+        }
+        try {
+          await runNextPostRaceReview(env);
+        } catch (error) {
+          console.error(error);
+        }
+      })());
     }
   }
 };
