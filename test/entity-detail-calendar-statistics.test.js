@@ -187,3 +187,36 @@ test('trainer form prior-start lookup stays below D1 bind limits and driver mark
   assert.match(source, /betting_snapshots bs INDEXED BY idx_betting_snapshots_entry_time/);
   assert.match(source, /race_entries re INDEXED BY \$\{config\.entryIndex\}/);
 });
+
+
+test('driver Form market component uses only the final source-backed snapshot at or before authoritative bet stop', async () => {
+  const { createTestEnv } = await import('./helpers/d1.js');
+  const { env, db } = createTestEnv();
+  db.prepare("INSERT INTO tracks (id,canonical_name) VALUES ('fm-track','Form Market')").run();
+  db.prepare("INSERT INTO trainers (id,canonical_name) VALUES ('fm-tr','Tränare')").run();
+  db.prepare("INSERT INTO drivers (id,canonical_name) VALUES ('fm-driver','Kusk')").run();
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('fm-h1','H1'),('fm-h2','H2'),('fm-h3','H3'),('fm-h4','H4')").run();
+  db.prepare("INSERT INTO source_records (id,source_type,fetched_at,quality_status) VALUES ('fm-source','synthetic','2026-09-04T10:00:00Z','verified')").run();
+
+  for (let i=1;i<=3;i++) {
+    const raceId='fm-r'+i, entryId='fm-e'+i, otherId='fm-o'+i, date='2026-09-0'+i, roundId='fm-round'+i;
+    db.prepare("INSERT INTO races (id,track_id,race_date,race_number,distance_m,start_method,status) VALUES (?, 'fm-track', ?, ?, 2140, 'auto', 'results')").run(raceId,date,i);
+    db.prepare("INSERT INTO race_entries (id,race_id,horse_id,driver_id,trainer_id,start_number,scratched) VALUES (?,?,'fm-h1','fm-driver','fm-tr',1,0)").run(entryId,raceId);
+    db.prepare("INSERT INTO race_entries (id,race_id,horse_id,start_number,scratched) VALUES (?,?,'fm-h2',2,0)").run(otherId,raceId);
+    db.prepare("INSERT INTO race_results (race_entry_id,placing,gallop,disqualified,result_status) VALUES (?,1,0,0,'official')").run(entryId);
+    db.prepare("INSERT INTO race_results (race_entry_id,placing,gallop,disqualified,result_status) VALUES (?,2,0,0,'official')").run(otherId);
+    db.prepare("INSERT INTO game_rounds (id,game_type,round_date,bet_stop_at) VALUES (?,'V85',?,?)").run(roundId,date,date+'T12:00:00Z');
+    db.prepare("INSERT INTO game_legs (game_round_id,leg_number,race_id) VALUES (?,1,?)").run(roundId,raceId);
+    db.prepare("INSERT INTO betting_snapshots (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id) VALUES (?,?,1,?,?,10,2,'fm-source')").run('fm-old'+i,roundId,entryId,date+'T11:40:00Z');
+    db.prepare("INSERT INTO betting_snapshots (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id) VALUES (?,?,1,?,?,60,1,'fm-source')").run('fm-final'+i,roundId,entryId,date+'T11:59:00Z');
+    db.prepare("INSERT INTO betting_snapshots (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id) VALUES (?,?,1,?,?,1,2,'fm-source')").run('fm-after'+i,roundId,entryId,date+'T12:01:00Z');
+    db.prepare("INSERT INTO betting_snapshots (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank) VALUES (?,?,1,?,?,1,2)").run('fm-unprovenanced'+i,roundId,entryId,date+'T11:59:30Z');
+  }
+
+  const data = await getDriverCalendarYearForm(env,'fm-driver',{year:2026,asOfDate:'2026-09-20'});
+  assert.equal(data.formLast.components.marketPerformance.usedStarts,3);
+  assert.equal(data.formLast.starts.every(row=>row.marketRank===1),true,'post-stop and unprovenanced rank 2 rows must not leak into Form');
+  assert.equal(data.formLast.starts.every(row=>String(row.marketCapturedAt).endsWith('11:59:00Z')),true);
+  assert.equal(data.formLast.components.marketPerformance.marketBlind,false);
+  assert.notEqual(data.formLast.score,null);
+});
