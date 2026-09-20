@@ -358,6 +358,17 @@ function validatePayload(payload) {
         evidenceExcerpt:optionalText(signal.evidence_excerpt, 'signal.evidence_excerpt', 400)
       };
     }) : [];
+    const changeSinceLast = row.change_since_last == null ? null : row.change_since_last;
+    if (changeSinceLast != null && typeof changeSinceLast !== 'boolean') {
+      throw new Error('interviews[' + index + '].change_since_last must be boolean or null');
+    }
+    const changeSummary = optionalText(row.change_summary, 'interviews[' + index + '].change_summary', 1200);
+    if (changeSinceLast === true && !changeSummary) {
+      throw new Error('interviews[' + index + '].change_summary is required when change_since_last is true');
+    }
+    if (changeSinceLast !== true && changeSummary) {
+      throw new Error('interviews[' + index + '].change_summary requires change_since_last=true');
+    }
     return {
       horseId:requiredText(row.horse_id, 'interviews[' + index + '].horse_id', 200),
       raceEntryId:requiredText(row.race_entry_id, 'interviews[' + index + '].race_entry_id', 200),
@@ -366,8 +377,8 @@ function validatePayload(payload) {
       speakerRole:optionalText(row.speaker_role, 'interviews[' + index + '].speaker_role', 120),
       publishedAt:row.published_at ? iso(row.published_at, 'interviews[' + index + '].published_at') : exportedAt,
       summary:requiredText(row.summary, 'interviews[' + index + '].summary', MAX_SUMMARY),
-      changeSinceLast:row.change_since_last == null ? null : Boolean(row.change_since_last),
-      changeSummary:optionalText(row.change_summary, 'interviews[' + index + '].change_summary', 1200),
+      changeSinceLast,
+      changeSummary,
       signals
     };
   }) : [];
@@ -465,7 +476,7 @@ export async function importExternalEvidence(env, payload) {
     const result = await env.DB.prepare(
       "INSERT OR IGNORE INTO editorial_items " +
       "(id,race_entry_id,horse_id,trainer_id,race_id,game_round_id,speaker_name,speaker_role,published_at,source_name,source_url,summary_text,change_since_last,change_summary,rights_status,source_record_id) " +
-      "VALUES (?,?,?,?,?,?,?,?,?,?,NULL,?,?,?,?,'structured_only',?)"
+      "VALUES (?,?,?,?,?,?,?,?,?,?,NULL,?,?,?,'structured_only',?)"
     ).bind(
       itemId, interview.raceEntryId, interview.horseId, interview.trainerId || entry.trainer_id || null,
       entry.race_id, validated.roundId, interview.speakerName, interview.speakerRole, interview.publishedAt,
