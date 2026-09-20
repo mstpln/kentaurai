@@ -271,7 +271,7 @@ test('post-race settlement fails closed when missing horse identity cannot be ma
       now:'2099-05-11T00:00:00Z',
       fetchImpl:async()=>response(payload)
     }),
-    /missing horse identity and has no unique stored pre-race entry/
+    /missing horse identity/
   );
   assert.equal(db.prepare('SELECT COUNT(*) n FROM race_results').get().n,0);
 });
