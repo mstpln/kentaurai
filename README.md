@@ -176,3 +176,9 @@ The script-inspection endpoint is read-only. It reports bounded counts of common
 
 ## Manual editorial JSON
 See `fixtures/editorial-import.example.json` for the public synthetic contract. Real exports are never committed to this repository.
+
+
+### Automatic post-race settlement
+Saved V85/V86 systems have a separate post-race factual pipeline. After the last known race start plus a safety delay, KentaurAI checks unresolved saved rounds, captures the exact linked official race ids, archives each final-result snapshot privately, and normalizes verified results through the ordinary-race mapper. This path is independent of the Swedish-only long historical discovery flow, so saved foreign rounds can also settle when the official race endpoint provides them.
+
+The minute scheduler advances at most three post-race race checkpoints sequentially. Incomplete results remain unknown and are retried; ambiguous winner states fail closed. When all eight legs have exactly one factual winner, Spel can calculate system/spike results from the stored facts, an exact-date X-Labs enrichment job is queued or reopened, and the existing deterministic post-race review/learning pipeline runs afterward.
