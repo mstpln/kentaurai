@@ -3,10 +3,10 @@ import { appAuthConfigured, hasValidAppSession } from './app-auth.js';
 import { createDataCoverageExportResponse } from './data-coverage-v2.js';
 import { getHorseFilterOptions } from './statistics/horses-complete.js';
 import {
+  getCalendarYearDetailForm,
   getCalendarYearDetailSpecialties,
   getDriverCalendarYearDetailStatistics,
   getHorseCalendarYearDetailStatistics,
-  getHorseCalendarYearForm,
   getTrainerCalendarYearDetailStatistics
 } from './entity-detail-calendar-statistics.js';
 import { getTrainerCalendarHomeTrackResults } from './trainer-calendar-home-statistics.js';
@@ -150,12 +150,13 @@ export default {
       catch (error) { console.error(error); return json({ error: 'request_failed', message: error.message }, 400); }
     }
 
-    const horseFormMatch = path.match(/^\/app\/api\/horses\/([^/]+)\/calendar-form$/);
-    if (request.method === 'GET' && horseFormMatch) {
+    const calendarFormMatch = path.match(/^\/app\/api\/(trainers|drivers|horses)\/([^/]+)\/calendar-form$/);
+    if (request.method === 'GET' && calendarFormMatch) {
       const denied = await requireSession(request, env);
       if (denied) return denied;
       try {
-        const data = await getHorseCalendarYearForm(env, decodeURIComponent(horseFormMatch[1]), calendarOptions(url));
+        const entityType = calendarFormMatch[1];
+        const data = await getCalendarYearDetailForm(env, entityType, decodeURIComponent(calendarFormMatch[2]), calendarOptions(url));
         return data ? json(data) : json({ error: 'not_found' }, 404);
       } catch (error) {
         console.error(error);
