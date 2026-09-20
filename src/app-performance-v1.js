@@ -3,7 +3,7 @@ function performanceClient() {
   const inflight = new Map();
   function ttl(path) {
     if (/\/statistics\/filter-options(?:\?|$)/.test(path) || path.startsWith('/trend/filter-options')) return 600000;
-    if (/\/calendar-(statistics|specialties)(?:\?|$)/.test(path)) return 180000;
+    if (/\/calendar-(statistics|specialties|form)(?:\?|$)/.test(path)) return 180000;
     if (path.startsWith('/trend?')) return 60000;
     if (/^\/entities\/(horses|trainers|drivers)\/[^/?]+(?:\?|$)/.test(path) || /^\/tracks\/[^/?]+(?:\?|$)/.test(path)) return 90000;
     if (/^\/entities\/(horses|trainers|drivers)(?:\?|$)/.test(path) || /^\/tracks(?:\?|$)/.test(path)) return 180000;
@@ -13,11 +13,17 @@ function performanceClient() {
   }
   function fresh(path) { const hit=cache.get(path); return Boolean(hit && hit.expiresAt>Date.now()); }
   const originalApi = api;
-  api = async function(path) {
+  api = async function(path,options={}) {
+    const signal=options?.signal;
+    if(signal){
+      const hit=cache.get(path);
+      if(hit&&hit.expiresAt>Date.now())return hit.value;
+      return originalApi(path,options).then(value=>{cache.set(path,{value,expiresAt:Date.now()+ttl(path)});return value});
+    }
     const hit=cache.get(path);
     if (hit && hit.expiresAt>Date.now()) return hit.value;
     if (inflight.has(path)) return inflight.get(path);
-    const pending=originalApi(path).then(value=>{cache.set(path,{value,expiresAt:Date.now()+ttl(path)});return value}).finally(()=>inflight.delete(path));
+    const pending=originalApi(path,options).then(value=>{cache.set(path,{value,expiresAt:Date.now()+ttl(path)});return value}).finally(()=>inflight.delete(path));
     inflight.set(path,pending);
     return pending;
   };

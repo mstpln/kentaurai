@@ -134,3 +134,15 @@ The external-analysis production release was accepted after:
 - Each row shows factual race context from the linked race entry: race date, track, race number, start method and post position. Speaker/role, summary and structured signals remain inside the expanded body.
 - The external-evidence import contract keeps the eight existing signal categories (form, training, tactics, distance, start, equipment, expectation, other) and adds an explicit nullable `change_since_last` marker plus a short `change_summary` when the source explicitly describes a relevant change versus the prior start/state.
 - Change markers are never inferred from missing or ambiguous text; unknown stays null.
+
+
+## Person form and entity-statistics performance candidate
+- Branch: `feat/person-form-performance-v1`.
+- Horse `Form (1–100)` is unchanged.
+- Trainer and driver core calendar-statistics no longer calculate Form before first paint. All three entity types use the same lazy `calendar-form` pattern after the core scorecard/tables render.
+- Driver Form uses up to 30 recent eligible drives: 60% field-size-aware result form plus 40% historical performance versus market rank from the last source-backed snapshot at or before authoritative bet stop. The market-derived component is exposed separately from the market-blind result component; missing historical market evidence renormalizes to result form rather than becoming zero.
+- Trainer Form uses up to 30 recent eligible trainer starts: 60% field-size-aware result form plus 40% horse development versus that horse's own prior verified results. It uses no market/odds, race-class or opposition component.
+- Trainer/driver Form cards use the same `Form (1–100)` UI treatment as horses and hydrate independently after core statistics.
+- Core trainer/driver reads are entity-index-first; deferred market/rest/home-track queries are scoped to the active entity before expensive ranking/window work where applicable.
+- Statistics requests use AbortController in addition to stale-write tokens, so navigation cancels browser requests instead of only suppressing late paint.
+- No schema migration or private-data change is required.

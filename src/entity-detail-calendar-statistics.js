@@ -22,6 +22,13 @@ import {
   resultPerformanceScore,
   weightedAvailable
 } from './statistics/horse-form-index.js';
+import {
+  PERSON_FORM_MAX_STARTS,
+  calculateDriverFormIndex,
+  calculateTrainerFormIndex,
+  marketExpectationPerformanceScore,
+  trainerDevelopmentScore
+} from './statistics/person-form-index.js';
 
 const DISTANCES = new Set(['all','640','1640','2140','2640','3140','3640','4140','other-long']);
 const DISTANCE_STANDARDS = [640,1640,2140,2640,3140,3640,4140];
@@ -31,9 +38,9 @@ const DISTANCE_TOLERANCE_M = 100;
 const REST_DAYS = 60;
 
 const ENTITY_CONFIG = Object.freeze({
-  trainers:{table:'trainers',entryColumn:'trainer_id',resultKey:'trainer',formLimit:30,market:true,rest:true,volt:true},
-  drivers:{table:'drivers',entryColumn:'driver_id',resultKey:'driver',formLimit:30,market:true,rest:false,volt:true},
-  horses:{table:'horses',entryColumn:'horse_id',resultKey:'horse',formLimit:5,market:false,rest:true,volt:false}
+  trainers:{table:'trainers',entryColumn:'trainer_id',entryIndex:'idx_entries_trainer',resultKey:'trainer',formLimit:30,market:true,rest:true,volt:true},
+  drivers:{table:'drivers',entryColumn:'driver_id',entryIndex:'idx_entries_driver',resultKey:'driver',formLimit:30,market:true,rest:false,volt:true},
+  horses:{table:'horses',entryColumn:'horse_id',entryIndex:'idx_entries_horse_race',resultKey:'horse',formLimit:5,market:false,rest:true,volt:false}
 });
 
 function configFor(entityType){
@@ -131,7 +138,11 @@ async function loadCore(env,entityId,filters,config){
   const methodSql=canonicalStartMethodSql('r'),distanceSql=distanceGroupSql('r'),metrics=coreMetricSelectSql('f');
   const {results}=await env.DB.prepare(`WITH filtered AS MATERIALIZED (
     SELECT rr.race_entry_id,rr.placing,rr.gallop,rr.disqualified,rr.prize_sek,${distanceSql} AS distance_group,${methodSql} AS start_method_group,COALESCE(tr.canonical_name,'Okänd bana') AS track_label
-    FROM races r INDEXED BY idx_races_date JOIN race_entries re ON re.race_id=r.id JOIN race_results rr ON rr.race_entry_id=re.id JOIN horses h ON h.id=re.horse_id LEFT JOIN tracks tr ON tr.id=r.track_id
+    FROM race_entries re INDEXED BY ${config.entryIndex}
+    JOIN races r ON r.id=re.race_id
+    JOIN race_results rr ON rr.race_entry_id=re.id
+    JOIN horses h ON h.id=re.horse_id
+    LEFT JOIN tracks tr ON tr.id=r.track_id
     WHERE ${conditions.join(' AND ')}
   )
   SELECT 'summary' section,'all' label,${metrics} FROM filtered f
@@ -140,15 +151,6 @@ async function loadCore(env,entityId,filters,config){
   UNION ALL SELECT 'track',f.track_label,${metrics} FROM filtered f GROUP BY f.track_label`).bind(...bindings).all();
   const rows=results||[],summaryRow=rows.find(r=>r.section==='summary');
   return{summary:mapCoreMetricRow(summaryRow||{}),startMethods:sortMethods(mapRows(rows,'method')),distances:sortDistances(mapRows(rows,'distance')),tracks:sortTracks(mapRows(rows,'track'))};
-}
-async function loadLegacyForm(env,entityId,filters,config){
-  const conditions=['re.scratched=0',`re.${config.entryColumn}=?`,'rr.placing IS NOT NULL','rr.placing>0'],bindings=[entityId];
-  addCommonFilters(conditions,bindings,filters,{includeVolt:config.volt});
-  const row=await env.DB.prepare(`SELECT COUNT(*) used_starts,AVG(placing) avg_placing FROM (
-    SELECT rr.placing FROM races r INDEXED BY idx_races_date JOIN race_entries re ON re.race_id=r.id JOIN race_results rr ON rr.race_entry_id=re.id JOIN horses h ON h.id=re.horse_id
-    WHERE ${conditions.join(' AND ')} ORDER BY r.race_date DESC,r.race_number DESC,re.id DESC LIMIT ${config.formLimit}
-  )`).bind(...bindings).first();
-  const used=Number(row?.used_starts||0);return used?{usedStarts:used,averagePlacing:Number(row.avg_placing),limit:config.formLimit}:null;
 }
 
 function stlDifficultyScore(value){
@@ -274,26 +276,186 @@ async function loadHorseForm(env,entityId,filters,config){
   return calculateHorseFormIndex(scored);
 }
 
-async function loadForm(env,entityId,filters,config){
-  return config.resultKey==='horse'
-    ? loadHorseForm(env,entityId,filters,config)
-    : loadLegacyForm(env,entityId,filters,config);
+async function loadPersonTargetStarts(env,entityId,filters,config){
+  const conditions=['re.scratched=0',`re.${config.entryColumn}=?`,'(rr.placing IS NOT NULL OR rr.disqualified=1)'],bindings=[entityId];
+  addCommonFilters(conditions,bindings,filters,{includeVolt:config.volt});
+  const {results}=await env.DB.prepare(`
+    SELECT re.id race_entry_id,re.horse_id,r.id race_id,r.race_date,r.race_number,
+      rr.placing,rr.disqualified,
+      (SELECT COUNT(*) FROM race_entries field_re WHERE field_re.race_id=r.id AND field_re.scratched=0) field_size
+    FROM race_entries re INDEXED BY ${config.entryIndex}
+    JOIN races r ON r.id=re.race_id
+    JOIN race_results rr ON rr.race_entry_id=re.id
+    JOIN horses h ON h.id=re.horse_id
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY r.race_date DESC,r.race_number DESC,re.id DESC
+    LIMIT ${PERSON_FORM_MAX_STARTS}
+  `).bind(...bindings).all();
+  return results||[];
 }
-function marketCte(){return`market_candidates AS (SELECT bs.race_entry_id,bs.bet_percent,bs.market_rank,bs.captured_at,bs.id,ROW_NUMBER() OVER(PARTITION BY bs.race_entry_id ORDER BY julianday(bs.captured_at) DESC,bs.id DESC) rn FROM betting_snapshots bs JOIN game_rounds gr ON gr.id=bs.game_round_id JOIN game_legs gl ON gl.game_round_id=gr.id AND gl.leg_number=bs.leg_number JOIN race_entries mre ON mre.id=bs.race_entry_id AND mre.race_id=gl.race_id WHERE gr.bet_stop_at IS NOT NULL AND bs.source_record_id IS NOT NULL AND julianday(bs.captured_at)<=julianday(gr.bet_stop_at)),market_at_stop AS (SELECT race_entry_id,bet_percent,market_rank,captured_at FROM market_candidates WHERE rn=1)`;}
+
+async function loadDriverMarketRanks(env,targets){
+  if(!targets.length)return new Map();
+  const ids=targets.map(row=>row.race_entry_id),placeholders=ids.map(()=>'?').join(',');
+  const {results}=await env.DB.prepare(`
+    WITH candidates AS (
+      SELECT bs.race_entry_id,bs.market_rank,bs.captured_at,bs.id,
+        ROW_NUMBER() OVER(PARTITION BY bs.race_entry_id ORDER BY julianday(bs.captured_at) DESC,bs.id DESC) rn
+      FROM betting_snapshots bs INDEXED BY idx_betting_snapshots_entry_time
+      JOIN game_rounds gr ON gr.id=bs.game_round_id
+      JOIN game_legs gl ON gl.game_round_id=gr.id AND gl.leg_number=bs.leg_number
+      JOIN race_entries re ON re.id=bs.race_entry_id AND re.race_id=gl.race_id
+      WHERE bs.race_entry_id IN (${placeholders})
+        AND gr.bet_stop_at IS NOT NULL
+        AND bs.source_record_id IS NOT NULL
+        AND julianday(bs.captured_at)<=julianday(gr.bet_stop_at)
+    )
+    SELECT race_entry_id,market_rank,captured_at FROM candidates WHERE rn=1
+  `).bind(...ids).all();
+  return new Map((results||[]).map(row=>[row.race_entry_id,row]));
+}
+
+async function loadTrainerPriorResults(env,targets){
+  if(!targets.length)return new Map();
+  const targetJson=JSON.stringify(targets.map(target=>({
+    targetEntryId:target.race_entry_id,
+    horseId:target.horse_id,
+    raceDate:target.race_date,
+    raceNumber:target.race_number
+  })));
+  const {results}=await env.DB.prepare(`
+    WITH targets AS (
+      SELECT
+        json_extract(value,'$.targetEntryId') target_entry_id,
+        json_extract(value,'$.horseId') horse_id,
+        json_extract(value,'$.raceDate') race_date,
+        CAST(json_extract(value,'$.raceNumber') AS INTEGER) race_number
+      FROM json_each(?)
+    ),
+    prior AS (
+      SELECT t.target_entry_id,rr.placing,rr.disqualified,
+        (SELECT COUNT(*) FROM race_entries field_re WHERE field_re.race_id=r.id AND field_re.scratched=0) field_size,
+        ROW_NUMBER() OVER(PARTITION BY t.target_entry_id ORDER BY r.race_date DESC,r.race_number DESC,re.id DESC) rn
+      FROM targets t
+      JOIN race_entries re INDEXED BY idx_entries_horse_race ON re.horse_id=t.horse_id AND re.scratched=0
+      JOIN races r ON r.id=re.race_id
+      JOIN race_results rr ON rr.race_entry_id=re.id
+      WHERE (r.race_date<t.race_date OR (r.race_date=t.race_date AND r.race_number<t.race_number))
+        AND (rr.placing IS NOT NULL OR rr.disqualified=1)
+    )
+    SELECT target_entry_id,placing,disqualified,field_size FROM prior WHERE rn<=3 ORDER BY target_entry_id,rn
+  `).bind(targetJson).all();
+  const byTarget=new Map();
+  for(const row of results||[]){
+    if(!byTarget.has(row.target_entry_id))byTarget.set(row.target_entry_id,[]);
+    byTarget.get(row.target_entry_id).push(resultPerformanceScore({placing:row.placing,disqualified:row.disqualified,fieldSize:row.field_size}));
+  }
+  return byTarget;
+}
+
+async function loadDriverForm(env,entityId,filters,config){
+  const targets=await loadPersonTargetStarts(env,entityId,filters,config);
+  const market=await loadDriverMarketRanks(env,targets);
+  return calculateDriverFormIndex(targets.map(row=>{
+    const resultScore=resultPerformanceScore({placing:row.placing,disqualified:row.disqualified,fieldSize:row.field_size});
+    const marketRow=market.get(row.race_entry_id);
+    return{
+      raceEntryId:row.race_entry_id,raceId:row.race_id,raceDate:row.race_date,
+      resultScore,
+      marketRank:marketRow?.market_rank==null?null:Number(marketRow.market_rank),
+      marketCapturedAt:marketRow?.captured_at||null,
+      marketPerformanceScore:marketExpectationPerformanceScore({
+        placing:row.placing,disqualified:row.disqualified,fieldSize:row.field_size,marketRank:marketRow?.market_rank
+      })
+    };
+  }));
+}
+
+async function loadTrainerForm(env,entityId,filters,config){
+  const targets=await loadPersonTargetStarts(env,entityId,filters,config);
+  const prior=await loadTrainerPriorResults(env,targets);
+  return calculateTrainerFormIndex(targets.map(row=>{
+    const resultScore=resultPerformanceScore({placing:row.placing,disqualified:row.disqualified,fieldSize:row.field_size});
+    return{
+      raceEntryId:row.race_entry_id,raceId:row.race_id,raceDate:row.race_date,
+      resultScore,
+      developmentScore:trainerDevelopmentScore({resultScore,priorResultScores:prior.get(row.race_entry_id)||[]})
+    };
+  }));
+}
 async function loadMarket(env,entityId,filters,config,kind){
   if(!config.market)return null;
-  const conditions=['re.scratched=0',`re.${config.entryColumn}=?`],bindings=[entityId];addCommonFilters(conditions,bindings,filters,{includeVolt:config.volt});
-  if(kind==='favorite')conditions.push('m.market_rank=1');else{conditions.push('m.bet_percent IS NOT NULL','m.bet_percent>=0','m.bet_percent<=?');bindings.push(DRIVER_LONGSHOT_PERCENT_MAX);}
-  const row=await env.DB.prepare(`WITH ${marketCte()} SELECT ${coreMetricSelectSql('rr')} FROM races r INDEXED BY idx_races_date JOIN race_entries re ON re.race_id=r.id JOIN race_results rr ON rr.race_entry_id=re.id JOIN horses h ON h.id=re.horse_id JOIN market_at_stop m ON m.race_entry_id=re.id WHERE ${conditions.join(' AND ')}`).bind(...bindings).first();
+  const targetConditions=['re.scratched=0',`re.${config.entryColumn}=?`],targetBindings=[entityId];
+  addCommonFilters(targetConditions,targetBindings,filters,{includeVolt:config.volt});
+  const marketConditions=kind==='favorite'
+    ? ['m.market_rank=1']
+    : ['m.bet_percent IS NOT NULL','m.bet_percent>=0','m.bet_percent<=?'];
+  const marketBindings=kind==='favorite'?[]:[DRIVER_LONGSHOT_PERCENT_MAX];
+  const row=await env.DB.prepare(`
+    WITH target_entries AS MATERIALIZED (
+      SELECT re.id race_entry_id
+      FROM race_entries re INDEXED BY ${config.entryIndex}
+      JOIN races r ON r.id=re.race_id
+      JOIN horses h ON h.id=re.horse_id
+      WHERE ${targetConditions.join(' AND ')}
+    ),
+    market_candidates AS (
+      SELECT bs.race_entry_id,bs.bet_percent,bs.market_rank,bs.captured_at,bs.id,
+        ROW_NUMBER() OVER(PARTITION BY bs.race_entry_id ORDER BY julianday(bs.captured_at) DESC,bs.id DESC) rn
+      FROM target_entries te
+      JOIN betting_snapshots bs INDEXED BY idx_betting_snapshots_entry_time ON bs.race_entry_id=te.race_entry_id
+      JOIN game_rounds gr ON gr.id=bs.game_round_id
+      JOIN game_legs gl ON gl.game_round_id=gr.id AND gl.leg_number=bs.leg_number
+      JOIN race_entries mre ON mre.id=bs.race_entry_id AND mre.race_id=gl.race_id
+      WHERE gr.bet_stop_at IS NOT NULL
+        AND bs.source_record_id IS NOT NULL
+        AND julianday(bs.captured_at)<=julianday(gr.bet_stop_at)
+    ),
+    market_at_stop AS (
+      SELECT race_entry_id,bet_percent,market_rank,captured_at FROM market_candidates WHERE rn=1
+    )
+    SELECT ${coreMetricSelectSql('rr')}
+    FROM target_entries te
+    JOIN race_results rr ON rr.race_entry_id=te.race_entry_id
+    JOIN market_at_stop m ON m.race_entry_id=te.race_entry_id
+    WHERE ${marketConditions.join(' AND ')}
+  `).bind(...targetBindings,...marketBindings).first();
   return mapCoreMetricRow(row||{});
 }
-function restCte(){return`actual AS (SELECT h.id horse_id,h.sex,h.birth_year,h.breed,re.trainer_id,re.driver_id,r.id,r.track_id,r.race_date,r.race_number,r.distance_m,r.start_method,r.first_prize_sek,r.race_name,r.main_class,r.class_flags_json,re.id race_entry_id,re.actual_lane,re.handicap_m,re.actual_start_distance_m,rr.placing,rr.prize_sek,rr.gallop,rr.disqualified,CAST(julianday(r.race_date)-julianday(LAG(r.race_date) OVER(PARTITION BY h.id ORDER BY r.race_date,r.race_number,re.id)) AS INTEGER) days_since_previous FROM races r JOIN race_entries re ON re.race_id=r.id JOIN race_results rr ON rr.race_entry_id=re.id JOIN horses h ON h.id=re.horse_id WHERE re.scratched=0),staged AS (SELECT *,LAG(days_since_previous) OVER(PARTITION BY horse_id ORDER BY race_date,race_number,race_entry_id) previous_gap FROM actual)`;}
+function restCte(config,filters){
+  const currentYear=Number(filters.asOfDate.slice(0,4));
+  const upper=filters.year===currentYear?'r0.race_date<=?':'r0.race_date<?';
+  return`relevant_horses AS (
+  SELECT DISTINCT re0.horse_id
+  FROM race_entries re0 INDEXED BY ${config.entryIndex}
+  JOIN races r0 ON r0.id=re0.race_id
+  WHERE re0.${config.entryColumn}=?
+    AND re0.scratched=0
+    AND r0.race_date>=?
+    AND ${upper}
+),actual AS (
+  SELECT h.id horse_id,h.sex,h.birth_year,h.breed,re.trainer_id,re.driver_id,r.id,r.track_id,r.race_date,r.race_number,r.distance_m,r.start_method,r.first_prize_sek,r.race_name,r.main_class,r.class_flags_json,re.id race_entry_id,re.actual_lane,re.handicap_m,re.actual_start_distance_m,rr.placing,rr.prize_sek,rr.gallop,rr.disqualified,
+    CAST(julianday(r.race_date)-julianday(LAG(r.race_date) OVER(PARTITION BY h.id ORDER BY r.race_date,r.race_number,re.id)) AS INTEGER) days_since_previous
+  FROM relevant_horses rh
+  JOIN race_entries re INDEXED BY idx_entries_horse_race ON re.horse_id=rh.horse_id
+  JOIN races r ON r.id=re.race_id
+  JOIN race_results rr ON rr.race_entry_id=re.id
+  JOIN horses h ON h.id=re.horse_id
+  WHERE re.scratched=0
+),staged AS (
+  SELECT *,LAG(days_since_previous) OVER(PARTITION BY horse_id ORDER BY race_date,race_number,race_entry_id) previous_gap FROM actual
+)`;}
 function addStagedFilters(conditions,bindings,filters,config){
   addYearCondition(conditions,bindings,filters,'s');if(filters.trackId){conditions.push('s.track_id=?');bindings.push(filters.trackId);}if(filters.startMethod!=='all')conditions.push(`${canonicalStartMethodSql('s')}='${filters.startMethod}'`);if(filters.raceType==='monte')conditions.push(monteRaceCondition('s'));if(filters.raceType==='sulky')conditions.push(`NOT ${monteRaceCondition('s')}`);if(filters.breedType==='warmblood')conditions.push("(LOWER(COALESCE(s.breed,'')) LIKE '%varmblod%' OR LOWER(COALESCE(s.breed,'')) LIKE '%warmblood%')");if(filters.breedType==='coldblood')conditions.push("(LOWER(COALESCE(s.breed,'')) LIKE '%kallblod%' OR LOWER(COALESCE(s.breed,'')) LIKE '%coldblood%')");if(filters.sex==='mare')conditions.push("LOWER(COALESCE(s.sex,'')) IN ('sto','mare','female','f')");if(filters.sex==='stallion')conditions.push("LOWER(COALESCE(s.sex,'')) IN ('hingst','stallion','male','m')");if(filters.sex==='gelding')conditions.push("LOWER(COALESCE(s.sex,'')) IN ('valack','gelding')");if(filters.age!=null){conditions.push('? - s.birth_year=?');bindings.push(filters.year,filters.age);}addDistanceCondition(conditions,bindings,filters.distanceGroup,'s');addCanonicalRaceScopeCondition(conditions,filters.raceScope,'s');if(config.volt&&filters.voltLane!=='all'){conditions.push(`${canonicalStartMethodSql('s')}='volt'`);conditions.push(filters.voltLane==='good'?'s.actual_lane IN (1,6,7)':'s.actual_lane IS NOT NULL AND s.actual_lane NOT IN (1,6,7)');}if(config.volt&&filters.handicapM!=null){conditions.push(`${canonicalStartMethodSql('s')}='volt'`,'s.handicap_m=?','s.actual_start_distance_m IS NOT NULL','s.distance_m IS NOT NULL','s.actual_start_distance_m-s.distance_m=s.handicap_m');bindings.push(filters.handicapM);}
 }
 async function loadRest(env,entityId,filters,config,kind){
-  if(!config.rest)return null;const column=config.entryColumn==='horse_id'?'horse_id':config.entryColumn;const conditions=[`s.${column}=?`],bindings=[entityId];addStagedFilters(conditions,bindings,filters,config);conditions.push(kind==='first'?`s.days_since_previous>=${REST_DAYS}`:`s.previous_gap>=${REST_DAYS} AND s.days_since_previous<${REST_DAYS}`);
-  const row=await env.DB.prepare(`WITH ${restCte()} SELECT COUNT(*) starts,SUM(CASE WHEN s.placing=1 THEN 1 ELSE 0 END) wins,SUM(CASE WHEN s.placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) top3 FROM staged s WHERE ${conditions.join(' AND ')}`).bind(...bindings).first();
+  if(!config.rest)return null;
+  const currentYear=Number(filters.asOfDate.slice(0,4));
+  const upper=filters.year===currentYear?filters.asOfDate:`${filters.year+1}-01-01`;
+  const column=config.entryColumn==='horse_id'?'horse_id':config.entryColumn;
+  const conditions=[`s.${column}=?`],bindings=[entityId,`${filters.year}-01-01`,upper,entityId];
+  addStagedFilters(conditions,bindings,filters,config);conditions.push(kind==='first'?`s.days_since_previous>=${REST_DAYS}`:`s.previous_gap>=${REST_DAYS} AND s.days_since_previous<${REST_DAYS}`);
+  const row=await env.DB.prepare(`WITH ${restCte(config,filters)} SELECT COUNT(*) starts,SUM(CASE WHEN s.placing=1 THEN 1 ELSE 0 END) wins,SUM(CASE WHEN s.placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) top3 FROM staged s WHERE ${conditions.join(' AND ')}`).bind(...bindings).first();
   const starts=Number(row?.starts||0),wins=Number(row?.wins||0),top3=Number(row?.top3||0);return{starts,wins,top3,winRate:starts?wins/starts:null,top3Rate:starts?top3/starts:null};
 }
 
@@ -321,18 +483,17 @@ export async function getCalendarYearDetailStatistics(env,entityType,entityId,op
   if(!env.DB)throw new Error('DB is not configured');
   const config=configFor(entityType),id=String(entityId||'').trim();if(!id)return null;
   const filters=normalizeFilters(options);
-  const [entity,,core,form,currentStartPoints]=await Promise.all([
+  const [entity,,core,currentStartPoints]=await Promise.all([
     env.DB.prepare(`SELECT id,canonical_name AS name FROM ${config.table} WHERE id=? LIMIT 1`).bind(id).first(),
     validateTrack(env,filters.trackId),
     loadCore(env,id,filters,config),
-    config.resultKey==='horse'?Promise.resolve(null):loadForm(env,id,filters,config),
     config.resultKey==='horse'?getHorseCurrentStartPoint(env,id,filters.asOfDate):Promise.resolve(null)
   ]);
   if(!entity)return null;
   const specialties=options.includeSpecials===false
     ? {favoriteResults:null,longshotResults:null,firstAfterRest:null,secondAfterRest:null}
     : await loadSpecialties(env,id,filters,config);
-  return{entityType,[config.resultKey]:entity,filters,...core,formLast:form,currentStartPoints,...specialties,definitions:definitions()};
+  return{entityType,[config.resultKey]:entity,filters,...core,formLast:null,currentStartPoints,...specialties,definitions:definitions()};
 }
 
 export async function getCalendarYearDetailSpecialties(env,entityType,entityId,options={}){
@@ -341,11 +502,19 @@ export async function getCalendarYearDetailSpecialties(env,entityType,entityId,o
   return{entityType,filters,...await loadSpecialties(env,id,filters,config),definitions:definitions()};
 }
 
-export async function getHorseCalendarYearForm(env,entityId,options={}){
-  const prepared=await prepareDetail(env,'horses',entityId,options);if(!prepared)return null;
+export async function getCalendarYearDetailForm(env,entityType,entityId,options={}){
+  const prepared=await prepareDetail(env,entityType,entityId,options);if(!prepared)return null;
   const {config,id,filters}=prepared;
-  return{entityType:'horses',filters,formLast:await loadHorseForm(env,id,filters,config)};
+  let formLast=null;
+  if(entityType==='horses')formLast=await loadHorseForm(env,id,filters,config);
+  else if(entityType==='drivers')formLast=await loadDriverForm(env,id,filters,config);
+  else if(entityType==='trainers')formLast=await loadTrainerForm(env,id,filters,config);
+  return{entityType,filters,formLast};
 }
+
+export const getHorseCalendarYearForm=(env,id,options)=>getCalendarYearDetailForm(env,'horses',id,options);
+export const getDriverCalendarYearForm=(env,id,options)=>getCalendarYearDetailForm(env,'drivers',id,options);
+export const getTrainerCalendarYearForm=(env,id,options)=>getCalendarYearDetailForm(env,'trainers',id,options);
 
 export const getTrainerCalendarYearDetailStatistics=(env,id,options)=>getCalendarYearDetailStatistics(env,'trainers',id,options);
 export const getDriverCalendarYearDetailStatistics=(env,id,options)=>getCalendarYearDetailStatistics(env,'drivers',id,options);

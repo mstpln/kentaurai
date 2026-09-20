@@ -77,7 +77,7 @@ function verifiedHomeTrackCte() {
       ROW_NUMBER() OVER(PARTITION BY o.entity_id ORDER BY o.observed_at DESC,o.created_at DESC,o.id DESC) AS rn
     FROM normalized_observations o
     JOIN source_records sr ON sr.id=o.source_record_id
-    WHERE o.entity_type='trainer' AND sr.source_type='official_provider'
+    WHERE o.entity_type='trainer' AND o.entity_id=? AND sr.source_type='official_provider'
   ), trainer_home AS (
     SELECT lto.trainer_id,tei.track_id AS home_track_id
     FROM latest_trainer_observation lto
@@ -92,15 +92,15 @@ function verifiedHomeTrackCte() {
 
 async function loadSummary(env, trainerId, filters, home) {
   const conditions = ['re.scratched = 0', 're.trainer_id = ?'];
-  const bindings = [trainerId];
+  const bindings = [trainerId, trainerId];
   addFilters(conditions, bindings, filters);
   conditions.push(home
     ? 'EXISTS (SELECT 1 FROM trainer_home th WHERE th.trainer_id=re.trainer_id AND th.home_track_id IS NOT NULL AND th.home_track_id=r.track_id)'
     : 'EXISTS (SELECT 1 FROM trainer_home th WHERE th.trainer_id=re.trainer_id AND th.home_track_id IS NOT NULL AND th.home_track_id<>r.track_id)');
   const row = await env.DB.prepare(`WITH ${verifiedHomeTrackCte()}
     SELECT ${coreMetricSelectSql('rr')}
-    FROM races r INDEXED BY idx_races_date
-    JOIN race_entries re ON re.race_id=r.id
+    FROM race_entries re INDEXED BY idx_entries_trainer
+    JOIN races r ON r.id=re.race_id
     JOIN race_results rr ON rr.race_entry_id=re.id
     JOIN horses h ON h.id=re.horse_id
     WHERE ${conditions.join(' AND ')}`).bind(...bindings).first();

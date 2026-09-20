@@ -123,7 +123,7 @@ test('horse-specific verified start-point and top-speed sections render directly
   assert.match(script, /topSpeed/);
   assert.match(script, /Toppfart/);
   assert.match(script, /horse-pattern-section/);
-  assert.match(script, /api\('\/horses\/'\+encodeURIComponent\(s\.id\)\+'\/statistics'\)/);
+  assert.match(script, /request\('\/horses\/'\+encodeURIComponent\(s\.id\)\+'\/statistics'\)/);
   assert.doesNotMatch(script, /captureHorseExtra|horseStatsBuildB/);
 });
 
@@ -141,7 +141,8 @@ test('shared summary keeps entity-specific specialized sections without the scor
   assert.doesNotMatch(html, /entity-detail-kicker/);
   assert.doesNotMatch(html, /\.entity-detail-label\{[^}]*margin-top/);
   assert.match(script, /Segerprocent/);
-  assert.match(script, /Form '\+c\.form/);
+  assert.match(script, /Form \(1–100\)/);
+  assert.match(script, /formMini\(data\.entityType,null\)/);
   assert.match(script, /if\(c\.rest\)/);
   assert.match(script, /if\(c\.market\)/);
   assert.match(script, /table\('Startmetod'/);
