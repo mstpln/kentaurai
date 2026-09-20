@@ -135,3 +135,9 @@ A single race must not directly change model weights. Candidate learnings are re
 - Missing verified evidence is null and causes weight renormalization; it never becomes a zero-performance assumption.
 - Opposition Start Points/earnings may contribute only when an official snapshot existed by the historical race cutoff. Current values are never projected backwards.
 - Form is market-blind and deterministic. It is a calculated feature shown in the factual/statistical UI, not an AI judgment or a replacement for the broader KentaurAI strength analysis.
+
+
+## X-Labs interval rows must follow captured telemetry into production
+- A normalized X-Labs race source is not complete for current consumers until both trusted whole-race telemetry and the additive `xlabs-intervals-v2` rows have been attempted from the same immutable raw source.
+- Existing normalized sources are repaired from private R2 rather than refetched externally. Repair is bounded, idempotent, recent-first and retries failed sources only up to the configured limit.
+- User-facing Toppfart opening sections use only valid v2 local intervals. Missing local evidence remains null; the UI must not substitute unrelated legacy values merely to fill a card.

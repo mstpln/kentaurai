@@ -46,7 +46,7 @@ The current build contains:
 - F2 post-race probability/system diagnostics for both historical sealed-v3 and external-analysis lineage, with repeated eligible misses recorded as candidate learning only and no automatic model changes
 - guided private four-stage external-AI workflow, separate external-evidence registration and sanitized coverage/backfill observability
 - complete presentation of currently stored measurement families on entity/start detail, including horse External statistics / Interviews and trainer Interviews tabs, while internal provenance remains backend-only
-- verified X-Labs race-telemetry capture, normalization and raw-vs-normalized checks; exact payloads remain private
+- verified X-Labs race-telemetry capture, whole-race and 100 m interval normalization, bounded repair of previously captured telemetry, and raw-vs-normalized checks; exact payloads remain private
 - scheduled previous-day X-Labs catch-up for stored V85/V86 game legs
 - a separate three-year-capable historical X-Labs job that follows verified official-history readiness rather than outrunning it
 - persistent official and X-Labs backfill jobs with idempotent source reuse, checkpoints, leases and bounded retries
@@ -110,6 +110,7 @@ Real source data belongs only in the private Cloudflare D1/R2 deployment or is s
 - `POST /v1/xlabs/capture-race-json` - Bearer ADMIN_TOKEN; captures one browser-verified telemetry object
 - `POST /v1/xlabs/normalize` - Bearer ADMIN_TOKEN; maps the verified telemetry subset
 - `POST /v1/xlabs/verify-normalization` - Bearer ADMIN_TOKEN; compares private raw telemetry with normalized rows
+- `POST /v1/xlabs/interval-repair` - Bearer ADMIN_TOKEN; bounded repair of missing v2 interval rows from already captured private raw telemetry
 - `POST /v1/xlabs/backfill/start` - Bearer ADMIN_TOKEN; creates/resumes a historical X-Labs date-range job
 - `POST /v1/xlabs/backfill/step` - Bearer ADMIN_TOKEN; advances one X-Labs checkpoint
 - `GET /v1/xlabs/backfill/status?job_id=...` - Bearer ADMIN_TOKEN

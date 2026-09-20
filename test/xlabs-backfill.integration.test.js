@@ -145,6 +145,7 @@ test('daily X-Labs job processes a fully normalized V86 round without waiting fo
   assert.equal(result.scope, 'daily_v85_v86');
   assert.equal(result.raceId, 'race_5');
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM xlabs_data`).get().n, 2);
+  assert.ok(db.prepare(`SELECT COUNT(*) AS n FROM xlabs_intervals`).get().n > 0);
 });
 
 test('daily X-Labs waits for the official V86 game normalization instead of completing a partial day', async () => {
@@ -214,6 +215,7 @@ test('captures and normalizes one available X-Labs race from a verified official
   assert.equal(result.scope, 'historical_all');
   assert.equal(result.checkpoint.nextRaceIndex, 1);
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM xlabs_data`).get().n, 2);
+  assert.ok(db.prepare(`SELECT COUNT(*) AS n FROM xlabs_intervals`).get().n > 0);
   assert.equal(db.prepare(`SELECT quality_status FROM source_records WHERE source_type='xlabs_race_json'`).get().quality_status, 'normalized_verified_subset');
   const job = db.prepare(`SELECT processed_races,unavailable_races,consecutive_errors FROM xlabs_backfill_jobs`).get();
   assert.equal(job.processed_races, 1);
