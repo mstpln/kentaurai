@@ -245,8 +245,9 @@ async function readJsonSource(env, source, label) {
   return payload;
 }
 
-async function storedSettledRoundReadiness(env, date) {
-  const { results } = await env.DB.prepare(`
+async function storedSettledRoundReadiness(env, date, roundId = null) {
+  const filter=roundId?'AND gr.id=?':'';
+  const statement=env.DB.prepare(`
     SELECT gr.id,
       (SELECT COUNT(*) FROM game_legs gl WHERE gl.game_round_id=gr.id) leg_count,
       (SELECT COUNT(*) FROM game_legs gl
@@ -257,8 +258,10 @@ async function storedSettledRoundReadiness(env, date) {
     FROM game_rounds gr
     WHERE gr.round_date=? AND gr.game_type IN ('V85','V86')
       AND EXISTS (SELECT 1 FROM systems s WHERE s.game_round_id=gr.id)
+      ${filter}
     ORDER BY gr.id
-  `).bind(date).all();
+  `);
+  const { results } = roundId ? await statement.bind(date,roundId).all() : await statement.bind(date).all();
   if (!(results || []).length) return null;
   const ready=(results || []).every(row=>Number(row.leg_count)===8 && Number(row.settled_legs)===8);
   return {
@@ -286,8 +289,8 @@ async function dailyOfficialReadiness(env, date) {
   for (const gameId of gameIds) {
     const source = await latestSourceByTime(env, 'official_provider', `game:${gameId}`);
     if (!source || source.quality_status !== NORMALIZED_QUALITY) {
-      const settled = await storedSettledRoundReadiness(env,date);
-      if (settled?.ready && gameIds.includes(gameId)) continue;
+      const settled = await storedSettledRoundReadiness(env,date,gameId);
+      if (settled?.ready) continue;
       pendingGameCount += 1;
       continue;
     }
