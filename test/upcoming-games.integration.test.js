@@ -33,7 +33,8 @@ function seedUpcoming(db) {
   const history=[
     ['hist_auto_high','2099-06-01','auto',2140,120000,1,1,0,'1.12,8','1.06,8'],
     ['hist_auto_weekday','2099-05-01','auto',2100,30000,4,2,1,'1.13,4','1.07,2'],
-    ['hist_volt_fast','2099-04-01','volt',2140,30000,6,1,0,'1.11,0','1.06,3']
+    ['hist_volt_fast','2099-04-01','volt',2140,30000,6,1,0,'1.11,0','1.06,3'],
+    ['hist_impossible','2099-03-01','auto',2140,30000,2,4,0,'0.06,6','0.05,9']
   ];
   for (const [id,date,method,distance,prize,lane,placing,gallop,first200,last400] of history) {
     db.prepare("INSERT INTO races (id,track_id,race_date,race_number,scheduled_start_at,distance_m,start_method,first_prize_sek,status) VALUES (?,?,?,?,?,?,?,?,?)")
@@ -80,6 +81,8 @@ test('upcoming leg uses fastest first 200 from matching start method and fastest
   assert.equal(horse.fastestFirst200.observationCount, 2);
   assert.equal(horse.fastestLast400.value, '1.06,3');
   assert.equal(horse.fastestLast400.observationCount, 3);
+  assert.notEqual(horse.fastestFirst200.value, '0.06,6');
+  assert.notEqual(horse.fastestLast400.value, '0.05,9');
   assert.equal(horse.betPercent, 21);
 });
 
@@ -87,19 +90,19 @@ test('expanded facts use rolling 12 months, canonical distance group, lane type 
   const { env, db } = createTestEnv();
   seedUpcoming(db);
   const data = await getUpcomingEntryFacts(env, 'round_up', 1, 'entry_1', { asOfDate:'2099-09-19' });
-  assert.equal(data.metrics.rolling12Months.starts, 3);
+  assert.equal(data.metrics.rolling12Months.starts, 4);
   assert.equal(data.metrics.rolling12Months.wins, 2);
-  assert.equal(data.metrics.gallop.starts, 3);
+  assert.equal(data.metrics.gallop.starts, 4);
   assert.equal(data.metrics.gallop.gallops, 1);
-  assert.equal(data.metrics.currentDriver.starts, 3);
-  assert.equal(data.metrics.currentTrack.starts, 3);
-  assert.equal(data.metrics.sameStartMethod.starts, 2);
+  assert.equal(data.metrics.currentDriver.starts, 4);
+  assert.equal(data.metrics.currentTrack.starts, 4);
+  assert.equal(data.metrics.sameStartMethod.starts, 3);
   assert.equal(data.metrics.sameDistanceGroup.key, '2140');
-  assert.equal(data.metrics.sameDistanceGroup.starts, 3);
+  assert.equal(data.metrics.sameDistanceGroup.starts, 4);
   assert.equal(data.metrics.laneType.key, 'auto_front');
-  assert.equal(data.metrics.laneType.starts, 2);
+  assert.equal(data.metrics.laneType.starts, 3);
   assert.equal(data.metrics.highPrize.starts, 1);
-  assert.equal(data.metrics.weekday.starts, 2);
+  assert.equal(data.metrics.weekday.starts, 3);
   assert.match(data.metrics.laneType.explanation, /framspår 1–8/);
 });
 
