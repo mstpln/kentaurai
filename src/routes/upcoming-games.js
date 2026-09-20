@@ -109,8 +109,9 @@ export async function listUpcomingGames(env, options = {}) {
   if (!env.DB) throw new Error('DB is not configured');
   const gameType = normalizeGameType(options.gameType);
   const asOfDate = String(options.asOfDate || swedenDateKey());
+  const asOfNow = String(options.asOfNow || new Date().toISOString());
   const limit = clampLimit(options.limit);
-  const bindings = [asOfDate];
+  const bindings = [asOfDate, asOfDate, asOfNow];
   const typeFilter = gameType ? 'AND gr.game_type = ?' : '';
   if (gameType) bindings.push(gameType);
   bindings.push(limit);
@@ -120,7 +121,11 @@ export async function listUpcomingGames(env, options = {}) {
       gr.id,
       gr.game_type,
       gr.round_date,
-      gr.scheduled_start_at,
+      COALESCE(gr.scheduled_start_at,(
+        SELECT MIN(rstart.scheduled_start_at)
+        FROM game_legs glstart JOIN races rstart ON rstart.id=glstart.race_id
+        WHERE glstart.game_round_id=gr.id
+      )) AS scheduled_start_at,
       gr.bet_stop_at,
       gr.status,
       (SELECT COUNT(*) FROM systems sx WHERE sx.game_round_id = gr.id) AS system_count,
@@ -189,7 +194,18 @@ export async function listUpcomingGames(env, options = {}) {
       ) AS latest_fetched_at
     FROM game_rounds gr
     WHERE gr.game_type IN ('V85','V86')
-      AND gr.round_date >= ?
+      AND (
+        gr.round_date > ?
+        OR (
+          gr.round_date = ?
+          AND datetime(COALESCE(
+            gr.bet_stop_at,
+            gr.scheduled_start_at,
+            (SELECT MIN(rnow.scheduled_start_at) FROM game_legs glnow JOIN races rnow ON rnow.id=glnow.race_id WHERE glnow.game_round_id=gr.id),
+            gr.round_date || 'T23:59:59Z'
+          )) > datetime(?)
+        )
+      )
       ${typeFilter}
       AND (SELECT COUNT(*) FROM game_legs gl8 WHERE gl8.game_round_id = gr.id) = 8
       AND (
@@ -206,6 +222,7 @@ export async function listUpcomingGames(env, options = {}) {
   return {
     gameType,
     asOfDate,
+    asOfNow,
     items:(results || []).map((row) => ({
       id:row.id,
       gameType:row.game_type,
