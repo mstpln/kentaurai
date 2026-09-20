@@ -148,3 +148,13 @@ A single race must not directly change model weights. Candidate learnings are re
 - Speaker and role are deliberately excluded from the collapsed row and shown only after expansion together with the summary and structured signals.
 - The canonical interview signal taxonomy remains: form, training, tactics, distance, start, equipment, expectation and other.
 - A relevant explicit change versus the previous start/state is stored separately as nullable `change_since_last` plus `change_summary`; it is not introduced as a ninth signal family and is never guessed.
+
+
+## Driver and trainer Form are role-specific deterministic current-form indices
+- Horse Form semantics and weights remain unchanged.
+- Driver `Form (1–100)` uses only two relevant components: 60% recent field-size-aware results and 40% historical result versus market-rank expectation. Up to 30 eligible drives are recency-weighted.
+- Driver market expectation uses only a source-backed historical betting snapshot captured at or before that round's authoritative bet stop. The market-derived component remains separately identifiable and must not be presented as market-blind evidence. Missing market history stays null and available weights renormalize.
+- Trainer `Form (1–100)` uses only two relevant components: 60% recent field-size-aware results and 40% development of the trainer's horses against their own prior verified results. Up to 30 eligible trainer starts are recency-weighted.
+- Trainer Form does not use betting/odds, race/opposition difficulty or X-Labs merely to mirror the horse formula.
+- Person Form requires at least three verified result starts for a score. Missing secondary evidence remains null; it is never treated as a zero-performance assumption.
+- Core entity statistics must not wait for any Form calculation. Horse, trainer and driver Form all load through separate private lazy endpoints after core paint.
