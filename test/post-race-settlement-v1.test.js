@@ -237,8 +237,7 @@ test('post-race settlement safely binds final results to an existing start when 
     .run('Synthetic Winner 1',entryId);
 
   const payload=racePayload(1);
-  payload.starts[0].horse={ name:'Synthetic Winner 1' };
-  delete payload.starts[0].horse.id;
+  payload.starts[0].horse={};
 
   const result=await runNextPostRaceSettlement(env,{
     roundId:ROUND_ID,
