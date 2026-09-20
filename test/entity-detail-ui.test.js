@@ -125,7 +125,7 @@ test('horse start points render from primary canonical data and verified top spe
   assert.match(script, /horse-pattern-section/);
   assert.match(script, /calendar-statistics\?'.*specials=0/);
   assert.match(script, /id="entityDetailHorseExtra"/);
-  assert.match(script, /topSpeedPromise=s\.page==='horses'\?delayedRequest\('\/horses\/'\+encodeURIComponent\(s\.id\)\+'\/top-speed',token\):Promise\.resolve\(null\)/);
+  assert.match(script, /topSpeedPromise=s\.page==='horses'\?delayedRequest\('\/horses\/'\+encodeURIComponent\(s\.id\)\+'\/top-speed',token\)\.catch\(\(\)=>null\):Promise\.resolve\(null\)/);
   assert.match(script, /extraHost\.innerHTML=horseExtra\(extra\)/);
   assert.match(script, /Ingen verifierad X-Labs-mätning/);
   assert.doesNotMatch(script, /captureHorseExtra|horseStatsBuildB/);
