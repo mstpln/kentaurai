@@ -6,7 +6,7 @@ import {
   ensureXlabsIntervalsForSource,
   runXlabsIntervalRepairBatch
 } from '../src/import/xlabs-interval-repair.js';
-import { XLABS_INTERVALS_V2_VERSION } from '../src/xlabs-intervals-v2.js';
+import { normalizeCapturedXlabsIntervalsV2, XLABS_INTERVALS_V2_VERSION } from '../src/xlabs-intervals-v2.js';
 import worker from '../src/index.js';
 
 const DATE = '2099-01-02';
@@ -75,6 +75,25 @@ test('interval repair derives missing v2 rows from already captured normalized X
   assert.equal(state.status, 'success');
   assert.equal(state.mapper_version, XLABS_INTERVALS_V2_VERSION);
   assert.equal(state.interval_rows, result.intervalRows);
+});
+
+test('interval repair completes a partially written source instead of falsely marking it complete', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedSource(db, objects);
+  const normalized = await normalizeCapturedXlabsIntervalsV2(env, 'src_x');
+  assert.ok(normalized.intervalRows > 1);
+
+  const row = db.prepare(`SELECT id FROM xlabs_intervals
+    WHERE source_record_id='src_x' AND mapper_version=? ORDER BY id LIMIT 1`).get(XLABS_INTERVALS_V2_VERSION);
+  db.prepare('DELETE FROM xlabs_intervals WHERE id=?').run(row.id);
+  const partial = db.prepare(`SELECT COUNT(*) n FROM xlabs_intervals
+    WHERE source_record_id='src_x' AND mapper_version=?`).get(XLABS_INTERVALS_V2_VERSION).n;
+  assert.equal(partial, normalized.intervalRows - 1);
+
+  const repaired = await ensureXlabsIntervalsForSource(env, 'src_x');
+  assert.equal(repaired.intervalRows, normalized.intervalRows);
+  assert.equal(db.prepare(`SELECT COUNT(*) n FROM xlabs_intervals
+    WHERE source_record_id='src_x' AND mapper_version=?`).get(XLABS_INTERVALS_V2_VERSION).n, normalized.intervalRows);
 });
 
 test('interval repair is idempotent and marks existing v2 rows as reused', async () => {
