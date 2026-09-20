@@ -110,6 +110,7 @@ Real source data belongs only in the private Cloudflare D1/R2 deployment or is s
 - `POST /v1/xlabs/capture-race-json` - Bearer ADMIN_TOKEN; captures one browser-verified telemetry object
 - `POST /v1/xlabs/normalize` - Bearer ADMIN_TOKEN; maps the verified telemetry subset
 - `POST /v1/xlabs/verify-normalization` - Bearer ADMIN_TOKEN; compares private raw telemetry with normalized rows
+- `POST /v1/xlabs/interval-repair` - Bearer ADMIN_TOKEN; bounded repair of missing v2 interval rows from already captured private raw telemetry
 - `POST /v1/xlabs/backfill/start` - Bearer ADMIN_TOKEN; creates/resumes a historical X-Labs date-range job
 - `POST /v1/xlabs/backfill/step` - Bearer ADMIN_TOKEN; advances one X-Labs checkpoint
 - `GET /v1/xlabs/backfill/status?job_id=...` - Bearer ADMIN_TOKEN
