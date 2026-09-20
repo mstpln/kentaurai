@@ -13,15 +13,16 @@ function primaryNavigationRuntime(html) {
   return match[1];
 }
 
-test('primary bottom navigation is reduced to Start, Statistik and Spel', () => {
+test('primary bottom navigation is Trend, Statistik, Analys and Spel', () => {
   const html = renderAppPage();
   const runtimeNav = primaryNavigationRuntime(html);
   const pages = [...runtimeNav.matchAll(/data-page="([^"]+)"/g)].map((match) => match[1]);
 
-  assert.match(html, /grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
-  assert.deepEqual(pages, ['start', 'statistics', 'games']);
-  assert.match(runtimeNav, /Start<\/button>/);
+  assert.match(html, /grid-template-columns:repeat\(4,minmax\(0,1fr\)\)/);
+  assert.deepEqual(pages, ['start', 'statistics', 'analysis', 'games']);
+  assert.match(runtimeNav, /Trend<\/button>/);
   assert.match(runtimeNav, /Statistik<\/button>/);
+  assert.match(runtimeNav, /Analys<\/button>/);
   assert.match(runtimeNav, /Spel<\/button>/);
   assert.doesNotMatch(runtimeNav, /data-page="(?:trainers|horses|drivers|tracks)"/);
   assert.doesNotMatch(html, /addTrackNavigation\(\)/);
@@ -34,15 +35,17 @@ test('statistics navigation groups trainer horse driver and track browsing with 
   assert.match(html, /\.statistics-category-nav\{display:grid;grid-template-columns:repeat\(4,minmax\(0,1fr\)\);gap:1px;background:var\(--line\);border:1px solid var\(--line\);border-radius:11px;overflow:hidden;margin-bottom:22px\}/);
   assert.match(html, /\.statistics-category-btn\.active\{background:#1d1913;color:var\(--accent-soft\);box-shadow:inset 0 -2px 0 var\(--accent\)\}/);
   assert.match(html, /app\.insertAdjacentHTML\('afterbegin',statisticsCategoryNav\(state\.page\)\)/);
+  assert.match(html, /STATISTICS_PAGES\.includes\(state\.page\)&&!state\.settingsOpen&&!state\.detail&&!state\.trackDetail/);
   assert.match(html, /aria-label="Statistikområden"/);
   assert.match(html, /aria-current="page"/);
 });
 
-test('bottom navigation reuses the rendered Trend icon and never calls the server-only icon helper in browser runtime', () => {
+test('bottom navigation reuses Trend and uses approved Table, Magnifying Glass and Currency Circle Dollar icons', () => {
   const html = renderAppPage();
   const runtimeNav = primaryNavigationRuntime(html);
   assert.match(html, /const startIcon=inner\.querySelector\('\[data-page="start"\] \.nav-icon'\)\?\.outerHTML\|\|''/);
-  assert.match(runtimeNav, /startIcon\+'Start/);
+  assert.match(runtimeNav, /startIcon\+'Trend/);
+  assert.match(html, /M229\.66,218\.34l-50\.07-50\.06/);
   assert.doesNotMatch(runtimeNav, /icon\(/);
   assert.match(html, /M224,48H32a8,8,0,0,0-8,8V192/);
   assert.match(html, /M128,24A104,104,0,1,0,232,128/);
@@ -68,8 +71,9 @@ test('full production-composed app keeps the grouped primary navigation after la
   const runtimeNav = primaryNavigationRuntime(html);
   const pages = [...runtimeNav.matchAll(/data-page="([^"]+)"/g)].map((match) => match[1]);
 
-  assert.deepEqual(pages, ['start', 'statistics', 'games']);
-  assert.match(runtimeNav, /startIcon\+'Start/);
+  assert.deepEqual(pages, ['start', 'statistics', 'analysis', 'games']);
+  assert.match(runtimeNav, /startIcon\+'Trend/);
+  assert.match(runtimeNav, /data-page="analysis"/);
   assert.doesNotMatch(runtimeNav, /icon\(/);
   assert.doesNotMatch(runtimeNav, /data-page="(?:trainers|horses|drivers|tracks)"/);
   assert.match(html, /id="kentaurai-performance-v1-script"/);
