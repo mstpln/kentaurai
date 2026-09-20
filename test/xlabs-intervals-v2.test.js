@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildXlabsIntervalsV2,
   normalizeCapturedXlabsIntervalsV2,
+  XLABS_INTERVALS_V2_POLICY,
   XLABS_INTERVALS_V2_VERSION
 } from '../src/xlabs-intervals-v2.js';
 import { createTestEnv } from './helpers/d1.js';
@@ -39,7 +40,7 @@ function syntheticTelemetry({ missing = {}, includeSecond = false, includeThird 
     return {
       trackId: 7,
       raceNumber: 5,
-      timestamp: new Date(Date.UTC(2099, 0, 2, 12, 0, index)).toISOString(),
+      timestamp: new Date(Date.UTC(2099, 0, 2, 12, 0, index * 4)).toISOString(),
       targets
     };
   });
@@ -104,6 +105,20 @@ test('C1 keeps useful local intervals when total starter coverage is only 96 per
   assert.equal(firstInterval.status, 'valid');
   assert.ok(Number.isFinite(firstInterval.elapsedMs));
   assert.ok(Number.isFinite(firstInterval.kmPaceMs));
+});
+
+test('impossible local pace is rejected as an outlier instead of being exposed as verified speed', () => {
+  const payload = syntheticTelemetry();
+  for (let index = 0; index < payload.length; index += 1) {
+    payload[index].timestamp = new Date(Date.UTC(2099, 0, 2, 12, 0, index)).toISOString();
+  }
+  const result = build(payload);
+  const firstInterval = result.intervalRows.find((row) => row.intervalStartM === 0 && row.intervalEndM === 100);
+  assert.equal(XLABS_INTERVALS_V2_POLICY.minPlausibleKmPaceMs, 50000);
+  assert.equal(firstInterval.status, 'pace_outlier');
+  assert.equal(firstInterval.kmPaceMs, null);
+  assert.equal(result.bundles[0].features.first_100_km_pace_ms.value, null);
+  assert.equal(result.bundles[0].features.first_100_km_pace_ms.evidence_level, 'D');
 });
 
 test('a missing local window nulls that feature without discarding unrelated X-Labs features', () => {
