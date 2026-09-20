@@ -42,6 +42,32 @@ test('statistics core endpoints avoid repeated ranking scans', async () => {
   }
 });
 
+test('statistics extended endpoints consolidate expensive ranking families', async () => {
+  {
+    const { env } = createTestEnv();
+    const captures = capturePreparedQueries(env);
+    await getHorseRankings(env, { mode:'extended', period:'1y', asOfDate:'2026-09-20', minStarts:'3' });
+    assert.equal(captures.length, 4, 'horse extended should use earnings + closing speed + combined rest + Start Points');
+    assert.equal(captures.filter((sql) => sql.includes('ranking_kind')).length, 1);
+  }
+  {
+    const { env } = createTestEnv();
+    const captures = capturePreparedQueries(env);
+    await getTrainerRankings(env, { mode:'extended', period:'1y', asOfDate:'2026-09-20', minStarts:'10' });
+    assert.equal(captures.length, 7, 'trainer extended should collapse performance, home, distance, market and rest ranking families');
+    assert.equal(captures.some((sql) => sql.includes("'goodVolt' category")), true);
+    assert.equal(captures.some((sql) => sql.includes("'favorite' category")), true);
+  }
+  {
+    const { env } = createTestEnv();
+    const captures = capturePreparedQueries(env);
+    await getDriverRankings(env, { mode:'extended', period:'1y', asOfDate:'2026-09-20', minStarts:'10' });
+    assert.equal(captures.length, 4, 'driver extended should collapse performance and market ranking families');
+    assert.equal(captures.some((sql) => sql.includes("'backRow'")), true);
+    assert.equal(captures.some((sql) => sql.includes("'longshot'")), true);
+  }
+});
+
 test('statistics UIs overlap core and extended reads while keeping core paint first', () => {
   for (const [file, mergeName] of [
     ['../src/horse-statistics-ui.js','mergeHorseRankingPayload'],
