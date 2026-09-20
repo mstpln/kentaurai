@@ -97,7 +97,7 @@ test('horse age options follow the selected calendar year rather than the device
 
 test('year and filter controls are rendered above the score summary because they affect the full view', () => {
   const script = statsScriptFrom(enhanced());
-  assert.match(script, /host\.innerHTML='<div class="entity-detail-controls">'\+toolbar\(s,c\)\+panel\(s,c\)\+'<\/div>'\+content\(data,s,c,extra\)/);
+  assert.match(script, /host\.innerHTML='<div class="entity-detail-controls">'\+toolbar\(s,c\)\+panel\(s,c\)\+'<\/div>'\+content\(data,s,c\)/);
   assert.doesNotMatch(script, /scoreNode\.after\(controlsNode\)/);
 });
 
