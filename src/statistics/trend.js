@@ -1,3 +1,4 @@
+import { getCalendarYearDetailForm } from '../entity-detail-calendar-statistics.js';
 import {
   addTrendRaceFilters,
   coreMetricSelectSql,
@@ -83,9 +84,93 @@ export function buildTrendQuery(options = {}) {
   };
 }
 
+function buildHorseTrendCandidates(options = {}) {
+  const raceScope = normalizeTrendRaceScope(options.raceScope);
+  const raceType = normalizeTrendRaceType(options.raceType);
+  const breedType = normalizeTrendBreed(options.breedType);
+  const startMethod = normalizeTrendStartMethod(options.startMethod);
+  const minStarts = normalizeTrendMinStarts(options.minStarts);
+  const trackId = normalizeTrackId(options.trackId);
+  const window = trendDateWindow(options.period, options.asOfDate);
+  const conditions = ['re.scratched = 0','r.race_date >= ?','r.race_date <= ?'];
+  const bindings = [window.startDate, window.endDate];
+  addTrendRaceFilters(conditions, bindings, { raceScope, raceType, breedType, startMethod, trackId });
+  const minimumCondition = minStarts == null ? 'starts > 0' : 'starts >= ?';
+  if (minStarts != null) bindings.push(minStarts);
+  return {
+    sql: `
+      WITH horse_stats AS (
+        SELECT h.id AS entity_id,h.canonical_name AS name,${coreMetricSelectSql('rr')}
+        FROM races r INDEXED BY idx_races_date
+        JOIN race_entries re ON re.race_id=r.id
+        JOIN race_results rr ON rr.race_entry_id=re.id
+        JOIN horses h ON h.id=re.horse_id
+        WHERE ${conditions.join(' AND ')}
+        GROUP BY h.id,h.canonical_name
+      )
+      SELECT * FROM horse_stats
+      WHERE ${minimumCondition}
+      ORDER BY starts DESC,wins DESC,entity_id ASC
+    `,
+    bindings,
+    normalized:{period:window.period,startDate:window.startDate,endDate:window.endDate,raceScope,trackId,raceType,breedType,startMethod,minStarts}
+  };
+}
+
+async function mapHorseForms(env, rows, normalized) {
+  const output = new Array(rows.length);
+  let next = 0;
+  async function worker() {
+    while (next < rows.length) {
+      const index = next++;
+      const row = rows[index];
+      const form = await getCalendarYearDetailForm(env,'horses',row.entity_id,{
+        period:normalized.period,
+        asOfDate:normalized.endDate,
+        raceScope:normalized.raceScope,
+        trackId:normalized.trackId,
+        raceType:normalized.raceType,
+        breedType:normalized.breedType,
+        startMethod:normalized.startMethod
+      });
+      output[index] = { row, form:form?.formLast || null };
+    }
+  }
+  await Promise.all(Array.from({length:Math.min(6,rows.length)},()=>worker()));
+  return output;
+}
+
+async function getHorseTrendLeaderboard(env, options = {}) {
+  const query=buildHorseTrendCandidates(options);
+  await validateTrack(env,query.normalized.trackId);
+  const {results}=await env.DB.prepare(query.sql).bind(...query.bindings).all();
+  const measured=await mapHorseForms(env,results||[],query.normalized);
+  const items=measured
+    .filter(item=>item.form?.score!=null)
+    .sort((a,b)=>Number(b.form.score)-Number(a.form.score)||Number(b.row.wins||0)-Number(a.row.wins||0)||Number(b.row.starts||0)-Number(a.row.starts||0)||String(a.row.entity_id).localeCompare(String(b.row.entity_id)))
+    .slice(0,10)
+    .map((item,index)=>({
+      rank:index+1,
+      id:item.row.entity_id,
+      name:item.row.name,
+      formScore:Number(item.form.score),
+      formUsedStarts:Number(item.form.usedStarts||0),
+      recentResults:item.form.recentResults||[],
+      ...mapCoreMetricRow(item.row)
+    }));
+  return {
+    category:'horses',
+    rankingMetric:'form',
+    filters:query.normalized,
+    items
+  };
+}
+
 export async function getTrendLeaderboard(env, options = {}) {
   if (!env.DB) throw new Error('DB is not configured');
-  const query = buildTrendQuery(options);
+  const category=normalizeTrendCategory(options.category);
+  if(category==='horses') return getHorseTrendLeaderboard(env,{...options,category});
+  const query = buildTrendQuery({...options,category});
   await validateTrack(env, query.normalized.trackId);
   const { results } = await env.DB.prepare(query.sql).bind(...query.bindings).all();
   return {
