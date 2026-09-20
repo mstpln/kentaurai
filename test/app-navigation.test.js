@@ -48,7 +48,7 @@ test('distance rows aggregate counts before recalculating rates', () => {
   assert.equal(short.gallopRate, 3 / 24);
 });
 
-test('rendered app shell has a borderless settings gear and in-app history support', () => {
+test('rendered app shell has a borderless data-only settings gear and in-app history support for Analysis', () => {
   const html = renderAppPage();
   assert.match(html, /id="settingsButton"/);
   assert.match(html, /\.settings-button\{[^}]*border:0!important[^}]*background:transparent!important/);
@@ -56,5 +56,9 @@ test('rendered app shell has a borderless settings gear and in-app history suppo
   assert.match(html, /history\.replaceState/);
   assert.match(html, /window\.addEventListener\('popstate'/);
   assert.match(html, /history\.back\(\)/);
+  assert.match(html, /settingsTab:state\.settingsTab\|\|'data'/);
+  assert.match(html, /state\.settingsTab='data'/);
+  assert.match(html, /view\.page==='analysis'/);
+  assert.match(html, /__kentauraiAnalysis/);
   assert.match(html, /groupDistanceRows/);
 });
