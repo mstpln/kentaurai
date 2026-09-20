@@ -199,6 +199,43 @@ test('actual production evidence tabs call their canonical APIs', async () => {
   assert.ok(requestedPaths.includes('/trainers/trainer-1/interviews'));
 });
 
+test('interview rows stay compact until expanded and expose race context without speaker in the summary row', async () => {
+  const html = await productionHtml();
+  const scripts = [...html.matchAll(/<script(?: id="([^"]+)")?[^>]*>([\s\S]*?)<\/script>/g)];
+  const { context } = runtimeContext();
+  for (const [, id = '(base)', source] of scripts) new vm.Script(source, { filename:id }).runInContext(context);
+  const payload = {
+    items:[{
+      speakerName:'Synthetic Speaker',
+      speakerRole:'stable_representative',
+      publishedAt:'2026-09-19T11:00:00Z',
+      raceDate:'2026-09-19',
+      trackName:'Färjestad',
+      raceNumber:7,
+      startMethod:'auto',
+      postPosition:4,
+      summary:'Kort strukturerad sammanfattning.',
+      changeSinceLast:true,
+      changeSummary:'Bättre träningsintryck än inför föregående start.',
+      signals:[{type:'training',value:'Tränar bra',fact_or_opinion:'soft_signal'}]
+    }]
+  };
+  context.__interviewPayload = payload;
+  const rendered = vm.runInContext("detailInterviewsView(__interviewPayload,'horses')", context);
+  const summaryMatch = rendered.match(/<summary class="external-interview-row">([\s\S]*?)<\/summary>/);
+  assert.ok(summaryMatch);
+  assert.match(summaryMatch[1], /Färjestad/);
+  assert.match(summaryMatch[1], /Lopp 7/);
+  assert.match(summaryMatch[1], /Auto/);
+  assert.match(summaryMatch[1], /Spår 4/);
+  assert.doesNotMatch(summaryMatch[1], /Synthetic Speaker|Stallrepresentant/);
+  assert.match(rendered, /<details class="card external-interview-card">/);
+  assert.match(rendered, /Synthetic Speaker · Stallrepresentant/);
+  assert.match(rendered, /Förändring sedan senast/);
+  assert.match(rendered, /Bättre träningsintryck/);
+  assert.match(rendered, /Träning/);
+});
+
 test('core production detail path is canonical with no final runtime wrapper present', async () => {
   const html = await productionHtml();
   assert.doesNotMatch(html, /kentaurai-entity-detail-ui-runtime/);
