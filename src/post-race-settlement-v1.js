@@ -262,6 +262,20 @@ export async function runNextPostRaceSettlement(env, options = {}) {
     }
 
     settled=state.filter(leg=>leg.winnerCount===1).length;
+    const normalizedTarget=state.find(leg=>leg.legNumber===target.legNumber);
+    if (normalizedTarget?.winnerCount===0) {
+      const message=`leg ${target.legNumber} has final official results but no unique factual winner`;
+      await markManualReview(env,job,token,settled,message);
+      return {
+        status:'manual_review',
+        roundId:job.game_round_id,
+        settledLegs:settled,
+        legNumber:target.legNumber,
+        raceId:target.raceId,
+        sourceRecordId:captured.sourceRecordId,
+        reason:'missing_unique_winner'
+      };
+    }
     if (settled===8) {
       const xlabsJob=await markCompleted(env,job,token,job.round_date,nowIso);
       return {
