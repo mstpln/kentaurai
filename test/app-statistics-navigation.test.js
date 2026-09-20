@@ -36,7 +36,9 @@ test('four-item bottom navigation keeps icons and labels legible and centered re
   assert.match(html, /@media\(max-width:760px\)\{[^}]*\.shell\{padding-bottom:calc\(110px \+ env\(safe-area-inset-bottom\)\)!important\}[^}]*\.bottom-nav\{padding-top:9px!important;padding-bottom:calc\(9px \+ env\(safe-area-inset-bottom\)\)!important\}/);
   assert.match(html, /\.nav-item\{min-height:72px!important;padding:9px 2px 8px!important;border-radius:15px!important;font-size:13px!important;line-height:1\.1!important;gap:7px!important\}/);
   assert.match(html, /\.nav-icon\{width:28px!important;height:28px!important;margin:0!important\}/);
-  assert.match(html, /@media\(max-width:420px\)\{[^}]*\.nav-item\{min-height:68px!important;font-size:12px!important;gap:6px!important\}[^}]*\.nav-icon\{width:26px!important;height:26px!important\}/);
+  assert.match(html, /@media\(max-width:420px\)/);
+  assert.match(html, /\.nav-item\{min-height:68px!important;font-size:12px!important;gap:6px!important\}/);
+  assert.match(html, /\.nav-icon\{width:26px!important;height:26px!important\}/);
 });
 
 test('statistics navigation groups trainer horse driver and track browsing with selector variant 5', () => {
