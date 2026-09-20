@@ -166,6 +166,50 @@ function stlDifficultyScore(value){
   return value&&Object.prototype.hasOwnProperty.call(scores,value)?scores[value]:null;
 }
 
+function scoreHorseTargets(entityId,targets,fieldRows,opponentRows){
+  const byRace=new Map();
+  for(const row of fieldRows||[]){if(!byRace.has(row.race_id))byRace.set(row.race_id,[]);byRace.get(row.race_id).push(row);}
+  const contextByRace=new Map();
+  for(const row of opponentRows||[]){if(!contextByRace.has(row.race_id))contextByRace.set(row.race_id,[]);contextByRace.get(row.race_id).push(row);}
+  const median=values=>values.length?values[Math.floor((values.length-1)/2)]:null;
+  const scored=targets.map(target=>{
+    const field=byRace.get(target.race_id)||[];
+    const targetField=field.find(row=>row.race_entry_id===target.race_entry_id)||null;
+    const fieldSize=field.length;
+    const resultScore=resultPerformanceScore({placing:target.placing,disqualified:target.disqualified,fieldSize});
+    const context=contextByRace.get(target.race_id)||[];
+    const self=context.find(row=>row.horse_id===entityId)||null;
+    const opponents=context.filter(row=>row.horse_id!==entityId);
+    const pointValues=opponents.filter(row=>row.start_points!=null).map(row=>Number(row.start_points)).filter(Number.isFinite).sort((a,b)=>a-b);
+    const earningValues=opponents.filter(row=>row.earnings_raw!=null).map(row=>Number(row.earnings_raw)).filter(Number.isFinite).sort((a,b)=>a-b);
+    const pointChallenge=relativeChallengeScore(median(pointValues),self?.start_points);
+    const earningChallenge=relativeChallengeScore(median(earningValues),self?.earnings_raw);
+    const difficultyScore=weightedAvailable([
+      {value:prizeDifficultyScore(target.first_prize_sek),weight:0.55},
+      {value:stlDifficultyScore(target.stl_class),weight:0.15},
+      {value:pointChallenge,weight:0.20},
+      {value:earningChallenge,weight:0.10}
+    ]);
+    const extraValues=field.map(row=>{
+      const distance=Number(row.actual_start_distance_m??row.distance_m);
+      const extra=Number(row.extra_distance_m);
+      return Number.isFinite(extra)&&distance>0?(extra/distance)*100:null;
+    }).filter(value=>value!=null);
+    const targetDistance=Number(targetField?.actual_start_distance_m??targetField?.distance_m);
+    const targetExtra=Number(targetField?.extra_distance_m);
+    const targetExtraPct=Number.isFinite(targetExtra)&&targetDistance>0?(targetExtra/targetDistance)*100:null;
+    const workScore=fieldPercentileScore(targetExtraPct,extraValues);
+    const officialPaces=field.map(row=>parsePaceSeconds(row.km_time)).filter(value=>value!=null);
+    const closingPaces=field.map(row=>parsePaceSeconds(row.last_400_time)).filter(value=>value!=null);
+    const officialScore=fieldPercentileScore(parsePaceSeconds(targetField?.km_time),officialPaces,{lowerIsBetter:true});
+    const closingScore=fieldPercentileScore(parsePaceSeconds(targetField?.last_400_time),closingPaces,{lowerIsBetter:true});
+    const speedScore=weightedAvailable([{value:officialScore,weight:0.5},{value:closingScore,weight:0.5}]);
+    return{raceEntryId:target.race_entry_id,raceId:target.race_id,raceDate:target.race_date,resultScore,difficultyScore,workScore,speedScore};
+  });
+  const form=calculateHorseFormIndex(scored);
+  return {...form,recentResults:targets.map(row=>row.disqualified?null:(row.placing==null?null:Number(row.placing))).filter(value=>value!=null).slice(0,5)};
+}
+
 async function loadHorseForm(env,entityId,filters,config){
   const conditions=['re.scratched=0','re.horse_id=?','(rr.placing IS NOT NULL OR rr.disqualified=1)'],bindings=[entityId];
   addCommonFilters(conditions,bindings,filters,{includeVolt:false});
@@ -232,57 +276,85 @@ async function loadHorseForm(env,entityId,filters,config){
     `).bind(...raceIds).all()
   ]);
 
-  const byRace=new Map();
-  for(const row of fieldRows||[]){if(!byRace.has(row.race_id))byRace.set(row.race_id,[]);byRace.get(row.race_id).push(row);}
-  const contextByRace=new Map();
-  for(const row of opponentRows||[]){if(!contextByRace.has(row.race_id))contextByRace.set(row.race_id,[]);contextByRace.get(row.race_id).push(row);}
+  return scoreHorseTargets(entityId,targets,fieldRows,opponentRows);
+}
 
-  const scored=targets.map(target=>{
-    const field=byRace.get(target.race_id)||[];
-    const targetField=field.find(row=>row.race_entry_id===target.race_entry_id)||null;
-    const fieldSize=field.length;
-    const resultScore=resultPerformanceScore({placing:target.placing,disqualified:target.disqualified,fieldSize});
+function chunks(values,size=80){const out=[];for(let index=0;index<values.length;index+=size)out.push(values.slice(index,index+size));return out;}
 
-    const context=contextByRace.get(target.race_id)||[];
-    const self=context.find(row=>row.horse_id===entityId)||null;
-    const opponents=context.filter(row=>row.horse_id!==entityId);
-    const pointValues=opponents.filter(row=>row.start_points!=null).map(row=>Number(row.start_points)).filter(Number.isFinite).sort((a,b)=>a-b);
-    const earningValues=opponents.filter(row=>row.earnings_raw!=null).map(row=>Number(row.earnings_raw)).filter(Number.isFinite).sort((a,b)=>a-b);
-    const median=values=>values.length?values[Math.floor((values.length-1)/2)]:null;
-    const pointChallenge=relativeChallengeScore(median(pointValues),self?.start_points);
-    const earningChallenge=relativeChallengeScore(median(earningValues),self?.earnings_raw);
-    const difficultyScore=weightedAvailable([
-      {value:prizeDifficultyScore(target.first_prize_sek),weight:0.55},
-      {value:stlDifficultyScore(target.stl_class),weight:0.15},
-      {value:pointChallenge,weight:0.20},
-      {value:earningChallenge,weight:0.10}
+async function loadHorseFormContextForRaces(env,raceIds,asOfDate){
+  const fieldRows=[],opponentRows=[];
+  for(const batch of chunks(raceIds)){
+    const placeholders=batch.map(()=>'?').join(',');
+    const [{results:fields},{results:opponents}]=await Promise.all([
+      env.DB.prepare(`
+        WITH latest_x AS (
+          SELECT x.*,ROW_NUMBER() OVER(PARTITION BY x.race_entry_id ORDER BY julianday(sr.fetched_at) DESC,x.source_record_id DESC) rn
+          FROM xlabs_data x JOIN source_records sr ON sr.id=x.source_record_id
+          WHERE x.quality_status='xlabs-telemetry-v1' AND sr.source_type='xlabs_race_json' AND substr(sr.fetched_at,1,10)<=?
+        )
+        SELECT re.race_id,re.id race_entry_id,re.horse_id,re.actual_start_distance_m,r.distance_m,rr.placing,rr.disqualified,rr.km_time,x.last_400_time,x.extra_distance_m
+        FROM race_entries re JOIN races r ON r.id=re.race_id
+        LEFT JOIN race_results rr ON rr.race_entry_id=re.id
+        LEFT JOIN latest_x x ON x.race_entry_id=re.id AND x.rn=1
+        WHERE re.scratched=0 AND re.race_id IN (${placeholders})
+        ORDER BY re.race_id,re.start_number,re.id
+      `).bind(asOfDate,...batch).all(),
+      env.DB.prepare(`
+        SELECT re.race_id,re.horse_id,
+          (SELECT hss.start_points FROM horse_stat_snapshots hss
+           JOIN official_snapshot_source_sync os ON os.source_record_id=hss.source_record_id AND os.status='complete'
+           JOIN source_records sr ON sr.id=hss.source_record_id
+           WHERE hss.horse_id=re.horse_id AND hss.snapshot_scope='life'
+             AND julianday(hss.observed_at)<=julianday(COALESCE(r.scheduled_start_at,r.race_date||'T23:59:59Z'))
+             AND julianday(sr.fetched_at)<=julianday(COALESCE(r.scheduled_start_at,r.race_date||'T23:59:59Z'))
+           ORDER BY julianday(hss.observed_at) DESC,hss.id DESC LIMIT 1) start_points,
+          (SELECT hss.earnings_raw FROM horse_stat_snapshots hss
+           JOIN official_snapshot_source_sync os ON os.source_record_id=hss.source_record_id AND os.status='complete'
+           JOIN source_records sr ON sr.id=hss.source_record_id
+           WHERE hss.horse_id=re.horse_id AND hss.snapshot_scope='life'
+             AND julianday(hss.observed_at)<=julianday(COALESCE(r.scheduled_start_at,r.race_date||'T23:59:59Z'))
+             AND julianday(sr.fetched_at)<=julianday(COALESCE(r.scheduled_start_at,r.race_date||'T23:59:59Z'))
+           ORDER BY julianday(hss.observed_at) DESC,hss.id DESC LIMIT 1) earnings_raw
+        FROM race_entries re JOIN races r ON r.id=re.race_id
+        WHERE re.scratched=0 AND re.race_id IN (${placeholders})
+      `).bind(...batch).all()
     ]);
+    fieldRows.push(...(fields||[]));opponentRows.push(...(opponents||[]));
+  }
+  return{fieldRows,opponentRows};
+}
 
-    const extraValues=field.map(row=>{
-      const distance=Number(row.actual_start_distance_m??row.distance_m);
-      const extra=Number(row.extra_distance_m);
-      return Number.isFinite(extra)&&distance>0?(extra/distance)*100:null;
-    }).filter(value=>value!=null);
-    const targetDistance=Number(targetField?.actual_start_distance_m??targetField?.distance_m);
-    const targetExtra=Number(targetField?.extra_distance_m);
-    const targetExtraPct=Number.isFinite(targetExtra)&&targetDistance>0?(targetExtra/targetDistance)*100:null;
-    const workScore=fieldPercentileScore(targetExtraPct,extraValues);
-
-    const officialPaces=field.map(row=>parsePaceSeconds(row.km_time)).filter(value=>value!=null);
-    const closingPaces=field.map(row=>parsePaceSeconds(row.last_400_time)).filter(value=>value!=null);
-    const officialScore=fieldPercentileScore(parsePaceSeconds(targetField?.km_time),officialPaces,{lowerIsBetter:true});
-    const closingScore=fieldPercentileScore(parsePaceSeconds(targetField?.last_400_time),closingPaces,{lowerIsBetter:true});
-    const speedScore=weightedAvailable([{value:officialScore,weight:0.5},{value:closingScore,weight:0.5}]);
-
-    return {
-      raceEntryId:target.race_entry_id,
-      raceId:target.race_id,
-      raceDate:target.race_date,
-      resultScore,difficultyScore,workScore,speedScore
-    };
-  });
-  const form=calculateHorseFormIndex(scored);
-  return {...form,recentResults:targets.map(row=>row.disqualified?null:(row.placing==null?null:Number(row.placing))).filter(value=>value!=null).slice(0,5)};
+export async function getHorseTrendForms(env,horseIds,options={}){
+  const ids=[...new Set((horseIds||[]).map(value=>String(value||'').trim()).filter(Boolean))];
+  if(!ids.length)return new Map();
+  const filters=normalizeFilters(options),config=configFor('horses');
+  await validateTrack(env,filters.trackId);
+  const conditions=['re.scratched=0','(rr.placing IS NOT NULL OR rr.disqualified=1)'],bindings=[];
+  addCommonFilters(conditions,bindings,filters,{includeVolt:false});
+  const {results}=await env.DB.prepare(`
+    WITH requested AS (SELECT CAST(value AS TEXT) horse_id FROM json_each(?)),
+    ranked AS (
+      SELECT re.horse_id,re.id race_entry_id,r.id race_id,r.race_date,r.race_number,r.scheduled_start_at,
+        r.first_prize_sek,r.distance_m,re.actual_start_distance_m,rr.placing,rr.disqualified,rsc.stl_class,
+        ROW_NUMBER() OVER(PARTITION BY re.horse_id ORDER BY r.race_date DESC,r.race_number DESC,re.id DESC) rn
+      FROM requested q
+      JOIN race_entries re INDEXED BY idx_entries_horse_race ON re.horse_id=q.horse_id
+      JOIN races r ON r.id=re.race_id
+      JOIN race_results rr ON rr.race_entry_id=re.id
+      JOIN horses h ON h.id=re.horse_id
+      LEFT JOIN race_stl_classifications rsc ON rsc.race_id=r.id
+      WHERE ${conditions.join(' AND ')}
+    )
+    SELECT * FROM ranked WHERE rn<=${config.formLimit}
+    ORDER BY horse_id,rn
+  `).bind(JSON.stringify(ids),...bindings).all();
+  const targetsByHorse=new Map();
+  for(const row of results||[]){if(!targetsByHorse.has(row.horse_id))targetsByHorse.set(row.horse_id,[]);targetsByHorse.get(row.horse_id).push(row);}
+  const raceIds=[...new Set((results||[]).map(row=>row.race_id))];
+  const {fieldRows,opponentRows}=await loadHorseFormContextForRaces(env,raceIds,filters.asOfDate);
+  const forms=new Map();
+  for(const id of ids){const targets=targetsByHorse.get(id)||[];forms.set(id,targets.length?scoreHorseTargets(id,targets,fieldRows,opponentRows):null);}
+  return forms;
 }
 
 async function loadPersonTargetStarts(env,entityId,filters,config){
