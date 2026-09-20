@@ -33,15 +33,15 @@ test('Trend critical path renders without summary or filter-option reads first',
   assert.match(script, /toggle\.onclick=async\(\)=>\{[^}]*state\.trendFilterOpen[^}]*await loadTrendFilterOptions\(\)/);
 });
 
-test('Trend opens with the requested period and filter defaults', () => {
+test('Trend keeps category-specific period and minimum-start defaults', () => {
   const html = enhanceTrendHtml('<html><head></head><body></body></html>');
   const match = html.match(/<script id="kentaurai-trend-build-a-script">([\s\S]*?)<\/script>/);
   assert.ok(match);
   const script = match[1];
 
-  assert.match(script, /state\.trendRange='2w';/);
+  assert.match(script, /TREND_DEFAULTS=\{trainers:\{range:'2w',minStarts:'10'\},horses:\{range:'3m',minStarts:'3'\},drivers:\{range:'2w',minStarts:'10'\}\}/);
   assert.match(script, /state\.trendRaceScope=state\.trendRaceScope\|\|'high_prize';/);
-  assert.match(script, /state\.trendDetailFilters=\{trackId:'all',raceType:'all',breedType:'all',startMethod:'all',minStarts:'10',\.\.\.\(state\.trendDetailFilters\|\|\{\}\)\};/);
+  assert.match(script, /applyTrendCategoryDefaults\(state\.trendCategory\)/);
   assert.match(script, /period:state\.trendRange/);
   assert.match(script, /race_scope:state\.trendRaceScope/);
   assert.match(script, /min_starts:f\.minStarts/);
@@ -54,12 +54,12 @@ test('Trend uses compact accessible period selector beside the filter trigger', 
   assert.match(html, /aria-label="Tidsperiod"/);
   assert.match(html, /class="trend-period-chevron"/);
   assert.match(html, /\.trend-period-select:focus-visible\{[^}]*outline:1px solid var\(--accent\)/);
-  assert.match(html, /period\.onchange=\(\)=>\{state\.trendRange=period\.value;renderTrendBuildA\(\)\}/);
+  assert.match(html, /period\.onchange=\(\)=>\{state\.trendRange=period\.value;saveTrendCategoryDefaults\(\);renderTrendBuildA\(\)\}/);
   assert.doesNotMatch(html, /class="range-group"/);
   assert.doesNotMatch(html, /class="range-btn/);
 });
 
-test('Trend filter badge counts Loppnivå plus active detail filters', () => {
+test('Trend filter badge counts Loppnivå and Loppnivå is a dropdown inside the filter panel', () => {
   const html = enhanceTrendHtml('<html><head></head><body></body></html>');
   const match = html.match(/<script id="kentaurai-trend-build-a-script">([\s\S]*?)<\/script>/);
   assert.ok(match);
@@ -68,6 +68,9 @@ test('Trend filter badge counts Loppnivå plus active detail filters', () => {
   assert.match(script, /function activeFilterCount\(\)\{return detailCount\(\)\+\(state\.trendRaceScope&&state\.trendRaceScope!=='all'\?1:0\)\}/);
   assert.match(script, /function trendPageControls\(\)\{const count=activeFilterCount\(\)/);
   assert.match(script, /trend-filter-count/);
+  assert.match(script, /id="trendRaceScopeSelect"/);
+  assert.match(script, /<label>Loppnivå<\/label><select id="trendRaceScopeSelect"/);
+  assert.doesNotMatch(script, /data-trend-scope/);
 });
 
 test('Trend reset clears Loppnivå and every detail filter in the canonical Trend handler', () => {
@@ -78,6 +81,16 @@ test('Trend reset clears Loppnivå and every detail filter in the canonical Tren
 
   assert.match(html, />Återställ filter<\/button>/);
   assert.match(script, /reset\.onclick=\(\)=>\{state\.trendRaceScope='all';state\.trendDetailFilters=\{trackId:'all',raceType:'all',breedType:'all',startMethod:'all',minStarts:'all'\};renderTrendBuildA\(\)\}/);
+});
+
+test('horse Trend uses existing Form as the primary metric and shows recent results', () => {
+  const html = enhanceTrendHtml('<html><head></head><body></body></html>');
+  assert.match(html, /state\.trendCategory==='horses'\?'Starkast form':'Högst segerprocent'/);
+  assert.match(html, /trend-score-label">Form/);
+  assert.match(html, /item\.formScore/);
+  assert.match(html, /item\.recentResults\.join\('–'\)/);
+  assert.match(html, /metricPill\('Seger %'/);
+  assert.match(html, /metricPill\('Topp 3 %'/);
 });
 
 test('Trend ranking rows remove repeated win label and preserve full prize-money space', () => {
