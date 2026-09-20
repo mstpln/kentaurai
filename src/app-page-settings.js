@@ -27,7 +27,7 @@ const settingsScript = `
 (function(){
 const settingsButton=document.getElementById('settingsButton');
 if(!settingsButton)return;
-state.settingsTab=state.settingsTab||'ai';
+state.settingsTab='data';
 const priorSetNav=setNav;
 setNav=function(page){settingsButton.classList.remove('active');state.settingsOpen=false;priorSetNav(page)};
 function clearMainNav(){document.querySelectorAll('.nav-item').forEach(b=>{b.classList.remove('active');b.removeAttribute('aria-current')})}
@@ -94,8 +94,9 @@ async function importExternalEvidenceFile(){
  }catch(err){box.className='settings-result show error';box.textContent='Kunde inte importera extern data: '+err.message}
  finally{button.disabled=false}
 }
-function renderAi(version){
- app.innerHTML=heading('Inställningar','Hantera AI-utbyte och appdata')+tabs([['ai','AI'],['data','Data']],state.settingsTab)+'<div class="settings-layout">'+
+function renderAnalysis(){
+ state.settingsOpen=false;state.settingsTab='data';state.detail=null;state.gameDetail=null;state.gameSystemId=null;state.page='analysis';settingsButton.classList.remove('active');setNav('analysis');
+ app.innerHTML=heading('Analys','Analysera omgångar och registrera underlag')+'<div class="settings-layout">'+
  '<h2 class="analysis-section-title">Analysera omgång</h2>'+
  '<section id="canonicalAnalysisWorkflow" class="settings-section settings-card analysis-card">'+
   '<div class="analysis-context">'+
@@ -130,8 +131,7 @@ function renderAi(version){
    '<div id="recordedSystemResult" class="settings-result"></div>'+
   '</div>'+
  '</section>'+
- settingsFooter(version)+'</div>';
- bindSettingsTabs();
+ '</div>';
  const providerSelect=document.getElementById('analysisProvider');
  if(providerSelect){providerSelect.value=state.analysisProvider||'openai';providerSelect.onchange=()=>{state.analysisProvider=providerSelect.value}}
  function bindClick(id,handler){const node=document.getElementById(id);if(node)node.onclick=handler}
@@ -152,13 +152,12 @@ function renderAi(version){
  loadExternalRounds('registration','registrationRound','registrationRoundId');
 }
 async function renderData(){
- app.innerHTML=heading('Inställningar','Hantera AI-utbyte och appdata')+tabs([['ai','AI'],['data','Data']],state.settingsTab)+'<div class="settings-layout"><div class="skeleton"></div></div>';
- bindSettingsTabs();
- try{const s=await api('/settings/status');if(!state.settingsOpen||state.settingsTab!=='data')return;const counts=s.counts||{};const runs=(s.recentRuns||[]).map(r=>'<div class="settings-row"><div><div class="settings-row-title">'+esc(r.name)+'</div><div class="settings-row-meta">'+esc(dateTimeSv(r.finishedAt||r.startedAt))+'</div></div><div class="settings-row-output">'+num(r.inserted)+' nya · '+num(r.updated)+' uppdaterade · '+num(r.skipped)+' hoppades över · '+num(r.errors)+' fel</div><span class="status-pill '+esc(r.status)+'">'+esc(statusText(r.status))+'</span></div>').join('')||'<div class="settings-help">Inga registrerade körningar ännu.</div>';const sources=(s.sources||[]).map(x=>'<div class="settings-row"><div><div class="settings-row-title">'+esc(x.name)+'</div><div class="settings-row-meta">Senast '+esc(dateTimeSv(x.lastRunAt))+'</div></div><div class="settings-row-output">'+esc(x.message)+'</div><span class="status-pill '+esc(x.status)+'">'+esc(statusText(x.status))+'</span></div>').join('');app.innerHTML=heading('Inställningar','Hantera AI-utbyte och appdata')+tabs([['ai','AI'],['data','Data']],state.settingsTab)+'<div class="settings-layout"><section class="settings-section settings-card"><div class="settings-card-head"><h2>Datamängd</h2></div><div class="settings-card-body"><div class="settings-counts"><div class="settings-count"><strong>'+num(counts.trainers)+'</strong><span>Tränare</span></div><div class="settings-count"><strong>'+num(counts.horses)+'</strong><span>Hästar</span></div><div class="settings-count"><strong>'+num(counts.drivers)+'</strong><span>Kuskar</span></div><div class="settings-count"><strong>'+num(counts.games)+'</strong><span>V85/V86-omgångar</span></div></div></div></section><section class="settings-section settings-card"><div class="settings-card-head"><h2>Senaste körningar</h2><p>Visar vad de senaste registrerade importerna och arbetsflödena producerade och om fel registrerades.</p></div><div class="settings-card-body"><div class="settings-list">'+runs+'</div></div></section><section class="settings-section settings-card"><div class="settings-card-head"><h2>Datakällor</h2><p>En snabb hälsobild baserad på de senaste registrerade körningarna.</p></div><div class="settings-card-body"><div class="settings-list">'+sources+'</div><div class="settings-help">'+esc(s.sourceStatusNote||'')+'</div></div></section>'+settingsFooter(s.appVersion)+'</div>';bindSettingsTabs();}catch(err){app.innerHTML=heading('Inställningar','Hantera AI-utbyte och appdata')+tabs([['ai','AI'],['data','Data']],state.settingsTab)+'<div class="notice">Kunde inte läsa status: '+esc(err.message)+'</div>';bindSettingsTabs()}
+ app.innerHTML=heading('Inställningar','Hantera data och uppdateringar')+'<div class="settings-layout"><div class="skeleton"></div></div>';
+ try{const s=await api('/settings/status');if(!state.settingsOpen)return;const counts=s.counts||{};const runs=(s.recentRuns||[]).map(r=>'<div class="settings-row"><div><div class="settings-row-title">'+esc(r.name)+'</div><div class="settings-row-meta">'+esc(dateTimeSv(r.finishedAt||r.startedAt))+'</div></div><div class="settings-row-output">'+num(r.inserted)+' nya · '+num(r.updated)+' uppdaterade · '+num(r.skipped)+' hoppades över · '+num(r.errors)+' fel</div><span class="status-pill '+esc(r.status)+'">'+esc(statusText(r.status))+'</span></div>').join('')||'<div class="settings-help">Inga registrerade körningar ännu.</div>';const sources=(s.sources||[]).map(x=>'<div class="settings-row"><div><div class="settings-row-title">'+esc(x.name)+'</div><div class="settings-row-meta">Senast '+esc(dateTimeSv(x.lastRunAt))+'</div></div><div class="settings-row-output">'+esc(x.message)+'</div><span class="status-pill '+esc(x.status)+'">'+esc(statusText(x.status))+'</span></div>').join('');app.innerHTML=heading('Inställningar','Hantera data och uppdateringar')+'<div class="settings-layout"><section class="settings-section settings-card"><div class="settings-card-head"><h2>Datamängd</h2></div><div class="settings-card-body"><div class="settings-counts"><div class="settings-count"><strong>'+num(counts.trainers)+'</strong><span>Tränare</span></div><div class="settings-count"><strong>'+num(counts.horses)+'</strong><span>Hästar</span></div><div class="settings-count"><strong>'+num(counts.drivers)+'</strong><span>Kuskar</span></div><div class="settings-count"><strong>'+num(counts.games)+'</strong><span>V85/V86-omgångar</span></div></div></div></section><section class="settings-section settings-card"><div class="settings-card-head"><h2>Senaste körningar</h2><p>Visar vad de senaste registrerade importerna och arbetsflödena producerade och om fel registrerades.</p></div><div class="settings-card-body"><div class="settings-list">'+runs+'</div></div></section><section class="settings-section settings-card"><div class="settings-card-head"><h2>Datakällor</h2><p>En snabb hälsobild baserad på de senaste registrerade körningarna.</p></div><div class="settings-card-body"><div class="settings-list">'+sources+'</div><div class="settings-help">'+esc(s.sourceStatusNote||'')+'</div></div></section>'+settingsFooter(s.appVersion)+'</div>';}catch(err){app.innerHTML=heading('Inställningar','Hantera data och uppdateringar')+'<div class="notice">Kunde inte läsa status: '+esc(err.message)+'</div>'}
 }
-function bindSettingsTabs(){document.querySelectorAll('.tab[data-tab]').forEach(b=>b.onclick=()=>{state.settingsTab=b.dataset.tab;renderSettings()})}
-async function renderSettings(){state.settingsOpen=true;state.detail=null;state.gameDetail=null;state.gameSystemId=null;settingsButton.classList.add('active');clearMainNav();if(state.settingsTab==='data')return renderData();let version='—';try{version=(await api('/settings/status')).appVersion}catch{}if(!state.settingsOpen)return;renderAi(version)}
-settingsButton.onclick=()=>{state.settingsTab=state.settingsTab||'ai';renderSettings()};
+async function renderSettings(){state.settingsOpen=true;state.settingsTab='data';state.detail=null;state.gameDetail=null;state.gameSystemId=null;settingsButton.classList.add('active');clearMainNav();return renderData()}
+window.__kentauraiAnalysis={render:renderAnalysis};
+settingsButton.onclick=()=>{renderSettings()};
 })();
 </script>`;
 
