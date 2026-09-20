@@ -101,3 +101,21 @@ export async function getHorseStartPointHistory(env, horseId, asOfDate) {
     history
   };
 }
+
+
+export async function getHorseCurrentStartPoint(env, horseId, asOfDate) {
+  const row = await env.DB.prepare(`
+    SELECT id, points, observed_at, race_entry_id, source_record_id
+    FROM horse_start_points
+    WHERE horse_id = ? AND substr(observed_at, 1, 10) <= ?
+    ORDER BY observed_at DESC, id DESC
+    LIMIT 1
+  `).bind(horseId, asOfDate).first();
+  return row ? {
+    id: row.id,
+    points: Number(row.points),
+    observedAt: row.observed_at,
+    raceEntryId: row.race_entry_id || null,
+    sourceRecordId: row.source_record_id
+  } : null;
+}
