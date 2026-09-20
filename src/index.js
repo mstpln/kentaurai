@@ -5,6 +5,7 @@ import { importReferenceRound } from './import/reference-round-safe.js';
 import { normalizeCapturedOfficialGameSequential } from './import/official-live-sequential.js';
 import { captureUpcomingOfficialGames, normalizeNextPendingOfficialGame } from './import/official-live-scheduled.js';
 import { normalizeCapturedXlabsRace } from './import/xlabs-telemetry.js';
+import { ensureXlabsIntervalsForSource, runXlabsIntervalRepairBatch } from './import/xlabs-interval-repair.js';
 import { normalizeCapturedOfficialRace } from './import/official-historical-race.js';
 import { ensureDailyOfficialHistoryJobs, getHistoricalBackfill, runHistoricalBackfillBatch, runHistoricalBackfillStep, startHistoricalBackfill } from './import/official-historical-backfill.js';
 import { ensureDailyXlabsJob, getXlabsBackfill, runXlabsBackfillBatch, runXlabsBackfillStep, startXlabsBackfill } from './import/xlabs-backfill.js';
@@ -248,7 +249,13 @@ async function handleFetch(request, env) {
   }
   if (request.method === 'POST' && path === '/v1/xlabs/normalize') {
     const body = await readJson(request);
-    return json(await normalizeCapturedXlabsRace(env, body.source_record_id));
+    const telemetry = await normalizeCapturedXlabsRace(env, body.source_record_id);
+    const intervals = await ensureXlabsIntervalsForSource(env, body.source_record_id);
+    return json({ ...telemetry, intervals });
+  }
+  if (request.method === 'POST' && path === '/v1/xlabs/interval-repair') {
+    const body = await readJson(request);
+    return json(await runXlabsIntervalRepairBatch(env, { limit: body.limit }));
   }
   if (request.method === 'POST' && path === '/v1/xlabs/verify-normalization') {
     const body = await readJson(request);
@@ -328,6 +335,7 @@ async function handleScheduled(controller, env) {
     parts.push(await runScheduledPart('live_normalize', () => normalizeNextPendingOfficialGame(env)));
     parts.push(await runScheduledPart('historical_backfill', () => runHistoricalBackfillBatch(env)));
     parts.push(await runScheduledPart('xlabs_backfill', () => runXlabsBackfillBatch(env)));
+    parts.push(await runScheduledPart('xlabs_interval_repair', () => runXlabsIntervalRepairBatch(env)));
   } else if (controller.cron === LIVE_MORNING_CRON) {
     parts.push(await runScheduledPart('live_capture_morning', () => captureUpcomingOfficialGames(env, controller.scheduledTime, { includeToday: true })));
   } else if (controller.cron === LIVE_EVENING_CRON) {
