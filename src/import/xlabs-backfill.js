@@ -194,12 +194,15 @@ async function dailyGameRacesForDate(env, date) {
       AND tx.source_type = 'official'
       AND r.race_number IS NOT NULL
       AND EXISTS (SELECT 1 FROM race_entries re WHERE re.race_id = r.id)
-      AND EXISTS (
-        SELECT 1 FROM source_records sr
-        WHERE sr.source_type = 'official_provider'
-          AND sr.external_id = 'game:' || gr.id
-          AND sr.quality_status = 'normalized_verified_subset'
-          AND sr.raw_object_key IS NOT NULL
+      AND (
+        EXISTS (
+          SELECT 1 FROM source_records sr
+          WHERE sr.source_type = 'official_provider'
+            AND sr.external_id = 'game:' || gr.id
+            AND sr.quality_status = 'normalized_verified_subset'
+            AND sr.raw_object_key IS NOT NULL
+        )
+        OR EXISTS (SELECT 1 FROM systems s WHERE s.game_round_id=gr.id)
       )
     ORDER BY CAST(tx.external_id AS INTEGER), r.race_number, r.id
   `).bind(date, date).all();
@@ -242,17 +245,49 @@ async function readJsonSource(env, source, label) {
   return payload;
 }
 
+async function storedSettledRoundReadiness(env, date) {
+  const { results } = await env.DB.prepare(`
+    SELECT gr.id,
+      (SELECT COUNT(*) FROM game_legs gl WHERE gl.game_round_id=gr.id) leg_count,
+      (SELECT COUNT(*) FROM game_legs gl
+       WHERE gl.game_round_id=gr.id
+         AND (SELECT COUNT(*) FROM race_entries re
+              JOIN race_results rr ON rr.race_entry_id=re.id AND rr.placing=1
+              WHERE re.race_id=gl.race_id)=1) settled_legs
+    FROM game_rounds gr
+    WHERE gr.round_date=? AND gr.game_type IN ('V85','V86')
+      AND EXISTS (SELECT 1 FROM systems s WHERE s.game_round_id=gr.id)
+    ORDER BY gr.id
+  `).bind(date).all();
+  if (!(results || []).length) return null;
+  const ready=(results || []).every(row=>Number(row.leg_count)===8 && Number(row.settled_legs)===8);
+  return {
+    ready,
+    reason:ready?null:'saved_round_settlement_pending',
+    gameCount:(results || []).length,
+    pendingGameCount:ready?0:(results || []).filter(row=>Number(row.leg_count)!==8 || Number(row.settled_legs)!==8).length
+  };
+}
+
 async function dailyOfficialReadiness(env, date) {
   const calendar = await latestSourceByTime(env, 'official_provider', `calendar:${date}`);
-  if (!calendar) return { ready: false, reason: 'calendar_missing', gameCount: null, pendingGameCount: null };
+  if (!calendar) {
+    const stored=await storedSettledRoundReadiness(env,date);
+    return stored || { ready:false,reason:'calendar_missing',gameCount:null,pendingGameCount:null };
+  }
   const payload = await readJsonSource(env, calendar, 'official calendar');
   const gameIds = v85V86GameIdsFromCalendar(payload, date);
-  if (gameIds.length === 0) return { ready: true, gameCount: 0, pendingGameCount: 0 };
+  if (gameIds.length === 0) {
+    const stored=await storedSettledRoundReadiness(env,date);
+    return stored || { ready:true,gameCount:0,pendingGameCount:0 };
+  }
 
   let pendingGameCount = 0;
   for (const gameId of gameIds) {
     const source = await latestSourceByTime(env, 'official_provider', `game:${gameId}`);
     if (!source || source.quality_status !== NORMALIZED_QUALITY) {
+      const settled = await storedSettledRoundReadiness(env,date);
+      if (settled?.ready && gameIds.includes(gameId)) continue;
       pendingGameCount += 1;
       continue;
     }
