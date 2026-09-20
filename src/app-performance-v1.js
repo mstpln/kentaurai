@@ -3,7 +3,7 @@ function performanceClient() {
   const inflight = new Map();
   function ttl(path) {
     if (/\/statistics\/filter-options(?:\?|$)/.test(path) || path.startsWith('/trend/filter-options')) return 600000;
-    if (/\/calendar-statistics(?:\?|$)/.test(path)) return 180000;
+    if (/\/calendar-(statistics|specialties)(?:\?|$)/.test(path)) return 180000;
     if (path.startsWith('/trend?')) return 60000;
     if (/^\/entities\/(horses|trainers|drivers)\/[^/?]+(?:\?|$)/.test(path) || /^\/tracks\/[^/?]+(?:\?|$)/.test(path)) return 90000;
     if (/^\/entities\/(horses|trainers|drivers)(?:\?|$)/.test(path) || /^\/tracks(?:\?|$)/.test(path)) return 180000;
@@ -32,6 +32,7 @@ function performanceClient() {
     if(!['trainers','horses','drivers'].includes(page)||!id)return null;
     const q=new URLSearchParams({year:String(new Date().getFullYear()),race_scope:'all',race_type:'all',breed_type:'all',sex:'all',age:'all',start_method:'all',distance_group:'all'});
     if(page!=='horses'){q.set('volt_lane','all');q.set('handicap_m','all')}
+    q.set('specials','0');
     return '/'+page+'/'+encodeURIComponent(id)+'/calendar-statistics?'+q.toString();
   }
   function loading(label){ return '<div class="kentaurai-fast-loading" role="status"><div class="kentaurai-fast-line"></div><div class="kentaurai-fast-line short"></div><span>'+esc(label)+'</span></div>'; }
