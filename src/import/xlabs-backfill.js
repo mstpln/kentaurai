@@ -287,17 +287,16 @@ async function storedSettledRoundReadiness(env, date, roundId = null) {
 }
 
 async function dailyOfficialReadiness(env, date) {
+  const stored=await storedSettledRoundReadiness(env,date);
+  if (stored) return stored;
+
   const calendar = await latestSourceByTime(env, 'official_provider', `calendar:${date}`);
   if (!calendar) {
-    const stored=await storedSettledRoundReadiness(env,date);
-    return stored || { ready:false,reason:'calendar_missing',gameCount:null,pendingGameCount:null };
+    return { ready:false,reason:'calendar_missing',gameCount:null,pendingGameCount:null };
   }
   const payload = await readJsonSource(env, calendar, 'official calendar');
   const gameIds = v85V86GameIdsFromCalendar(payload, date);
-  if (gameIds.length === 0) {
-    const stored=await storedSettledRoundReadiness(env,date);
-    return stored || { ready:true,gameCount:0,pendingGameCount:0 };
-  }
+  if (gameIds.length === 0) return { ready:true,gameCount:0,pendingGameCount:0 };
 
   let pendingGameCount = 0;
   for (const gameId of gameIds) {
