@@ -56,7 +56,10 @@ test('canonical statistics mount is exposed without wrapping the legacy detail r
 
 test('critical detail statistics render defers filter options and specialty reads', () => {
   const script = statsScriptFrom(enhanced());
-  assert.doesNotMatch(script, /await loadOptions\(s,c\);if\(state\.detail/);
+  const mountStart = script.indexOf('async function mount()');
+  const mountEnd = script.indexOf('window.__kentauraiEntityDetailStatistics', mountStart);
+  assert.ok(mountStart >= 0 && mountEnd > mountStart);
+  assert.doesNotMatch(script.slice(mountStart, mountEnd), /loadOptions\(/);
   assert.match(script, /if\(s\.open&&!s\.options\)await loadOptions\(s,c\)/);
   assert.match(script, /calendar-statistics\?'.*specials=0/);
   assert.match(script, /calendar-specialties\?'/);
