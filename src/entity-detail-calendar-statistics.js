@@ -166,9 +166,16 @@ async function prepareDetail(env,entityType,entityId,options={}){
 }
 
 export async function getCalendarYearDetailStatistics(env,entityType,entityId,options={}){
-  const prepared=await prepareDetail(env,entityType,entityId,options);if(!prepared)return null;
-  const {config,id,entity,filters}=prepared;
-  const [core,form]=await Promise.all([loadCore(env,id,filters,config),loadForm(env,id,filters,config)]);
+  if(!env.DB)throw new Error('DB is not configured');
+  const config=configFor(entityType),id=String(entityId||'').trim();if(!id)return null;
+  const filters=normalizeFilters(options);
+  const [entity,,core,form]=await Promise.all([
+    env.DB.prepare(`SELECT id,canonical_name AS name FROM ${config.table} WHERE id=? LIMIT 1`).bind(id).first(),
+    validateTrack(env,filters.trackId),
+    loadCore(env,id,filters,config),
+    loadForm(env,id,filters,config)
+  ]);
+  if(!entity)return null;
   const specialties=options.includeSpecials===false
     ? {favoriteResults:null,longshotResults:null,firstAfterRest:null,secondAfterRest:null}
     : await loadSpecialties(env,id,filters,config);
