@@ -141,3 +141,10 @@ A single race must not directly change model weights. Candidate learnings are re
 - A normalized X-Labs race source is not complete for current consumers until both trusted whole-race telemetry and the additive `xlabs-intervals-v2` rows have been attempted from the same immutable raw source.
 - Existing normalized sources are repaired from private R2 rather than refetched externally. Repair is bounded, idempotent, recent-first and retries failed sources only up to the configured limit.
 - User-facing Toppfart opening sections use only valid v2 local intervals. Missing local evidence remains null; the UI must not substitute unrelated legacy values merely to fill a card.
+
+
+## Interview histories use collapsed factual race-context rows
+- Interview lists default to one collapsed row per stored interview: date · track · race · Auto/Voltstart · post position.
+- Speaker and role are deliberately excluded from the collapsed row and shown only after expansion together with the summary and structured signals.
+- The canonical interview signal taxonomy remains: form, training, tactics, distance, start, equipment, expectation and other.
+- A relevant explicit change versus the previous start/state is stored separately as nullable `change_since_last` plus `change_summary`; it is not introduced as a ninth signal family and is never guessed.

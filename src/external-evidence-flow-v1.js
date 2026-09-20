@@ -7,6 +7,7 @@ export const EXTERNAL_EVIDENCE_PROMPT_VERSION = 'external-evidence-prompt-v1';
 
 const CONTEXT_TYPES = new Set(['all_starts','current_track','season','v85','v86','lead','balance','wagon']);
 const FACT_OR_OPINION = new Set(['fact','opinion','mixed','intention','soft_signal']);
+const INTERVIEW_SIGNAL_TYPES = new Set(['form','training','tactics','distance','start','equipment','expectation','other']);
 const MAX_SUMMARY = 5000;
 const MAX_SIGNAL_VALUE = 1200;
 const ID_CHUNK = 40;
@@ -213,7 +214,7 @@ async function loadInterviews(env, horseIds, trainerIds, asOf = null) {
   const byId = new Map();
   for (const group of chunks([...new Set(horseIds)].filter(Boolean), 35)) {
     const { results } = await env.DB.prepare(
-      "SELECT ei.id,ei.horse_id,ei.trainer_id,ei.race_entry_id,ei.race_id,ei.game_round_id,ei.speaker_name,ei.speaker_role,ei.published_at,ei.summary_text " +
+      "SELECT ei.id,ei.horse_id,ei.trainer_id,ei.race_entry_id,ei.race_id,ei.game_round_id,ei.speaker_name,ei.speaker_role,ei.published_at,ei.summary_text,ei.change_since_last,ei.change_summary " +
       "FROM editorial_items ei JOIN source_records sr ON sr.id=ei.source_record_id " +
       "WHERE sr.source_type='manual_editorial_import' AND ei.horse_id IN (" + placeholders(group) + ") " +
       (asOf ? "AND julianday(COALESCE(ei.published_at,sr.fetched_at))<=julianday(?) " : "") +
@@ -223,7 +224,7 @@ async function loadInterviews(env, horseIds, trainerIds, asOf = null) {
   }
   for (const group of chunks([...new Set(trainerIds)].filter(Boolean), 35)) {
     const { results } = await env.DB.prepare(
-      "SELECT ei.id,ei.horse_id,ei.trainer_id,ei.race_entry_id,ei.race_id,ei.game_round_id,ei.speaker_name,ei.speaker_role,ei.published_at,ei.summary_text " +
+      "SELECT ei.id,ei.horse_id,ei.trainer_id,ei.race_entry_id,ei.race_id,ei.game_round_id,ei.speaker_name,ei.speaker_role,ei.published_at,ei.summary_text,ei.change_since_last,ei.change_summary " +
       "FROM editorial_items ei JOIN source_records sr ON sr.id=ei.source_record_id " +
       "WHERE sr.source_type='manual_editorial_import' AND ei.trainer_id IN (" + placeholders(group) + ") " +
       (asOf ? "AND julianday(COALESCE(ei.published_at,sr.fetched_at))<=julianday(?) " : "") +
@@ -253,6 +254,8 @@ async function loadInterviews(env, horseIds, trainerIds, asOf = null) {
     speaker_role:row.speaker_role || null,
     published_at:row.published_at || null,
     summary:row.summary_text || null,
+    change_since_last:row.change_since_last == null ? null : Boolean(row.change_since_last),
+    change_summary:row.change_summary || null,
     signals:signals.get(row.id) || []
   }));
 }
@@ -348,8 +351,10 @@ function validatePayload(payload) {
       if (!signal || typeof signal !== 'object' || Array.isArray(signal)) throw new Error('interview signal must be an object');
       const fact = requiredText(signal.fact_or_opinion, 'interviews[' + index + '].signals[' + signalIndex + '].fact_or_opinion', 40);
       if (!FACT_OR_OPINION.has(fact)) throw new Error('unsupported fact_or_opinion: ' + fact);
+      const signalType = requiredText(signal.type, 'signal.type', 120);
+      if (!INTERVIEW_SIGNAL_TYPES.has(signalType)) throw new Error('unsupported interview signal type: ' + signalType);
       return {
-        type:requiredText(signal.type, 'signal.type', 120),
+        type:signalType,
         value:optionalText(signal.value, 'signal.value', MAX_SIGNAL_VALUE),
         polarity:optionalText(signal.polarity, 'signal.polarity', 40),
         strength:numberOrNull(signal.strength, 'signal.strength', { min:0, max:1 }),
@@ -358,6 +363,17 @@ function validatePayload(payload) {
         evidenceExcerpt:optionalText(signal.evidence_excerpt, 'signal.evidence_excerpt', 400)
       };
     }) : [];
+    const changeSinceLast = row.change_since_last == null ? null : row.change_since_last;
+    if (changeSinceLast != null && typeof changeSinceLast !== 'boolean') {
+      throw new Error('interviews[' + index + '].change_since_last must be boolean or null');
+    }
+    const changeSummary = optionalText(row.change_summary, 'interviews[' + index + '].change_summary', 1200);
+    if (changeSinceLast === true && !changeSummary) {
+      throw new Error('interviews[' + index + '].change_summary is required when change_since_last is true');
+    }
+    if (changeSinceLast !== true && changeSummary) {
+      throw new Error('interviews[' + index + '].change_summary requires change_since_last=true');
+    }
     return {
       horseId:requiredText(row.horse_id, 'interviews[' + index + '].horse_id', 200),
       raceEntryId:requiredText(row.race_entry_id, 'interviews[' + index + '].race_entry_id', 200),
@@ -366,6 +382,8 @@ function validatePayload(payload) {
       speakerRole:optionalText(row.speaker_role, 'interviews[' + index + '].speaker_role', 120),
       publishedAt:row.published_at ? iso(row.published_at, 'interviews[' + index + '].published_at') : exportedAt,
       summary:requiredText(row.summary, 'interviews[' + index + '].summary', MAX_SUMMARY),
+      changeSinceLast,
+      changeSummary,
       signals
     };
   }) : [];
@@ -447,7 +465,7 @@ export async function importExternalEvidence(env, payload) {
 
   for (const [index, interview] of validated.interviews.entries()) {
     const entry = entries.get(interview.raceEntryId);
-    const interviewDigest = await evidenceDigest({
+    const interviewDigestInput = {
       horseId:interview.horseId,
       trainerId:interview.trainerId || entry.trainer_id || null,
       raceEntryId:interview.raceEntryId,
@@ -456,16 +474,23 @@ export async function importExternalEvidence(env, payload) {
       publishedAt:interview.publishedAt,
       summary:interview.summary,
       signals:interview.signals
-    });
+    };
+    if (interview.changeSinceLast === true) {
+      interviewDigestInput.changeSinceLast = true;
+      interviewDigestInput.changeSummary = interview.changeSummary;
+    }
+    const interviewDigest = await evidenceDigest(interviewDigestInput);
     const itemId = stableId('external-interview', interview.raceEntryId, interviewDigest);
     const result = await env.DB.prepare(
       "INSERT OR IGNORE INTO editorial_items " +
-      "(id,race_entry_id,horse_id,trainer_id,race_id,game_round_id,speaker_name,speaker_role,published_at,source_name,source_url,summary_text,rights_status,source_record_id) " +
-      "VALUES (?,?,?,?,?,?,?,?,?,?,NULL,?,'structured_only',?)"
+      "(id,race_entry_id,horse_id,trainer_id,race_id,game_round_id,speaker_name,speaker_role,published_at,source_name,source_url,summary_text,change_since_last,change_summary,rights_status,source_record_id) " +
+      "VALUES (?,?,?,?,?,?,?,?,?,?,NULL,?,?,?,'structured_only',?)"
     ).bind(
       itemId, interview.raceEntryId, interview.horseId, interview.trainerId || entry.trainer_id || null,
       entry.race_id, validated.roundId, interview.speakerName, interview.speakerRole, interview.publishedAt,
-      validated.source.sourceName, interview.summary, raw.sourceRecordId
+      validated.source.sourceName, interview.summary,
+      interview.changeSinceLast == null ? null : Number(interview.changeSinceLast), interview.changeSummary,
+      raw.sourceRecordId
     ).run();
     const inserted = Number(result?.meta?.changes || 0);
     counts.interviews += inserted;
@@ -510,8 +535,11 @@ export async function getHorseExternalStats(env, horseId) {
 async function interviewsFor(env, column, id) {
   const { results } = await env.DB.prepare(
     "SELECT ei.id,ei.horse_id,h.canonical_name AS horse_name,ei.trainer_id,tr.canonical_name AS trainer_name," +
-    "ei.speaker_name,ei.speaker_role,ei.published_at,ei.summary_text " +
-    "FROM editorial_items ei JOIN source_records sr ON sr.id=ei.source_record_id LEFT JOIN horses h ON h.id=ei.horse_id LEFT JOIN trainers tr ON tr.id=ei.trainer_id " +
+    "ei.speaker_name,ei.speaker_role,ei.published_at,ei.summary_text,ei.change_since_last,ei.change_summary," +
+    "r.race_date,r.race_number,r.start_method,t.canonical_name AS track_name,re.actual_lane,re.start_number " +
+    "FROM editorial_items ei JOIN source_records sr ON sr.id=ei.source_record_id " +
+    "LEFT JOIN horses h ON h.id=ei.horse_id LEFT JOIN trainers tr ON tr.id=ei.trainer_id " +
+    "LEFT JOIN race_entries re ON re.id=ei.race_entry_id LEFT JOIN races r ON r.id=re.race_id LEFT JOIN tracks t ON t.id=r.track_id " +
     "WHERE sr.source_type='manual_editorial_import' AND ei." + column + "=? ORDER BY COALESCE(ei.published_at,ei.created_at) DESC,ei.id DESC LIMIT 200"
   ).bind(id).all();
   const signals = await loadSignals(env, (results || []).map((row) => row.id));
@@ -525,6 +553,13 @@ async function interviewsFor(env, column, id) {
     speakerRole:row.speaker_role || null,
     publishedAt:row.published_at || null,
     summary:row.summary_text || null,
+    changeSinceLast:row.change_since_last == null ? null : Boolean(row.change_since_last),
+    changeSummary:row.change_summary || null,
+    raceDate:row.race_date || null,
+    trackName:row.track_name || null,
+    raceNumber:row.race_number == null ? null : Number(row.race_number),
+    startMethod:row.start_method || null,
+    postPosition:row.actual_lane == null ? (row.start_number == null ? null : Number(row.start_number)) : Number(row.actual_lane),
     signals:signals.get(row.id) || []
   }));
 }
@@ -579,6 +614,7 @@ export function getExternalEvidenceImportPrompt(provider = 'openai') {
     '- För balans, vagn och bana måste context_key och context_label kopieras exakt från importkontextens allowed_stat_contexts.',
     '- Intervjuer kopplas till hästen och tränaren/stallet. Ange den faktiska talaren och rollen när den framgår.',
     '- Ta med en fyllig sammanfattning och alla relevanta strukturerade signaler, men inkludera inte full betald artikel- eller intervjutext.',
+    '- Om materialet uttryckligen beskriver en relevant förändring mot föregående start/läge, sätt change_since_last=true och sammanfatta förändringen kort i change_summary. Annars använd null; gissa aldrig förändring.',
     '- Ingen data ska skapas för kuskar.',
     '- Varje observation ska ha observed_at/published_at från materialet när möjligt.',
     '',
@@ -588,7 +624,7 @@ export function getExternalEvidenceImportPrompt(provider = 'openai') {
     '  "round_id": "<exakt från importkontexten>",',
     '  "source": {"name":"manual_editorial_import","export_id":"<stabilt id>","exported_at":"<ISO>"},',
     '  "statistics": [{"horse_id":"...","race_entry_id":"...","context_type":"all_starts|current_track|season|v85|v86|lead|balance|wagon","context_key":null,"context_label":"...","starts":null,"wins":null,"seconds":null,"thirds":null,"win_rate_percent":null,"roi_percent":null,"observed_at":"<ISO>"}],',
-    '  "interviews": [{"horse_id":"...","trainer_id":"...","race_entry_id":"...","speaker_name":"...","speaker_role":"trainer|stable_representative|other","published_at":"<ISO>","summary":"...","signals":[{"type":"form|training|tactics|distance|start|equipment|expectation|other","value":"...","polarity":"positive|neutral|negative","strength":null,"fact_or_opinion":"fact|intention|soft_signal|opinion|mixed","confidence":null,"evidence_excerpt":"kort utdrag"}]}]',
+    '  "interviews": [{"horse_id":"...","trainer_id":"...","race_entry_id":"...","speaker_name":"...","speaker_role":"trainer|stable_representative|other","published_at":"<ISO>","summary":"...","change_since_last":null,"change_summary":null,"signals":[{"type":"form|training|tactics|distance|start|equipment|expectation|other","value":"...","polarity":"positive|neutral|negative","strength":null,"fact_or_opinion":"fact|intention|soft_signal|opinion|mixed","confidence":null,"evidence_excerpt":"kort utdrag"}]}]',
     '}'
   ].join('\n');
 }

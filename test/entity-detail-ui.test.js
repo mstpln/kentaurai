@@ -24,6 +24,8 @@ test('canonical detail enhancer composes shared statistics and evidence presenta
   assert.doesNotMatch(html, /legacyRenderDetail|renderCanonicalShell/);
   assert.match(html, /external-evidence-table/);
   assert.match(html, /external-interview-card/);
+  assert.match(html, /external-interview-row/);
+  assert.match(html, /external-interview-change/);
   assert.doesNotThrow(() => new vm.Script(statsScriptFrom(html)));
 
   const twice = enhanceEntityDetailUiHtml(html);
