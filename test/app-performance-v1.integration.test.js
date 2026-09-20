@@ -19,6 +19,9 @@ test('performance Worker injects cache, prefetch and immediate loading UI into p
   assert.match(html, /kentaurai-performance-v1-style/);
   assert.match(html, /requestIdleCallback/);
   assert.match(html, /inflight\.has\(path\)/);
+  assert.match(html, /defaultCalendarPath/);
+  assert.match(html, /statistics\/filter-options/);
+  assert.doesNotMatch(html, /if\(page==='start'\) return '\/summary'/);
   assert.match(html, /Öppnar profil/);
   assert.doesNotMatch(html, /kentaurai-external-analysis-ui-script/);
   assert.match(html, /canonicalAnalysisWorkflow/);
@@ -80,6 +83,50 @@ test('lightweight entity detail omits expensive start enrichment while preservin
   assert.equal(light.entity.name, 'Perf Horse');
   assert.equal(light.stats.databaseStarts, 1);
   assert.equal(light.starts.length, 0);
+});
+
+test('identity-only entity detail skips aggregate scans on the critical profile path', async () => {
+  const { env, db } = createTestEnv();
+  db.prepare(`INSERT INTO tracks (id,canonical_name,country_code) VALUES ('identity_track','Identity Track','SE')`).run();
+  db.prepare(`INSERT INTO horses (id,canonical_name,country_code) VALUES ('identity_horse','Identity Horse','SE')`).run();
+  db.prepare(`INSERT INTO races (id,track_id,race_date,race_number) VALUES ('identity_race','identity_track','2099-01-01',1)`).run();
+  db.prepare(`INSERT INTO race_entries (id,race_id,horse_id,start_number) VALUES ('identity_entry','identity_race','identity_horse',1)`).run();
+
+  const identity = await getEntityDetail(env, 'horses', 'identity_horse', {
+    includeStarts: false,
+    includeObservation: false,
+    includeStats: false,
+    includeBreakdowns: false,
+    includeCoverage: false
+  });
+  assert.equal(identity.entity.name, 'Identity Horse');
+  assert.deepEqual(identity.stats, {});
+  assert.deepEqual(identity.breakdowns, { startMethods: [], distances: [], tracks: [] });
+  assert.deepEqual(identity.coverage, {});
+  assert.equal(identity.latestObservation, null);
+  assert.deepEqual(identity.starts, []);
+});
+
+test('private entity endpoint defaults to identity-only and exposes aggregates only on full=1', async () => {
+  const { env, db } = createTestEnv();
+  env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
+  db.prepare(`INSERT INTO tracks (id,canonical_name,country_code) VALUES ('route_track','Route Track','SE')`).run();
+  db.prepare(`INSERT INTO horses (id,canonical_name,country_code) VALUES ('route_horse','Route Horse','SE')`).run();
+  db.prepare(`INSERT INTO races (id,track_id,race_date,race_number) VALUES ('route_race','route_track','2099-01-01',1)`).run();
+  db.prepare(`INSERT INTO race_entries (id,race_id,horse_id,start_number) VALUES ('route_entry','route_race','route_horse',1)`).run();
+  const cookie = (await createAppSessionCookie(env)).split(';')[0];
+
+  let response = await worker.fetch(new Request('https://example.test/app/api/entities/horses/route_horse', { headers:{ cookie } }), env, {});
+  assert.equal(response.status, 200);
+  let body = await response.json();
+  assert.equal(body.entity.name, 'Route Horse');
+  assert.equal(body.stats.databaseStarts, undefined);
+  assert.deepEqual(body.breakdowns, { startMethods: [], distances: [], tracks: [] });
+
+  response = await worker.fetch(new Request('https://example.test/app/api/entities/horses/route_horse?full=1', { headers:{ cookie } }), env, {});
+  assert.equal(response.status, 200);
+  body = await response.json();
+  assert.equal(body.stats.databaseStarts, 1);
 });
 
 test('track overview can defer home-trainer scan without losing factual track summary', async () => {
