@@ -366,6 +366,8 @@ function validatePayload(payload) {
       speakerRole:optionalText(row.speaker_role, 'interviews[' + index + '].speaker_role', 120),
       publishedAt:row.published_at ? iso(row.published_at, 'interviews[' + index + '].published_at') : exportedAt,
       summary:requiredText(row.summary, 'interviews[' + index + '].summary', MAX_SUMMARY),
+      changeSinceLast:row.change_since_last == null ? null : Boolean(row.change_since_last),
+      changeSummary:optionalText(row.change_summary, 'interviews[' + index + '].change_summary', 1200),
       signals
     };
   }) : [];
@@ -455,17 +457,21 @@ export async function importExternalEvidence(env, payload) {
       speakerRole:interview.speakerRole,
       publishedAt:interview.publishedAt,
       summary:interview.summary,
+      changeSinceLast:interview.changeSinceLast,
+      changeSummary:interview.changeSummary,
       signals:interview.signals
     });
     const itemId = stableId('external-interview', interview.raceEntryId, interviewDigest);
     const result = await env.DB.prepare(
       "INSERT OR IGNORE INTO editorial_items " +
-      "(id,race_entry_id,horse_id,trainer_id,race_id,game_round_id,speaker_name,speaker_role,published_at,source_name,source_url,summary_text,rights_status,source_record_id) " +
-      "VALUES (?,?,?,?,?,?,?,?,?,?,NULL,?,'structured_only',?)"
+      "(id,race_entry_id,horse_id,trainer_id,race_id,game_round_id,speaker_name,speaker_role,published_at,source_name,source_url,summary_text,change_since_last,change_summary,rights_status,source_record_id) " +
+      "VALUES (?,?,?,?,?,?,?,?,?,?,NULL,?,?,?,?,'structured_only',?)"
     ).bind(
       itemId, interview.raceEntryId, interview.horseId, interview.trainerId || entry.trainer_id || null,
       entry.race_id, validated.roundId, interview.speakerName, interview.speakerRole, interview.publishedAt,
-      validated.source.sourceName, interview.summary, raw.sourceRecordId
+      validated.source.sourceName, interview.summary,
+      interview.changeSinceLast == null ? null : Number(interview.changeSinceLast), interview.changeSummary,
+      raw.sourceRecordId
     ).run();
     const inserted = Number(result?.meta?.changes || 0);
     counts.interviews += inserted;
@@ -510,8 +516,11 @@ export async function getHorseExternalStats(env, horseId) {
 async function interviewsFor(env, column, id) {
   const { results } = await env.DB.prepare(
     "SELECT ei.id,ei.horse_id,h.canonical_name AS horse_name,ei.trainer_id,tr.canonical_name AS trainer_name," +
-    "ei.speaker_name,ei.speaker_role,ei.published_at,ei.summary_text " +
-    "FROM editorial_items ei JOIN source_records sr ON sr.id=ei.source_record_id LEFT JOIN horses h ON h.id=ei.horse_id LEFT JOIN trainers tr ON tr.id=ei.trainer_id " +
+    "ei.speaker_name,ei.speaker_role,ei.published_at,ei.summary_text,ei.change_since_last,ei.change_summary," +
+    "r.race_date,r.race_number,r.start_method,t.canonical_name AS track_name,re.actual_lane,re.start_number " +
+    "FROM editorial_items ei JOIN source_records sr ON sr.id=ei.source_record_id " +
+    "LEFT JOIN horses h ON h.id=ei.horse_id LEFT JOIN trainers tr ON tr.id=ei.trainer_id " +
+    "LEFT JOIN race_entries re ON re.id=ei.race_entry_id LEFT JOIN races r ON r.id=re.race_id LEFT JOIN tracks t ON t.id=r.track_id " +
     "WHERE sr.source_type='manual_editorial_import' AND ei." + column + "=? ORDER BY COALESCE(ei.published_at,ei.created_at) DESC,ei.id DESC LIMIT 200"
   ).bind(id).all();
   const signals = await loadSignals(env, (results || []).map((row) => row.id));
@@ -525,6 +534,13 @@ async function interviewsFor(env, column, id) {
     speakerRole:row.speaker_role || null,
     publishedAt:row.published_at || null,
     summary:row.summary_text || null,
+    changeSinceLast:row.change_since_last == null ? null : Boolean(row.change_since_last),
+    changeSummary:row.change_summary || null,
+    raceDate:row.race_date || null,
+    trackName:row.track_name || null,
+    raceNumber:row.race_number == null ? null : Number(row.race_number),
+    startMethod:row.start_method || null,
+    postPosition:row.actual_lane == null ? (row.start_number == null ? null : Number(row.start_number)) : Number(row.actual_lane),
     signals:signals.get(row.id) || []
   }));
 }
@@ -579,6 +595,7 @@ export function getExternalEvidenceImportPrompt(provider = 'openai') {
     '- För balans, vagn och bana måste context_key och context_label kopieras exakt från importkontextens allowed_stat_contexts.',
     '- Intervjuer kopplas till hästen och tränaren/stallet. Ange den faktiska talaren och rollen när den framgår.',
     '- Ta med en fyllig sammanfattning och alla relevanta strukturerade signaler, men inkludera inte full betald artikel- eller intervjutext.',
+    '- Om materialet uttryckligen beskriver en relevant förändring mot föregående start/läge, sätt change_since_last=true och sammanfatta förändringen kort i change_summary. Annars använd null; gissa aldrig förändring.',
     '- Ingen data ska skapas för kuskar.',
     '- Varje observation ska ha observed_at/published_at från materialet när möjligt.',
     '',
@@ -588,7 +605,7 @@ export function getExternalEvidenceImportPrompt(provider = 'openai') {
     '  "round_id": "<exakt från importkontexten>",',
     '  "source": {"name":"manual_editorial_import","export_id":"<stabilt id>","exported_at":"<ISO>"},',
     '  "statistics": [{"horse_id":"...","race_entry_id":"...","context_type":"all_starts|current_track|season|v85|v86|lead|balance|wagon","context_key":null,"context_label":"...","starts":null,"wins":null,"seconds":null,"thirds":null,"win_rate_percent":null,"roi_percent":null,"observed_at":"<ISO>"}],',
-    '  "interviews": [{"horse_id":"...","trainer_id":"...","race_entry_id":"...","speaker_name":"...","speaker_role":"trainer|stable_representative|other","published_at":"<ISO>","summary":"...","signals":[{"type":"form|training|tactics|distance|start|equipment|expectation|other","value":"...","polarity":"positive|neutral|negative","strength":null,"fact_or_opinion":"fact|intention|soft_signal|opinion|mixed","confidence":null,"evidence_excerpt":"kort utdrag"}]}]',
+    '  "interviews": [{"horse_id":"...","trainer_id":"...","race_entry_id":"...","speaker_name":"...","speaker_role":"trainer|stable_representative|other","published_at":"<ISO>","summary":"...","change_since_last":null,"change_summary":null,"signals":[{"type":"form|training|tactics|distance|start|equipment|expectation|other","value":"...","polarity":"positive|neutral|negative","strength":null,"fact_or_opinion":"fact|intention|soft_signal|opinion|mixed","confidence":null,"evidence_excerpt":"kort utdrag"}]}]',
     '}'
   ].join('\n');
 }
