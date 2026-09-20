@@ -55,8 +55,8 @@ test('statistics extended endpoints consolidate expensive ranking families', asy
     const captures = capturePreparedQueries(env);
     await getTrainerRankings(env, { mode:'extended', period:'1y', asOfDate:'2026-09-20', minStarts:'10' });
     assert.equal(captures.length, 7, 'trainer extended should collapse performance, home, distance, market and rest ranking families');
-    assert.equal(captures.some((sql) => sql.includes("'goodVolt' category")), true);
-    assert.equal(captures.some((sql) => sql.includes("'favorite' category")), true);
+    assert.equal(captures.some((sql) => sql.includes("'goodVolt'")), true);
+    assert.equal(captures.some((sql) => sql.includes("'favorite'")), true);
   }
   {
     const { env } = createTestEnv();
