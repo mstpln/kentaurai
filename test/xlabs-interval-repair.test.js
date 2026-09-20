@@ -7,6 +7,7 @@ import {
   runXlabsIntervalRepairBatch
 } from '../src/import/xlabs-interval-repair.js';
 import { XLABS_INTERVALS_V2_VERSION } from '../src/xlabs-intervals-v2.js';
+import worker from '../src/worker-v077.js';
 
 const DATE = '2099-01-02';
 
@@ -108,4 +109,14 @@ test('bounded repair batch prioritizes newest normalized sources and reports rem
   assert.equal(result.successCount, 1);
   assert.equal(result.items[0].sourceRecordId, 'src_new');
   assert.ok(result.remaining >= 1);
+});
+
+
+test('interval repair admin route is private before database work', async () => {
+  const response = await worker.fetch(new Request('https://example.test/v1/xlabs/interval-repair', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ limit: 1 })
+  }), {}, {});
+  assert.equal(response.status, 401);
 });
