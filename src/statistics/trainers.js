@@ -290,6 +290,14 @@ function mapForm(rows){return rows.map((row,index)=>({rank:index+1,id:row.entity
 
 export async function getTrainerRankings(env,options={}){
   if(!env.DB)throw new Error('DB is not configured');const f=normalizeTrainerStatsFilters(options);await validateTrack(env,f.trackId);
+  if(options.mode==='core'){
+    const [win,top3,wins,form]=await Promise.all([
+      run(env,buildCoreRanking(f,'winRate')),run(env,buildCoreRanking(f,'top3Rate')),run(env,buildCoreRanking(f,'wins')),run(env,buildFormQuery(f))
+    ]);
+    return {filters:f,partial:true,definitions:{longshotPercentMax:DRIVER_LONGSHOT_PERCENT_MAX,market:DRIVER_MARKET_DEFINITION_VERSION,voltLaneGood:[1,6,7],restDays:REST_DAYS,distanceProfile:DISTANCE_PROFILE_VERSION},rankings:{
+      highestWinRate:mapCoreRanking(win,'winRate'),highestTop3Rate:mapCoreRanking(top3,'top3Rate'),mostWins:mapCoreRanking(wins,'wins'),bestFormLast30:mapForm(form)
+    }};
+  }
   const [win,top3,wins,form,annual,perStart,auto,volt,goodVolt,otherVolt,handicap,home,away,short,medium,long,favorite,longshot,firstRest,secondRest]=await Promise.all([
     run(env,buildCoreRanking(f,'winRate')),run(env,buildCoreRanking(f,'top3Rate')),run(env,buildCoreRanking(f,'wins')),run(env,buildFormQuery(f)),
     run(env,buildCoreRanking(f,'earnings',[],{includePeriod:false})),run(env,buildCoreRanking(f,'earningsPerVerifiedStart')),
