@@ -14,8 +14,9 @@ test('upcoming games UI installs factual Spel navigation and responsive contract
   assert.match(html, /Första 200/);
   assert.match(html, /ugMarketPercent/);
   assert.match(html, /format\(n\)\+' %'/);
+  assert.doesNotMatch(html, /pct\(e\.betPercent\)/);
   assert.match(html, /return full\[1\]\+'\.'\+full\[2\]/);
-  assert.match(html, /\/horses\/\'+encodeURIComponent\(e\.horseId\)\+'\/calendar-form/);
+  assert.ok(html.includes("api('/horses/'+encodeURIComponent(e.horseId)+'/calendar-form?year='+year)"));
   assert.match(html, /Sista 400/);
   assert.match(html, /Visa mer/);
   assert.match(html, /Hög prissumma/);
