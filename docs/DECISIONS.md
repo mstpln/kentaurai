@@ -31,7 +31,7 @@
 
 ## Interface direction
 1. Horse, trainer and driver remain primary detail entities, with V85/V86 system/performance history available in a dedicated Spel area.
-2. Bottom navigation is fixed as **Trend -> Tränare -> Hästar -> Kuskar -> Bana -> Spel**.
+2. Bottom navigation is fixed as **Start -> Statistik -> Spel**. Statistik owns the four-way top selector **Tränare -> Hästar -> Kuskar -> Bana**, shown above the workspace page heading.
 3. Trend is the start workspace and uses category switching for Tränare / Hästar / Kuskar plus rolling periods 2 weeks / 4 weeks / 3 months / 6 months / 1 year.
 4. Trend uses the verified actual starts currently present in D1; an incomplete historical backfill does not create guessed values or a special UI warning. Ranking is deterministic by win rate -> wins -> starts -> stable entity ID and is capped at ten rows.
 5. Trend and individual entity statistics share the same core definitions and denominator rules. Scratched entries are not starts; win rate uses actual starts, top-three rate uses result starts, gallop rate uses only starts with verified gallop status, and missing prize data stays distinguishable from zero.
@@ -50,8 +50,8 @@
 18. There is no visible logout control; the private session expires normally.
 19. Visual direction is minimal and strongly structured, using black/grey/brown/beige as the base with restrained warm accent color and clear card/divider/tab separation.
 20. The approved Sagittarius KentaurAI brand stays separate from entity navigation symbolism.
-21. Bottom-navigation symbols are Trend = approved chart-line, Tränare = clipboard/pen, Hästar = horse, Kuskar = lightbulb, Bana = map-pin/oval, Spel = ticket. Entity profile tiles use initials rather than category symbols.
-22. Trend uses the approved chart-line symbol and the singular label `Trend` in both navigation and page heading.
+21. Bottom-navigation symbols are Start = the existing approved Trend chart-line, Statistik = Phosphor Table, and Spel = Phosphor Currency Circle Dollar. Entity profile tiles use initials rather than category symbols.
+22. Start keeps the approved chart-line symbol; the Trend workspace and its page content remain unchanged behind Start.
 23. KentaurAI is packaged as an installable PWA scoped to `/app/` with standalone launch and dedicated Sagittarius icons. Its service worker may cache public PWA metadata/icon assets only; authenticated app HTML and API data remain outside the offline cache.
 24. Bana uses **Översikt -> Spårstatistik -> Hemmatränare**. User-facing country codes are localized (for example `SE` -> `Sverige`) while storage/API identities remain unchanged.
 25. Spårstatistik owns Period, Startmetod, Distans, STL-klass and Lopptyp in the canonical lane-statistics flow. Optional filters combine with AND semantics; the literal all-period label is `All data`.
