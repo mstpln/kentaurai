@@ -264,6 +264,54 @@ export async function getDriverRankings(env, options = {}) {
   if (!env.DB) throw new Error('DB is not configured');
   const filters = normalizeDriverStatsFilters(options);
   await validateTrack(env, filters.trackId);
+  if (options.mode === 'core') {
+    const [win,top3,wins,form] = await Promise.all([
+      run(env,buildCoreRanking(filters,'winRate')),
+      run(env,buildCoreRanking(filters,'top3Rate')),
+      run(env,buildCoreRanking(filters,'wins')),
+      run(env,buildFormQuery(filters))
+    ]);
+    return {
+      filters,
+      partial:true,
+      definitions:{longshotPercentMax:DRIVER_LONGSHOT_PERCENT_MAX,market:DRIVER_MARKET_DEFINITION_VERSION,positions:DRIVER_POSITION_DEFINITION_VERSION,voltLaneGood:[1,6,7]},
+      rankings:{
+        highestWinRate:mapCoreRanking(win,'winRate'),
+        highestTop3Rate:mapCoreRanking(top3,'top3Rate'),
+        mostWins:mapCoreRanking(wins,'wins'),
+        bestFormLast30:mapForm(form)
+      }
+    };
+  }
+  if (options.mode === 'extended') {
+    const [yearEarnings,perStart,leader,death,backRow,auto,volt,favorite,longshot] = await Promise.all([
+      run(env,buildCoreRanking(filters,'earnings',[],{includePeriod:false})),
+      run(env,buildCoreRanking(filters,'earningsPerVerifiedStart')),
+      run(env,buildPositionRanking(filters,'leader')),
+      run(env,buildPositionRanking(filters,'death')),
+      run(env,buildCoreRanking(filters,'winRate',[`${canonicalStartMethodSql('r')}='auto'`,'re.back_row=1'],{applyMinimumStarts:true})),
+      run(env,buildCoreRanking(filters,'winRate',[`${canonicalStartMethodSql('r')}='auto'`],{applyMinimumStarts:true})),
+      run(env,buildCoreRanking(filters,'winRate',[`${canonicalStartMethodSql('r')}='volt'`],{applyMinimumStarts:true})),
+      run(env,buildMarketRanking(filters,'favorite')),
+      run(env,buildMarketRanking(filters,'longshot'))
+    ]);
+    return {
+      filters,
+      partial:false,
+      definitions:{longshotPercentMax:DRIVER_LONGSHOT_PERCENT_MAX,market:DRIVER_MARKET_DEFINITION_VERSION,positions:DRIVER_POSITION_DEFINITION_VERSION,voltLaneGood:[1,6,7]},
+      rankings:{
+        mostEarningsThisYear:mapCoreRanking(yearEarnings,'earnings'),
+        highestEarningsPerStart:mapCoreRanking(perStart,'earningsPerVerifiedStart'),
+        bestFromLead:mapCoreRanking(leader,'winRate'),
+        bestFromDeathSeat:mapCoreRanking(death,'winRate'),
+        bestFromBackRow:mapCoreRanking(backRow,'winRate'),
+        bestAuto:mapCoreRanking(auto,'winRate'),
+        bestVolt:mapCoreRanking(volt,'winRate'),
+        favoriteResults:mapCoreRanking(favorite,'winRate'),
+        longshotResults:mapCoreRanking(longshot,'winRate')
+      }
+    };
+  }
   const [win,top3,wins,form,yearEarnings,perStart,leader,death,backRow,auto,volt,favorite,longshot] = await Promise.all([
     run(env,buildCoreRanking(filters,'winRate')),
     run(env,buildCoreRanking(filters,'top3Rate')),

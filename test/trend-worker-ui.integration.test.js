@@ -40,6 +40,8 @@ test('Trend API is private and is served through the actual Worker entrypoint', 
   assert.equal(data.items.length, 1);
   assert.equal(data.items[0].id, 'horse-trend');
   assert.equal(data.items[0].winRate, 1);
+  assert.equal(data.rankingMetric, 'horse_form_index_v1');
+  assert.ok(data.items[0].formScore >= 1 && data.items[0].formScore <= 100);
 });
 
 test('Trend API returns 400 for invalid filters through the actual Worker', async () => {
@@ -70,9 +72,12 @@ test('actual Worker app HTML contains the canonical Trend Build A enhancement', 
   assert.match(html, /aria-label="Detaljfilter"/);
   assert.match(html, /id="trendPeriodSelect"/);
   assert.match(html, /class="trend-period-chevron"/);
-  assert.match(html, /state\.trendRange='2w'/);
+  assert.match(html, /state\.trendRange=state\.trendCategory==='horses'\?'3m':'2w'/);
   assert.match(html, /state\.trendRaceScope=state\.trendRaceScope\|\|'high_prize'/);
-  assert.match(html, /minStarts:'10'/);
+  assert.match(html, /minStarts:state\.trendCategory==='horses'\?'3':'10'/);
+  assert.match(html, /id="trendRaceScopeSelect"/);
+  assert.match(html, /Starkast form/);
+  assert.match(html, /recentPlacings/);
   assert.match(html, /function activeFilterCount\(\)/);
   assert.match(html, /M4 7h10M18 7h2M14 4v6M4 17h2M10 17h10M10 14v6/);
   assert.match(html, /@media\(max-width:430px\)/);

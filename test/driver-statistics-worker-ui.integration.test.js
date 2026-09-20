@@ -26,6 +26,8 @@ test('driver statistics routes are private through actual Worker', async () => {
   const cookie=await authenticatedCookie(env);
   response=await worker.fetch(new Request(url,{headers:{cookie}}),env);assert.equal(response.status,200);
   const data=await response.json();assert.equal(data.rankings.highestWinRate[0].id,'driver-d');assert.equal(data.filters.sex,'mare');assert.equal(data.filters.age,6);assert.equal(data.definitions.longshotPercentMax,5);
+  response=await worker.fetch(new Request(url+'&mode=extended',{headers:{cookie}}),env);assert.equal(response.status,200);
+  const extended=await response.json();assert.equal(Object.hasOwn(extended.rankings,'highestWinRate'),false);assert.equal(Object.hasOwn(extended.rankings,'bestAuto'),true);
   response=await worker.fetch(new Request('https://example.test/app/api/drivers/driver-d/statistics?period=1y&sex=mare&age=6',{headers:{cookie}}),env);assert.equal(response.status,200);
   const detail=await response.json();assert.equal(detail.summary.winRate,1);assert.equal(detail.driver.id,'driver-d');assert.equal(detail.filters.age,6);
 });
@@ -44,7 +46,7 @@ test('actual Worker HTML composes driver Build C after Trend and horse statistic
   assert.ok(html.indexOf('kentaurai-horse-statistics-build-b-script')<html.indexOf('kentaurai-driver-statistics-build-c-script'));
   for(const text of ['Flest segrar','Bäst form – senaste 30','Mest inkört i år','Bäst från spets','Bäst från dödens','Bäst med bakspår','Resultat som favorit','Resultat som skräll','Bra spår (1/6/7)',"dField('Kön','sex',SEXES)","dField('Ålder','age',dAgeRows())"]) assert.match(html,new RegExp(text.replace(/[()]/g,'\\$&')));
   assert.match(html,/sex:f\.sex/);assert.match(html,/age:f\.age/);
-  assert.match(html,/@media\(max-width:430px\)/);assert.match(html,/@media\(max-width:320px\)/);
+  assert.match(html,/@media\(max-width:430px\)/);assert.match(html,/@media\(max-width:320px\)/);assert.match(html,/mode=core/);assert.match(html,/mode=extended/);assert.match(html,/dMergeRankingPayload/);
 });
 
 test('driver UI enhancer preserves HTML and injects syntactically valid JavaScript', () => {

@@ -39,9 +39,11 @@ test('Trend opens with the requested period and filter defaults', () => {
   assert.ok(match);
   const script = match[1];
 
-  assert.match(script, /state\.trendRange='2w';/);
+  assert.match(script, /state\.trendRange=state\.trendCategory==='horses'\?'3m':'2w';/);
   assert.match(script, /state\.trendRaceScope=state\.trendRaceScope\|\|'high_prize';/);
-  assert.match(script, /state\.trendDetailFilters=\{trackId:'all',raceType:'all',breedType:'all',startMethod:'all',minStarts:'10',\.\.\.\(state\.trendDetailFilters\|\|\{\}\)\};/);
+  assert.match(script, /state\.trendDetailFilters=\{trackId:'all',raceType:'all',breedType:'all',startMethod:'all',minStarts:state\.trendCategory==='horses'\?'3':'10',\.\.\.\(state\.trendDetailFilters\|\|\{\}\)\};/);
+  assert.match(script, /state\.trendRange=next==='horses'\?'3m':'2w'/);
+  assert.match(script, /state\.trendDetailFilters\.minStarts=next==='horses'\?'3':'10'/);
   assert.match(script, /period:state\.trendRange/);
   assert.match(script, /race_scope:state\.trendRaceScope/);
   assert.match(script, /min_starts:f\.minStarts/);
@@ -70,14 +72,14 @@ test('Trend filter badge counts Loppnivå plus active detail filters', () => {
   assert.match(script, /trend-filter-count/);
 });
 
-test('Trend reset clears Loppnivå and every detail filter in the canonical Trend handler', () => {
+test('Trend reset restores category-specific canonical defaults', () => {
   const html = enhanceTrendHtml('<html><head></head><body></body></html>');
   const match = html.match(/<script id="kentaurai-trend-build-a-script">([\s\S]*?)<\/script>/);
   assert.ok(match);
   const script = match[1];
 
   assert.match(html, />Återställ filter<\/button>/);
-  assert.match(script, /reset\.onclick=\(\)=>\{state\.trendRaceScope='all';state\.trendDetailFilters=\{trackId:'all',raceType:'all',breedType:'all',startMethod:'all',minStarts:'all'\};renderTrendBuildA\(\)\}/);
+  assert.match(script, /reset\.onclick=\(\)=>\{state\.trendRaceScope='high_prize';state\.trendDetailFilters=\{trackId:'all',raceType:'all',breedType:'all',startMethod:'all',minStarts:state\.trendCategory==='horses'\?'3':'10'\};renderTrendBuildA\(\)\}/);
 });
 
 test('Trend ranking rows remove repeated win label and preserve full prize-money space', () => {

@@ -31,6 +31,17 @@ function xlabs(db, id, entryId, sourceId, first200, last400) {
   db.prepare("INSERT INTO xlabs_data (id,race_entry_id,first_200_time,last_400_time,quality_status,source_record_id) VALUES (?,?,?,?, 'xlabs-telemetry-v1', ?)").run(id,entryId,first200,last400,sourceId);
 }
 
+function opening200(db, id, entryId, sourceId, first100Ms, second100Ms) {
+  for (const [suffix, start, end, elapsed] of [['a', 0, 100, first100Ms], ['b', 100, 200, second100Ms]]) {
+    db.prepare(`INSERT INTO xlabs_intervals
+      (id,race_entry_id,source_record_id,interval_start_m,interval_end_m,elapsed_ms,km_pace_ms,measured_distance_m,
+       local_target_frame_count,local_window_frame_count,local_frame_coverage,start_endpoint_error_m,end_endpoint_error_m,
+       eligibility_status,mapper_version)
+      VALUES (?,?,?,?,?,?,?,?,10,10,1,0,0,'valid','xlabs-intervals-v2')`)
+      .run(`${id}-${suffix}`, entryId, sourceId, start, end, elapsed, elapsed * 10, 100);
+  }
+}
+
 test('horse filter contract rejects unsupported values', () => {
   assert.throws(()=>normalizeHorseStatsFilters({period:'bad'}),/period must be/);
   assert.throws(()=>normalizeHorseStatsFilters({distanceGroup:'2000'}),/distance_group/);
@@ -51,6 +62,9 @@ test('horse rankings share null-safe core metrics, placements-only form and veri
   xlabs(db,'x-old','e1','s-old','1.20,0 min/km','1.15,0 min/km');
   xlabs(db,'x-new','e1','s-new','1.10,0 min/km','1.05,0 min/km');
   xlabs(db,'x-b','e3','s-new','1.12,0 min/km','1.07,0 min/km');
+  opening200(db,'i-old','e1','s-old',7000,7000);
+  opening200(db,'i-new','e1','s-new',6500,6500);
+  opening200(db,'i-b','e3','s-new',6600,6600);
 
   const data=await getHorseRankings(env,{period:'1y',asOfDate:'2026-09-11'});
   const win=data.rankings.highestWinRate.find(x=>x.id==='h-a');
@@ -63,7 +77,7 @@ test('horse rankings share null-safe core metrics, placements-only form and veri
   assert.equal(formB.usedStarts,1,'missing placing is excluded from placements-only form');
   const speedA=data.rankings.fastestFirst200.find(x=>x.id==='h-a');
   assert.equal(speedA.measurements,1,'multiple verified telemetry observations for one start are deduplicated');
-  assert.equal(speedA.averageSeconds,70);
+  assert.equal(speedA.averageSeconds,65,'verified 0–100 and 100–200 intervals are converted to seconds per km');
   assert.equal(data.rankings.highestStartPoints,null);
   assert.equal(data.startPointsStatus,'unverified_official_semantics');
 });

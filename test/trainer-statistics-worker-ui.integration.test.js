@@ -23,6 +23,8 @@ test('trainer statistics routes are private through actual Worker', async()=>{
   let response=await worker.fetch(new Request(url),env);assert.equal(response.status,401);
   const auth=await cookie(env);response=await worker.fetch(new Request(url,{headers:{cookie:auth}}),env);assert.equal(response.status,200);
   const data=await response.json();assert.equal(data.rankings.highestWinRate[0].id,'trainer-t');assert.equal(data.definitions.restDays,60);
+  response=await worker.fetch(new Request(url+'&mode=extended',{headers:{cookie:auth}}),env);assert.equal(response.status,200);
+  const extended=await response.json();assert.equal(Object.hasOwn(extended.rankings,'highestWinRate'),false);assert.equal(Object.hasOwn(extended.rankings,'bestAuto'),true);
   response=await worker.fetch(new Request('https://example.test/app/api/trainers/trainer-t/statistics?period=1y',{headers:{cookie:auth}}),env);assert.equal(response.status,200);
   const detail=await response.json();assert.equal(detail.trainer.id,'trainer-t');assert.equal(detail.summary.winRate,1);
 });
@@ -39,7 +41,7 @@ test('actual Worker composes Build D after horse and driver statistics with resp
   for(const id of ['kentaurai-trend-build-a-script','kentaurai-horse-statistics-build-b-script','kentaurai-driver-statistics-build-c-script','kentaurai-trainer-statistics-build-d-script'])assert.match(html,new RegExp(id));
   assert.ok(html.indexOf('kentaurai-driver-statistics-build-c-script')<html.indexOf('kentaurai-trainer-statistics-build-d-script'));
   for(const text of ['Bäst på hemmabana','Bäst på övriga banor','Första starten efter vila','Andra starten efter vila','Bäst på tillägg','Bäst kort distans'])assert.match(html,new RegExp(text));
-  assert.match(html,/@media\(max-width:430px\)/);assert.match(html,/@media\(max-width:320px\)/);
+  assert.match(html,/@media\(max-width:430px\)/);assert.match(html,/@media\(max-width:320px\)/);assert.match(html,/mode=core/);assert.match(html,/mode=extended/);assert.match(html,/tMergeRankingPayload/);
 });
 
 test('trainer UI enhancer preserves HTML and injects valid JavaScript',()=>{

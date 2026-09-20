@@ -180,4 +180,8 @@ A single race must not directly change model weights. Candidate learnings are re
 - Lane context is autostart 1–8 versus 9–12, and voltstart lanes 1/6/7 versus all other lanes within the volt.
 - `Hög prissumma` and `Vardagstrav` reuse the canonical `race-scope.js` evidence definition; no second prize-class threshold is introduced.
 - Upcoming Spel is explicitly before AI analysis. It must not expose or create strength labels, probabilities, ABCD, race scenarios, value judgments, system recommendations, tips or interview/editorial evidence.
+23. Trend keeps **Hästar** as a first-class category. Horse Trend is ranked by the existing canonical **Form 1–100** calculation, not win rate, with **3 months** and **min 3 starts** as defaults; trainer/driver Trend keeps win rate as the primary ranking.
+24. Trend and trainer/driver/horse Statistik pages share the compact filter interaction: period remains directly visible, detailed filters open from the sliders icon, and **Loppnivå** is a dropdown. Statistik defaults to **1 year** plus the same race-scope/minimum-start defaults as Trend.
+25. X-Labs opening-speed presentation must use verified interval measurements for the first 200 m, respect the requested as-of source cutoff, and derive km pace from elapsed time / measured distance. Legacy first_200_time strings must not be treated directly as km pace.
+26. Progressive trainer/driver/horse rankings use disjoint `core` and `extended` server modes. The UI merges the payloads; the extended request must not recompute the core ranking queries.
 

@@ -65,5 +65,6 @@ test('Trend UI exposes and sends the minimum-starts filter', () => {
   assert.match(html, /Minst 3/);
   assert.match(html, /Minst 20/);
   assert.match(html, /min_starts:f\.minStarts/);
-  assert.match(html, /minStarts:'all'/);
+  assert.match(html, /minStarts:state\.trendCategory==='horses'\?'3':'10'/);
+  assert.match(html, /state\.trendDetailFilters\[select\.dataset\.trendDetail\]=select\.value/);
 });

@@ -1,3 +1,14 @@
+## Trend and statistics filter/performance candidate
+- Trend keeps **Tränare / Hästar / Kuskar**.
+- Trainer/driver Trend remains win-rate-led; horse Trend is ranked by the canonical **Form 1–100** calculation with **3 months** and **min 3 starts** as horse defaults.
+- Trend **Loppnivå** is a dropdown inside the collapsible filter panel.
+- Trainer/driver/horse Statistik pages use the same compact period + filter-icon pattern as Trend. Defaults are **1 year**, **Högre prissumma**, and category-appropriate minimum starts (10 for trainer/driver, 3 for horse).
+- Filter-option requests are deferred until the filter panel is opened, and ranking payloads are cached by filter key in the client so repeat visits do not block on duplicate reads.
+- Progressive rankings use disjoint `core` and `extended` responses; the second request calculates only the remaining cards and the UI merges both payloads instead of repeating the core queries.
+- Horse **Startsnabbaste** no longer interprets legacy first-200 elapsed-time strings as km pace. It uses the verified X-Labs interval-v2 first 0–200 m segment, respects the statistics as-of source cutoff, and derives seconds/km from elapsed time and measured distance.
+- Unknown or unavailable measurements remain null/empty rather than being invented.
+- No market percentages or editorial signals are used in horse Trend Form ranking.
+
 ## Primary navigation candidate
 - Branch: `feat/analysis-primary-navigation`.
 - Primary bottom navigation is **Trend / Statistik / Analys / Spel**.

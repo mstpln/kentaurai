@@ -12,6 +12,7 @@ import {
   normalizeTrendStartMethod,
   trendDateWindow
 } from './core.js';
+import { XLABS_INTERVALS_V2_VERSION } from '../xlabs-intervals-v2.js';
 
 const PERIODS = new Set(['all', '2w', '4w', '3m', '6m', '1y']);
 const DISTANCES = new Set(['all', '640', '1640', '2140', '2640', '3140', '3640', '4140', 'other-long']);
@@ -139,6 +140,49 @@ function xlabsSecondsSql(column) {
   return `(CAST(substr(${column},1,instr(${column},'.')-1) AS REAL)*60 + CAST(substr(${column},instr(${column},'.')+1,2) AS REAL) + CAST(substr(${column},instr(${column},',')+1,1) AS REAL)/10.0)`;
 }
 
+function buildXlabsOpening200Ranking(filters) {
+  const conditions = ['re.scratched = 0'];
+  const bindings = [filters.asOfDate];
+  addHorseFilters(conditions, bindings, filters);
+  const minimum = filters.minStarts == null ? 'measurements > 0' : 'measurements >= ?';
+  if (filters.minStarts != null) bindings.push(filters.minStarts);
+  return {
+    sql: `WITH source_candidates AS (
+      SELECT xi.race_entry_id,xi.source_record_id,sr.fetched_at
+      FROM xlabs_intervals xi
+      JOIN source_records sr ON sr.id=xi.source_record_id
+      WHERE xi.mapper_version='${XLABS_INTERVALS_V2_VERSION}' AND sr.source_type='xlabs_race_json'
+        AND substr(sr.fetched_at,1,10) <= ?
+      GROUP BY xi.race_entry_id,xi.source_record_id,sr.fetched_at
+    ), latest_sources AS (
+      SELECT *,ROW_NUMBER() OVER(PARTITION BY race_entry_id ORDER BY julianday(fetched_at) DESC,source_record_id DESC) rn
+      FROM source_candidates
+    ), segment AS (
+      SELECT xi.race_entry_id,
+        SUM(xi.elapsed_ms) elapsed_ms,
+        SUM(xi.measured_distance_m) measured_distance_m,
+        COUNT(*) interval_count,
+        SUM(CASE WHEN xi.eligibility_status='valid' THEN 1 ELSE 0 END) valid_count
+      FROM latest_sources ls
+      JOIN xlabs_intervals xi ON xi.race_entry_id=ls.race_entry_id AND xi.source_record_id=ls.source_record_id AND xi.mapper_version='${XLABS_INTERVALS_V2_VERSION}'
+      WHERE ls.rn=1 AND xi.interval_start_m IN (0,100) AND xi.interval_end_m IN (100,200)
+      GROUP BY xi.race_entry_id
+      HAVING interval_count=2 AND valid_count=2 AND elapsed_ms>0 AND measured_distance_m>0
+    ), measured AS (
+      SELECT h.id entity_id,h.canonical_name name,COUNT(*) measurements,
+        AVG((segment.elapsed_ms/1000.0)*(1000.0/segment.measured_distance_m)) avg_seconds
+      FROM races r INDEXED BY idx_races_date
+      JOIN race_entries re ON re.race_id=r.id
+      JOIN race_results rr ON rr.race_entry_id=re.id
+      JOIN horses h ON h.id=re.horse_id
+      JOIN segment ON segment.race_entry_id=re.id
+      WHERE ${conditions.join(' AND ')}
+      GROUP BY h.id,h.canonical_name
+    ) SELECT * FROM measured WHERE ${minimum} ORDER BY avg_seconds ASC,measurements DESC,entity_id ASC LIMIT 10`,
+    bindings
+  };
+}
+
 function buildXlabsRanking(filters, column) {
   const conditions = ['re.scratched = 0', `x.${column} IS NOT NULL`];
   const bindings = [];
@@ -241,12 +285,51 @@ export async function getHorseRankings(env, options = {}) {
   if (!env.DB) throw new Error('DB is not configured');
   const filters = normalizeHorseStatsFilters(options);
   await validateTrack(env, filters.trackId);
+  if (options.mode === 'core') {
+    const [win,top3,form,start] = await Promise.all([
+      run(env,buildCoreRanking(filters,'winRate')),
+      run(env,buildCoreRanking(filters,'top3Rate')),
+      run(env,buildFormQuery(filters)),
+      run(env,buildXlabsOpening200Ranking(filters))
+    ]);
+    return {
+      filters,
+      partial:true,
+      rankings:{
+        highestWinRate:mapCoreRanking(win,'winRate'),
+        highestTop3Rate:mapCoreRanking(top3,'top3Rate'),
+        bestFormLast10:form.map((row,index)=>({rank:index+1,id:row.entity_id,name:row.name,usedStarts:Number(row.used_starts),averagePlacing:Number(row.avg_placing)})),
+        fastestFirst200:start.map((row,index)=>({rank:index+1,id:row.entity_id,name:row.name,measurements:Number(row.measurements),averageSeconds:Number(row.avg_seconds)}))
+      },
+      startPointsStatus:'deferred'
+    };
+  }
+  if (options.mode === 'extended') {
+    const [earnings,close,firstRest,secondRest] = await Promise.all([
+      run(env,buildCoreRanking(filters,'earningsPerVerifiedStart')),
+      run(env,buildXlabsRanking(filters,'last_400_time')),
+      run(env,buildRestRanking(filters,'first')),
+      run(env,buildRestRanking(filters,'second'))
+    ]);
+    return {
+      filters,
+      partial:false,
+      rankings:{
+        highestEarningsPerStart:mapCoreRanking(earnings,'earningsPerVerifiedStart'),
+        strongestLast400:close.map((row,index)=>({rank:index+1,id:row.entity_id,name:row.name,measurements:Number(row.measurements),averageSeconds:Number(row.avg_seconds)})),
+        firstAfterRest:mapRestRanking(firstRest),
+        secondAfterRest:mapRestRanking(secondRest),
+        highestStartPoints:null
+      },
+      startPointsStatus:'unverified_official_semantics'
+    };
+  }
   const [win,top3,earnings,form,start,close,firstRest,secondRest] = await Promise.all([
     run(env,buildCoreRanking(filters,'winRate')),
     run(env,buildCoreRanking(filters,'top3Rate')),
     run(env,buildCoreRanking(filters,'earningsPerVerifiedStart')),
     run(env,buildFormQuery(filters)),
-    run(env,buildXlabsRanking(filters,'first_200_time')),
+    run(env,buildXlabsOpening200Ranking(filters)),
     run(env,buildXlabsRanking(filters,'last_400_time')),
     run(env,buildRestRanking(filters,'first')),
     run(env,buildRestRanking(filters,'second'))
