@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=ca6334df1876b0b6840c55a93cf32fab80a88579
-release_nonce=2026-09-20-production-analysis-primary-navigation-pr220-1
+source_main=16dafbb82dcfbbf9e651d23d49536f7f85ee990e
+release_nonce=2026-09-20-production-bottom-navigation-sizing-pr221-1
