@@ -317,13 +317,21 @@ async function loadDriverMarketRanks(env,targets){
 
 async function loadTrainerPriorResults(env,targets){
   if(!targets.length)return new Map();
-  const values=[],parts=[];
-  for(const target of targets){
-    parts.push(`SELECT ? target_entry_id,? horse_id,? race_date,? race_number`);
-    values.push(target.race_entry_id,target.horse_id,target.race_date,target.race_number);
-  }
+  const targetJson=JSON.stringify(targets.map(target=>({
+    targetEntryId:target.race_entry_id,
+    horseId:target.horse_id,
+    raceDate:target.race_date,
+    raceNumber:target.race_number
+  })));
   const {results}=await env.DB.prepare(`
-    WITH targets(target_entry_id,horse_id,race_date,race_number) AS (${parts.join(' UNION ALL ')}),
+    WITH targets AS (
+      SELECT
+        json_extract(value,'$.targetEntryId') target_entry_id,
+        json_extract(value,'$.horseId') horse_id,
+        json_extract(value,'$.raceDate') race_date,
+        CAST(json_extract(value,'$.raceNumber') AS INTEGER) race_number
+      FROM json_each(?)
+    ),
     prior AS (
       SELECT t.target_entry_id,rr.placing,rr.disqualified,
         (SELECT COUNT(*) FROM race_entries field_re WHERE field_re.race_id=r.id AND field_re.scratched=0) field_size,
@@ -336,7 +344,7 @@ async function loadTrainerPriorResults(env,targets){
         AND (rr.placing IS NOT NULL OR rr.disqualified=1)
     )
     SELECT target_entry_id,placing,disqualified,field_size FROM prior WHERE rn<=3 ORDER BY target_entry_id,rn
-  `).bind(...values).all();
+  `).bind(targetJson).all();
   const byTarget=new Map();
   for(const row of results||[]){
     if(!byTarget.has(row.target_entry_id))byTarget.set(row.target_entry_id,[]);
