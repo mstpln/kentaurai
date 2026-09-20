@@ -99,6 +99,11 @@ test('full production-composed app keeps the grouped primary navigation after la
   assert.doesNotMatch(runtimeNav, /data-page="(?:trainers|horses|drivers|tracks)"/);
   assert.match(html, /id="kentaurai-performance-v1-script"/);
   assert.match(html, /id="kentaurai-upcoming-games-v1-script"/);
+  assert.match(html, /id="kentaurai-mobile-layout-polish-v104"/);
+  assert.match(html, /\.bottom-inner\{width:100%!important;max-width:none!important;grid-template-columns:repeat\(4,minmax\(0,1fr\)\)!important;gap:4px!important;align-items:center!important\}/);
+  assert.match(html, /\.nav-item\{min-width:0!important;min-height:72px!important;font-size:13px!important;font-weight:600!important;[^}]*justify-content:center!important;gap:7px!important;overflow:visible!important\}/);
+  assert.match(html, /\.nav-icon\{width:28px!important;height:28px!important;margin:0!important;flex:0 0 auto!important\}/);
+  assert.ok(html.indexOf('kentaurai-mobile-layout-polish-v104') > html.indexOf('kentaurai-aligned-ui-v063'), 'final mobile polish must come after aligned UI');
   assert.match(html, /const gamesNav=document\.querySelector\('\.nav-item\[data-page="games"\]'\)/);
   assert.doesNotMatch(html, /addTrackNavigation\(\)/);
 });
