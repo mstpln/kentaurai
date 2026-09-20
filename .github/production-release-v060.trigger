@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=5ee007f6292c7e73afb2a62af460bc75ff2ccedb
-release_nonce=2026-09-20-production-xlabs-interval-repair-pr206-1
+source_main=82c79446878dbe8516e29972b83084a7fb3fe67d
+release_nonce=2026-09-20-production-interview-accordion-pr207-1
