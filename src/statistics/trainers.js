@@ -161,6 +161,41 @@ function buildCoreRanking(filters, metric, extraConditions = [], { includePeriod
   };
 }
 
+function buildCoreRankingSet(filters) {
+  const conditions = ['re.scratched = 0', 're.trainer_id IS NOT NULL'];
+  const bindings = [];
+  addTrainerFilters(conditions, bindings, filters);
+  const minimum = filters.minStarts == null ? 1 : Number(filters.minStarts);
+  bindings.push(minimum, minimum);
+  return {
+    sql:`WITH trainer_stats AS MATERIALIZED (
+      SELECT t.id AS entity_id,t.canonical_name AS name,${coreMetricSelectSql('rr')}
+      FROM races r INDEXED BY idx_races_date
+      JOIN race_entries re ON re.race_id=r.id
+      JOIN race_results rr ON rr.race_entry_id=re.id
+      JOIN horses h ON h.id=re.horse_id
+      JOIN trainers t ON t.id=re.trainer_id
+      WHERE ${conditions.join(' AND ')}
+      GROUP BY t.id,t.canonical_name
+    ), ranked AS (
+      SELECT 'winRate' ranking_metric,ts.*,
+        ROW_NUMBER() OVER(ORDER BY wins*1.0/starts DESC,wins DESC,starts DESC,entity_id ASC) rn
+      FROM trainer_stats ts WHERE starts>=?
+      UNION ALL
+      SELECT 'top3Rate' ranking_metric,ts.*,
+        ROW_NUMBER() OVER(ORDER BY top3*1.0/result_starts DESC,top3 DESC,result_starts DESC,entity_id ASC) rn
+      FROM trainer_stats ts WHERE starts>=? AND result_starts>0
+      UNION ALL
+      SELECT 'wins' ranking_metric,ts.*,
+        ROW_NUMBER() OVER(ORDER BY wins DESC,wins*1.0/starts DESC,starts DESC,entity_id ASC) rn
+      FROM trainer_stats ts WHERE starts>0
+    )
+    SELECT * FROM ranked WHERE rn<=10 ORDER BY ranking_metric,rn`,
+    bindings
+  };
+}
+function rankingRows(rows,metric){return rows.filter(row=>row.ranking_metric===metric);}
+
 function buildFormQuery(filters, trainerId = null, limit = true) {
   const conditions = ['re.scratched=0','re.trainer_id IS NOT NULL','rr.placing IS NOT NULL','rr.placing > 0'];
   const bindings = [];
@@ -291,11 +326,11 @@ function mapForm(rows){return rows.map((row,index)=>({rank:index+1,id:row.entity
 export async function getTrainerRankings(env,options={}){
   if(!env.DB)throw new Error('DB is not configured');const f=normalizeTrainerStatsFilters(options);await validateTrack(env,f.trackId);
   if(options.mode==='core'){
-    const [win,top3,wins,form]=await Promise.all([
-      run(env,buildCoreRanking(f,'winRate')),run(env,buildCoreRanking(f,'top3Rate')),run(env,buildCoreRanking(f,'wins')),run(env,buildFormQuery(f))
+    const [coreRows,form]=await Promise.all([
+      run(env,buildCoreRankingSet(f)),run(env,buildFormQuery(f))
     ]);
     return {filters:f,partial:true,definitions:{longshotPercentMax:DRIVER_LONGSHOT_PERCENT_MAX,market:DRIVER_MARKET_DEFINITION_VERSION,voltLaneGood:[1,6,7],restDays:REST_DAYS,distanceProfile:DISTANCE_PROFILE_VERSION},rankings:{
-      highestWinRate:mapCoreRanking(win,'winRate'),highestTop3Rate:mapCoreRanking(top3,'top3Rate'),mostWins:mapCoreRanking(wins,'wins'),bestFormLast30:mapForm(form)
+      highestWinRate:mapCoreRanking(rankingRows(coreRows,'winRate'),'winRate'),highestTop3Rate:mapCoreRanking(rankingRows(coreRows,'top3Rate'),'top3Rate'),mostWins:mapCoreRanking(rankingRows(coreRows,'wins'),'wins'),bestFormLast30:mapForm(form)
     }};
   }
   if(options.mode==='extended'){
