@@ -183,27 +183,30 @@ test('Trend rejects unknown enums and track IDs instead of silently ignoring the
   await assert.rejects(() => getTrendLeaderboard(env, { ...base, trackId: 'not-stored' }), /track_id does not identify/);
 });
 
-test('Trend orders win rate, wins, starts and stable ID and returns exactly top 10', async () => {
+test('horse Trend orders canonical Form deterministically and returns exactly top 10', async () => {
   const { db, env } = createTestEnv();
   insertTrack(db, 'track-a', 'Bana A');
   insertPerson(db, 'drivers', 'driver-a', 'Kusk A');
   insertPerson(db, 'trainers', 'trainer-a', 'Tränare A');
 
   for (let i = 0; i < 30; i += 1) insertRace(db, { id: `race-${200 + i}`, date: '2026-09-10' });
-  const addHorseStarts = (horseId, wins, starts) => {
+  const addHorseStarts = (horseId, placings) => {
     insertHorse(db, horseId, horseId);
-    for (let i = 0; i < starts; i += 1) insertEntry(db, { id: `${horseId}-e${i}`, raceId: `race-${200 + i}`, horseId, placing: i < wins ? 1 : 4, prize: 0, gallop: 0 });
+    for (let i = 0; i < placings.length; i += 1) insertEntry(db, { id: `${horseId}-e${i}`, raceId: `race-${200 + i}`, horseId, placing: placings[i], prize: 0, gallop: 0 });
   };
-  addHorseStarts('horse-a', 1, 2);
-  addHorseStarts('horse-b', 2, 4);
-  addHorseStarts('horse-c', 2, 4);
-  for (let i = 0; i < 10; i += 1) addHorseStarts(`horse-z${i}`, 0, 1);
+  addHorseStarts('horse-a', [4, 1]);
+  addHorseStarts('horse-b', [1, 1, 4, 4]);
+  addHorseStarts('horse-c', [1, 1, 4, 4]);
+  for (let i = 0; i < 10; i += 1) addHorseStarts(`horse-z${i}`, [13]);
 
   const data = await getTrendLeaderboard(env, { category: 'horses', period: '2w', asOfDate: '2026-09-11' });
   assert.equal(data.items.length, 10);
-  assert.deepEqual(data.items.slice(0, 3).map((item) => item.id), ['horse-b', 'horse-c', 'horse-a']);
+  assert.equal(data.items[0].id, 'horse-a', 'recent strong form outranks horses with more wins at the same win rate');
   assert.equal(data.items[0].winRate, 0.5);
-  assert.equal(data.items[1].winRate, 0.5);
-  assert.equal(data.items[2].winRate, 0.5);
-  assert.deepEqual(data.items.slice(3).map((item) => item.id), ['horse-z0', 'horse-z1', 'horse-z2', 'horse-z3', 'horse-z4', 'horse-z5', 'horse-z6']);
+  assert.ok(data.items[0].formScore > data.items.find((item) => item.id === 'horse-b').formScore);
+  assert.deepEqual(
+    data.items.filter((item) => item.id === 'horse-b' || item.id === 'horse-c').map((item) => item.id),
+    ['horse-b', 'horse-c'],
+    'equal Form uses the stable ID tie-break'
+  );
 });
