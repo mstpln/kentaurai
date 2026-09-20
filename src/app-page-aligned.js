@@ -82,7 +82,7 @@ function bindStatisticsCategoryNav(){
     state.statisticsPage=page;
     state.detail=null;state.gameDetail=null;state.gameSystemId=null;state.trackDetail=null;
     if(page==='tracks')renderTracks();
-    else renderEntityList(page);
+    else{state.tab='list';renderEntityList(page);}
   });
 }
 function syncStatisticsCategoryNav(){
