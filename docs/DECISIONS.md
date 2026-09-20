@@ -168,3 +168,16 @@ A single race must not directly change model weights. Candidate learnings are re
 - Exactly one factual winner per leg is required for automatic round completion. Multiple winners/dead-heat ambiguity fails closed to `manual_review` until dedicated verified semantics exist.
 - Up to three legs may settle sequentially per minute invocation. Job state is lease-protected and idempotent.
 - Full eight-leg settlement queues/reopens exact-date X-Labs enrichment and only then allows the existing post-race diagnostic/learning flow to consume the completed factual outcomes. One result or round still never changes model weights automatically.
+
+## Upcoming Spel is a factual pre-analysis surface
+- Spel navigation is `Kommande / Historik / Översikt`. V85/V86 are filters inside the first two views, not top-level navigation.
+- A stored V85/V86 round belongs to Kommande only while it is still pre-bet-stop. A saved system may be marked `System registrerat` without moving the round out of Kommande.
+- Upcoming round cards are date-grouped and responsive but deliberately sparse: game type, track, start/bet-stop, saved-system state, X-Labs coverage and latest source-backed fetch timestamp.
+- The collapsed horse row is limited to start number/name/post, horse Form, fastest verified first 200 m for the same start method, fastest verified last 400 m and current market percentage.
+- Expanded rows are deterministic historical context only. They must show the metric/value at left and a concise explanation at right, including sample sizes for rates.
+- First-200 and last-400 values are peak verified X-Labs facts, not median/average scores, and are not duplicated in the expanded section.
+- Distance statistics reuse the canonical ±100 m buckets already used by entity statistics.
+- Lane context is autostart 1–8 versus 9–12, and voltstart lanes 1/6/7 versus all other lanes within the volt.
+- `Hög prissumma` and `Vardagstrav` reuse the canonical `race-scope.js` evidence definition; no second prize-class threshold is introduced.
+- Upcoming Spel is explicitly before AI analysis. It must not expose or create strength labels, probabilities, ABCD, race scenarios, value judgments, system recommendations, tips or interview/editorial evidence.
+
