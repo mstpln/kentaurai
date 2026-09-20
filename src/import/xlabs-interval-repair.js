@@ -49,41 +49,38 @@ async function nextCandidates(env, limit) {
 }
 
 export async function ensureXlabsIntervalsForSource(env, sourceRecordId) {
-  const existing = await env.DB.prepare(`
-    SELECT COUNT(*) AS n
-    FROM xlabs_intervals
+  const state = await env.DB.prepare(`
+    SELECT status, interval_rows, valid_intervals
+    FROM xlabs_interval_source_state
     WHERE source_record_id = ? AND mapper_version = ?
+    LIMIT 1
   `).bind(sourceRecordId, XLABS_INTERVALS_V2_VERSION).first();
 
-  if (Number(existing?.n || 0) > 0) {
-    const valid = await env.DB.prepare(`
-      SELECT COUNT(*) AS n
-      FROM xlabs_intervals
-      WHERE source_record_id = ? AND mapper_version = ? AND eligibility_status = 'valid'
-    `).bind(sourceRecordId, XLABS_INTERVALS_V2_VERSION).first();
-    await markState(env, sourceRecordId, 'success', {
-      intervalRows: Number(existing.n),
-      validIntervals: Number(valid?.n || 0)
-    });
+  if (state?.status === 'success') {
     return {
       sourceRecordId,
       reused: true,
-      intervalRows: Number(existing.n),
-      validIntervals: Number(valid?.n || 0)
+      intervalRows: Number(state.interval_rows || 0),
+      validIntervals: Number(state.valid_intervals || 0)
     };
   }
 
   try {
     const result = await normalizeCapturedXlabsIntervalsV2(env, sourceRecordId);
-    await markState(env, sourceRecordId, 'success', {
-      intervalRows: result.intervalRows,
-      validIntervals: result.validIntervals
-    });
+    const counts = await env.DB.prepare(`
+      SELECT COUNT(*) AS interval_rows,
+        SUM(CASE WHEN eligibility_status = 'valid' THEN 1 ELSE 0 END) AS valid_intervals
+      FROM xlabs_intervals
+      WHERE source_record_id = ? AND mapper_version = ?
+    `).bind(sourceRecordId, XLABS_INTERVALS_V2_VERSION).first();
+    const intervalRows = Number(counts?.interval_rows || 0);
+    const validIntervals = Number(counts?.valid_intervals || 0);
+    await markState(env, sourceRecordId, 'success', { intervalRows, validIntervals });
     return {
       sourceRecordId,
-      reused: false,
-      intervalRows: result.intervalRows,
-      validIntervals: result.validIntervals
+      reused: result.counts?.inserted === 0,
+      intervalRows,
+      validIntervals
     };
   } catch (error) {
     await markState(env, sourceRecordId, 'failed', { error });
