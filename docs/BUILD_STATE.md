@@ -127,3 +127,10 @@ The external-analysis production release was accepted after:
 - Existing historical X-Labs backfill originally normalized only the trusted whole-race `xlabs-telemetry-v1` rows, while `xlabs_intervals-v2` remained additive and unscheduled. This left horse Toppfart opening 100/200/500 values empty even when the immutable raw race telemetry already existed.
 - The repair is code-only plus migration `0029_xlabs_interval_backfill.sql`: it adds durable per-source interval-repair state, derives v2 interval rows from already captured R2 telemetry, processes old normalized sources in bounded recent-first batches, and wires v2 interval normalization into every new X-Labs race backfill checkpoint and manual normalize call.
 - Missing/invalid local intervals remain explicit null/eligibility states; no opening speed is guessed from closing or whole-race data.
+
+
+## Interview history compact presentation
+- Horse/trainer interview history renders one collapsed row per interview by default so long histories remain scannable.
+- Each row shows factual race context from the linked race entry: race date, track, race number, start method and post position. Speaker/role, summary and structured signals remain inside the expanded body.
+- The external-evidence import contract keeps the eight existing signal categories (form, training, tactics, distance, start, equipment, expectation, other) and adds an explicit nullable `change_since_last` marker plus a short `change_summary` when the source explicitly describes a relevant change versus the prior start/state.
+- Change markers are never inferred from missing or ambiguous text; unknown stays null.
