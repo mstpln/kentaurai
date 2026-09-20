@@ -111,3 +111,13 @@ The external-analysis production release was accepted after:
 5. User explicitly authorized merge/deploy.
 6. Controlled release #64 verified the Worker, v3 health mode, login/private auth and external-analysis route protection.
 7. No historical replay/backfill reset or resume occurred.
+
+
+## Horse statistics refinement candidate
+- Branch: `feat/horse-form-top-speed`.
+- Horse scorecard replaces average placing as Form with a deterministic `Form (1–100)` over up to five starts. Each start combines result quality (30%), race/opposition difficulty (30%), extra-distance workload (20%) and field-relative speed/closing performance (20%); available components renormalize when verified data is missing. Recency weights are 35/25/18/13/9.
+- Historical opposition context uses only official horse-stat snapshots available as-of the historical race; missing historical Start Points/earnings remain null and never fall back to current values. Race difficulty retains deterministic first-prize/class inputs when opponent snapshots are unavailable.
+- Horse scorecard moves current Startpoäng into the top summary, moves Galopp % into the summary strip and removes the duplicate numeric Galopper display there.
+- Horse `Toppfart` presents fastest verified X-Labs first 100 m, first 200 m, first 500 m, last 400 m and last 1000 m. Opening segments are reconstructed from valid 100 m interval measurements; closing segments use the verified whole-race telemetry facts already persisted from the same X-Labs race source.
+- The Distans table now groups rows with the same canonical buckets as the Distans filter instead of splitting exact race distances.
+- No market/odds/editorial data enters Form. No model weights or Step 1 analysis semantics change in this candidate.
