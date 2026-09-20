@@ -10,6 +10,7 @@ import {
   getTrainerCalendarYearDetailStatistics
 } from './entity-detail-calendar-statistics.js';
 import { getTrainerCalendarHomeTrackResults } from './trainer-calendar-home-statistics.js';
+import { getHorseTopSpeedProfile } from './statistics/horse-top-speed.js';
 
 const dataCoverageUiStyle = `
 <style id="kentaurai-data-coverage-ui-style">
@@ -148,6 +149,22 @@ export default {
       if (denied) return denied;
       try { return json(await getHorseFilterOptions(env)); }
       catch (error) { console.error(error); return json({ error: 'request_failed', message: error.message }, 400); }
+    }
+
+    const horseTopSpeedMatch = path.match(/^\/app\/api\/horses\/([^/]+)\/top-speed$/);
+    if (request.method === 'GET' && horseTopSpeedMatch) {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        return json(await getHorseTopSpeedProfile(
+          env,
+          decodeURIComponent(horseTopSpeedMatch[1]),
+          url.searchParams.get('as_of') || new Intl.DateTimeFormat('en-CA', { timeZone:'Europe/Stockholm' }).format(new Date())
+        ));
+      } catch (error) {
+        console.error(error);
+        return json({ error:'request_failed', message:error.message }, 400);
+      }
     }
 
     const calendarFormMatch = path.match(/^\/app\/api\/(trainers|drivers|horses)\/([^/]+)\/calendar-form$/);
