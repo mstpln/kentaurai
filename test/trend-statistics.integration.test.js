@@ -209,7 +209,9 @@ test('trainer Trend still orders win rate, wins, starts and stable ID and return
   for (let i = 0; i < 30; i += 1) insertRace(db, { id: `race-${200 + i}`, date: '2026-09-10' });
   const addHorseStarts = (horseId, wins, starts) => {
     insertHorse(db, horseId, horseId);
-    for (let i = 0; i < starts; i += 1) insertEntry(db, { id: `${horseId}-e${i}`, raceId: `race-${200 + i}`, horseId, placing: i < wins ? 1 : 4, prize: 0, gallop: 0 });
+    const trainerId=`trainer-${horseId}`;
+    insertPerson(db,'trainers',trainerId,trainerId);
+    for (let i = 0; i < starts; i += 1) insertEntry(db, { id: `${horseId}-e${i}`, raceId: `race-${200 + i}`, horseId, trainerId, placing: i < wins ? 1 : 4, prize: 0, gallop: 0 });
   };
   addHorseStarts('horse-a', 1, 2);
   addHorseStarts('horse-b', 2, 4);
@@ -218,9 +220,9 @@ test('trainer Trend still orders win rate, wins, starts and stable ID and return
 
   const data = await getTrendLeaderboard(env, { category: 'trainers', period: '2w', asOfDate: '2026-09-11' });
   assert.equal(data.items.length, 10);
-  assert.deepEqual(data.items.slice(0, 3).map((item) => item.id), ['horse-b', 'horse-c', 'horse-a']);
+  assert.deepEqual(data.items.slice(0, 3).map((item) => item.id), ['trainer-horse-b', 'trainer-horse-c', 'trainer-horse-a']);
   assert.equal(data.items[0].winRate, 0.5);
   assert.equal(data.items[1].winRate, 0.5);
   assert.equal(data.items[2].winRate, 0.5);
-  assert.deepEqual(data.items.slice(3).map((item) => item.id), ['horse-z0', 'horse-z1', 'horse-z2', 'horse-z3', 'horse-z4', 'horse-z5', 'horse-z6']);
+  assert.deepEqual(data.items.slice(3).map((item) => item.id), ['trainer-horse-z0', 'trainer-horse-z1', 'trainer-horse-z2', 'trainer-horse-z3', 'trainer-horse-z4', 'trainer-horse-z5', 'trainer-horse-z6']);
 });
