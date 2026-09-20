@@ -156,14 +156,14 @@ export async function listUpcomingGames(env, options = {}) {
         SELECT COUNT(*)
         FROM game_legs gla
         JOIN race_entries rea ON rea.race_id = gla.race_id
-        WHERE gla.game_round_id = gr.id AND rea.scratched = 0
+        WHERE gla.game_round_id = gr.id AND COALESCE(rea.scratched,0) = 0
       ) AS active_entries,
       (
         SELECT COUNT(*)
         FROM game_legs glx
         JOIN race_entries rex ON rex.race_id = glx.race_id
         WHERE glx.game_round_id = gr.id
-          AND rex.scratched = 0
+          AND COALESCE(rex.scratched,0) = 0
           AND EXISTS (
             SELECT 1
             FROM race_entries hist_re
@@ -171,7 +171,7 @@ export async function listUpcomingGames(env, options = {}) {
             JOIN xlabs_data xd ON xd.race_entry_id = hist_re.id
             JOIN source_records xsr ON xsr.id = xd.source_record_id
             WHERE hist_re.horse_id = rex.horse_id
-              AND hist_re.scratched = 0
+              AND COALESCE(hist_re.scratched,0) = 0
               AND hist_r.race_date < gr.round_date
               AND xd.quality_status = 'xlabs-telemetry-v1'
               AND xsr.source_type = 'xlabs_race_json'
@@ -259,7 +259,7 @@ export async function getUpcomingGameRound(env, roundId) {
   const { results:legs } = await env.DB.prepare(`
     SELECT gl.leg_number, r.id race_id, r.race_number, r.race_name, r.distance_m, r.start_method,
       r.scheduled_start_at, t.id track_id, t.canonical_name track_name,
-      SUM(CASE WHEN re.scratched=0 THEN 1 ELSE 0 END) active_entries,
+      SUM(CASE WHEN COALESCE(re.scratched,0)=0 THEN 1 ELSE 0 END) active_entries,
       SUM(CASE WHEN re.scratched=1 THEN 1 ELSE 0 END) scratched_entries
     FROM game_legs gl
     JOIN races r ON r.id=gl.race_id
@@ -325,7 +325,7 @@ export async function getUpcomingGameLeg(env, roundId, legNumber) {
     SELECT cur.id current_entry_id,hr.start_method,xd.first_200_time,xd.last_400_time,
       xsr.fetched_at
     FROM race_entries cur
-    JOIN race_entries hre ON hre.horse_id=cur.horse_id AND hre.id<>cur.id AND hre.scratched=0
+    JOIN race_entries hre ON hre.horse_id=cur.horse_id AND hre.id<>cur.id AND COALESCE(hre.scratched,0)=0
     JOIN races hr ON hr.id=hre.race_id
     JOIN xlabs_data xd ON xd.race_entry_id=hre.id
     JOIN source_records xsr ON xsr.id=xd.source_record_id
@@ -377,7 +377,7 @@ export async function getUpcomingLegHorseForms(env, roundId, legNumber, options 
   const { results } = await env.DB.prepare(`
     SELECT id race_entry_id, horse_id
     FROM race_entries
-    WHERE race_id=? AND scratched=0
+    WHERE race_id=? AND COALESCE(scratched,0)=0
     ORDER BY start_number ASC,id ASC
   `).bind(leg.raceId).all();
   const asOfDate = String(options.asOfDate || swedenDateKey());
@@ -476,7 +476,7 @@ export async function getUpcomingEntryFacts(env, roundId, legNumber, raceEntryId
     JOIN races hr ON hr.id=hre.race_id
     JOIN race_results rr ON rr.race_entry_id=hre.id
     WHERE hre.horse_id=?
-      AND hre.scratched=0
+      AND COALESCE(hre.scratched,0)=0
       AND ${priorRaceCondition('hr')}
   `).bind(
     twelveMonthStart,twelveMonthStart,
