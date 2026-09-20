@@ -284,6 +284,25 @@ export async function getHorseRankings(env, options = {}) {
   if (!env.DB) throw new Error('DB is not configured');
   const filters = normalizeHorseStatsFilters(options);
   await validateTrack(env, filters.trackId);
+  if (options.mode === 'core') {
+    const [win,top3,form,start] = await Promise.all([
+      run(env,buildCoreRanking(filters,'winRate')),
+      run(env,buildCoreRanking(filters,'top3Rate')),
+      run(env,buildFormQuery(filters)),
+      run(env,buildXlabsOpening200Ranking(filters))
+    ]);
+    return {
+      filters,
+      partial:true,
+      rankings:{
+        highestWinRate:mapCoreRanking(win,'winRate'),
+        highestTop3Rate:mapCoreRanking(top3,'top3Rate'),
+        bestFormLast10:form.map((row,index)=>({rank:index+1,id:row.entity_id,name:row.name,usedStarts:Number(row.used_starts),averagePlacing:Number(row.avg_placing)})),
+        fastestFirst200:start.map((row,index)=>({rank:index+1,id:row.entity_id,name:row.name,measurements:Number(row.measurements),averageSeconds:Number(row.avg_seconds)}))
+      },
+      startPointsStatus:'deferred'
+    };
+  }
   const [win,top3,earnings,form,start,close,firstRest,secondRest] = await Promise.all([
     run(env,buildCoreRanking(filters,'winRate')),
     run(env,buildCoreRanking(filters,'top3Rate')),
