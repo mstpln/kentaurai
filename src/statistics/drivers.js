@@ -176,6 +176,41 @@ function buildCoreRanking(filters, metric, extraConditions = [], { includePeriod
   };
 }
 
+function buildCoreRankingSet(filters) {
+  const conditions = ['re.scratched = 0', 're.driver_id IS NOT NULL'];
+  const bindings = [];
+  addDriverFilters(conditions, bindings, filters);
+  const minimum = filters.minStarts == null ? 1 : Number(filters.minStarts);
+  bindings.push(minimum, minimum);
+  return {
+    sql:`WITH driver_stats AS MATERIALIZED (
+      SELECT d.id AS entity_id,d.canonical_name AS name,${coreMetricSelectSql('rr')}
+      FROM races r INDEXED BY idx_races_date
+      JOIN race_entries re ON re.race_id=r.id
+      JOIN race_results rr ON rr.race_entry_id=re.id
+      JOIN horses h ON h.id=re.horse_id
+      JOIN drivers d ON d.id=re.driver_id
+      WHERE ${conditions.join(' AND ')}
+      GROUP BY d.id,d.canonical_name
+    ), ranked AS (
+      SELECT 'winRate' ranking_metric,ds.*,
+        ROW_NUMBER() OVER(ORDER BY wins*1.0/starts DESC,wins DESC,starts DESC,entity_id ASC) rn
+      FROM driver_stats ds WHERE starts>=?
+      UNION ALL
+      SELECT 'top3Rate' ranking_metric,ds.*,
+        ROW_NUMBER() OVER(ORDER BY top3*1.0/result_starts DESC,top3 DESC,result_starts DESC,entity_id ASC) rn
+      FROM driver_stats ds WHERE starts>=? AND result_starts>0
+      UNION ALL
+      SELECT 'wins' ranking_metric,ds.*,
+        ROW_NUMBER() OVER(ORDER BY wins DESC,wins*1.0/starts DESC,starts DESC,entity_id ASC) rn
+      FROM driver_stats ds WHERE starts>0
+    )
+    SELECT * FROM ranked WHERE rn<=10 ORDER BY ranking_metric,rn`,
+    bindings
+  };
+}
+function rankingRows(rows,metric){return rows.filter(row=>row.ranking_metric===metric);}
+
 function buildFormQuery(filters, driverId = null, limit = true) {
   const conditions = ['re.scratched = 0', 're.driver_id IS NOT NULL', 'rr.placing IS NOT NULL', 'rr.placing > 0'];
   const bindings = [];
@@ -265,10 +300,8 @@ export async function getDriverRankings(env, options = {}) {
   const filters = normalizeDriverStatsFilters(options);
   await validateTrack(env, filters.trackId);
   if (options.mode === 'core') {
-    const [win,top3,wins,form] = await Promise.all([
-      run(env,buildCoreRanking(filters,'winRate')),
-      run(env,buildCoreRanking(filters,'top3Rate')),
-      run(env,buildCoreRanking(filters,'wins')),
+    const [coreRows,form] = await Promise.all([
+      run(env,buildCoreRankingSet(filters)),
       run(env,buildFormQuery(filters))
     ]);
     return {
@@ -276,9 +309,9 @@ export async function getDriverRankings(env, options = {}) {
       partial:true,
       definitions:{longshotPercentMax:DRIVER_LONGSHOT_PERCENT_MAX,market:DRIVER_MARKET_DEFINITION_VERSION,positions:DRIVER_POSITION_DEFINITION_VERSION,voltLaneGood:[1,6,7]},
       rankings:{
-        highestWinRate:mapCoreRanking(win,'winRate'),
-        highestTop3Rate:mapCoreRanking(top3,'top3Rate'),
-        mostWins:mapCoreRanking(wins,'wins'),
+        highestWinRate:mapCoreRanking(rankingRows(coreRows,'winRate'),'winRate'),
+        highestTop3Rate:mapCoreRanking(rankingRows(coreRows,'top3Rate'),'top3Rate'),
+        mostWins:mapCoreRanking(rankingRows(coreRows,'wins'),'wins'),
         bestFormLast30:mapForm(form)
       }
     };
