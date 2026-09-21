@@ -38,6 +38,11 @@ test('settings statuses use a dedicated labelled bottom row with words rather th
   assert.match(html, /warning:'Fel upptäckt'/);
   assert.match(html, /error:'Fel upptäckt'/);
   assert.match(html, /unknown:'Ingen körning ännu'/);
+  assert.match(html, /never_run:'Ingen körning ännu'/);
+  assert.match(html, /waiting:'Väntar'/);
+  assert.match(html, /completed:'Klar'/);
+  assert.match(html, /error_retrying:'Fel upptäckt'/);
+  assert.match(html, /action_required:'Åtgärd krävs'/);
 });
 
 test('mobile entity statistic tables fit all six columns without horizontal scrolling', () => {
