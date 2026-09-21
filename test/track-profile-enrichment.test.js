@@ -34,6 +34,16 @@ test('track profile enrichment lists targets and imports idempotently', async ()
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM track_profile_fact_observations").get().n, 1);
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM track_first_turn_distances").get().n, 1);
 });
+test('later reverification is preserved as a new observation', async () => {
+  const { env, db } = createTestEnv(); seedTrack(db);
+  await applyTrackProfileEnrichment(env, payload());
+  const later = payload();
+  later.tracks[0].verified_at = '2026-09-21T12:00:00Z';
+  await applyTrackProfileEnrichment(env, later);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM track_profile_fact_observations").get().n, 2);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM track_first_turn_distances").get().n, 2);
+});
+
 test('calculated values require a calculation note', async () => {
   const { env, db } = createTestEnv(); seedTrack(db);
   const bad = payload({ facts:[], first_turn_distances:[{
