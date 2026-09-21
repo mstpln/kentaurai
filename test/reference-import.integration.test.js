@@ -94,3 +94,62 @@ test('reference reimport rejects changed content under the same identity and tim
     /reference export conflict/
   );
 });
+
+
+test('reference import reuses one existing canonical track instead of creating a name-based duplicate', async () => {
+  const { env, db } = createTestEnv();
+  const payload = buildReferenceRound();
+  payload.round.track = 'Canonical Track';
+  for (const wrapper of payload.races) wrapper.race.track = 'Canonical Track';
+
+  db.prepare(`
+    INSERT INTO tracks (id, canonical_name, country_code)
+    VALUES ('track_official__999', 'Canonical Track', 'SE')
+  `).run();
+  db.prepare(`
+    INSERT INTO track_external_ids (track_id, source_type, external_id)
+    VALUES ('track_official__999', 'official', '999')
+  `).run();
+
+  await importReferenceRound(env, payload);
+
+  const canonicalTracks = db.prepare("SELECT id FROM tracks WHERE canonical_name = 'Canonical Track' ORDER BY id").all();
+  assert.equal(canonicalTracks.length, 1);
+  assert.equal(canonicalTracks[0].id, 'track_official__999');
+  assert.equal(
+    db.prepare("SELECT primary_track_id FROM game_rounds WHERE id = 'synthetic-round'").get().primary_track_id,
+    'track_official__999'
+  );
+  assert.equal(
+    db.prepare("SELECT count(*) AS n FROM races WHERE track_id <> 'track_official__999'").get().n,
+    0
+  );
+  assert.equal(
+    db.prepare("SELECT count(*) AS n FROM tracks WHERE id = 'track_canonical-track'").get().n,
+    0
+  );
+});
+
+test('reference import fails closed when a canonical track name is ambiguous', async () => {
+  const { env, db } = createTestEnv();
+  const payload = buildReferenceRound();
+  payload.round.track = 'Ambiguous Track';
+  for (const wrapper of payload.races) wrapper.race.track = 'Ambiguous Track';
+
+  db.prepare("INSERT INTO tracks (id, canonical_name) VALUES ('track_a', 'Ambiguous Track')").run();
+  db.prepare("INSERT INTO tracks (id, canonical_name) VALUES ('track_b', 'Ambiguous Track')").run();
+
+  await assert.rejects(
+    () => importReferenceRound(env, payload),
+    /ambiguous track identity for "Ambiguous Track": track_a, track_b/
+  );
+
+  assert.equal(
+    db.prepare("SELECT count(*) AS n FROM tracks WHERE canonical_name = 'Ambiguous Track'").get().n,
+    2
+  );
+  assert.equal(
+    db.prepare("SELECT count(*) AS n FROM tracks WHERE id = 'track_ambiguous-track'").get().n,
+    0
+  );
+});
