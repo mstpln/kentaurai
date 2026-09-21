@@ -28,8 +28,10 @@ test('approved brand treatment renders exact Sagittarius direction and optical b
   assert.match(html, /--accent:#C79552/);
   assert.match(html, /\.brand-badge\{width:1\.14cap!important;height:1\.14cap!important;flex-basis:1\.14cap!important\}/);
   assert.match(html, /\.brand-icon\{width:\.82cap!important;height:\.82cap!important\}/);
+  assert.match(html, /\.topbar \.brand-icon\{width:1\.076cap!important;height:1\.076cap!important\}/);
   assert.match(login, /\.login \.brand-badge\{width:1\.14cap!important;height:1\.14cap!important;flex-basis:1\.14cap!important\}/);
   assert.match(login, /\.login \.brand-icon\{width:\.82cap!important;height:\.82cap!important\}/);
+  assert.doesNotMatch(login, /\.topbar \.brand-icon/);
 });
 
 test('trend navigation uses approved chart icon and Trend naming', () => {
