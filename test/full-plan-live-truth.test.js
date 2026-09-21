@@ -31,7 +31,7 @@ test('live-state documentation contains no pre-cutover candidate markers', () =>
   assert.doesNotMatch(serialized, /legacy runtime behavior until the later v3 cutover build/i);
   assert.doesNotMatch(serialized, /worker-v075/i);
   assert.match(files.readme, /Production release #64 (?:is current|is the currently deployed baseline)/i);
-  assert.match(files.readme, /production entrypoint is `src\/worker-v077\.js`/i);
+  assert.match(files.readme, /production entrypoint is `src\/worker-v078\.js`/i);
   assert.match(files.buildState, /Production schema is current through migration `0028_external_evidence_v1\.sql`/i);
   assert.match(files.buildState, /External analysis workflow production live/i);
   assert.match(files.buildState, /External evidence workflow production live/i);
