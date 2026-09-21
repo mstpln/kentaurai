@@ -97,6 +97,9 @@ test('settings status reports useful data counts, workflow output and source hea
   assert.equal(data.recentRuns[0].inserted, 12);
   assert.equal(data.recentRuns[0].errors, 0);
   assert.equal(data.sources.find((source) => source.id === 'official').status, 'working');
+  assert.equal(data.sources.find((source) => source.id === 'official').processing.status, 'never_run');
+  assert.equal(data.sources.find((source) => source.id === 'xlabs').status, 'never_run');
+  assert.equal(data.alert.hasUnacknowledged, false);
 });
 
 test('workflow exports keep step 1 market-blind and expose market only in step 2', async () => {
@@ -149,4 +152,41 @@ test('analysis upload rejects non-JSON files and logout clears the private sessi
   assert.equal(response.status, 303);
   assert.equal(response.headers.get('location'), '/app/login');
   assert.match(response.headers.get('set-cookie'), /Max-Age=0/);
+});
+
+
+test('settings alert endpoints are private and opening settings can acknowledge the current incident', async () => {
+  const { env, db } = createTestEnv();
+  env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
+  db.prepare(`
+    INSERT INTO xlabs_backfill_jobs (
+      id,scope,start_date,end_date,next_date,next_race_index,status,processed_dates,
+      processed_races,reused_races,unavailable_dates,unavailable_races,
+      consecutive_errors,last_error,last_run_at,retry_after
+    ) VALUES (
+      'settings-alert-job','historical_all','2026-09-01','2026-09-10','2026-09-05',0,
+      'running',5,20,0,0,0,1,'Synthetic transient failure',
+      '2026-09-21T19:59:00Z','2099-01-01T00:00:00Z'
+    )
+  `).run();
+
+  let response = await worker.fetch(new Request('https://example.test/app/api/settings/alerts'), env);
+  assert.equal(response.status, 401);
+
+  const cookie = await sessionCookie(env);
+  response = await worker.fetch(new Request('https://example.test/app/api/settings/alerts', { headers: { cookie } }), env);
+  assert.equal(response.status, 200);
+  let data = await response.json();
+  assert.equal(data.hasUnacknowledged, true);
+
+  response = await worker.fetch(new Request('https://example.test/app/api/settings/alerts/acknowledge', {
+    method: 'POST',
+    headers: { cookie }
+  }), env);
+  assert.equal(response.status, 200);
+
+  response = await worker.fetch(new Request('https://example.test/app/api/settings/alerts', { headers: { cookie } }), env);
+  data = await response.json();
+  assert.equal(data.hasActiveAlerts, true);
+  assert.equal(data.hasUnacknowledged, false);
 });
