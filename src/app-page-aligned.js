@@ -154,7 +154,7 @@ function trackFirstTurnRows(items){const rows=items||[];if(!rows.length)return [
 function trackPhysicalProfile(detail){const p=detail.profile||{};const blocks=[
   trackFactBlock('Grundmått',[['Banalängd',trackValue(p.lapLengthM,'m')],['Upplopp',trackValue(p.homeStretchM,'m')]]),
   trackFactBlock('Start & bredd',[['Bredd vid 1640',trackValue(p.width1640M,'m',1)],['Bredd vid 2140',trackValue(p.width2140M,'m',1)],['Vinklad startbilsvinge',p.angledMobileWing==null?null:(p.angledMobileWing?'Ja':'Nej')],['Open stretch',trackOpenStretch(p.openStretchLanes)]]),
-  trackFactBlock('Till första sväng',trackFirstTurnRows(p.firstTurnDistances),'Visar endast distanser som används på banan. Beräknade värden bygger på verifierad ban-geometri och faktisk startpunkt.'),
+  trackFactBlock('Till första sväng',trackFirstTurnRows(p.firstTurnDistances),'Visar lagrade distanser för banan. Beräknade värden bygger på verifierad ban-geometri och faktisk startpunkt.'),
   trackFactBlock('Kurvradier',[['Stor kurvradie',trackValue(p.largeCurveRadiusM,'m',1)],['Kurva 1',trackValue(p.firstTurnRadiusM,'m',1)],['Kurva 2',trackValue(p.secondTurnRadiusM,'m',1)]]),
   trackFactBlock('Dosering',[['Kurva 1',trackValue(p.firstTurnBankingPercent,'%',1)],['Kurva 2',trackValue(p.secondTurnBankingPercent,'%',1)]])
 ].filter(Boolean);return blocks.length?'<div class="track-fact-groups">'+blocks.join('')+'</div>':''}
