@@ -114,6 +114,10 @@ test('track detail exposes current detailed geometry and distance-specific first
   ) VALUES
     ('profile-old','track-a','width_1640_m',20.0,'verified','measurement','https://example.test/old','2025-01-01T10:00:00Z','2025-01-01','active'),
     ('profile-current','track-a','width_1640_m',21.5,'verified','measurement','https://example.test/current','2026-01-01T10:00:00Z','2026-01-01','active'),
+    ('profile-lap','track-a','lap_length_m',1001.0,'verified','measurement','https://example.test/lap','2026-01-01T10:00:00Z','2026-01-01','active'),
+    ('profile-stretch','track-a','home_stretch_m',199.0,'verified','measurement','https://example.test/stretch','2026-01-01T10:00:00Z','2026-01-01','active'),
+    ('profile-open','track-a','open_stretch_lanes',2.0,'verified','official_sport','https://example.test/open','2026-01-01T10:00:00Z','2026-01-01','active'),
+    ('profile-wing','track-a','angled_mobile_wing',0.0,'verified','official_sport','https://example.test/wing','2026-01-01T10:00:00Z','2026-01-01','active'),
     ('profile-radius','track-a','first_turn_radius_m',86.0,'verified','official_sport','https://example.test/radius','2026-01-02T10:00:00Z','2026-01-01','active'),
     ('profile-banking','track-a','first_turn_banking_percent',14.0,'verified','official_sport','https://example.test/banking','2026-01-02T10:00:00Z','2026-01-01','active')`).run();
   db.prepare(`INSERT INTO track_first_turn_distances (
@@ -124,6 +128,10 @@ test('track detail exposes current detailed geometry and distance-specific first
     ('turn-2140','track-a',2140,'auto',181.5,'calculated','calculation','https://example.test/turn-2140','2026-01-03T10:00:00Z','2026-01-01','active','Synthetic geometry calculation')`).run();
 
   const detail = await getTrackDetail(env, 'track-a');
+  assert.equal(detail.profile.lapLengthM, 1001);
+  assert.equal(detail.profile.homeStretchM, 199);
+  assert.equal(detail.profile.openStretchLanes, 2);
+  assert.equal(detail.profile.angledMobileWing, false);
   assert.equal(detail.profile.width1640M, 21.5);
   assert.equal(detail.profile.firstTurnRadiusM, 86);
   assert.equal(detail.profile.firstTurnBankingPercent, 14);

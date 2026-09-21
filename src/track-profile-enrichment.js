@@ -1,4 +1,8 @@
 const PROFILE_FACT_TYPES = new Set([
+  'lap_length_m',
+  'home_stretch_m',
+  'open_stretch_lanes',
+  'angled_mobile_wing',
   'width_1640_m',
   'width_2140_m',
   'large_curve_radius_m',
@@ -17,9 +21,23 @@ function text(value) {
   return result || null;
 }
 
-function positiveNumber(value, label) {
+function finiteNumber(value, label) {
   const number = Number(value);
-  if (!Number.isFinite(number) || number <= 0) throw new Error(`${label} must be a positive number`);
+  if (!Number.isFinite(number)) throw new Error(`${label} must be a finite number`);
+  return number;
+}
+
+function profileFactNumber(type, value, label) {
+  const number = finiteNumber(value, label);
+  if (type === 'open_stretch_lanes') {
+    if (!Number.isInteger(number) || number < 0 || number > 2) throw new Error(`${label} must be 0, 1 or 2`);
+    return number;
+  }
+  if (type === 'angled_mobile_wing') {
+    if (number !== 0 && number !== 1) throw new Error(`${label} must be 0 or 1`);
+    return number;
+  }
+  if (number <= 0) throw new Error(`${label} must be a positive number`);
   return number;
 }
 
@@ -147,7 +165,7 @@ export async function applyTrackProfileEnrichment(env, payload) {
     for (const item of facts) {
       const factType = text(item?.type);
       if (!PROFILE_FACT_TYPES.has(factType)) throw new Error(`unsupported track profile fact type: ${factType || 'missing'}`);
-      const value = positiveNumber(item.value, `facts.${factType}.value`);
+      const value = profileFactNumber(factType, item.value, `facts.${factType}.value`);
       const type = evidenceType(item.evidence_type);
       const source = sourceFor(item.source, `facts.${factType}`);
       const note = calculationNote(item, type, `facts.${factType}`);
@@ -173,7 +191,8 @@ export async function applyTrackProfileEnrichment(env, payload) {
       const distanceM = positiveInteger(item.race_distance_m, 'first_turn_distances.race_distance_m');
       const method = text(item.start_method) || 'unknown';
       if (!START_METHODS.has(method)) throw new Error('first_turn_distances.start_method must be auto, volt or unknown');
-      const distanceToTurn = positiveNumber(item.distance_to_first_turn_m, 'first_turn_distances.distance_to_first_turn_m');
+      const distanceToTurn = finiteNumber(item.distance_to_first_turn_m, 'first_turn_distances.distance_to_first_turn_m');
+      if (distanceToTurn <= 0) throw new Error('first_turn_distances.distance_to_first_turn_m must be a positive number');
       const type = evidenceType(item.evidence_type);
       const source = sourceFor(item.source, 'first_turn_distances');
       const note = calculationNote(item, type, 'first_turn_distances');

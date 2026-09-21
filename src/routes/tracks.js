@@ -273,14 +273,16 @@ export async function getTrackDetail(env, id, options = {}) {
       const facts = mapTrackProfileFacts(profileFactRows?.results || []);
       const turns = mapFirstTurnDistances(firstTurnRows?.results || []);
       return {
-        lapLengthM: track.lap_length_m == null ? null : Number(track.lap_length_m),
-        homeStretchM: track.home_stretch_m == null ? null : Number(track.home_stretch_m),
+        lapLengthM: facts.lap_length_m ?? (track.lap_length_m == null ? null : Number(track.lap_length_m)),
+        homeStretchM: facts.home_stretch_m ?? (track.home_stretch_m == null ? null : Number(track.home_stretch_m)),
         curveRadiusM: track.curve_radius_m == null ? null : Number(track.curve_radius_m),
         bankingDegrees: track.banking_degrees == null ? null : Number(track.banking_degrees),
         widthM: track.width_m == null ? null : Number(track.width_m),
         surface: track.surface,
-        openStretchLanes: track.open_stretch_lanes == null ? null : Number(track.open_stretch_lanes),
-        angledMobileWing: track.angled_mobile_wing == null ? null : Boolean(track.angled_mobile_wing),
+        openStretchLanes: facts.open_stretch_lanes ?? (track.open_stretch_lanes == null ? null : Number(track.open_stretch_lanes)),
+        angledMobileWing: facts.angled_mobile_wing == null
+          ? (track.angled_mobile_wing == null ? null : Boolean(track.angled_mobile_wing))
+          : Boolean(facts.angled_mobile_wing),
         width1640M: facts.width_1640_m ?? null,
         width2140M: facts.width_2140_m ?? null,
         largeCurveRadiusM: facts.large_curve_radius_m ?? null,

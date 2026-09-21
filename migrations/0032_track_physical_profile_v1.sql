@@ -6,6 +6,10 @@ CREATE TABLE IF NOT EXISTS track_profile_fact_observations (
   id TEXT PRIMARY KEY,
   track_id TEXT NOT NULL REFERENCES tracks(id),
   fact_type TEXT NOT NULL CHECK (fact_type IN (
+    'lap_length_m',
+    'home_stretch_m',
+    'open_stretch_lanes',
+    'angled_mobile_wing',
     'width_1640_m',
     'width_2140_m',
     'large_curve_radius_m',
