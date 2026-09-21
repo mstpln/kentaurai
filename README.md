@@ -20,7 +20,7 @@ Production release #64 is the currently deployed baseline. The production entryp
 10. Registered analysis/system data feeds Spel plus external-aware F1 replay and F2 post-race diagnostics. Historical sealed-v3 paths remain compatibility-only.
 
 
-C4 named X-Labs trip labels remain optional/gated; the v3 workflow uses only validated continuous evidence while unsupported labels remain null.
+C4 named X-Labs trip labels are implemented as a conservative calculated layer on top of C3. Stable evidence around 500 m remaining can populate the existing `race_positions` model as `calculated_xlabs`; production backfill is still an explicit workflow-dispatch action rather than a release side effect, and unsupported/ambiguous labels remain null.
 
 The current build contains:
 - D1 normalized relational schema and provenance model
