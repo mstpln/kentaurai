@@ -142,9 +142,7 @@ test('accepts legitimate X-Labs telemetry payloads above the former 8 MB ceiling
   const { env, db, objects } = createTestEnv();
   seedContext(db, objects);
   seedOfficialTrack(db);
-  const payload = telemetryPayload();
-  payload[0].padding = 'x'.repeat((8 * 1024 * 1024) + 1024);
-  const body = JSON.stringify(payload);
+  const body = telemetryPayload(7, 5, { padding: 'x'.repeat((8 * 1024 * 1024) + 1024) });
   assert.ok(new TextEncoder().encode(body).byteLength > 8 * 1024 * 1024);
 
   const result = await captureXlabsRaceJson(env, 'src_calc', 7, 5, {
@@ -166,9 +164,7 @@ test('configured X-Labs telemetry response ceiling still fails closed with byte 
   env.XLABS_MAX_RACE_RESPONSE_BYTES = '256';
   seedContext(db, objects);
   seedOfficialTrack(db);
-  const payload = telemetryPayload();
-  payload[0].padding = 'x'.repeat(1024);
-  const body = JSON.stringify(payload);
+  const body = telemetryPayload(7, 5, { padding: 'x'.repeat(1024) });
 
   await assert.rejects(
     () => captureXlabsRaceJson(env, 'src_calc', 7, 5, {
