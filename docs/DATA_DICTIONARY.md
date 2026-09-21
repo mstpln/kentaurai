@@ -175,3 +175,10 @@ Only these statuses are used:
 The dictionary covers the source families required by the detailed build plan: official calendar/day, official V85/V86 game capture, official ordinary-race history/results, equipment, market/odds, X-Labs telemetry, key normalized deterministic feature families and the provider-neutral analysis context.
 
 A `build_candidate` row is not permission to map it automatically. It still requires a separately scoped build with source-semantic verification, as-of/leakage rules, null behavior, provenance, tests and exact-head review. An `unclear` row must fail closed until semantics are proven.
+
+
+## Manual track physical profile enrichment
+
+| manual_track_profile | facts[].type + facts[].value | detailed physical track measurement | number | yes | track_profile_fact_observations | used | Bana profile / future analysis | exact track ID + source URL/type + verified_at + layout_effective_from | Supported facts are lap length, home-stretch length, open-stretch lanes, angled mobile wing, width at 1640/2140, large/first/second curve radius and first/second curve banking. Real production values stay private. |
+| manual_track_profile | first_turn_distances[].distance_to_first_turn_m | distance from start line to first turn | number | yes | track_first_turn_distances | used | Bana profile / future analysis | exact track ID + race distance + start method + evidence type + source + verified_at + layout_effective_from | Verified measurements and deterministic calculations are stored distinctly. Calculated values require an explanation. Unknown stays null. |
+| calculated_track_geometry | first-turn geometry calculation | calculated distance to first turn | number | yes | track_first_turn_distances | derived | Bana profile / future analysis | source-backed geometry + explicit calculation note + layout_effective_from | Calculation never replaces a conflicting verified observation silently. |

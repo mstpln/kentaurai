@@ -68,6 +68,23 @@ test('Bana detail owns all-method, race-level, STL and race-type filters in the 
   assert.doesNotMatch(html, /Alla startmetoder/);
 });
 
+test('Bana overview uses the approved physical profile layout and canonical back icon', () => {
+  const html = renderAppPage();
+  assert.match(html, /<h2>Bananalys<\/h2>/);
+  assert.match(html, /trackFactBlock\('Grundmått'/);
+  assert.match(html, /trackFactBlock\('Start & bredd'/);
+  assert.match(html, /trackFactBlock\('Till första sväng'/);
+  assert.match(html, /trackFactBlock\('Kurvradier'/);
+  assert.match(html, /trackFactBlock\('Dosering'/);
+  assert.match(html, /Beräknat/);
+  assert.match(html, /Verifierat/);
+  assert.match(html, /Datagrund/);
+  assert.match(html, /M20 20v-7a4 4 0 0 0-4-4H4/);
+  assert.doesNotMatch(html, /↩ <span>Banor<\/span>/);
+  assert.doesNotMatch(html, /Banan i korthet/);
+  assert.doesNotMatch(html, /\["Underlag",p\.surface\]/);
+});
+
 test('Bana overview localizes Sweden and renders contact facts only when present with HTTPS defense in depth', () => {
   const html = renderAppPage();
   assert.match(html, /SE:'Sverige'/);

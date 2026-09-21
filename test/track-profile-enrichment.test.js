@@ -1,0 +1,102 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+import { applyTrackProfileEnrichment, listTrackProfileTargets } from '../src/track-profile-enrichment.js';
+import { createTestEnv } from './helpers/d1.js';
+
+function seedTrack(db) {
+  db.prepare("INSERT INTO tracks (id, canonical_name, city, country_code) VALUES ('track-x','Synthetic Geometry Track','Teststad','SE')").run();
+}
+function payload(overrides = {}) {
+  return { tracks:[{
+    track_id:'track-x',
+    canonical_name:'Synthetic Geometry Track',
+    verified_at:'2026-09-20T12:00:00Z',
+    layout_effective_from:'2026-01-01',
+    facts:[{ type:'width_1640_m', value:21.2, evidence_type:'verified', source:{ type:'measurement', url:'https://example.test/geometry' } }],
+    first_turn_distances:[{
+      race_distance_m:1640, start_method:'auto', distance_to_first_turn_m:178.5,
+      evidence_type:'calculated', source:{ type:'calculation', url:'https://example.test/first-turn' },
+      calculation_note:'Synthetic calculation from verified geometry and start position'
+    }],
+    ...overrides
+  }]};
+}
+test('track profile enrichment lists targets and imports idempotently', async () => {
+  const { env, db } = createTestEnv(); seedTrack(db);
+  const targets = await listTrackProfileTargets(env);
+  assert.equal(targets.total, 1);
+  assert.equal(targets.items[0].name, 'Synthetic Geometry Track');
+  const first = await applyTrackProfileEnrichment(env, payload());
+  assert.equal(first.profileFacts, 1); assert.equal(first.firstTurnDistances, 1); assert.equal(first.conflicts, 0);
+  const second = await applyTrackProfileEnrichment(env, payload());
+  assert.equal(second.conflicts, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM track_profile_fact_observations").get().n, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM track_first_turn_distances").get().n, 1);
+});
+test('later reverification is preserved as a new observation', async () => {
+  const { env, db } = createTestEnv(); seedTrack(db);
+  await applyTrackProfileEnrichment(env, payload());
+  const later = payload();
+  later.tracks[0].verified_at = '2026-09-21T12:00:00Z';
+  await applyTrackProfileEnrichment(env, later);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM track_profile_fact_observations").get().n, 2);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM track_first_turn_distances").get().n, 2);
+});
+
+test('calculated values require a calculation note', async () => {
+  const { env, db } = createTestEnv(); seedTrack(db);
+  const bad = payload({ facts:[], first_turn_distances:[{
+    race_distance_m:2140, start_method:'auto', distance_to_first_turn_m:182, evidence_type:'calculated',
+    source:{ type:'calculation', url:'https://example.test/calculated' }
+  }]});
+  await assert.rejects(() => applyTrackProfileEnrichment(env, bad), /calculation_note is required/);
+});
+test('verified same-layout facts supersede calculated observations for current use without deleting history', async () => {
+  const { env, db } = createTestEnv(); seedTrack(db);
+  const calculated = payload({
+    facts:[{
+      type:'first_turn_radius_m',
+      value:85.5,
+      evidence_type:'calculated',
+      source:{ type:'calculation', url:'https://example.test/radius-calculated' },
+      calculation_note:'Synthetic calculation'
+    }],
+    first_turn_distances:[]
+  });
+  await applyTrackProfileEnrichment(env, calculated);
+
+  const verified = payload({
+    facts:[{
+      type:'first_turn_radius_m',
+      value:86.0,
+      evidence_type:'verified',
+      source:{ type:'measurement', url:'https://example.test/radius-verified' }
+    }],
+    first_turn_distances:[]
+  });
+  const result = await applyTrackProfileEnrichment(env, verified);
+  assert.equal(result.conflicts, 0);
+  const rows = db.prepare("SELECT numeric_value, evidence_type, status FROM track_profile_fact_observations WHERE fact_type='first_turn_radius_m' ORDER BY evidence_type").all()
+    .map((row) => ({ numeric_value:row.numeric_value, evidence_type:row.evidence_type, status:row.status }));
+  assert.deepEqual(rows, [
+    { numeric_value:85.5, evidence_type:'calculated', status:'conflict' },
+    { numeric_value:86, evidence_type:'verified', status:'active' }
+  ]);
+});
+
+test('conflicting same-layout facts are preserved instead of overwritten', async () => {
+  const { env, db } = createTestEnv(); seedTrack(db);
+  await applyTrackProfileEnrichment(env, payload());
+  const conflict = payload({ facts:[{
+    type:'width_1640_m', value:22.4, evidence_type:'verified',
+    source:{ type:'official_sport', url:'https://example.test/conflicting-geometry' }
+  }], first_turn_distances:[] });
+  const result = await applyTrackProfileEnrichment(env, conflict);
+  assert.equal(result.conflicts, 1);
+  const rows = db.prepare("SELECT numeric_value, status FROM track_profile_fact_observations ORDER BY numeric_value").all()
+    .map((row) => ({ numeric_value:row.numeric_value, status:row.status }));
+  assert.deepEqual(rows, [
+    { numeric_value:21.2, status:'active' }, { numeric_value:22.4, status:'conflict' }
+  ]);
+});

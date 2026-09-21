@@ -105,6 +105,51 @@ test('track list and detail expose verified profile fields and database coverage
 });
 
 
+test('track detail exposes current detailed geometry and distance-specific first-turn facts', async () => {
+  const { env, db } = createTestEnv();
+  seedTrackData(db);
+  db.prepare(`INSERT INTO track_profile_fact_observations (
+    id, track_id, fact_type, numeric_value, evidence_type, source_type, source_url,
+    verified_at, layout_effective_from, status
+  ) VALUES
+    ('profile-old','track-a','width_1640_m',20.0,'verified','measurement','https://example.test/old','2025-01-01T10:00:00Z','2025-01-01','active'),
+    ('profile-current','track-a','width_1640_m',21.5,'verified','measurement','https://example.test/current','2026-01-01T10:00:00Z','2026-01-01','active'),
+    ('profile-lap','track-a','lap_length_m',1001.0,'verified','measurement','https://example.test/lap','2026-01-01T10:00:00Z','2026-01-01','active'),
+    ('profile-stretch','track-a','home_stretch_m',199.0,'verified','measurement','https://example.test/stretch','2026-01-01T10:00:00Z','2026-01-01','active'),
+    ('profile-open','track-a','open_stretch_lanes',2.0,'verified','official_sport','https://example.test/open','2026-01-01T10:00:00Z','2026-01-01','active'),
+    ('profile-wing','track-a','angled_mobile_wing',0.0,'verified','official_sport','https://example.test/wing','2026-01-01T10:00:00Z','2026-01-01','active'),
+    ('profile-radius','track-a','first_turn_radius_m',86.0,'verified','official_sport','https://example.test/radius','2026-01-02T10:00:00Z','2026-01-01','active'),
+    ('profile-banking','track-a','first_turn_banking_percent',14.0,'verified','official_sport','https://example.test/banking','2026-01-02T10:00:00Z','2026-01-01','active')`).run();
+  db.prepare(`INSERT INTO track_first_turn_distances (
+    id, track_id, race_distance_m, start_method, distance_to_first_turn_m,
+    evidence_type, source_type, source_url, verified_at, layout_effective_from, status, calculation_note
+  ) VALUES
+    ('turn-1640','track-a',1640,'auto',176.0,'verified','official_sport','https://example.test/turn-1640','2026-01-03T10:00:00Z','2026-01-01','active',NULL),
+    ('turn-2140','track-a',2140,'auto',181.5,'calculated','calculation','https://example.test/turn-2140','2026-01-03T10:00:00Z','2026-01-01','active','Synthetic geometry calculation')`).run();
+
+  const detail = await getTrackDetail(env, 'track-a');
+  assert.equal(detail.profile.lapLengthM, 1001);
+  assert.equal(detail.profile.homeStretchM, 199);
+  assert.equal(detail.profile.openStretchLanes, 2);
+  assert.equal(detail.profile.angledMobileWing, false);
+  assert.equal(detail.profile.width1640M, 21.5);
+  assert.equal(detail.profile.firstTurnRadiusM, 86);
+  assert.equal(detail.profile.firstTurnBankingPercent, 14);
+  assert.deepEqual(detail.profile.firstTurnDistances.map((row) => ({
+    raceDistanceM: row.raceDistanceM,
+    startMethod: row.startMethod,
+    distanceToFirstTurnM: row.distanceToFirstTurnM,
+    evidenceType: row.evidenceType
+  })), [
+    { raceDistanceM: 1640, startMethod: 'auto', distanceToFirstTurnM: 176, evidenceType: 'verified' },
+    { raceDistanceM: 2140, startMethod: 'auto', distanceToFirstTurnM: 181.5, evidenceType: 'calculated' }
+  ]);
+  assert.equal(detail.profile.evidence.hasVerified, true);
+  assert.equal(detail.profile.evidence.hasCalculated, true);
+  assert.equal(detail.profile.evidence.layoutEffectiveFrom, '2026-01-01');
+});
+
+
 test('track detail does not fail when a malformed trainer observation exists', async () => {
   const { env, db } = createTestEnv();
   seedTrackData(db);

@@ -41,6 +41,7 @@ The current build contains:
 - Trend workspace with category/time-period controls
 - Bana list/detail with Översikt, Spårstatistik and Hemmatränare; track statistics combine period, start method, distance, STL class and race type
 - nullable track address/website presentation with fact-level provenance for private enrichment
+- structured physical track profiles with provenance-backed width/curve/banking facts and distance-specific first-turn distances; values distinguish verified measurements from deterministic calculations and preserve unknowns/conflicts
 - Spel area with Översikt / V85 / V86 plus saved-round post-race detail
 - F1 replay/calibration and ablation evidence with chronological leakage guards
 - F2 post-race probability/system diagnostics for both historical sealed-v3 and external-analysis lineage, with repeated eligible misses recorded as candidate learning only and no automatic model changes
@@ -120,6 +121,8 @@ Real source data belongs only in the private Cloudflare D1/R2 deployment or is s
 - `POST /v1/xlabs/inspect-script` - Bearer ADMIN_TOKEN; sanitized read-only inspection of a captured X-Labs script for request mechanisms and endpoint candidates
 - `GET /v1/admin/tracks/contact-targets` - Bearer ADMIN_TOKEN; returns the private exact track identities requiring contact verification
 - `POST /v1/admin/tracks/contact-enrichment` - Bearer ADMIN_TOKEN; exact-ID, provenance-backed, conflict-preserving private track contact update
+- `GET /v1/admin/tracks/profile-targets` - Bearer ADMIN_TOKEN; exact track identities for private physical-profile enrichment
+- `POST /v1/admin/tracks/profile-enrichment` - Bearer ADMIN_TOKEN; provenance-backed, layout-aware physical geometry and first-turn-distance import
 - `POST /v1/import/editorial` - Bearer ADMIN_TOKEN
 - `POST /v1/import/reference-round` - Bearer ADMIN_TOKEN
 - `POST /v1/import/raw` - Bearer ADMIN_TOKEN

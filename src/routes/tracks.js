@@ -117,6 +117,36 @@ function mapDistanceGroups(rows) {
     }));
 }
 
+function mapTrackProfileFacts(rows) {
+  const facts = {};
+  for (const row of rows || []) facts[row.fact_type] = Number(row.numeric_value);
+  return facts;
+}
+
+function mapFirstTurnDistances(rows) {
+  return (rows || []).map((row) => ({
+    raceDistanceM: Number(row.race_distance_m),
+    startMethod: row.start_method,
+    distanceToFirstTurnM: Number(row.distance_to_first_turn_m),
+    evidenceType: row.evidence_type,
+    verifiedAt: row.verified_at,
+    layoutEffectiveFrom: row.layout_effective_from || null
+  }));
+}
+
+function profileEvidence(rows, firstTurnRows) {
+  const all = [...(rows || []), ...(firstTurnRows || [])];
+  if (!all.length) return { hasVerified:false, hasCalculated:false, latestVerifiedAt:null, layoutEffectiveFrom:null };
+  const timestamps = all.map((row) => row.verified_at).filter(Boolean).sort();
+  const layouts = all.map((row) => row.layout_effective_from).filter(Boolean).sort();
+  return {
+    hasVerified: all.some((row) => row.evidence_type === 'verified'),
+    hasCalculated: all.some((row) => row.evidence_type === 'calculated'),
+    latestVerifiedAt: timestamps.length ? timestamps[timestamps.length - 1] : null,
+    layoutEffectiveFrom: layouts.length ? layouts[layouts.length - 1] : null
+  };
+}
+
 export async function listTracks(env, options = {}) {
   if (!env.DB) throw new Error('DB is not configured');
   const q = sanitizeQuery(options.q);
@@ -183,8 +213,44 @@ export async function getTrackDetail(env, id, options = {}) {
     GROUP BY r.distance_m
     ORDER BY r.distance_m ASC
   `).bind(trackId).all();
+  const profileFactsPromise = env.DB.prepare(`
+    SELECT fact_type, numeric_value, evidence_type, source_type, source_url, verified_at, layout_effective_from
+    FROM (
+      SELECT fact_type, numeric_value, evidence_type, source_type, source_url, verified_at, layout_effective_from, id,
+        ROW_NUMBER() OVER (
+          PARTITION BY fact_type
+          ORDER BY COALESCE(layout_effective_from, SUBSTR(verified_at, 1, 10)) DESC,
+            CASE evidence_type WHEN 'verified' THEN 0 ELSE 1 END,
+            verified_at DESC, id DESC
+        ) AS row_number
+      FROM track_profile_fact_observations
+      WHERE track_id = ? AND status = 'active'
+    )
+    WHERE row_number = 1
+    ORDER BY fact_type ASC
+  `).bind(trackId).all();
+  const firstTurnPromise = env.DB.prepare(`
+    SELECT race_distance_m, start_method, distance_to_first_turn_m, evidence_type,
+      source_type, source_url, verified_at, layout_effective_from
+    FROM (
+      SELECT race_distance_m, start_method, distance_to_first_turn_m, evidence_type,
+        source_type, source_url, verified_at, layout_effective_from, id,
+        ROW_NUMBER() OVER (
+          PARTITION BY race_distance_m, start_method
+          ORDER BY COALESCE(layout_effective_from, SUBSTR(verified_at, 1, 10)) DESC,
+            CASE evidence_type WHEN 'verified' THEN 0 ELSE 1 END,
+            verified_at DESC, id DESC
+        ) AS row_number
+      FROM track_first_turn_distances
+      WHERE track_id = ? AND status = 'active'
+    )
+    WHERE row_number = 1
+    ORDER BY race_distance_m ASC, start_method ASC
+  `).bind(trackId).all();
 
-  const [track, summary, distanceRows] = await Promise.all([trackPromise, summaryPromise, distancePromise]);
+  const [track, summary, distanceRows, profileFactRows, firstTurnRows] = await Promise.all([
+    trackPromise, summaryPromise, distancePromise, profileFactsPromise, firstTurnPromise
+  ]);
   if (!track) return null;
 
   const includeHomeTrainerCount = options.includeHomeTrainerCount !== false;
@@ -203,18 +269,33 @@ export async function getTrackDetail(env, id, options = {}) {
       postalCode: track.postal_code || null
     },
     websiteUrl: track.website_url || null,
-    profile: {
-      lapLengthM: track.lap_length_m == null ? null : Number(track.lap_length_m),
-      homeStretchM: track.home_stretch_m == null ? null : Number(track.home_stretch_m),
-      curveRadiusM: track.curve_radius_m == null ? null : Number(track.curve_radius_m),
-      bankingDegrees: track.banking_degrees == null ? null : Number(track.banking_degrees),
-      widthM: track.width_m == null ? null : Number(track.width_m),
-      surface: track.surface,
-      openStretchLanes: track.open_stretch_lanes == null ? null : Number(track.open_stretch_lanes),
-      angledMobileWing: track.angled_mobile_wing == null ? null : Boolean(track.angled_mobile_wing),
-      startNotes: track.start_notes,
-      trackNotes: track.track_notes
-    },
+    profile: (() => {
+      const facts = mapTrackProfileFacts(profileFactRows?.results || []);
+      const turns = mapFirstTurnDistances(firstTurnRows?.results || []);
+      return {
+        lapLengthM: facts.lap_length_m ?? (track.lap_length_m == null ? null : Number(track.lap_length_m)),
+        homeStretchM: facts.home_stretch_m ?? (track.home_stretch_m == null ? null : Number(track.home_stretch_m)),
+        curveRadiusM: track.curve_radius_m == null ? null : Number(track.curve_radius_m),
+        bankingDegrees: track.banking_degrees == null ? null : Number(track.banking_degrees),
+        widthM: track.width_m == null ? null : Number(track.width_m),
+        surface: track.surface,
+        openStretchLanes: facts.open_stretch_lanes ?? (track.open_stretch_lanes == null ? null : Number(track.open_stretch_lanes)),
+        angledMobileWing: facts.angled_mobile_wing == null
+          ? (track.angled_mobile_wing == null ? null : Boolean(track.angled_mobile_wing))
+          : Boolean(facts.angled_mobile_wing),
+        width1640M: facts.width_1640_m ?? null,
+        width2140M: facts.width_2140_m ?? null,
+        largeCurveRadiusM: facts.large_curve_radius_m ?? null,
+        firstTurnRadiusM: facts.first_turn_radius_m ?? null,
+        secondTurnRadiusM: facts.second_turn_radius_m ?? null,
+        firstTurnBankingPercent: facts.first_turn_banking_percent ?? null,
+        secondTurnBankingPercent: facts.second_turn_banking_percent ?? null,
+        firstTurnDistances: turns,
+        evidence: profileEvidence(profileFactRows?.results || [], firstTurnRows?.results || []),
+        startNotes: track.start_notes,
+        trackNotes: track.track_notes
+      };
+    })(),
     coverage: {
       races: Number(summary?.races ?? 0),
       racesWithResults: Number(summary?.races_with_results ?? 0),
