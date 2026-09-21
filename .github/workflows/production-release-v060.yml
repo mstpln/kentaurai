@@ -231,12 +231,15 @@ jobs:
             '/v1/replay/private-probe' \
             '/v1/xlabs/interval-repair' \
             '/v1/admin/tracks/profile-targets' \
-            '/v1/admin/tracks/profile-enrichment' \
             '/v1/post-race/settlement/private-probe'; do
             status="$(curl --silent --show-error --output /tmp/private-response.json --write-out '%{http_code}' "$WORKER_URL$path")"
             test "$status" = '401' || { echo "Expected $path to return 401 without authorization, got $status"; cat /tmp/private-response.json; exit 1; }
             grep -q 'unauthorized' /tmp/private-response.json
           done
+
+          status="$(curl --silent --show-error --request POST --header 'content-type: application/json' --data '{"tracks":[]}' --output /tmp/private-response.json --write-out '%{http_code}' "$WORKER_URL/v1/admin/tracks/profile-enrichment")"
+          test "$status" = '401' || { echo "Expected /v1/admin/tracks/profile-enrichment to return 401 without authorization, got $status"; cat /tmp/private-response.json; exit 1; }
+          grep -q 'unauthorized' /tmp/private-response.json
 
       - name: Release summary
         shell: bash
