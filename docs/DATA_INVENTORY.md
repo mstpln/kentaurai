@@ -17,18 +17,18 @@ The following planned families are now implemented and used by the v3 analysis p
 - equipment-response and person/driver-horse/trainer context features;
 - hierarchical race/track/lane structural priors without market leakage;
 - partial-tolerant X-Labs 100 m interval features, evidence/coverage profiles and population-shift diagnostics;
-- versioned continuous X-Labs position reconstruction/checkpoints. Named trip labels remain gated/null (C4);
+- versioned continuous X-Labs position reconstruction/checkpoints plus conservative C4 named trip labels around 500 m remaining; ambiguous labels stay null and production backfill is explicit;
 - round-scoped analysis pack v3, sealed Step 1/revision lineage, market delta/maturity, versioned decision layer and exact-three-spike optimizer;
 - replay/calibration/ablation and post-race learning diagnostics.
 
-Still deliberately unpromoted or optional include unverified named trip labels, unverified source trend semantics, slipstream semantics, unverified static track geometry/day-profile fields and other later opportunities called out below.
+Still deliberately unpromoted or optional include ambiguous/unverified tactical labels outside the C4 confidence gate, unverified source trend semantics, slipstream semantics, unverified static track geometry/day-profile fields and other later opportunities called out below.
 
 ## F4 live analysis transport status
 - The default creation path is v3. Market-blind deterministic data is exported through the round-scoped v3 analysis pack and sealed Step 1 is persisted before current market exposure.
 - Step 2 uses a self-contained bundle containing the exact persisted sealed Step 1 document plus the bound verified market pack. Conversation memory is not a data source or reconstruction mechanism.
 - Canonical decision probability and optimizer output are deterministic/versioned KentaurAI records. New V85/V86 systems are exact-three-spike optimizer output.
 - Legacy v1/v2 analysis rows remain historical/read-compatible. Their combined/declared-unsealed transport is deprecated and cannot create new analyses in the default v3 mode.
-- C4 named X-Labs trip labels remain unpromoted; unsupported semantic labels stay null.
+- C4 named X-Labs trip labels are implemented as calculated evidence using a conservative decision window; unsupported or ambiguous labels stay null.
 
 ## Purpose
 
