@@ -345,6 +345,10 @@ export async function getSettingsAlertState(env, health = null) {
   }
 
   const placeholders = keys.map(() => '?').join(',');
+  await env.DB.prepare(`
+    DELETE FROM settings_alert_acknowledgements
+    WHERE alert_key NOT IN (${placeholders})
+  `).bind(...keys).run();
   const { results } = await env.DB.prepare(`
     SELECT alert_key
     FROM settings_alert_acknowledgements
