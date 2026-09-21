@@ -22,8 +22,8 @@ const exactBrandAlignment = `
 .brand{font-family:var(--font-brand)!important;font-size:31px!important}
 .brand-badge{width:1.14cap!important;height:1.14cap!important;flex-basis:1.14cap!important}
 .brand-icon{width:.82cap!important;height:.82cap!important}
-/* Match the installed PWA icon's Sagittarius-to-ring proportion while keeping the topbar ring size unchanged. */
-.topbar .brand-icon{width:1.13cap!important;height:1.13cap!important}
+/* Keep the installed-PWA look while leaving a small optical gap inside the unchanged topbar ring. */
+.topbar .brand-icon{width:1.08cap!important;height:1.08cap!important}
 @media(max-width:760px){.brand{font-size:28px!important}}
 @media(max-width:430px){.brand{font-size:27px!important}}
 </style>`;
