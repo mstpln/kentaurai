@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=7b443d5c6a35111944d4d7bf6a616f51567b4c52
-release_nonce=2026-09-21-unified-category-tabs-pr231-1
+source_main=e95a692527b4e795e038b9f68337ec5d25f61798
+release_nonce=2026-09-21-topbar-brand-icon-pr232-1
