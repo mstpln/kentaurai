@@ -97,7 +97,8 @@ export function createTestEnv() {
     '../../migrations/0029_xlabs_interval_backfill.sql',
     '../../migrations/0030_interview_change_marker.sql',
     '../../migrations/0031_post_race_settlement.sql',
-    '../../migrations/0032_track_physical_profile_v1.sql'
+    '../../migrations/0032_track_physical_profile_v1.sql',
+    '../../migrations/0033_xlabs_trip_classification_v1.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }
