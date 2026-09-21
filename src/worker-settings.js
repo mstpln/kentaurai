@@ -2,7 +2,14 @@ import worker from './worker-pwa.js';
 import { appAuthConfigured, clearAppSessionCookie, hasValidAppSession } from './app-auth.js';
 import { htmlResponse, redirectResponse, renderAppPage } from './app-page-aligned.js';
 import { XLABS_SCRIPT_SELECTOR_VERSION } from './provider/xlabs-script.js';
-import { KENTAURAI_APP_VERSION, createFullDataExportResponse, getSettingsStatus, importAnalysisUpload } from './settings-data-display.js';
+import {
+  KENTAURAI_APP_VERSION,
+  acknowledgeSettingsAlerts,
+  createFullDataExportResponse,
+  getSettingsAlertState,
+  getSettingsStatus,
+  importAnalysisUpload
+} from './settings-data-display.js';
 import { getEnhancedGameHistoryDetail } from './routes/game-detail-display.js';
 import { getFilteredEntityStatBreakdowns } from './routes/entity-stat-breakdowns.js';
 import { getTrackDetail, getTrackHomeTrainers, getTrackLaneStats, listTracks } from './routes/tracks.js';
@@ -79,6 +86,28 @@ export default {
       if (denied) return denied;
       try {
         return json(await getSettingsStatus(env));
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    if (path === '/app/api/settings/alerts' && request.method === 'GET') {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        return json(await getSettingsAlertState(env));
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    if (path === '/app/api/settings/alerts/acknowledge' && request.method === 'POST') {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        return json(await acknowledgeSettingsAlerts(env));
       } catch (error) {
         console.error(error);
         return json({ error: 'request_failed', message: error.message }, 400);
