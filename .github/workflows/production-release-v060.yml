@@ -113,6 +113,12 @@ jobs:
           grep -q '0026_app_read_performance.sql' /tmp/migration-check.txt
           grep -q '0029_xlabs_interval_backfill.sql' /tmp/migration-check.txt
           grep -q '0030_interview_change_marker.sql' /tmp/migration-check.txt
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT id,track_id,fact_type,numeric_value,evidence_type,source_type,source_url,verified_at,layout_effective_from,status FROM track_profile_fact_observations LIMIT 0; SELECT id,track_id,race_distance_m,start_method,distance_to_first_turn_m,evidence_type,source_type,source_url,verified_at,layout_effective_from,status FROM track_first_turn_distances LIMIT 0; SELECT name FROM sqlite_master WHERE type='table' AND name IN ('track_profile_fact_observations','track_first_turn_distances') ORDER BY name; SELECT name FROM d1_migrations WHERE name='0032_track_physical_profile_v1.sql'; SELECT name FROM sqlite_master WHERE type='index' AND name IN ('idx_track_profile_fact_current','idx_track_first_turn_current') ORDER BY name;" > /tmp/track-profile-schema-check.txt
+          grep -q 'track_profile_fact_observations' /tmp/track-profile-schema-check.txt
+          grep -q 'track_first_turn_distances' /tmp/track-profile-schema-check.txt
+          grep -q '0032_track_physical_profile_v1.sql' /tmp/track-profile-schema-check.txt
+          grep -q 'idx_track_profile_fact_current' /tmp/track-profile-schema-check.txt
+          grep -q 'idx_track_first_turn_current' /tmp/track-profile-schema-check.txt
 
           npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT id,game_round_id,status,settled_legs,attempt_count,next_check_at,last_error,started_at,completed_at,created_at,updated_at FROM post_race_settlement_jobs LIMIT 0; SELECT name FROM sqlite_master WHERE type='table' AND name='post_race_settlement_jobs'; SELECT name FROM d1_migrations WHERE name='0031_post_race_settlement.sql'; SELECT name FROM sqlite_master WHERE type='index' AND name='idx_post_race_settlement_due';" > /tmp/post-race-settlement-schema-check.txt
           grep -q 'post_race_settlement_jobs' /tmp/post-race-settlement-schema-check.txt
@@ -224,6 +230,8 @@ jobs:
             '/v1/analysis-v3/private-probe' \
             '/v1/replay/private-probe' \
             '/v1/xlabs/interval-repair' \
+            '/v1/admin/tracks/profile-targets' \
+            '/v1/admin/tracks/profile-enrichment' \
             '/v1/post-race/settlement/private-probe'; do
             status="$(curl --silent --show-error --output /tmp/private-response.json --write-out '%{http_code}' "$WORKER_URL$path")"
             test "$status" = '401' || { echo "Expected $path to return 401 without authorization, got $status"; cat /tmp/private-response.json; exit 1; }
@@ -237,4 +245,4 @@ jobs:
         run: |
           echo 'KentaurAI v0.6.0 production release completed.'
           echo "Worker: $WORKER_URL"
-          echo 'Required production schema through migration 0031, X-Labs interval repair state, external analysis lineage/evidence storage, external F1/F2 evidence integration, worker-v078 runtime, controlled legacy boundary, exact app version, health, login and private external-analysis route checks passed.'
+          echo 'Required production schema through migration 0032, track physical-profile storage, X-Labs interval repair state, external analysis lineage/evidence storage, external F1/F2 evidence integration, worker-v078 runtime, controlled legacy boundary, exact app version, health, login and private route checks passed.'
