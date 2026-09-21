@@ -2,6 +2,7 @@ import { stableId, randomId } from './ids.js';
 import { finishImportRun, startImportRun } from './import/common.js';
 import { deriveCapturedXlabsIntervalsV2 } from './xlabs-intervals-v2.js';
 import { validateXlabsRacePayload } from './provider/xlabs-race.js';
+import { persistXlabsTripScenarios } from './xlabs-trip-classification-v1.js';
 
 export const XLABS_POSITION_RECONSTRUCTION_CONTRACT = 'kentaurai-xlabs-position-reconstruction-v1';
 export const XLABS_POSITION_RECONSTRUCTION_VERSION = 'xlabs-position-reconstruction-v1';
@@ -612,6 +613,9 @@ export async function normalizeCapturedXlabsPositionReconstruction(env, sourceRe
     await persistBatches(env, reconstruction.checkpoints.map((row) => checkpointInsert(env, row)), counts);
     await persistBatches(env, reconstruction.episodes.map((row) => episodeInsert(env, row)), counts);
     await persistBatches(env, reconstruction.summaries.map((row) => summaryInsert(env, row)), counts);
+    const tripClassification = await persistXlabsTripScenarios(env, reconstruction);
+    counts.inserted += tripClassification.inserted;
+    counts.skipped += tripClassification.skipped;
     await finishImportRun(env, run.id, counts);
     return {
       importRunId: run.id,
@@ -623,7 +627,8 @@ export async function normalizeCapturedXlabsPositionReconstruction(env, sourceRe
       summaryRows: reconstruction.summaries.length,
       counts,
       sourceQualityStatus: derived.source.quality_status,
-      namedTripLabelsEnabled: false
+      namedTripLabelsEnabled: true,
+      tripClassificationRows: tripClassification.rows.length
     };
   } catch (error) {
     counts.errors = 1;
