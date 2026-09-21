@@ -191,7 +191,7 @@ async function renderSettings(){state.settingsOpen=true;state.settingsTab='data'
 window.__kentauraiAnalysis={render:renderAnalysis};
 settingsButton.onclick=()=>{renderSettings()};
 refreshSettingsAlertBadge();
-setInterval(refreshSettingsAlertBadge,60000);
+if(typeof setInterval==='function')setInterval(refreshSettingsAlertBadge,60000);
 })();
 </script>`;
 
