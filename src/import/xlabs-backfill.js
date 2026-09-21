@@ -6,7 +6,8 @@ import { normalizeCapturedXlabsPositionReconstruction } from '../xlabs-position-
 import { XLABS_SOURCE_GAP_QUALITY, markXlabsSourceGap, xlabsTelemetrySourceGap } from './xlabs-source-gap.js';
 import { v85V86GameIdsFromCalendar } from './official-live-scheduled.js';
 import { captureXlabsDate, validateXlabsDate } from '../provider/xlabs.js';
-import { captureReferencedXlabsScript } from '../provider/xlabs-script.js';
+import { captureReferencedXlabsScript, XLABS_SCRIPT_SELECTOR_VERSION } from '../provider/xlabs-script.js';
+import { inspectCapturedXlabs } from '../routes/xlabs-inspection.js';
 import { captureXlabsRaceJson } from '../provider/xlabs-race.js';
 import { sourceFailureRetryDelayMs } from '../provider/source-error.js';
 
@@ -327,7 +328,34 @@ async function dailyOfficialReadiness(env, date) {
   };
 }
 
-async function ensureDateContext(env, date, options, counts) {
+function missingRequiredScriptWithNoAlternatives(error, scriptName) {
+  const expected = `requested X-Labs script was not referenced by the captured page [selector=${XLABS_SCRIPT_SELECTOR_VERSION}; requested=${scriptName}; available=none]`;
+  return String(error?.message || '') === expected;
+}
+
+async function historicalStaticPageGap(env, parentSourceRecordId, scriptName, error, scope) {
+  if (scope !== HISTORICAL_SCOPE || !missingRequiredScriptWithNoAlternatives(error, scriptName)) return null;
+  let inspected;
+  try {
+    inspected = await inspectCapturedXlabs(env, parentSourceRecordId);
+  } catch {
+    return null;
+  }
+  const inspection = inspected?.inspection;
+  const channels = Array.isArray(inspection?.candidateDataChannels) ? inspection.candidateDataChannels : [];
+  const noDataChannel = channels.length === 1 && channels[0] === 'static_html_or_unknown';
+  const noScriptTags = Number(inspection?.scripts?.total || 0) === 0;
+  const noTables = Number(inspection?.counts?.tables || 0) === 0;
+  const noIframes = Number(inspection?.counts?.iframes || 0) === 0;
+  if (!noDataChannel || !noScriptTags || !noTables || !noIframes) return null;
+  return {
+    unavailable: true,
+    unavailableReason: 'historical_static_page_without_supported_data_channel',
+    selectorVersion: XLABS_SCRIPT_SELECTOR_VERSION
+  };
+}
+
+async function ensureDateContext(env, date, options, counts, scope) {
   let parent = await latestSource(env, 'xlabs', `date:${date}`);
   if (!parent) {
     try {
@@ -336,7 +364,7 @@ async function ensureDateContext(env, date, options, counts) {
       counts.inserted += Number(!captured.reused);
       counts.skipped += Number(captured.reused);
     } catch (error) {
-      if (error?.code === 'XLABS_NOT_FOUND') return { unavailable: true };
+      if (error?.code === 'XLABS_NOT_FOUND') return { unavailable: true, unavailableReason: 'date_page_not_found' };
       throw error;
     }
   } else counts.skipped += 1;
@@ -345,12 +373,18 @@ async function ensureDateContext(env, date, options, counts) {
   for (const scriptName of ['calculate.js', 'main.js']) {
     let script = await latestSource(env, 'xlabs_script', `${parent.id}:${scriptName}`);
     if (!script) {
-      const captured = await captureReferencedXlabsScript(env, parent.id, scriptName, {
-        fetchImpl: options.scriptFetchImpl ?? options.fetchImpl
-      });
-      script = { id: captured.sourceRecordId };
-      counts.inserted += Number(!captured.reused);
-      counts.skipped += Number(captured.reused);
+      try {
+        const captured = await captureReferencedXlabsScript(env, parent.id, scriptName, {
+          fetchImpl: options.scriptFetchImpl ?? options.fetchImpl
+        });
+        script = { id: captured.sourceRecordId };
+        counts.inserted += Number(!captured.reused);
+        counts.skipped += Number(captured.reused);
+      } catch (error) {
+        const gap = await historicalStaticPageGap(env, parent.id, scriptName, error, scope);
+        if (gap) return gap;
+        throw error;
+      }
     } else counts.skipped += 1;
     captures[scriptName] = script;
   }
@@ -513,7 +547,7 @@ export async function runXlabsBackfillStep(env, jobId = null, options = {}) {
       };
     }
 
-    const context = await ensureDateContext(env, job.next_date, options, counts);
+    const context = await ensureDateContext(env, job.next_date, options, counts, job.scope);
     if (context.unavailable) {
       const completed = await advanceDate(env, job, leaseToken, { unavailableDate: true });
       await finishImportRun(env, run.id, counts);
@@ -523,6 +557,7 @@ export async function runXlabsBackfillStep(env, jobId = null, options = {}) {
         scope: job.scope,
         status: completed ? 'completed' : 'running',
         unavailableDate: job.next_date,
+        unavailableReason: context.unavailableReason || 'unknown',
         done: completed
       };
     }

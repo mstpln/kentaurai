@@ -220,3 +220,11 @@ The external-analysis production release was accepted after:
 - Successful race captures persist observed response bytes and the active byte limit in private source metadata for diagnostics.
 - Oversized responses still fail closed before archival/normalization, now with bounded byte diagnostics.
 - Existing historical X-Labs cursor/job state is preserved; after deployment the failed job should be resumed in place rather than recreated.
+
+
+## X-Labs historical static-page gap handling
+
+- Historical X-Labs backfill can encounter archived date pages that return valid HTML but no referenced application scripts or other supported data-channel clues.
+- Those pages are now inspected through the existing sanitized HTML inspector. Only pages that are genuinely static/unknown with zero script tags, tables and iframes are treated as neutral unavailable X-Labs coverage.
+- Pages that expose any alternate data-channel clue still fail closed for manual investigation; the backfill does not silently skip potentially available telemetry.
+- The existing historical cursor is preserved and can be resumed from the failed checkpoint after deployment.

@@ -208,3 +208,12 @@ A single race must not directly change model weights. Candidate learnings are re
 3. Successful raw captures retain response byte size and active limit in source metadata. Payload contents remain private in R2.
 4. Exceeding the active ceiling still fails closed and must not advance a historical cursor.
 5. A failed historical backfill resumes from its existing checkpoint after the capture fix is deployed; it is not restarted from scratch.
+
+
+## Historical X-Labs static pages may close as neutral source gaps
+
+1. A valid archived X-Labs date page that references none of the verified application scripts is not automatically an error.
+2. Before marking that historical date unavailable, KentaurAI runs the existing sanitized HTML inspection.
+3. Only a page classified as static/unknown with no script tags, tables or iframes may close as neutral unavailable coverage.
+4. Any alternate data-channel clue keeps the checkpoint failed/paused for investigation rather than being silently skipped.
+5. Daily/current X-Labs jobs retain the stricter behavior; this neutral static-page rule is limited to the historical-all backfill.
