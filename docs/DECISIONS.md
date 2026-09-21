@@ -199,3 +199,12 @@ A single race must not directly change model weights. Candidate learnings are re
 3. Supported labels are leader/spets, pocket/rygg ledaren, death seat/dödens, second over/2:a utvändigt, third over/3:e utvändigt and a coarse back-field label. Ambiguous cases remain unknown.
 4. C4 does not create a parallel storage model. Final labels are written to the existing race_positions table with source_record_id plus evidence_type, confidence and classification_version so calculated evidence remains distinguishable from direct verified observations.
 5. Historical production promotion is an explicit workflow-dispatch operation over already stored private X-Labs race JSON. It is not a deployment side effect.
+
+
+## X-Labs race responses use a bounded but evidence-sized capture ceiling
+
+1. X-Labs race telemetry can legitimately exceed the original 8 MiB safety ceiling.
+2. The race capture remains streaming and byte-bounded; the default ceiling is 32 MiB and configuration may not exceed 64 MiB.
+3. Successful raw captures retain response byte size and active limit in source metadata. Payload contents remain private in R2.
+4. Exceeding the active ceiling still fails closed and must not advance a historical cursor.
+5. A failed historical backfill resumes from its existing checkpoint after the capture fix is deployed; it is not restarted from scratch.

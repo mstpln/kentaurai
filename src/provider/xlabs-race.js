@@ -5,7 +5,8 @@ import { resolveCapturedXlabsRequestPath } from '../routes/xlabs-path-resolution
 import { sourceFetchError, sourceHttpError, sourceInvalidResponseError } from './source-error.js';
 
 const XLABS_HOST = 'kmtid.atgx.se';
-const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+const DEFAULT_MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
+const MAX_CONFIGURED_RESPONSE_BYTES = 64 * 1024 * 1024;
 const MAX_REDIRECTS = 2;
 const MAX_SAMPLE_FIELDS = 20;
 const MAX_SAMPLE_DEPTH = 3;
@@ -364,11 +365,25 @@ function validateRedirectUrl(currentUrl, location, expectedPathname) {
   return target.toString();
 }
 
-async function readBoundedText(response) {
+function responseByteLimit(env) {
+  const configured = Number(env?.XLABS_MAX_RACE_RESPONSE_BYTES);
+  if (!Number.isFinite(configured) || configured <= 0) return DEFAULT_MAX_RESPONSE_BYTES;
+  return Math.min(Math.floor(configured), MAX_CONFIGURED_RESPONSE_BYTES);
+}
+
+function sizeLimitError(limitBytes, observedBytes = null) {
+  const detail = observedBytes == null
+    ? `limit=${limitBytes}`
+    : `limit=${limitBytes}, observed>${observedBytes}`;
+  return sourceInvalidResponseError(`X-Labs race-data response exceeded size limit (${detail})`);
+}
+
+async function readBoundedText(response, maxBytes) {
   if (!response.body?.getReader) {
     const text = await response.text();
-    if (new TextEncoder().encode(text).byteLength > MAX_RESPONSE_BYTES) throw sourceInvalidResponseError('X-Labs race-data response exceeded size limit');
-    return text;
+    const bytes = new TextEncoder().encode(text).byteLength;
+    if (bytes > maxBytes) throw sizeLimitError(maxBytes, bytes);
+    return { text, bytes };
   }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -378,17 +393,17 @@ async function readBoundedText(response) {
     const { done, value } = await reader.read();
     if (done) break;
     bytes += value.byteLength;
-    if (bytes > MAX_RESPONSE_BYTES) {
+    if (bytes > maxBytes) {
       await reader.cancel();
-      throw sourceInvalidResponseError('X-Labs race-data response exceeded size limit');
+      throw sizeLimitError(maxBytes, bytes);
     }
     parts.push(decoder.decode(value, { stream: true }));
   }
   parts.push(decoder.decode());
-  return parts.join('');
+  return { text: parts.join(''), bytes };
 }
 
-async function fetchJsonText(url, fetchImpl, timeoutMs = XLABS_FETCH_TIMEOUT_MS) {
+async function fetchJsonText(url, fetchImpl, timeoutMs = XLABS_FETCH_TIMEOUT_MS, maxBytes = DEFAULT_MAX_RESPONSE_BYTES) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const expectedPathname = new URL(url).pathname;
@@ -412,11 +427,11 @@ async function fetchJsonText(url, fetchImpl, timeoutMs = XLABS_FETCH_TIMEOUT_MS)
       const type = (response.headers.get('content-type') || '').toLowerCase();
       if (type && !type.includes('json') && !type.includes('text/plain')) throw sourceInvalidResponseError('X-Labs race-data response had an unexpected content type');
       const declared = Number(response.headers.get('content-length'));
-      if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) throw sourceInvalidResponseError('X-Labs race-data response exceeded size limit');
-      const body = await readBoundedText(response);
+      if (Number.isFinite(declared) && declared > maxBytes) throw sizeLimitError(maxBytes, declared);
+      const read = await readBoundedText(response, maxBytes);
       let parsed;
-      try { parsed = JSON.parse(body); } catch { throw sourceInvalidResponseError('X-Labs race-data response was not valid JSON'); }
-      return { body, parsed, finalUrl: currentUrl, redirectCount: redirects };
+      try { parsed = JSON.parse(read.text); } catch { throw sourceInvalidResponseError('X-Labs race-data response was not valid JSON'); }
+      return { body: read.text, parsed, bytes: read.bytes, finalUrl: currentUrl, redirectCount: redirects };
     }
   } catch (error) {
     throw sourceFetchError(error, 'X-Labs race-data capture', { timeoutMs });
@@ -475,7 +490,13 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
 
   try {
     const fetchedAt = new Date().toISOString();
-    const fetched = await fetchJsonText(requestedUrl, options.fetchImpl || fetch, options.timeoutMs ?? XLABS_FETCH_TIMEOUT_MS);
+    const maxResponseBytes = responseByteLimit(env);
+    const fetched = await fetchJsonText(
+      requestedUrl,
+      options.fetchImpl || fetch,
+      options.timeoutMs ?? XLABS_FETCH_TIMEOUT_MS,
+      maxResponseBytes
+    );
     try {
       validateXlabsRacePayload(fetched.parsed, xlabsTrackId, race);
     } catch (error) {
@@ -506,7 +527,9 @@ export async function captureXlabsRaceJson(env, calculateSourceRecordId, trackId
         redirectCount: fetched.redirectCount,
         pathResolution: resolution,
         acquisitionRecipe: '1MMDDTTRR.json',
-        normalizationStatus: 'available_verified_subset'
+        normalizationStatus: 'available_verified_subset',
+        responseBytes: fetched.bytes,
+        responseByteLimit: maxResponseBytes
       }
     });
     if (archived.reused) counts.skipped = 1;

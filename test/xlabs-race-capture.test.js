@@ -136,6 +136,45 @@ test('bounds the returned schema sample across nested objects', async () => {
   assert.ok(countKeys(result.schemaSample) <= 20);
 });
 
+
+
+test('accepts legitimate X-Labs telemetry payloads above the former 8 MB ceiling while keeping a bounded limit', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedContext(db, objects);
+  seedOfficialTrack(db);
+  const body = telemetryPayload(7, 5, { padding: 'x'.repeat((8 * 1024 * 1024) + 1024) });
+  assert.ok(new TextEncoder().encode(body).byteLength > 8 * 1024 * 1024);
+
+  const result = await captureXlabsRaceJson(env, 'src_calc', 7, 5, {
+    fetchImpl: async () => new Response(body, { headers: { 'content-type': 'application/json' } })
+  });
+
+  assert.equal(result.qualityStatus, 'captured_unmapped');
+  const source = db.prepare(`
+    SELECT metadata_json FROM source_records
+    WHERE id = ?
+  `).get(result.sourceRecordId);
+  const metadata = JSON.parse(source.metadata_json);
+  assert.ok(metadata.responseBytes > 8 * 1024 * 1024);
+  assert.equal(metadata.responseByteLimit, 32 * 1024 * 1024);
+});
+
+test('configured X-Labs telemetry response ceiling still fails closed with byte diagnostics', async () => {
+  const { env, db, objects } = createTestEnv();
+  env.XLABS_MAX_RACE_RESPONSE_BYTES = '256';
+  seedContext(db, objects);
+  seedOfficialTrack(db);
+  const body = telemetryPayload(7, 5, { padding: 'x'.repeat(1024) });
+
+  await assert.rejects(
+    () => captureXlabsRaceJson(env, 'src_calc', 7, 5, {
+      fetchImpl: async () => new Response(body, { headers: { 'content-type': 'application/json' } })
+    }),
+    /exceeded size limit \(limit=256, observed>/
+  );
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM source_records WHERE source_type = 'xlabs_race_json'`).get().n, 0);
+});
+
 test('rejects a resolved base path outside the captured date json directory', async () => {
   const { env, db, objects } = createTestEnv();
   seedContext(db, objects, '/other-date/json/');
