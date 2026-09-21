@@ -17,6 +17,7 @@ import {
 import { importStrictCombinedAnalysisUpload } from './analysis-workflow-v2-strict.js';
 import { getTrackDetailV064, getTrackLaneStatsV064 } from './routes/tracks-v064.js';
 import { applyTrackContactEnrichment, listTrackContactTargets } from './track-contact-enrichment.js';
+import { applyTrackProfileEnrichment, listTrackProfileTargets } from './track-profile-enrichment.js';
 import { syncOnePendingHorseStartPointSource } from './import/official-start-points.js';
 import { getHorseDetailStatistics, getHorseRankings } from './statistics/horses-complete.js';
 import { getDriverDetailStatistics, getDriverFilterOptions, getDriverRankings } from './statistics/drivers.js';
@@ -90,6 +91,18 @@ export default {
     if (request.method === 'POST' && path === '/v1/admin/tracks/contact-enrichment') {
       const denied = requireAdmin(request, env); if (denied) return denied;
       try { return json(await applyTrackContactEnrichment(env, await request.json())); }
+      catch (error) { console.error(error); return json({ error: 'request_failed', message: error.message }, 400); }
+    }
+
+    if (request.method === 'GET' && path === '/v1/admin/tracks/profile-targets') {
+      const denied = requireAdmin(request, env); if (denied) return denied;
+      try { return json(await listTrackProfileTargets(env)); }
+      catch (error) { console.error(error); return json({ error: 'request_failed', message: error.message }, 400); }
+    }
+
+    if (request.method === 'POST' && path === '/v1/admin/tracks/profile-enrichment') {
+      const denied = requireAdmin(request, env); if (denied) return denied;
+      try { return json(await applyTrackProfileEnrichment(env, await request.json())); }
       catch (error) { console.error(error); return json({ error: 'request_failed', message: error.message }, 400); }
     }
 
