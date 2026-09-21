@@ -57,12 +57,12 @@ function historicalProcessing(job, nowMs) {
     : null;
   const retryAfterMs = isoTime(job.retry_after);
   const lastActivityMs = isoTime(job.last_run_at || job.updated_at || job.created_at);
-  const waiting = job.status === 'running'
-    && Number(job.consecutive_errors || 0) === 0
+  const retryScheduled = job.status === 'running'
     && retryAfterMs !== null
     && retryAfterMs > nowMs;
+  const waiting = retryScheduled && Number(job.consecutive_errors || 0) === 0;
   const stale = job.status === 'running'
-    && !waiting
+    && !retryScheduled
     && lastActivityMs !== null
     && nowMs - lastActivityMs > HISTORICAL_STALE_MS;
 
@@ -184,7 +184,9 @@ async function latestHistoricalOfficial(env) {
   return env.DB.prepare(`
     SELECT id, start_date, end_date, next_date, next_race_index, status,
            processed_dates, processed_races, reused_races, consecutive_errors,
-           last_error, last_run_at, NULL AS retry_after, created_at, updated_at
+           last_error, last_run_at,
+           CASE WHEN consecutive_errors > 0 THEN lease_until ELSE NULL END AS retry_after,
+           created_at, updated_at
     FROM historical_backfill_jobs
     WHERE start_date <> end_date
     ORDER BY datetime(created_at) DESC, id DESC
