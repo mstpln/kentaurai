@@ -217,3 +217,12 @@ A single race must not directly change model weights. Candidate learnings are re
 3. Only a page classified as static/unknown with no script tags, tables or iframes may close as neutral unavailable coverage.
 4. Any alternate data-channel clue keeps the checkpoint failed/paused for investigation rather than being silently skipped.
 5. Daily/current X-Labs jobs retain the stricter behavior; this neutral static-page rule is limited to the historical-all backfill.
+
+
+## Settings health and notification semantics
+1. **Datakällor** is operational health, not a mirror of the recent-run list. It must use durable official/X-Labs job state and relevant scheduled-run evidence so an active source cannot become “unknown” merely because another source filled the latest log window.
+2. Source health and historical-job state are separate. User-facing health is **Fungerar / Fel upptäckt / Åtgärd krävs / Ingen körning ännu**. Historical processing is **Pågår / Väntar / Klar / Åtgärd krävs / Ingen körning ännu**.
+3. **Pågår**, **Fungerar** and **Klar** use the normal green success treatment. Error/retry and action-required states are red. **Väntar** and **Ingen körning ännu** are neutral.
+4. Historical progress equals completed dates divided by the inclusive requested date range. A date deliberately closed as neutral unavailable X-Labs coverage is completed work, not missing progress.
+5. The Settings-gear red badge represents an unseen current incident, not merely an active error. Opening a successfully rendered Settings page acknowledges the current incident. Repeated retry failures at the same checkpoint remain acknowledged; escalation to **Åtgärd krävs** creates a new notification. Recovery removes the active incident and resets acknowledgement state for future incidents.
+6. Settings health reads are observational only and must not make extra provider requests.
