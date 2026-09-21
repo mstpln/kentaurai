@@ -90,6 +90,28 @@ test('persistent historical jobs drive source health and date progress without r
   assert.equal(xlabs.processing.status, 'never_run');
 });
 
+test('official retry delay remains an automatic retry instead of becoming stale action-required', async () => {
+  const { env, db } = createTestEnv();
+  insertOfficialHistorical(db, {
+    consecutive_errors: 1,
+    last_error: 'Synthetic access failure',
+    last_run_at: '2099-09-21T19:30:00Z'
+  });
+  db.prepare(`
+    UPDATE historical_backfill_jobs
+    SET lease_until='2099-09-21T20:10:00Z'
+    WHERE id='official-history'
+  `).run();
+
+  const result = await getSettingsSourceHealth(env, { now: NOW });
+  const official = result.sources.find((source) => source.id === 'official');
+
+  assert.equal(official.status, 'error_retrying');
+  assert.equal(official.processing.status, 'running');
+  assert.equal(official.processing.stale, false);
+  assert.equal(official.issue.label, 'Fel upptäckt · nytt försök pågår');
+});
+
 test('X-Labs retry error is red-alert health while historical processing remains running', async () => {
   const { env, db } = createTestEnv();
   insertXlabsHistorical(db, {
