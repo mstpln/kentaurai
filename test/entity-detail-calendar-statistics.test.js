@@ -220,3 +220,41 @@ test('driver Form market component uses only the final source-backed snapshot at
   assert.equal(data.formLast.components.marketPerformance.marketBlind,false);
   assert.notEqual(data.formLast.score,null);
 });
+
+
+test('horse specialties aggregate verified C4 race scenarios with active calendar filters', async () => {
+  const { createTestEnv } = await import('./helpers/d1.js');
+  const { env, db } = createTestEnv();
+  db.prepare("INSERT INTO tracks (id,canonical_name,country_code) VALUES ('scenario-track','Scenario','SE')").run();
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('scenario-horse','Scenario Häst')").run();
+  db.prepare("INSERT INTO source_records (id,source_type,fetched_at,quality_status) VALUES ('scenario-src','xlabs_race_json','2026-09-10T15:00:00Z','normalized_verified_subset')").run();
+
+  const scenarios = [
+    ['s1','2026-09-01',1,1,'leader'],
+    ['s2','2026-09-02',1,2,'leader'],
+    ['s3','2026-09-03',2,3,'death_seat'],
+    ['s4','2026-09-04',1,1,'second_over']
+  ];
+  for (const [id,date,raceNo,placing,scenario] of scenarios) {
+    const raceId='r-'+id, entryId='e-'+id;
+    db.prepare("INSERT INTO races (id,track_id,race_date,race_number,distance_m,start_method,status) VALUES (?,'scenario-track',?,?,2140,'auto','results')").run(raceId,date,raceNo);
+    db.prepare("INSERT INTO race_entries (id,race_id,horse_id,start_number,scratched) VALUES (?,?,'scenario-horse',1,0)").run(entryId,raceId);
+    db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,gallop,disqualified) VALUES (?,?,'official',0,0)").run(entryId,placing);
+    const flags={leader:0,pocket:0,death_seat:0,second_over:0,third_over:0};
+    if (scenario!=='back') flags[scenario]=1;
+    db.prepare(`INSERT INTO race_positions
+      (id,race_entry_id,observed_at_m,position,leader,pocket,death_seat,second_over,third_over,traffic_event,source_record_id,evidence_type,confidence,classification_version)
+      VALUES (?,?,500,2,?,?,?,?,?,?,?,?,0.95,'xlabs-trip-classification-v1')`).run(
+      'p-'+id,entryId,flags.leader,flags.pocket,flags.death_seat,flags.second_over,flags.third_over,
+      scenario==='back'?'bakifrån':null,'scenario-src','calculated_xlabs'
+    );
+  }
+
+  const data=await getCalendarYearDetailSpecialties(env,'horses','scenario-horse',{year:2026,asOfDate:'2026-09-20'});
+  const leader=data.tripScenarioResults.find(row=>row.scenario==='leader');
+  const death=data.tripScenarioResults.find(row=>row.scenario==='death_seat');
+  const second=data.tripScenarioResults.find(row=>row.scenario==='second_over');
+  assert.deepEqual({starts:leader.starts,wins:leader.wins,top3:leader.top3,winRate:leader.winRate},{starts:2,wins:1,top3:2,winRate:0.5});
+  assert.deepEqual({starts:death.starts,wins:death.wins,top3:death.top3},{starts:1,wins:0,top3:1});
+  assert.deepEqual({starts:second.starts,wins:second.wins,top3:second.top3},{starts:1,wins:1,top3:1});
+});
