@@ -359,6 +359,7 @@ export async function getSettingsAlertState(env, health = null) {
   const current = health || await getSettingsSourceHealth(env);
   const keys = [...new Set((current.alerts || []).map((alert) => alert.key).filter(Boolean))];
   if (!keys.length) {
+    await env.DB.prepare('DELETE FROM settings_alert_acknowledgements').run();
     return { hasActiveAlerts: false, hasUnacknowledged: false, activeCount: 0, unacknowledgedCount: 0 };
   }
 
