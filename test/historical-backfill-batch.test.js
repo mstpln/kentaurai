@@ -109,7 +109,8 @@ test('minute scheduler prioritizes live normalization and records bounded histor
     'live_normalize',
     'historical_backfill',
     'xlabs_backfill',
-    'xlabs_interval_repair'
+    'xlabs_interval_repair',
+    'xlabs_position_reconstruction'
   ]);
   assert.equal(metadata.parts[0].result.maxSteps, 3);
   assert.equal(metadata.parts[2].result.maxCheckpoints, 3);

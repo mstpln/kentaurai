@@ -114,13 +114,13 @@ Updated: 2026-09-20
 - The Step 2 bundle contains the exact persisted sealed Step 1 document plus its bound verified market files. New Step 2 work therefore does not rely on reconstructing Step 1 from conversation memory.
 - Legacy v1/v2 analysis creation is disabled in v3 mode after authentication; creation routes return a deprecation error. Historical legacy read routes/artifacts remain available.
 - Historical sealed-v3 systems remain authoritative for their own lineage. New external-workflow systems are selected by the external AI and accepted only after deterministic exact-three-spike/row/cost validation.
-- C4 named trip-label promotion remains optional/gated and is not required for the cutover.
+- C4 named trip-label promotion is implemented on top of C3 with a conservative 400-600 m decision window centered on 500 m remaining. It writes only stable high-confidence labels to the existing `race_positions` table as calculated X-Labs evidence.
 - F4 has no planned schema migration and does not reset or start replay/backfill work.
 
 ## v3 programme status
 - A1-A4: complete.
 - B1-B6: complete.
-- C1-C3: complete and deployed. C4: optional/gated, not promoted.
+- C1-C3: complete and deployed. C4: implemented in code with explicit production backfill activation; ambiguous labels remain null.
 - D1 pre-market pack v3: complete and deployed.
 - D2 Step 1 prompt + sealed lock: complete and deployed.
 - D3 late-fact revision + lock lineage: complete and deployed.

@@ -180,7 +180,7 @@ test('C3 abstains from rank and leader gap when longitudinal telemetry is ambigu
   assert.ok(tiedRows.every((row) => row.metersBehindLeader == null));
 });
 
-test('C3 persistence is idempotent, source-backed and never writes named legacy race_positions', async () => {
+test('C3 persistence is idempotent, source-backed and promotes stable C4 labels into race_positions', async () => {
   const { env, db, objects } = createTestEnv();
   seedOfficialRace(db);
   seedCapturedTelemetry(db, objects);
@@ -190,8 +190,10 @@ test('C3 persistence is idempotent, source-backed and never writes named legacy 
   assert.ok(first.checkpointRows > 0);
   assert.ok(first.summaryRows === 3);
   assert.ok(first.counts.inserted > 0);
-  assert.equal(first.namedTripLabelsEnabled, false);
-  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM race_positions`).get().n, 0);
+  assert.equal(first.namedTripLabelsEnabled, true);
+  assert.ok(first.tripClassificationRows >= 0);
+  const firstNamed = db.prepare(`SELECT COUNT(*) AS n FROM race_positions`).get().n;
+  assert.equal(firstNamed, first.tripClassificationRows);
   assert.equal(db.prepare(`SELECT quality_status FROM source_records WHERE id=?`).get(SOURCE_ID).quality_status, 'normalized_verified_subset');
   const countsAfterFirst = {
     checkpoints: db.prepare(`SELECT COUNT(*) AS n FROM race_position_checkpoints`).get().n,
@@ -207,7 +209,7 @@ test('C3 persistence is idempotent, source-backed and never writes named legacy 
     episodes: db.prepare(`SELECT COUNT(*) AS n FROM race_trajectory_episodes`).get().n,
     summaries: db.prepare(`SELECT COUNT(*) AS n FROM race_trajectory_summaries`).get().n
   }, countsAfterFirst);
-  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM race_positions`).get().n, 0);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM race_positions`).get().n, firstNamed);
 });
 
 test('C3 selective reconstruction job is date-bounded, checkpointed and advances one stored source per explicit step', async () => {

@@ -5,6 +5,13 @@ import { importReferenceRound } from './import/reference-round-safe.js';
 import { normalizeCapturedOfficialGameSequential } from './import/official-live-sequential.js';
 import { captureUpcomingOfficialGames, normalizeNextPendingOfficialGame } from './import/official-live-scheduled.js';
 import { normalizeCapturedXlabsRace } from './import/xlabs-telemetry.js';
+import {
+  createXlabsPositionReconstructionJob,
+  getXlabsPositionReconstructionJob,
+  normalizeCapturedXlabsPositionReconstruction,
+  runXlabsPositionReconstructionBatch,
+  stepXlabsPositionReconstructionJob
+} from './xlabs-position-reconstruction-v1.js';
 import { ensureXlabsIntervalsForSource, runXlabsIntervalRepairBatch } from './import/xlabs-interval-repair.js';
 import { normalizeCapturedOfficialRace } from './import/official-historical-race.js';
 import { ensureDailyOfficialHistoryJobs, getHistoricalBackfill, runHistoricalBackfillBatch, runHistoricalBackfillStep, startHistoricalBackfill } from './import/official-historical-backfill.js';
@@ -252,7 +259,8 @@ async function handleFetch(request, env) {
     const body = await readJson(request);
     const telemetry = await normalizeCapturedXlabsRace(env, body.source_record_id);
     const intervals = await ensureXlabsIntervalsForSource(env, body.source_record_id);
-    return json({ ...telemetry, intervals });
+    const positions = await normalizeCapturedXlabsPositionReconstruction(env, body.source_record_id);
+    return json({ ...telemetry, intervals, positions });
   }
   if (request.method === 'POST' && path === '/v1/xlabs/interval-repair') {
     const body = await readJson(request);
@@ -261,6 +269,19 @@ async function handleFetch(request, env) {
   if (request.method === 'POST' && path === '/v1/xlabs/verify-normalization') {
     const body = await readJson(request);
     return json(await verifyCapturedXlabsNormalization(env, body.source_record_id));
+  }
+
+  if (request.method === 'POST' && path === '/v1/xlabs/position-reconstruction/start') {
+    const body = await readJson(request);
+    return json(await createXlabsPositionReconstructionJob(env, { startDate: body.start_date, endDate: body.end_date }), 201);
+  }
+  if (request.method === 'POST' && path === '/v1/xlabs/position-reconstruction/step') {
+    const body = await readJson(request);
+    return json(await stepXlabsPositionReconstructionJob(env, body.job_id));
+  }
+  if (request.method === 'GET' && path === '/v1/xlabs/position-reconstruction/status') {
+    const job = await getXlabsPositionReconstructionJob(env, url.searchParams.get('job_id'));
+    return job ? json(job) : json({ error:'not_found' }, 404);
   }
   if (request.method === 'POST' && path === '/v1/xlabs/backfill/start') {
     const body = await readJson(request);
@@ -338,6 +359,7 @@ async function handleScheduled(controller, env) {
     parts.push(await runScheduledPart('historical_backfill', () => runHistoricalBackfillBatch(env)));
     parts.push(await runScheduledPart('xlabs_backfill', () => runXlabsBackfillBatch(env)));
     parts.push(await runScheduledPart('xlabs_interval_repair', () => runXlabsIntervalRepairBatch(env)));
+    parts.push(await runScheduledPart('xlabs_position_reconstruction', () => runXlabsPositionReconstructionBatch(env)));
   } else if (controller.cron === LIVE_MORNING_CRON) {
     parts.push(await runScheduledPart('live_capture_morning', () => captureUpcomingOfficialGames(env, controller.scheduledTime, { includeToday: true })));
   } else if (controller.cron === LIVE_EVENING_CRON) {

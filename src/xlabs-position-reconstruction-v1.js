@@ -2,6 +2,7 @@ import { stableId, randomId } from './ids.js';
 import { finishImportRun, startImportRun } from './import/common.js';
 import { deriveCapturedXlabsIntervalsV2 } from './xlabs-intervals-v2.js';
 import { validateXlabsRacePayload } from './provider/xlabs-race.js';
+import { persistXlabsTripScenarios } from './xlabs-trip-classification-v1.js';
 
 export const XLABS_POSITION_RECONSTRUCTION_CONTRACT = 'kentaurai-xlabs-position-reconstruction-v1';
 export const XLABS_POSITION_RECONSTRUCTION_VERSION = 'xlabs-position-reconstruction-v1';
@@ -612,6 +613,9 @@ export async function normalizeCapturedXlabsPositionReconstruction(env, sourceRe
     await persistBatches(env, reconstruction.checkpoints.map((row) => checkpointInsert(env, row)), counts);
     await persistBatches(env, reconstruction.episodes.map((row) => episodeInsert(env, row)), counts);
     await persistBatches(env, reconstruction.summaries.map((row) => summaryInsert(env, row)), counts);
+    const tripClassification = await persistXlabsTripScenarios(env, reconstruction);
+    counts.inserted += tripClassification.inserted;
+    counts.skipped += tripClassification.skipped;
     await finishImportRun(env, run.id, counts);
     return {
       importRunId: run.id,
@@ -623,7 +627,8 @@ export async function normalizeCapturedXlabsPositionReconstruction(env, sourceRe
       summaryRows: reconstruction.summaries.length,
       counts,
       sourceQualityStatus: derived.source.quality_status,
-      namedTripLabelsEnabled: false
+      namedTripLabelsEnabled: true,
+      tripClassificationRows: tripClassification.rows.length
     };
   } catch (error) {
     counts.errors = 1;
@@ -647,12 +652,38 @@ export async function createXlabsPositionReconstructionJob(env, { startDate, end
   return { id, startDate: start, endDate: end, status: 'running', reconstructionVersion: XLABS_POSITION_RECONSTRUCTION_VERSION };
 }
 
-async function loadPositionJob(env, jobId) {
-  const job = await env.DB.prepare(`
-    SELECT * FROM xlabs_position_reconstruction_jobs WHERE id=? LIMIT 1
-  `).bind(requiredText(jobId, 'jobId')).first();
-  if (!job) throw new Error('X-Labs position reconstruction job was not found');
-  return job;
+async function loadPositionJob(env, jobId = null) {
+  if (jobId != null && String(jobId).trim()) {
+    const job = await env.DB.prepare(`
+      SELECT * FROM xlabs_position_reconstruction_jobs WHERE id=? LIMIT 1
+    `).bind(requiredText(jobId, 'jobId')).first();
+    if (!job) throw new Error('X-Labs position reconstruction job was not found');
+    return job;
+  }
+  return env.DB.prepare(`
+    SELECT * FROM xlabs_position_reconstruction_jobs
+    WHERE status='running' AND reconstruction_version=?
+    ORDER BY created_at,id
+    LIMIT 1
+  `).bind(XLABS_POSITION_RECONSTRUCTION_VERSION).first();
+}
+
+export async function getXlabsPositionReconstructionJob(env, jobId) {
+  if (!env?.DB) throw new Error('DB is not configured');
+  const job = await loadPositionJob(env, jobId);
+  return job ? {
+    id: job.id,
+    startDate: job.start_date,
+    endDate: job.end_date,
+    status: job.status,
+    processedSources: Number(job.processed_sources || 0),
+    insertedRows: Number(job.inserted_rows || 0),
+    skippedRows: Number(job.skipped_rows || 0),
+    consecutiveErrors: Number(job.consecutive_errors || 0),
+    lastError: job.last_error || null,
+    lastRunAt: job.last_run_at || null,
+    reconstructionVersion: job.reconstruction_version
+  } : null;
 }
 
 async function nextJobSource(env, job) {
@@ -677,8 +708,9 @@ async function nextJobSource(env, job) {
   ).first();
 }
 
-export async function stepXlabsPositionReconstructionJob(env, jobId) {
+export async function stepXlabsPositionReconstructionJob(env, jobId = null) {
   const job = await loadPositionJob(env, jobId);
+  if (!job) return { jobId: null, status: 'idle', done: true };
   if (job.reconstruction_version !== XLABS_POSITION_RECONSTRUCTION_VERSION) throw new Error('job reconstruction version does not match current C3 version');
   if (job.status !== 'running') return { jobId: job.id, status: job.status, done: job.status === 'completed' };
   const source = await nextJobSource(env, job);
@@ -708,4 +740,16 @@ export async function stepXlabsPositionReconstructionJob(env, jobId) {
     `).bind(nextErrors,status,error.message,source.id,new Date().toISOString(),job.id).run();
     throw error;
   }
+}
+
+
+export async function runXlabsPositionReconstructionBatch(env, jobId = null) {
+  const result = await stepXlabsPositionReconstructionJob(env, jobId);
+  return {
+    jobId: result?.jobId || jobId || null,
+    status: result?.status || 'idle',
+    done: Boolean(result?.done),
+    stepCount: result?.status === 'idle' ? 0 : 1,
+    result
+  };
 }

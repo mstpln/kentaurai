@@ -2,6 +2,7 @@ import { stableId } from '../ids.js';
 import { finishImportRun, startImportRun } from './common.js';
 import { normalizeCapturedXlabsRace } from './xlabs-telemetry.js';
 import { ensureXlabsIntervalsForSource } from './xlabs-interval-repair.js';
+import { normalizeCapturedXlabsPositionReconstruction } from '../xlabs-position-reconstruction-v1.js';
 import { XLABS_SOURCE_GAP_QUALITY, markXlabsSourceGap, xlabsTelemetrySourceGap } from './xlabs-source-gap.js';
 import { v85V86GameIdsFromCalendar } from './official-live-scheduled.js';
 import { captureXlabsDate, validateXlabsDate } from '../provider/xlabs.js';
@@ -584,6 +585,7 @@ export async function runXlabsBackfillStep(env, jobId = null, options = {}) {
     } else counts.skipped += 1;
 
     await ensureXlabsIntervalsForSource(env, source.id);
+    await normalizeCapturedXlabsPositionReconstruction(env, source.id);
 
     const nextIndex = await recordCompletedRace(env, job, leaseToken, reused);
     await finishImportRun(env, run.id, counts);
