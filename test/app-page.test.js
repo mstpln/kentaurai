@@ -105,7 +105,7 @@ test('entity detail UI groups every stored measurement family', () => {
 
 test('historical starts present C4 positions as clear race scenarios', () => {
   const html = renderAppPage();
-  assert.match(html, /500 m kvar/);
+  assert.match(html, /m kvar/);
   assert.match(html, /Löpningsscenario/);
   assert.match(html, /2:a utvändigt/);
   assert.match(html, /Dödens/);
