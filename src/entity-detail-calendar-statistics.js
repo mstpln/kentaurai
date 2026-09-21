@@ -13,6 +13,7 @@ import {
 } from './statistics/core.js';
 import { DRIVER_LONGSHOT_PERCENT_MAX, DRIVER_MARKET_DEFINITION_VERSION } from './statistics/driver-features.js';
 import { getHorseCurrentStartPoint } from './statistics/horse-start-points.js';
+import { XLABS_TRIP_CLASSIFICATION_VERSION } from './xlabs-trip-classification-v1.js';
 import {
   calculateHorseFormIndex,
   fieldPercentileScore,
@@ -459,16 +460,65 @@ async function loadRest(env,entityId,filters,config,kind){
   const starts=Number(row?.starts||0),wins=Number(row?.wins||0),top3=Number(row?.top3||0);return{starts,wins,top3,winRate:starts?wins/starts:null,top3Rate:starts?top3/starts:null};
 }
 
+
+async function loadHorseTripScenarios(env,entityId,filters){
+  const conditions=['re.scratched=0','re.horse_id=?'],bindings=[entityId];
+  addCommonFilters(conditions,bindings,filters,{includeVolt:false});
+  bindings.push(XLABS_TRIP_CLASSIFICATION_VERSION);
+  const {results}=await env.DB.prepare(`
+    WITH latest_trip AS (
+      SELECT rp.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY rp.race_entry_id
+          ORDER BY julianday(sr.fetched_at) DESC,rp.id DESC
+        ) rn
+      FROM race_positions rp
+      JOIN source_records sr ON sr.id=rp.source_record_id
+      WHERE rp.classification_version=?
+    ), filtered AS MATERIALIZED (
+      SELECT re.id race_entry_id,rr.placing,
+        CASE
+          WHEN rp.leader=1 THEN 'leader'
+          WHEN rp.pocket=1 THEN 'pocket'
+          WHEN rp.death_seat=1 THEN 'death_seat'
+          WHEN rp.second_over=1 THEN 'second_over'
+          WHEN rp.third_over=1 THEN 'third_over'
+          WHEN rp.traffic_event='bakifrån' THEN 'back'
+          ELSE NULL
+        END scenario
+      FROM race_entries re INDEXED BY idx_entries_horse_race
+      JOIN races r ON r.id=re.race_id
+      JOIN race_results rr ON rr.race_entry_id=re.id
+      JOIN horses h ON h.id=re.horse_id
+      JOIN latest_trip rp ON rp.race_entry_id=re.id AND rp.rn=1
+      WHERE ${conditions.join(' AND ')}
+    )
+    SELECT scenario,COUNT(*) starts,
+      SUM(CASE WHEN placing=1 THEN 1 ELSE 0 END) wins,
+      SUM(CASE WHEN placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) top3
+    FROM filtered
+    WHERE scenario IS NOT NULL
+    GROUP BY scenario
+  `).bind(XLABS_TRIP_CLASSIFICATION_VERSION,...bindings.slice(0,-1)).all();
+  const labels={leader:'Spets',pocket:'Rygg ledaren',death_seat:'Dödens',second_over:'2:a utvändigt',third_over:'3:e utvändigt',back:'Bakifrån'};
+  const order={leader:1,pocket:2,death_seat:3,second_over:4,third_over:5,back:6};
+  return (results||[]).map(row=>{
+    const starts=Number(row.starts||0),wins=Number(row.wins||0),top3=Number(row.top3||0);
+    return{scenario:row.scenario,label:labels[row.scenario]||row.scenario,starts,wins,top3,winRate:starts?wins/starts:null,top3Rate:starts?top3/starts:null};
+  }).sort((a,b)=>(order[a.scenario]||99)-(order[b.scenario]||99));
+}
+
 function definitions(){return{longshotPercentMax:DRIVER_LONGSHOT_PERCENT_MAX,market:DRIVER_MARKET_DEFINITION_VERSION,voltLaneGood:[1,6,7],restDays:REST_DAYS}}
 
 async function loadSpecialties(env,id,filters,config){
-  const [favorite,longshot,firstAfterRest,secondAfterRest]=await Promise.all([
+  const [favorite,longshot,firstAfterRest,secondAfterRest,tripScenarioResults]=await Promise.all([
     loadMarket(env,id,filters,config,'favorite'),
     loadMarket(env,id,filters,config,'longshot'),
     loadRest(env,id,filters,config,'first'),
-    loadRest(env,id,filters,config,'second')
+    loadRest(env,id,filters,config,'second'),
+    config.resultKey==='horse'?loadHorseTripScenarios(env,id,filters):Promise.resolve(null)
   ]);
-  return{favoriteResults:favorite,longshotResults:longshot,firstAfterRest,secondAfterRest};
+  return{favoriteResults:favorite,longshotResults:longshot,firstAfterRest,secondAfterRest,tripScenarioResults};
 }
 
 async function prepareDetail(env,entityType,entityId,options={}){
@@ -491,7 +541,7 @@ export async function getCalendarYearDetailStatistics(env,entityType,entityId,op
   ]);
   if(!entity)return null;
   const specialties=options.includeSpecials===false
-    ? {favoriteResults:null,longshotResults:null,firstAfterRest:null,secondAfterRest:null}
+    ? {favoriteResults:null,longshotResults:null,firstAfterRest:null,secondAfterRest:null,tripScenarioResults:null}
     : await loadSpecialties(env,id,filters,config);
   return{entityType,[config.resultKey]:entity,filters,...core,formLast:null,currentStartPoints,...specialties,definitions:definitions()};
 }
