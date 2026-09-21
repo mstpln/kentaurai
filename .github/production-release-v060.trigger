@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=288a919ed89af80302c8c846009b6a8a682b72e5
-release_nonce=2026-09-21-topbar-brand-icon-fit-pr233-1
+source_main=a051808f6917d347534ff2f936fc6f5e5c656234
+release_nonce=2026-09-21-xlabs-trip-scenarios-pr234-1
