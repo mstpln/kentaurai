@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS track_first_turn_distances (
   distance_to_first_turn_m REAL NOT NULL CHECK (distance_to_first_turn_m > 0),
   evidence_type TEXT NOT NULL CHECK (evidence_type IN ('verified','calculated')),
   source_type TEXT NOT NULL CHECK (source_type IN ('official_track','official_sport','measurement','secondary','calculation')),
-  source_url TEXT,
+  source_url TEXT NOT NULL,
   verified_at TEXT NOT NULL,
   layout_effective_from TEXT,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','conflict')),
