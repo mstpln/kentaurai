@@ -170,7 +170,7 @@ export async function applyTrackProfileEnrichment(env, payload) {
       const source = sourceFor(item.source, `facts.${factType}`);
       const note = calculationNote(item, type, `facts.${factType}`);
       const status = await profileFactStatus(env, trackId, factType, layoutEffectiveFrom, value);
-      const id = await digestId('track-profile', [trackId,factType,value,type,source.sourceType,source.sourceUrl,layoutEffectiveFrom]);
+      const id = await digestId('track-profile', [trackId,factType,value,type,source.sourceType,source.sourceUrl,verifiedAt,layoutEffectiveFrom]);
       await env.DB.prepare(`
         INSERT INTO track_profile_fact_observations (
           id, track_id, fact_type, numeric_value, evidence_type, source_type, source_url,
@@ -197,7 +197,7 @@ export async function applyTrackProfileEnrichment(env, payload) {
       const source = sourceFor(item.source, 'first_turn_distances');
       const note = calculationNote(item, type, 'first_turn_distances');
       const status = await firstTurnStatus(env, trackId, distanceM, method, layoutEffectiveFrom, distanceToTurn);
-      const id = await digestId('track-first-turn', [trackId,distanceM,method,distanceToTurn,type,source.sourceType,source.sourceUrl,layoutEffectiveFrom]);
+      const id = await digestId('track-first-turn', [trackId,distanceM,method,distanceToTurn,type,source.sourceType,source.sourceUrl,verifiedAt,layoutEffectiveFrom]);
       await env.DB.prepare(`
         INSERT INTO track_first_turn_distances (
           id, track_id, race_distance_m, start_method, distance_to_first_turn_m,
