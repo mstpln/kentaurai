@@ -51,7 +51,9 @@ test('conflicting same-layout facts are preserved instead of overwritten', async
   }], first_turn_distances:[] });
   const result = await applyTrackProfileEnrichment(env, conflict);
   assert.equal(result.conflicts, 1);
-  assert.deepEqual(db.prepare("SELECT numeric_value, status FROM track_profile_fact_observations ORDER BY numeric_value").all(), [
+  const rows = db.prepare("SELECT numeric_value, status FROM track_profile_fact_observations ORDER BY numeric_value").all()
+    .map((row) => ({ numeric_value:row.numeric_value, status:row.status }));
+  assert.deepEqual(rows, [
     { numeric_value:21.2, status:'active' }, { numeric_value:22.4, status:'conflict' }
   ]);
 });
