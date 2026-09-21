@@ -130,7 +130,7 @@ const priorAlignedOpenDetail=openDetail;
 openDetail=async function(page,id){if(STATISTICS_PAGES.includes(page))state.statisticsPage=page;return priorAlignedOpenDetail(page,id)};
 const priorAlignedRenderEntityList=renderEntityList;
 renderEntityList=async function(page){if(!['list','stats'].includes(state.tab))state.tab='list';if(STATISTICS_PAGES.includes(page))state.statisticsPage=page;return priorAlignedRenderEntityList(page)};
-function statusWords(status){return ({working:'Fungerar',success:'Klar',warning:'Fel upptäckt',error:'Fel upptäckt',running:'Pågår',unknown:'Ingen körning ännu'})[status]||status}statusText=statusWords;
+function statusWords(status){return ({working:'Fungerar',success:'Klar',warning:'Fel upptäckt',error:'Fel upptäckt',running:'Pågår',unknown:'Ingen körning ännu',never_run:'Ingen körning ännu',waiting:'Väntar',completed:'Klar',error_retrying:'Fel upptäckt',action_required:'Åtgärd krävs'})[status]||status}statusText=statusWords;
 function alignSettingsStatuses(){document.querySelectorAll('.settings-row').forEach(row=>{const pill=row.querySelector(':scope > .status-pill');if(!pill||row.querySelector(':scope > .settings-row-status'))return;const status=pill.className.split(/\\s+/).find(x=>['working','success','warning','error','running','unknown'].includes(x));if(status)pill.textContent=statusWords(status);const bottom=document.createElement('div');bottom.className='settings-row-status';const label=document.createElement('span');label.className='settings-row-status-label';label.textContent='Status';bottom.append(label,pill);row.append(bottom)})}
 const priorAlignedRenderData=renderData;renderData=async function(){await priorAlignedRenderData();if(state.settingsOpen&&state.settingsTab==='data')alignSettingsStatuses()};
 
