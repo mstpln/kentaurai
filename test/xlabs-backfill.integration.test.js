@@ -264,6 +264,71 @@ test('404 date pages are neutral missing coverage and complete a ready single-da
   assert.equal(job.consecutive_errors, 0);
 });
 
+
+test('historical X-Labs treats a verified static page with no supported data channel as neutral unavailable coverage', async () => {
+  const { env, db } = createTestEnv();
+  seedOfficialRace(db);
+  seedOfficialCoverage(db);
+  await startXlabsBackfill(env, DATE, DATE);
+
+  const result = await runXlabsBackfillStep(env, null, {
+    dateFetchImpl: async () => new Response('<html><head><title>Archive</title></head><body>no telemetry here</body></html>', {
+      status: 200,
+      headers: { 'content-type': 'text/html' }
+    })
+  });
+
+  assert.equal(result.unavailableDate, DATE);
+  assert.equal(result.unavailableReason, 'historical_static_page_without_supported_data_channel');
+  assert.equal(result.status, 'completed');
+  assert.equal(result.done, true);
+
+  const job = db.prepare(`
+    SELECT status,processed_dates,processed_races,unavailable_dates,consecutive_errors,last_error
+    FROM xlabs_backfill_jobs
+  `).get();
+  assert.deepEqual({ ...job }, {
+    status: 'completed',
+    processed_dates: 1,
+    processed_races: 0,
+    unavailable_dates: 1,
+    consecutive_errors: 0,
+    last_error: null
+  });
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM source_records WHERE source_type='xlabs'`).get().n, 1);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM source_records WHERE source_type='xlabs_script'`).get().n, 0);
+});
+
+test('historical X-Labs does not skip a page that exposes another data-channel clue when required scripts are missing', async () => {
+  const { env, db } = createTestEnv();
+  seedOfficialRace(db);
+  seedOfficialCoverage(db);
+  await startXlabsBackfill(env, DATE, DATE);
+
+  await assert.rejects(
+    () => runXlabsBackfillStep(env, null, {
+      dateFetchImpl: async () => new Response("<html><script>fetch('/api/race-data')</script></html>", {
+        status: 200,
+        headers: { 'content-type': 'text/html' }
+      })
+    }),
+    /requested X-Labs script was not referenced/
+  );
+
+  const job = db.prepare(`
+    SELECT status,next_date,next_race_index,processed_dates,processed_races,unavailable_dates,consecutive_errors,last_error
+    FROM xlabs_backfill_jobs
+  `).get();
+  assert.equal(job.status, 'running');
+  assert.equal(job.next_date, DATE);
+  assert.equal(job.next_race_index, 0);
+  assert.equal(job.processed_dates, 0);
+  assert.equal(job.processed_races, 0);
+  assert.equal(job.unavailable_dates, 0);
+  assert.equal(job.consecutive_errors, 1);
+  assert.match(job.last_error, /requested X-Labs script was not referenced/);
+});
+
 test('X-Labs backfill admin routes require ADMIN_TOKEN and expose stable status', async () => {
   const { env } = createTestEnv();
   env.ADMIN_TOKEN = 'synthetic-admin-token';
