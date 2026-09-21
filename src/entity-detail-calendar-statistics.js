@@ -483,7 +483,7 @@ async function loadHorseTripScenarios(env,entityId,filters){
           WHEN rp.death_seat=1 THEN 'death_seat'
           WHEN rp.second_over=1 THEN 'second_over'
           WHEN rp.third_over=1 THEN 'third_over'
-          WHEN rp.traffic_event='bakifrån' THEN 'back'
+          WHEN json_extract(rp.event_json,'$.scenario_key')='back' THEN 'back'
           ELSE NULL
         END scenario
       FROM race_entries re INDEXED BY idx_entries_horse_race
