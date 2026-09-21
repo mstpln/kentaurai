@@ -4,8 +4,13 @@ import {
   getSettingsStatus as getBaseSettingsStatus,
   importAnalysisUpload
 } from './settings-data.js';
+import {
+  acknowledgeSettingsAlerts,
+  getSettingsAlertState,
+  getSettingsSourceHealth
+} from './settings-source-health.js';
 
-export { KENTAURAI_APP_VERSION, createFullDataExportResponse, importAnalysisUpload };
+export { KENTAURAI_APP_VERSION, createFullDataExportResponse, importAnalysisUpload, acknowledgeSettingsAlerts, getSettingsAlertState };
 
 function looksTechnical(value) {
   const text = String(value || '').trim();
@@ -28,26 +33,38 @@ export function friendlyRunName(sourceType, fallback = 'Automatisk körning') {
   return candidate && !looksTechnical(candidate) ? candidate : 'Automatisk körning';
 }
 
+function decorateSource(source) {
+  if (source.id === 'official') {
+    return {
+      ...source,
+      name: 'Lopp- och resultatdata',
+      description: 'Tävlingsprogram, hästar, kuskar, tränare, starter och resultat från den officiella tävlingskällan.'
+    };
+  }
+  if (source.id === 'xlabs') {
+    return {
+      ...source,
+      name: 'X-Labs',
+      description: 'Direkta loppmätningar som tempo, faktisk distans och andra verifierade mätvärden.'
+    };
+  }
+  return source;
+}
+
 export async function getSettingsStatus(env) {
-  const status = await getBaseSettingsStatus(env);
+  const [status, health] = await Promise.all([
+    getBaseSettingsStatus(env),
+    getSettingsSourceHealth(env)
+  ]);
+  const alert = await getSettingsAlertState(env, health);
   return {
     ...status,
     recentRuns: (status.recentRuns || []).map((run) => ({
       ...run,
       name: friendlyRunName(run.sourceType, run.name)
     })),
-    sources: (status.sources || []).map((source) => source.id === 'official'
-      ? {
-          ...source,
-          name: 'Lopp- och resultatdata',
-          description: 'Tävlingsprogram, hästar, kuskar, tränare, starter och resultat från den officiella tävlingskällan.'
-        }
-      : source.id === 'xlabs'
-        ? {
-            ...source,
-            name: 'X-Labs',
-            description: 'Direkta loppmätningar som tempo, faktisk distans och andra verifierade mätvärden.'
-          }
-        : source)
+    sources: (health.sources || []).map(decorateSource),
+    alert,
+    sourceStatusNote: 'Statusen bygger på faktiska jobb, senaste körningar, fel och senaste aktivitet. Inga extra anrop görs till datakällorna bara för att visa sidan.'
   };
 }
