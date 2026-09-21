@@ -173,6 +173,46 @@ test('resolved incidents clear acknowledgement state so a later same-checkpoint 
   assert.equal(alert.hasUnacknowledged, true);
 });
 
+test('recovering one incident clears only its acknowledgement while another alert remains active', async () => {
+  const { env, db } = createTestEnv();
+  insertOfficialHistorical(db, {
+    consecutive_errors: 1,
+    last_error: 'Synthetic official retry failure'
+  });
+  insertXlabsHistorical(db, {
+    consecutive_errors: 1,
+    last_error: 'Synthetic X-Labs retry failure',
+    retry_after: '2099-09-21T20:05:00Z'
+  });
+
+  await acknowledgeSettingsAlerts(env);
+  let alert = await getSettingsAlertState(env);
+  assert.equal(alert.activeCount, 2);
+  assert.equal(alert.hasUnacknowledged, false);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM settings_alert_acknowledgements').get().n, 2);
+
+  db.prepare(`
+    UPDATE historical_backfill_jobs
+    SET consecutive_errors=0,last_error=NULL,last_run_at='2099-09-21T20:03:00Z'
+    WHERE id='official-history'
+  `).run();
+  alert = await getSettingsAlertState(env);
+  assert.equal(alert.activeCount, 1);
+  assert.equal(alert.hasUnacknowledged, false);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM settings_alert_acknowledgements').get().n, 1);
+
+  db.prepare(`
+    UPDATE historical_backfill_jobs
+    SET consecutive_errors=1,last_error='Synthetic later official incident',
+        last_run_at='2099-09-21T20:04:00Z'
+    WHERE id='official-history'
+  `).run();
+  alert = await getSettingsAlertState(env);
+  assert.equal(alert.activeCount, 2);
+  assert.equal(alert.unacknowledgedCount, 1);
+  assert.equal(alert.hasUnacknowledged, true);
+});
+
 test('completed historical job reports 100 percent and Klar processing state', async () => {
   const { env, db } = createTestEnv();
   insertOfficialHistorical(db, {
