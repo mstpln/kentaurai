@@ -115,8 +115,25 @@ export function summarizeReferenceRound(payload) {
 }
 
 async function upsertTrack(env, name) {
-  const id = stableId('track', name);
-  await env.DB.prepare(`INSERT INTO tracks (id, canonical_name) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET canonical_name = excluded.canonical_name, updated_at = CURRENT_TIMESTAMP`).bind(id, name).run();
+  const canonicalName = String(name ?? '').trim();
+  const { results } = await env.DB.prepare(`
+    SELECT id, canonical_name
+    FROM tracks
+    WHERE canonical_name = ?
+    ORDER BY id
+  `).bind(canonicalName).all();
+  const matches = results || [];
+  if (matches.length > 1) {
+    throw new Error(`ambiguous track identity for "${canonicalName}": ${matches.map((row) => row.id).join(', ')}`);
+  }
+  if (matches.length === 1) return matches[0].id;
+
+  const id = stableId('track', canonicalName);
+  const existingById = await env.DB.prepare('SELECT canonical_name FROM tracks WHERE id = ? LIMIT 1').bind(id).first();
+  if (existingById && existingById.canonical_name !== canonicalName) {
+    throw new Error(`track id collision for "${canonicalName}": ${id} already belongs to "${existingById.canonical_name}"`);
+  }
+  await env.DB.prepare(`INSERT INTO tracks (id, canonical_name) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET canonical_name = excluded.canonical_name, updated_at = CURRENT_TIMESTAMP`).bind(id, canonicalName).run();
   return id;
 }
 async function upsertPerson(env, table, externalTable, prefix, name, externalId) {
