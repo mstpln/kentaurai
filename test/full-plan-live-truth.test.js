@@ -44,8 +44,8 @@ test('data inventory and dictionary distinguish historical source inventory from
   const dictionary = read('docs/DATA_DICTIONARY.md');
   assert.match(inventory, /Post-F4 implementation overlay/);
   assert.match(inventory, /X-Labs 100 m interval features/);
-  assert.match(inventory, /Named trip labels remain gated\/null/);
+  assert.match(inventory, /conservative C4 named trip labels around 500 m remaining/);
   assert.match(dictionary, /Post-F4 analytical truth is:/);
   assert.match(dictionary, /C1-C3 are active and partial-coverage safe/);
-  assert.match(dictionary, /named trip labels C4 remain gated\/null/);
+  assert.match(dictionary, /C4 named trip labels are available as conservative calculated X-Labs evidence around 500 m remaining/);
 });
