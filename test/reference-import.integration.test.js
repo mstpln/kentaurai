@@ -113,10 +113,9 @@ test('reference import reuses one existing canonical track instead of creating a
 
   await importReferenceRound(env, payload);
 
-  assert.deepEqual(
-    db.prepare("SELECT id FROM tracks WHERE canonical_name = 'Canonical Track' ORDER BY id").all(),
-    [{ id: 'track_official__999' }]
-  );
+  const canonicalTracks = db.prepare("SELECT id FROM tracks WHERE canonical_name = 'Canonical Track' ORDER BY id").all();
+  assert.equal(canonicalTracks.length, 1);
+  assert.equal(canonicalTracks[0].id, 'track_official__999');
   assert.equal(
     db.prepare("SELECT primary_track_id FROM game_rounds WHERE id = 'synthetic-round'").get().primary_track_id,
     'track_official__999'
