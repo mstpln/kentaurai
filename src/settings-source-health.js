@@ -1,5 +1,4 @@
 const HISTORICAL_STALE_MS = 15 * 60 * 1000;
-const SCHEDULED_STALE_MS = 36 * 60 * 60 * 1000;
 const RUN_STALE_MS = 30 * 60 * 1000;
 const MAX_AUTOMATIC_ERRORS = 3;
 
@@ -165,20 +164,6 @@ function runIssue(sourceId, run, nowMs) {
   };
 }
 
-function staleSourceIssue(sourceId, lastActivityAt, nowMs) {
-  const activityMs = isoTime(lastActivityAt);
-  if (activityMs === null || nowMs - activityMs <= SCHEDULED_STALE_MS) return null;
-  return {
-    key: `${sourceId}:source-stale:${String(lastActivityAt).slice(0, 13)}`,
-    sourceId,
-    severity: 'action_required',
-    label: 'Åtgärd krävs',
-    message: 'Ingen ny schemalagd aktivitet har registrerats för datakällan inom förväntad tid.',
-    error: null,
-    at: lastActivityAt
-  };
-}
-
 function strongestIssue(issues) {
   return [...issues].sort((a, b) => {
     const rank = { action_required: 2, error_retrying: 1 };
@@ -278,13 +263,9 @@ function sourceCard({ id, historicalJob, historicalProcessingState, supportingJo
   );
 
   const hasEvidence = Boolean(historicalJob || supportingJobs.some(({ job }) => job) || runs.some(Boolean) || fallbackRun);
-  if (hasEvidence && !issues.length) {
-    const historicalCompleted = historicalJob?.status === 'completed';
-    const hasScheduledEvidence = runs.some(Boolean) || supportingJobs.some(({ job }) => job);
-    if (historicalCompleted && hasScheduledEvidence) {
-      const stale = staleSourceIssue(id, lastActivityAt, nowMs);
-      if (stale) issues.push(stale);
-    }
+  if (!historicalJob && !supportingJobs.some(({ job }) => job) && !runs.some(Boolean) && fallbackRun) {
+    const fallbackIssue = runIssue(id, fallbackRun, nowMs);
+    if (fallbackIssue) issues.push(fallbackIssue);
   }
 
   const status = sourceStatus(hasEvidence, issues);
@@ -397,7 +378,6 @@ export async function acknowledgeSettingsAlerts(env) {
 
 export const SETTINGS_SOURCE_HEALTH_LIMITS = {
   historicalStaleMs: HISTORICAL_STALE_MS,
-  scheduledStaleMs: SCHEDULED_STALE_MS,
   runStaleMs: RUN_STALE_MS,
   maxAutomaticErrors: MAX_AUTOMATIC_ERRORS
 };
