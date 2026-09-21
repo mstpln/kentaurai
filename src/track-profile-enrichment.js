@@ -103,29 +103,47 @@ function sameLayoutSql() {
   return "COALESCE(layout_effective_from, '') = COALESCE(?, '')";
 }
 
-async function profileFactStatus(env, trackId, factType, layoutEffectiveFrom, value) {
-  const row = await env.DB.prepare(`
-    SELECT numeric_value
+async function profileFactStatus(env, trackId, factType, layoutEffectiveFrom, value, incomingEvidenceType) {
+  const { results } = await env.DB.prepare(`
+    SELECT id, numeric_value, evidence_type
     FROM track_profile_fact_observations
     WHERE track_id = ? AND fact_type = ? AND status = 'active' AND ${sameLayoutSql()}
     ORDER BY CASE evidence_type WHEN 'verified' THEN 0 ELSE 1 END, verified_at DESC, id DESC
-    LIMIT 1
-  `).bind(trackId, factType, layoutEffectiveFrom).first();
-  if (!row) return 'active';
-  return Number(row.numeric_value) === Number(value) ? 'active' : 'conflict';
+  `).bind(trackId, factType, layoutEffectiveFrom).all();
+  const active = results || [];
+  if (!active.length || active.some((row) => Number(row.numeric_value) === Number(value))) return 'active';
+  if (incomingEvidenceType === 'verified' && active.every((row) => row.evidence_type === 'calculated')) {
+    await env.DB.prepare(`
+      UPDATE track_profile_fact_observations
+      SET status = 'conflict', updated_at = CURRENT_TIMESTAMP
+      WHERE track_id = ? AND fact_type = ? AND status = 'active'
+        AND evidence_type = 'calculated' AND ${sameLayoutSql()}
+    `).bind(trackId, factType, layoutEffectiveFrom).run();
+    return 'active';
+  }
+  return 'conflict';
 }
 
-async function firstTurnStatus(env, trackId, distanceM, startMethod, layoutEffectiveFrom, value) {
-  const row = await env.DB.prepare(`
-    SELECT distance_to_first_turn_m
+async function firstTurnStatus(env, trackId, distanceM, startMethod, layoutEffectiveFrom, value, incomingEvidenceType) {
+  const { results } = await env.DB.prepare(`
+    SELECT id, distance_to_first_turn_m, evidence_type
     FROM track_first_turn_distances
     WHERE track_id = ? AND race_distance_m = ? AND start_method = ? AND status = 'active'
       AND ${sameLayoutSql()}
     ORDER BY CASE evidence_type WHEN 'verified' THEN 0 ELSE 1 END, verified_at DESC, id DESC
-    LIMIT 1
-  `).bind(trackId, distanceM, startMethod, layoutEffectiveFrom).first();
-  if (!row) return 'active';
-  return Number(row.distance_to_first_turn_m) === Number(value) ? 'active' : 'conflict';
+  `).bind(trackId, distanceM, startMethod, layoutEffectiveFrom).all();
+  const active = results || [];
+  if (!active.length || active.some((row) => Number(row.distance_to_first_turn_m) === Number(value))) return 'active';
+  if (incomingEvidenceType === 'verified' && active.every((row) => row.evidence_type === 'calculated')) {
+    await env.DB.prepare(`
+      UPDATE track_first_turn_distances
+      SET status = 'conflict', updated_at = CURRENT_TIMESTAMP
+      WHERE track_id = ? AND race_distance_m = ? AND start_method = ? AND status = 'active'
+        AND evidence_type = 'calculated' AND ${sameLayoutSql()}
+    `).bind(trackId, distanceM, startMethod, layoutEffectiveFrom).run();
+    return 'active';
+  }
+  return 'conflict';
 }
 
 export async function listTrackProfileTargets(env) {
@@ -169,7 +187,7 @@ export async function applyTrackProfileEnrichment(env, payload) {
       const type = evidenceType(item.evidence_type);
       const source = sourceFor(item.source, `facts.${factType}`);
       const note = calculationNote(item, type, `facts.${factType}`);
-      const status = await profileFactStatus(env, trackId, factType, layoutEffectiveFrom, value);
+      const status = await profileFactStatus(env, trackId, factType, layoutEffectiveFrom, value, type);
       const id = await digestId('track-profile', [trackId,factType,value,type,source.sourceType,source.sourceUrl,verifiedAt,layoutEffectiveFrom]);
       await env.DB.prepare(`
         INSERT INTO track_profile_fact_observations (
@@ -196,7 +214,7 @@ export async function applyTrackProfileEnrichment(env, payload) {
       const type = evidenceType(item.evidence_type);
       const source = sourceFor(item.source, 'first_turn_distances');
       const note = calculationNote(item, type, 'first_turn_distances');
-      const status = await firstTurnStatus(env, trackId, distanceM, method, layoutEffectiveFrom, distanceToTurn);
+      const status = await firstTurnStatus(env, trackId, distanceM, method, layoutEffectiveFrom, distanceToTurn, type);
       const id = await digestId('track-first-turn', [trackId,distanceM,method,distanceToTurn,type,source.sourceType,source.sourceUrl,verifiedAt,layoutEffectiveFrom]);
       await env.DB.prepare(`
         INSERT INTO track_first_turn_distances (
