@@ -211,3 +211,12 @@ The external-analysis production release was accepted after:
 - The view contains no AI strength, ranking, ABCD, scenario, lead prediction, value, spike recommendation, external tips or interviews. Current market remains a displayed factual input only.
 - Historik is system-granular: every saved main/alternative system is one list row even when multiple systems share a round. V85/V86 filters, pagination and `Senaste / Flest rätt / Färst rätt / Bästa spikar` sorting operate on systems; row click opens the shared round detail with that system preselected. Översikt/learning aggregates remain round-oriented where already defined.
 
+
+
+## X-Labs large race payload recovery
+
+- Historical X-Labs backfill exposed a legitimate telemetry race response larger than the original 8 MiB capture ceiling.
+- Race-object capture now keeps the same streaming byte guard but uses a 32 MiB default ceiling, optionally configurable through `XLABS_MAX_RACE_RESPONSE_BYTES` and hard-capped at 64 MiB.
+- Successful race captures persist observed response bytes and the active byte limit in private source metadata for diagnostics.
+- Oversized responses still fail closed before archival/normalization, now with bounded byte diagnostics.
+- Existing historical X-Labs cursor/job state is preserved; after deployment the failed job should be resumed in place rather than recreated.
