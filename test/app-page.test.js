@@ -97,10 +97,18 @@ test('entity detail UI groups every stored measurement family', () => {
   for (const label of [
     'Profil','Datatäckning','Lopp & start','Klassflaggor','Resultat','Senaste marknad & odds',
     'Streckhistorik','Oddshistorik','Senaste utrustning','Utrustningshistorik','Senaste X-Labs','X-Labs segment',
-    'X-Labs historik','Positioner','Beräknade features','Featurehistorik','Lagrade AI-bedömningar',
+    'X-Labs historik','Löpningsscenario','Beräknade features','Featurehistorik','Lagrade AI-bedömningar',
     'Redaktionella signaler','Förhållanden','Dagsprofil'
   ]) assert.ok(html.includes(label), `missing ${label}`);
   for (const field of ['startsWithXLabs','startsWithPositions','startsWithFeatures','startsWithAi','startsWithEditorial','startsWithConditions']) assert.match(html, new RegExp(field));
+});
+
+test('historical starts present C4 positions as clear race scenarios', () => {
+  const html = renderAppPage();
+  assert.match(html, /500 m kvar/);
+  assert.match(html, /Löpningsscenario/);
+  assert.match(html, /2:a utvändigt/);
+  assert.match(html, /Dödens/);
 });
 
 test('complete data UI preserves raw/calculated/AI separation cues and hides internal feature provenance', () => {
