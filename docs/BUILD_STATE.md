@@ -228,3 +228,11 @@ The external-analysis production release was accepted after:
 - Those pages are now inspected through the existing sanitized HTML inspector. Only pages that are genuinely static/unknown with zero script tags, tables and iframes are treated as neutral unavailable X-Labs coverage.
 - Pages that expose any alternate data-channel clue still fail closed for manual investigation; the backfill does not silently skip potentially available telemetry.
 - The existing historical cursor is preserved and can be resumed from the failed checkpoint after deployment.
+
+
+## Settings source-health and notification candidate
+- Settings **Datakällor** now reads durable official/X-Labs job state plus relevant scheduled runs instead of inferring health from only the twelve latest `import_runs`.
+- Source health and requested historical processing are separate user-facing concepts. Normal source health is **Fungerar**; historical work is **Pågår / Väntar / Klar**, while retrying failures and stopped work are shown as **Fel upptäckt · nytt försök pågår** or **Åtgärd krävs**.
+- Historical progress is the share of the requested date interval that is fully processed. X-Labs dates closed as verified neutral unavailable coverage count as processed, so legitimate source gaps do not prevent 100% completion.
+- A small red badge on the Settings gear means a current error/escalation has not yet been seen. Successfully opening Settings acknowledges the current incident; repeated retries at the same checkpoint do not re-notify, escalation to action-required does, and recovery clears acknowledgement state so a later incident can notify again.
+- Migration `0034_settings_alert_acknowledgements.sql` stores only alert acknowledgement keys/timestamps. It contains no provider payloads or private racing/editorial data.
