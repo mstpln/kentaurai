@@ -341,22 +341,29 @@ export async function getSettingsSourceHealth(env, options = {}) {
 export async function getSettingsAlertState(env, health = null) {
   const current = health || await getSettingsSourceHealth(env);
   const keys = [...new Set((current.alerts || []).map((alert) => alert.key).filter(Boolean))];
+  const { results: acknowledgementRows } = await env.DB.prepare(`
+    SELECT alert_key
+    FROM settings_alert_acknowledgements
+  `).all();
+  const activeKeys = new Set(keys);
+  const staleAcknowledgements = acknowledgementRows
+    .map((row) => row.alert_key)
+    .filter((key) => !activeKeys.has(key));
+  if (staleAcknowledgements.length) {
+    await env.DB.batch(staleAcknowledgements.map((key) => env.DB.prepare(`
+      DELETE FROM settings_alert_acknowledgements
+      WHERE alert_key = ?
+    `).bind(key)));
+  }
   if (!keys.length) {
-    await env.DB.prepare('DELETE FROM settings_alert_acknowledgements').run();
     return { hasActiveAlerts: false, hasUnacknowledged: false, activeCount: 0, unacknowledgedCount: 0 };
   }
 
-  const placeholders = keys.map(() => '?').join(',');
-  await env.DB.prepare(`
-    DELETE FROM settings_alert_acknowledgements
-    WHERE alert_key NOT IN (${placeholders})
-  `).bind(...keys).run();
-  const { results } = await env.DB.prepare(`
-    SELECT alert_key
-    FROM settings_alert_acknowledgements
-    WHERE alert_key IN (${placeholders})
-  `).bind(...keys).all();
-  const acknowledged = new Set(results.map((row) => row.alert_key));
+  const acknowledged = new Set(
+    acknowledgementRows
+      .map((row) => row.alert_key)
+      .filter((key) => activeKeys.has(key))
+  );
   const unacknowledgedCount = keys.filter((key) => !acknowledged.has(key)).length;
   return {
     hasActiveAlerts: true,
