@@ -52,6 +52,39 @@ test('calculated values require a calculation note', async () => {
   }]});
   await assert.rejects(() => applyTrackProfileEnrichment(env, bad), /calculation_note is required/);
 });
+test('verified same-layout facts supersede calculated observations for current use without deleting history', async () => {
+  const { env, db } = createTestEnv(); seedTrack(db);
+  const calculated = payload({
+    facts:[{
+      type:'first_turn_radius_m',
+      value:85.5,
+      evidence_type:'calculated',
+      source:{ type:'calculation', url:'https://example.test/radius-calculated' },
+      calculation_note:'Synthetic calculation'
+    }],
+    first_turn_distances:[]
+  });
+  await applyTrackProfileEnrichment(env, calculated);
+
+  const verified = payload({
+    facts:[{
+      type:'first_turn_radius_m',
+      value:86.0,
+      evidence_type:'verified',
+      source:{ type:'measurement', url:'https://example.test/radius-verified' }
+    }],
+    first_turn_distances:[]
+  });
+  const result = await applyTrackProfileEnrichment(env, verified);
+  assert.equal(result.conflicts, 0);
+  const rows = db.prepare("SELECT numeric_value, evidence_type, status FROM track_profile_fact_observations WHERE fact_type='first_turn_radius_m' ORDER BY evidence_type").all()
+    .map((row) => ({ numeric_value:row.numeric_value, evidence_type:row.evidence_type, status:row.status }));
+  assert.deepEqual(rows, [
+    { numeric_value:85.5, evidence_type:'calculated', status:'conflict' },
+    { numeric_value:86, evidence_type:'verified', status:'active' }
+  ]);
+});
+
 test('conflicting same-layout facts are preserved instead of overwritten', async () => {
   const { env, db } = createTestEnv(); seedTrack(db);
   await applyTrackProfileEnrichment(env, payload());
