@@ -8,7 +8,7 @@ import {
 } from '../src/settings-source-health.js';
 import { createTestEnv } from './helpers/d1.js';
 
-const NOW = new Date('2026-09-21T20:00:00Z');
+const NOW = new Date('2099-09-21T20:00:00Z');
 
 function insertOfficialHistorical(db, overrides = {}) {
   const row = {
@@ -23,7 +23,7 @@ function insertOfficialHistorical(db, overrides = {}) {
     reused_races: 4,
     consecutive_errors: 0,
     last_error: null,
-    last_run_at: '2026-09-21T19:59:00Z',
+    last_run_at: '2099-09-21T19:59:00Z',
     ...overrides
   };
   db.prepare(`
@@ -54,7 +54,7 @@ function insertXlabsHistorical(db, overrides = {}) {
     unavailable_races: 3,
     consecutive_errors: 0,
     last_error: null,
-    last_run_at: '2026-09-21T19:59:00Z',
+    last_run_at: '2099-09-21T19:59:00Z',
     retry_after: null,
     ...overrides
   };
@@ -95,7 +95,7 @@ test('X-Labs retry error is red-alert health while historical processing remains
   insertXlabsHistorical(db, {
     consecutive_errors: 1,
     last_error: 'Synthetic transient source failure',
-    retry_after: '2026-09-21T20:05:00Z'
+    retry_after: '2099-09-21T20:05:00Z'
   });
 
   const result = await getSettingsSourceHealth(env, { now: NOW });
@@ -113,7 +113,7 @@ test('acknowledgement hides the badge for the same incident and escalation creat
   insertXlabsHistorical(db, {
     consecutive_errors: 1,
     last_error: 'Synthetic retry failure',
-    retry_after: '2026-09-21T20:05:00Z'
+    retry_after: '2099-09-21T20:05:00Z'
   });
 
   let alert = await getSettingsAlertState(env);
@@ -128,7 +128,7 @@ test('acknowledgement hides the badge for the same incident and escalation creat
   db.prepare(`
     UPDATE xlabs_backfill_jobs
     SET consecutive_errors=2,last_error='Synthetic retry failure again',
-        last_run_at='2026-09-21T20:01:00Z',retry_after='2026-09-21T20:06:00Z'
+        last_run_at='2099-09-21T20:01:00Z',retry_after='2099-09-21T20:06:00Z'
     WHERE id='xlabs-history'
   `).run();
   alert = await getSettingsAlertState(env);
@@ -137,7 +137,7 @@ test('acknowledgement hides the badge for the same incident and escalation creat
   db.prepare(`
     UPDATE xlabs_backfill_jobs
     SET status='failed',consecutive_errors=3,last_error='Synthetic terminal failure',
-        last_run_at='2026-09-21T20:02:00Z'
+        last_run_at='2099-09-21T20:02:00Z'
     WHERE id='xlabs-history'
   `).run();
   alert = await getSettingsAlertState(env);
@@ -150,13 +150,13 @@ test('resolved incidents clear acknowledgement state so a later same-checkpoint 
   insertXlabsHistorical(db, {
     consecutive_errors: 1,
     last_error: 'Synthetic first incident',
-    retry_after: '2026-09-21T20:05:00Z'
+    retry_after: '2099-09-21T20:05:00Z'
   });
   await acknowledgeSettingsAlerts(env);
 
   db.prepare(`
     UPDATE xlabs_backfill_jobs
-    SET consecutive_errors=0,last_error=NULL,retry_after=NULL,last_run_at='2026-09-21T20:03:00Z'
+    SET consecutive_errors=0,last_error=NULL,retry_after=NULL,last_run_at='2099-09-21T20:03:00Z'
     WHERE id='xlabs-history'
   `).run();
   let alert = await getSettingsAlertState(env);
@@ -166,7 +166,7 @@ test('resolved incidents clear acknowledgement state so a later same-checkpoint 
   db.prepare(`
     UPDATE xlabs_backfill_jobs
     SET consecutive_errors=1,last_error='Synthetic second incident',
-        retry_after='2026-09-21T20:10:00Z',last_run_at='2026-09-21T20:04:00Z'
+        retry_after='2099-09-21T20:10:00Z',last_run_at='2099-09-21T20:04:00Z'
     WHERE id='xlabs-history'
   `).run();
   alert = await getSettingsAlertState(env);
@@ -180,7 +180,7 @@ test('completed historical job reports 100 percent and Klar processing state', a
     next_race_index: 0,
     status: 'completed',
     processed_dates: 10,
-    last_run_at: '2026-09-21T19:59:00Z'
+    last_run_at: '2099-09-21T19:59:00Z'
   });
 
   const result = await getSettingsSourceHealth(env, { now: NOW });
