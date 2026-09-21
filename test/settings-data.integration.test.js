@@ -166,7 +166,7 @@ test('settings alert endpoints are private and opening settings can acknowledge 
     ) VALUES (
       'settings-alert-job','historical_all','2026-09-01','2026-09-10','2026-09-05',0,
       'running',5,20,0,0,0,1,'Synthetic transient failure',
-      '2026-09-21T19:59:00Z','2099-01-01T00:00:00Z'
+      '2099-01-01T00:00:00Z','2099-01-01T00:05:00Z'
     )
   `).run();
 
