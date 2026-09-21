@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const workflow = readFileSync(new URL('../.github/workflows/production-d1-migrations.yml', import.meta.url), 'utf8');
+const releaseWorkflow = readFileSync(new URL('../.github/workflows/production-release-v060.yml', import.meta.url), 'utf8');
 
 test('production migration workflow is manual and main-only', () => {
   assert.match(workflow, /workflow_dispatch:/);
@@ -40,4 +41,12 @@ test('production migration workflow pins third-party actions to immutable commit
 test('production migration workflow prevents overlapping database writes', () => {
   assert.match(workflow, /kentaurai-production-d1-migrations/);
   assert.match(workflow, /cancel-in-progress: false/);
+});
+
+test('production release verifies the Settings alert migration and private observability routes', () => {
+  assert.match(releaseWorkflow, /0034_settings_alert_acknowledgements\.sql/);
+  assert.match(releaseWorkflow, /settings_alert_acknowledgements/);
+  assert.match(releaseWorkflow, /\/app\/api\/settings\/status/);
+  assert.match(releaseWorkflow, /\/app\/api\/settings\/alerts'/);
+  assert.match(releaseWorkflow, /\/app\/api\/settings\/alerts\/acknowledge/);
 });
