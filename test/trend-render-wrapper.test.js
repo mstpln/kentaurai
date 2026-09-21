@@ -90,3 +90,14 @@ test('Trend ranking rows remove repeated win label and preserve full prize-money
   assert.match(html, /\.trend-metric-pill:last-child strong\{[^}]*overflow:visible[^}]*text-overflow:clip/);
   assert.match(html, /\.trend-win-block\{[^}]*align-items:center[^}]*padding:0 10px/);
 });
+
+
+test('Trend categories use the unified muted connected tab row', () => {
+  const html = enhanceTrendHtml('<html><head></head><body></body></html>');
+
+  assert.match(html, /class="trend-category-tabs"/);
+  assert.match(html, /\.trend-category-tabs\{display:grid;grid-template-columns:repeat\(3,minmax\(0,1fr\)\);height:40px;background:#11110f;border:1px solid var\(--line\);border-radius:10px;overflow:hidden\}/);
+  assert.match(html, /\.trend-category-tabs \.segment-btn\{[^}]*height:100%[^}]*border-right:1px solid var\(--line\)[^}]*border-radius:0[^}]*font-size:12px[^}]*font-weight:600/);
+  assert.match(html, /\.trend-category-tabs \.segment-btn\.active\{background:#b7ac9c;border-color:var\(--line\);color:#1a1713\}/);
+  assert.doesNotMatch(html, /class="segment-group"[^>]*>.*data-trend-category/);
+});

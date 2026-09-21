@@ -1,6 +1,11 @@
 const trendCss = `
 <style id="kentaurai-trend-build-a">
 .trend-top-controls{display:grid;gap:14px;margin:18px 0 14px}
+.trend-category-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));height:40px;background:#11110f;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.trend-category-tabs .segment-btn{height:100%;min-width:0;border:0;border-right:1px solid var(--line);border-radius:0;background:#11110f;color:#938d84;padding:0 8px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600}
+.trend-category-tabs .segment-btn:last-child{border-right:0}
+.trend-category-tabs .segment-btn:hover{color:var(--text);background:#161512}
+.trend-category-tabs .segment-btn.active{background:#b7ac9c;border-color:var(--line);color:#1a1713}
 .trend-scope-line{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;border-top:1px solid var(--line-soft);padding-top:10px}
 .trend-scope-line .filter-block{min-width:0}
 .trend-period-menu{display:flex;align-items:center;gap:8px;min-width:0;padding:6px 2px;color:var(--muted)}
@@ -54,7 +59,7 @@ state.trendFilterOptions=state.trendFilterOptions||null;
 let trendRequestToken=0;
 function trendLabel(options,value){return (options.find(x=>x[0]===value)||[])[1]||value}
 function trendOptionHtml(options,active){return options.map(([value,label])=>'<option value="'+esc(value)+'" '+(String(value)===String(active)?'selected':'')+'>'+esc(label)+'</option>').join('')}
-function trendSegment(options,active,attr){return '<div class="segment-group">'+options.map(([value,label])=>'<button type="button" class="segment-btn '+(value===active?'active':'')+'" '+attr+'="'+esc(value)+'">'+esc(label)+'</button>').join('')+'</div>'}
+function trendSegment(options,active,attr){return '<div class="trend-category-tabs">'+options.map(([value,label])=>'<button type="button" class="segment-btn '+(value===active?'active':'')+'" '+attr+'="'+esc(value)+'">'+esc(label)+'</button>').join('')+'</div>'}
 function detailCount(){const f=state.trendDetailFilters;return [f.trackId,f.raceType,f.breedType,f.startMethod,f.minStarts].filter(x=>x&&x!=='all').length}
 function activeFilterCount(){return detailCount()+(state.trendRaceScope&&state.trendRaceScope!=='all'?1:0)}
 function trackOptions(){const rows=(state.trendFilterOptions&&state.trendFilterOptions.tracks)||[];return [['all','Alla banor'],...rows.map(row=>[String(row.id),row.name])]}
