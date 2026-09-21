@@ -21,14 +21,14 @@ CREATE TABLE IF NOT EXISTS track_profile_fact_observations (
   numeric_value REAL NOT NULL,
   evidence_type TEXT NOT NULL CHECK (evidence_type IN ('verified','calculated')),
   source_type TEXT NOT NULL CHECK (source_type IN ('official_track','official_sport','measurement','secondary','calculation')),
-  source_url TEXT,
+  source_url TEXT NOT NULL,
   verified_at TEXT NOT NULL,
   layout_effective_from TEXT,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','conflict')),
   calculation_note TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(track_id, fact_type, numeric_value, evidence_type, source_type, source_url, layout_effective_from)
+  UNIQUE(track_id, fact_type, numeric_value, evidence_type, source_type, source_url, verified_at, layout_effective_from)
 );
 
 CREATE INDEX IF NOT EXISTS idx_track_profile_fact_current
@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS track_first_turn_distances (
   calculation_note TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE(track_id, race_distance_m, start_method, distance_to_first_turn_m, evidence_type, source_type, source_url, layout_effective_from)
+  UNIQUE(track_id, race_distance_m, start_method, distance_to_first_turn_m, evidence_type, source_type, source_url, verified_at, layout_effective_from)
 );
 
 CREATE INDEX IF NOT EXISTS idx_track_first_turn_current
