@@ -8,8 +8,8 @@ import {
 
 export { renderLoginPage, htmlResponse, redirectResponse, safeReturnPath };
 
-const statusTextBefore = `function statusText(status){return ({working:'Fungerar',success:'Klar',warning:'Varning',error:'Fel',running:'Pågår',unknown:'Okänd'})[status]||status}`;
-const statusTextAfter = `function statusText(status){return ({working:'✓',success:'✓',warning:'!',error:'✕',running:'…',unknown:'?'})[status]||status}`;
+const statusTextBefore = `function statusText(status){return ({working:'Fungerar',success:'Klar',warning:'Varning',error:'Fel upptäckt',running:'Pågår',never_run:'Ingen körning ännu',waiting:'Väntar',completed:'Klar',error_retrying:'Fel upptäckt',action_required:'Åtgärd krävs'})[status]||status}`;
+const statusTextAfter = `function statusText(status){return ({working:'✓',success:'✓',warning:'!',error:'✕',running:'…',never_run:'?',waiting:'…',completed:'✓',error_retrying:'✕',action_required:'✕'})[status]||status}`;
 
 const feedbackCss = `
 <style id="kentaurai-feedback-fixes">
