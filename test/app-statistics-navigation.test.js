@@ -41,12 +41,14 @@ test('four-item bottom navigation keeps icons and labels legible and centered re
   assert.match(html, /\.nav-icon\{width:26px!important;height:26px!important\}/);
 });
 
-test('statistics navigation groups trainer horse driver and track browsing with selector variant 5', () => {
+test('statistics navigation uses the unified muted Trend-style category tabs', () => {
   const html = renderAppPage();
   assert.match(html, /class="statistics-category-nav"/);
   assert.match(html, /\['trainers','Tränare'\],\['horses','Hästar'\],\['drivers','Kuskar'\],\['tracks','Bana'\]/);
-  assert.match(html, /\.statistics-category-nav\{display:grid;grid-template-columns:repeat\(4,minmax\(0,1fr\)\);gap:1px;background:var\(--line\);border:1px solid var\(--line\);border-radius:11px;overflow:hidden;margin-bottom:22px\}/);
-  assert.match(html, /\.statistics-category-btn\.active\{background:#1d1913;color:var\(--accent-soft\);box-shadow:inset 0 -2px 0 var\(--accent\)\}/);
+  assert.match(html, /\.statistics-category-nav\{display:grid;grid-template-columns:repeat\(4,minmax\(0,1fr\)\);height:40px;background:#11110f;border:1px solid var\(--line\);border-radius:10px;overflow:hidden;margin-bottom:22px\}/);
+  assert.match(html, /\.statistics-category-btn\{[^}]*border-right:1px solid var\(--line\)[^}]*height:100%[^}]*display:flex[^}]*justify-content:center/);
+  assert.match(html, /\.statistics-category-btn\.active\{background:#b7ac9c;color:#1a1713\}/);
+  assert.doesNotMatch(html, /\.statistics-category-btn\.active\{[^}]*box-shadow:inset 0 -2px 0 var\(--accent\)/);
   assert.match(html, /app\.insertAdjacentHTML\('afterbegin',statisticsCategoryNav\(state\.page\)\)/);
   assert.match(html, /STATISTICS_PAGES\.includes\(state\.page\)&&!state\.settingsOpen&&!state\.detail&&!state\.trackDetail/);
   assert.match(html, /aria-label="Statistikområden"/);
