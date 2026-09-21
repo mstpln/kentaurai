@@ -57,6 +57,11 @@
 25. Spårstatistik owns Period, Startmetod, Distans, STL-klass and Lopptyp in the canonical lane-statistics flow. Optional filters combine with AND semantics; the literal all-period label is `All data`.
 26. Verified track address/website facts remain nullable. Real enrichment values live only in private D1 with fact-level source URL/type and verification timestamps; conflicts are preserved rather than silently overwriting a previously verified fact.
 27. User-facing statistics and factual pattern labels use short, natural Swedish. Internal field names, source-family names, status enums and provenance terms are technical contracts and must not leak into normal UI copy when an understandable Swedish label exists.
+28. Bana Översikt uses the approved grouped physical-profile layout. **Bananalys** is the first section and remains empty until a separately scoped analysis capability is built; the former free-text `Banan i korthet` block is not shown.
+29. Detailed track geometry is stored as provenance-backed observations rather than overwriting generic legacy columns. Width at 1640/2140, large/first/second curve radius and first/second curve banking may be null. Distance-to-first-turn observations are keyed by actual race distance and start method.
+30. Track geometry evidence distinguishes `verified` measurements from deterministic `calculated` values. Calculated values require an explanation; source conflicts are preserved; layout-effective dates prevent obsolete geometry from silently replacing current layouts. Unknown facts remain null.
+31. Surface is not shown in the normal Bana profile until reliable source coverage and semantics are verified. The legacy storage field remains for compatibility.
+32. The Bana detail back control uses the same canonical corner-back icon as other app detail pages. Real researched production track values remain private and are imported only through the admin enrichment path; public fixtures stay synthetic.
 
 ## Historical data and X-Labs
 1. Historical starter/result data is imported once, stored permanently and updated incrementally. The planned backfill remains approximately 2-3 years of Swedish racing, with older starts fetched selectively when useful for active horse profiles.

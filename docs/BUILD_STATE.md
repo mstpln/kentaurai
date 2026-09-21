@@ -1,3 +1,12 @@
+## Track physical profile candidate
+- Branch: `feat/track-physical-profile-v1`.
+- Bana Översikt follows the approved V5 layout: an initially empty **Bananalys** section first, followed by grouped **Grundmått / Start & bredd / Till första sväng / Kurvradier / Dosering**, then existing Datatäckning, Kontakt & plats and optional Startnoteringar.
+- The track back button uses the canonical app detail back icon; the legacy track-only `↩` glyph is removed.
+- Migration `0032_track_physical_profile_v1.sql` adds provenance-backed, layout-aware physical geometry observations plus distance/start-method-specific first-turn distances.
+- Evidence is explicitly `verified` or `calculated`; calculated values require a calculation note, conflicts are retained, and unknown facts remain null.
+- Surface is no longer presented in the normal track profile. Legacy columns remain untouched for compatibility.
+- Public code contains no researched production track dataset. Real values are intended for private admin enrichment only.
+
 ## App/statistics responsiveness candidate
 - Trainer/driver ranking core now derives win rate, top-3 rate and wins from one materialized filtered sample instead of three repeated scans.
 - Horse ranking core shares win/top-3 aggregation, keeps Start Points out of the fast core response, scopes X-Labs reads to eligible entries and combines both rest rankings into one history pass.
