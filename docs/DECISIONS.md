@@ -190,3 +190,12 @@ A single race must not directly change model weights. Candidate learnings are re
 25. X-Labs opening-speed presentation must use verified interval measurements for the first 200 m, respect the requested as-of source cutoff, and derive km pace from elapsed time / measured distance. Legacy first_200_time strings must not be treated directly as km pace.
 26. Progressive trainer/driver/horse rankings use disjoint `core` and `extended` server modes. The UI merges the payloads; the extended request must not recompute the core ranking queries.
 
+
+
+## X-Labs tactical labels reuse the existing race_positions model
+
+1. C3 remains the geometric evidence layer: longitudinal order, gaps, relative lateral offsets, lead changes and trajectory confidence.
+2. C4 interprets only a conservative decision window around 500 m remaining (400-600 m) and requires stable/high-confidence evidence before assigning a named tactical label.
+3. Supported labels are leader/spets, pocket/rygg ledaren, death seat/dödens, second over/2:a utvändigt, third over/3:e utvändigt and a coarse back-field label. Ambiguous cases remain unknown.
+4. C4 does not create a parallel storage model. Final labels are written to the existing race_positions table with source_record_id plus evidence_type, confidence and classification_version so calculated evidence remains distinguishable from direct verified observations.
+5. Historical production promotion is an explicit workflow-dispatch operation over already stored private X-Labs race JSON. It is not a deployment side effect.
