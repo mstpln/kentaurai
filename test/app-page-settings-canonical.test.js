@@ -34,8 +34,8 @@ test('primary Analysis workspace owns the approved external analysis workflow wh
   assert.match(html, /settingsAlertBadge/);
   assert.match(html, /settings-source-grid/);
   assert.match(html, /Historisk import/);
-  assert.match(html, /Fel upptäckt · nytt försök pågår/);
-  assert.match(html, /Åtgärd krävs/);
+  assert.match(html, /error_retrying:'Fel upptäckt'/);
+  assert.match(html, /action_required:'Åtgärd krävs'/);
   assert.match(html, /\/app\/api\/settings\/alerts/);
   assert.match(html, /\/app\/api\/settings\/alerts\/acknowledge/);
   assert.doesNotMatch(html, /tabs\(\[\['ai','AI'\],\['data','Data'\]\]/);
