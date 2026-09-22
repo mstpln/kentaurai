@@ -70,19 +70,35 @@ test('statistics extended endpoints consolidate expensive ranking families', asy
   }
 });
 
-test('statistics UIs complete and paint core before requesting extended data', () => {
-  for (const [file, mergeName] of [
-    ['../src/horse-statistics-ui.js','mergeHorseRankingPayload'],
-    ['../src/trainer-statistics-ui.js','tMergeRankingPayload'],
-    ['../src/driver-statistics-ui.js','dMergeRankingPayload']
+test('progressive statistics parts keep each server request bounded', async () => {
+  for (const [getter,parts,baseOptions] of [
+    [getHorseRankings,['form','earnings','opening','closing','rest','startpoints'],{period:'1y',asOfDate:'2026-09-20',minStarts:'3'}],
+    [getTrainerRankings,['form','annual','per-start','performance','home','distance','market','rest'],{period:'1y',asOfDate:'2026-09-20',minStarts:'10'}],
+    [getDriverRankings,['form','annual','per-start','performance','market'],{period:'1y',asOfDate:'2026-09-20',minStarts:'10'}]
+  ]) {
+    for (const part of parts) {
+      const { env } = createTestEnv();
+      const captures = capturePreparedQueries(env);
+      await getter(env, {...baseOptions,mode:'extended',part});
+      assert.ok(captures.length >= 1, part+' should execute its own bounded read');
+      assert.ok(captures.length <= 2, part+' should not recreate a multi-family statistics batch');
+    }
+  }
+});
+
+test('statistics UIs paint core then request bounded extended parts sequentially', () => {
+  for (const [file, parts] of [
+    ['../src/horse-statistics-ui.js',['form','opening','closing','earnings','rest','startpoints']],
+    ['../src/trainer-statistics-ui.js',['form','annual','per-start','performance','home','distance','market','rest']],
+    ['../src/driver-statistics-ui.js',['form','annual','per-start','performance','market']]
   ]) {
     const source = fs.readFileSync(new URL(file, import.meta.url), 'utf8');
     assert.match(source, /await api\([^;]+mode=core[^;]+signal:lifecycle\.controller\.signal/);
     assert.match(source, /await afterRankingCorePaint\(\)/);
-    assert.match(source, /mode=extended/);
-    assert.doesNotMatch(source, /setTimeout\([^)]*75|corePromise|extendedPromise/);
-    assert.ok(source.indexOf('render'+(mergeName==='mergeHorseRankingPayload'?'Horse':mergeName==='tMergeRankingPayload'?'Trainer':'Driver')+'RankingShell(core)') < source.indexOf("mode=extended"));
-    assert.ok(source.includes('const data='+mergeName+'(core,extended)'));
+    assert.match(source, /mode=extended&part=/);
+    assert.doesNotMatch(source, /mode=extended'\s*,\{signal|setTimeout\([^)]*75|corePromise|extendedPromise/);
+    for (const part of parts) assert.ok(source.includes("'"+part+"'"), file+' should request '+part);
+    assert.match(source, /for\(let index=0;index<parts\.length;index\+\+\)/);
     assert.match(source, /if\(isRankingAbort\(error\)\)return/);
     assert.match(source, /cancelRankingLifecycle\(\)/);
   }
