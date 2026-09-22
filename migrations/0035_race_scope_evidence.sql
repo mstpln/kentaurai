@@ -45,8 +45,12 @@ WHERE no.entity_type = 'race'
 CREATE TRIGGER IF NOT EXISTS trg_race_scope_stl_insert
 AFTER INSERT ON race_stl_classifications
 BEGIN
-  INSERT OR IGNORE INTO race_scope_evidence(race_id, evidence_kind)
-  VALUES (NEW.race_id, 'stl_classification');
+  INSERT INTO race_scope_evidence(race_id, evidence_kind)
+  SELECT NEW.race_id, 'stl_classification'
+  WHERE NOT EXISTS (
+    SELECT 1 FROM race_scope_evidence
+    WHERE race_id = NEW.race_id AND evidence_kind = 'stl_classification'
+  );
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_race_scope_stl_delete
@@ -68,8 +72,12 @@ WHEN EXISTS (
     AND UPPER(TRIM(gr.game_type)) IN ('V75', 'V85', 'V86')
 )
 BEGIN
-  INSERT OR IGNORE INTO race_scope_evidence(race_id, evidence_kind)
-  VALUES (NEW.race_id, 'game');
+  INSERT INTO race_scope_evidence(race_id, evidence_kind)
+  SELECT NEW.race_id, 'game'
+  WHERE NOT EXISTS (
+    SELECT 1 FROM race_scope_evidence
+    WHERE race_id = NEW.race_id AND evidence_kind = 'game'
+  );
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_race_scope_game_leg_delete
@@ -100,11 +108,15 @@ BEGIN
       WHERE gl.race_id = race_scope_evidence.race_id
         AND UPPER(TRIM(gr.game_type)) IN ('V75', 'V85', 'V86')
     );
-  INSERT OR IGNORE INTO race_scope_evidence(race_id, evidence_kind)
-  SELECT race_id, 'game'
-  FROM game_legs
-  WHERE game_round_id = NEW.id
-    AND UPPER(TRIM(NEW.game_type)) IN ('V75', 'V85', 'V86');
+  INSERT INTO race_scope_evidence(race_id, evidence_kind)
+  SELECT DISTINCT gl_new.race_id, 'game'
+  FROM game_legs gl_new
+  WHERE gl_new.game_round_id = NEW.id
+    AND UPPER(TRIM(NEW.game_type)) IN ('V75', 'V85', 'V86')
+    AND NOT EXISTS (
+      SELECT 1 FROM race_scope_evidence rse_new
+      WHERE rse_new.race_id = gl_new.race_id AND rse_new.evidence_kind = 'game'
+    );
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_race_scope_observation_insert
@@ -115,9 +127,13 @@ WHEN NEW.entity_type = 'race'
     WHERE sr.id = NEW.source_record_id AND sr.source_type = 'official_provider'
   )
 BEGIN
-  INSERT OR IGNORE INTO race_scope_evidence(race_id, evidence_kind)
+  INSERT INTO race_scope_evidence(race_id, evidence_kind)
   SELECT NEW.entity_id, 'official_observation'
-  WHERE (
+  WHERE NOT EXISTS (
+    SELECT 1 FROM race_scope_evidence
+    WHERE race_id = NEW.entity_id AND evidence_kind = 'official_observation'
+  )
+  AND (
     (INSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(UPPER(' ' || COALESCE(NEW.fields_json, '') || ' '), '-', ' '), '/', ' '), '(', ' '), ')', ' '), '[', ' '), ']', ' '), '"', ' '), ',', ' '), '.', ' '), ':', ' '), ';', ' '), '|', ' '), '_', ' '), CHAR(9), ' '), CHAR(10), ' '), CHAR(13), ' '), ' STL ') > 0 OR INSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(UPPER(' ' || COALESCE(NEW.fields_json, '') || ' '), '-', ' '), '/', ' '), '(', ' '), ')', ' '), '[', ' '), ']', ' '), '"', ' '), ',', ' '), '.', ' '), ':', ' '), ';', ' '), '|', ' '), '_', ' '), CHAR(9), ' '), CHAR(10), ' '), CHAR(13), ' '), ' SVENSKA TRAVLIGAN ') > 0 OR INSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(UPPER(' ' || COALESCE(NEW.fields_json, '') || ' '), '-', ' '), '/', ' '), '(', ' '), ')', ' '), '[', ' '), ']', ' '), '"', ' '), ',', ' '), '.', ' '), ':', ' '), ';', ' '), '|', ' '), '_', ' '), CHAR(9), ' '), CHAR(10), ' '), CHAR(13), ' '), ' SVENSKA TRAVLIGANS ') > 0)
     OR (
       json_valid(NEW.fields_json)
