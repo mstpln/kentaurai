@@ -1,6 +1,6 @@
 PRAGMA foreign_keys = ON;
 
--- Materialize the expensive, append-oriented evidence families used by the
+-- Materialize the expensive append-oriented evidence families used by the
 -- canonical high-prize race scope. Mutable race-local facts (first prize and
 -- race/class text) remain evaluated directly from races so corrections are
 -- reflected immediately.
@@ -31,27 +31,7 @@ JOIN source_records sr ON sr.id = no.source_record_id
 WHERE no.entity_type = 'race'
   AND sr.source_type = 'official_provider'
   AND (
-    INSTR(
-      REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-        UPPER(' ' || COALESCE(no.fields_json, '') || ' '),
-        '-', ' '), '/', ' '), '(', ' '), ')', ' '), '[', ' '), ']', ' '), '"', ' '), ',', ' '),
-        '.', ' '), ':', ' '), ';', ' '), '|', ' '), '_', ' '), CHAR(10), ' '),
-      ' STL '
-    ) > 0
-    OR INSTR(
-      REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-        UPPER(' ' || COALESCE(no.fields_json, '') || ' '),
-        '-', ' '), '/', ' '), '(', ' '), ')', ' '), '[', ' '), ']', ' '), '"', ' '), ',', ' '),
-        '.', ' '), ':', ' '), ';', ' '), '|', ' '), '_', ' '), CHAR(10), ' '),
-      ' SVENSKA TRAVLIGAN '
-    ) > 0
-    OR INSTR(
-      REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
-        UPPER(' ' || COALESCE(no.fields_json, '') || ' '),
-        '-', ' '), '/', ' '), '(', ' '), ')', ' '), '[', ' '), ']', ' '), '"', ' '), ',', ' '),
-        '.', ' '), ':', ' '), ';', ' '), '|', ' '), '_', ' '), CHAR(10), ' '),
-      ' SVENSKA TRAVLIGANS '
-    ) > 0
+    (INSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(UPPER(' ' || COALESCE(no.fields_json, '') || ' '), '-', ' '), '/', ' '), '(', ' '), ')', ' '), '[', ' '), ']', ' '), '"', ' '), ',', ' '), '.', ' '), ':', ' '), ';', ' '), '|', ' '), '_', ' '), CHAR(9), ' '), CHAR(10), ' '), CHAR(13), ' '), ' STL ') > 0 OR INSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(UPPER(' ' || COALESCE(no.fields_json, '') || ' '), '-', ' '), '/', ' '), '(', ' '), ')', ' '), '[', ' '), ']', ' '), '"', ' '), ',', ' '), '.', ' '), ':', ' '), ';', ' '), '|', ' '), '_', ' '), CHAR(9), ' '), CHAR(10), ' '), CHAR(13), ' '), ' SVENSKA TRAVLIGAN ') > 0 OR INSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(UPPER(' ' || COALESCE(no.fields_json, '') || ' '), '-', ' '), '/', ' '), '(', ' '), ')', ' '), '[', ' '), ']', ' '), '"', ' '), ',', ' '), '.', ' '), ':', ' '), ';', ' '), '|', ' '), '_', ' '), CHAR(9), ' '), CHAR(10), ' '), CHAR(13), ' '), ' SVENSKA TRAVLIGANS ') > 0)
     OR (
       json_valid(no.fields_json)
       AND json_type(no.fields_json, '$.gameTypes') = 'array'
@@ -138,8 +118,7 @@ BEGIN
   INSERT OR IGNORE INTO race_scope_evidence(race_id, evidence_kind)
   SELECT NEW.entity_id, 'official_observation'
   WHERE (
-    UPPER(NEW.fields_json) LIKE '%STL%'
-    OR UPPER(NEW.fields_json) LIKE '%SVENSKA TRAVLIGAN%'
+    (INSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(UPPER(' ' || COALESCE(NEW.fields_json, '') || ' '), '-', ' '), '/', ' '), '(', ' '), ')', ' '), '[', ' '), ']', ' '), '"', ' '), ',', ' '), '.', ' '), ':', ' '), ';', ' '), '|', ' '), '_', ' '), CHAR(9), ' '), CHAR(10), ' '), CHAR(13), ' '), ' STL ') > 0 OR INSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(UPPER(' ' || COALESCE(NEW.fields_json, '') || ' '), '-', ' '), '/', ' '), '(', ' '), ')', ' '), '[', ' '), ']', ' '), '"', ' '), ',', ' '), '.', ' '), ':', ' '), ';', ' '), '|', ' '), '_', ' '), CHAR(9), ' '), CHAR(10), ' '), CHAR(13), ' '), ' SVENSKA TRAVLIGAN ') > 0 OR INSTR(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(UPPER(' ' || COALESCE(NEW.fields_json, '') || ' '), '-', ' '), '/', ' '), '(', ' '), ')', ' '), '[', ' '), ']', ' '), '"', ' '), ',', ' '), '.', ' '), ':', ' '), ';', ' '), '|', ' '), '_', ' '), CHAR(9), ' '), CHAR(10), ' '), CHAR(13), ' '), ' SVENSKA TRAVLIGANS ') > 0)
     OR (
       json_valid(NEW.fields_json)
       AND json_type(NEW.fields_json, '$.gameTypes') = 'array'
