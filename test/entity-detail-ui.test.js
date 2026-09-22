@@ -112,8 +112,11 @@ test('detail layout explicitly supports narrow mobile widths and scrollable tabl
   assert.match(html, /@media\(max-width:320px\)/);
   assert.match(html, /overflow-x:auto/);
   assert.match(html, /-webkit-overflow-scrolling:touch/);
-  assert.match(html, /entity-detail-score-main\{display:grid;grid-template-columns:minmax\(0,1\.2fr\) minmax\(0,1fr\)/);
-  assert.match(html, /@media\(max-width:650px\)\{\.entity-detail-score-main\{grid-template-columns:1fr\}/);
+  assert.match(html, /entity-detail-score\{display:grid;gap:0;border:1px solid var\(--line\);border-radius:11px;overflow:hidden/);
+  assert.match(html, /entity-detail-score-main\{display:grid;grid-template-columns:minmax\(0,1\.2fr\) minmax\(0,1fr\);gap:0;border-bottom:1px solid var\(--line-soft\)/);
+  assert.match(html, /entity-detail-side\{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:0\}/);
+  assert.match(html, /entity-detail-side>\.entity-detail-mini:nth-child\(odd\)\{border-right:1px solid var\(--line-soft\)\}/);
+  assert.match(html, /@media\(max-width:650px\)\{\.entity-detail-score-main\{grid-template-columns:1fr\}\.entity-detail-hero\{border-right:0;border-bottom:1px solid var\(--line-soft\)\}/);
 });
 
 test('horse start points render from primary canonical data and verified top speed loads lazily', () => {
@@ -147,6 +150,8 @@ test('shared summary keeps entity-specific specialized sections without the scor
   assert.match(script, /Segerprocent/);
   assert.match(script, /Form \(1–100\)/);
   assert.match(script, /formMini\(data\.entityType,null\)/);
+  assert.match(script, /entity-detail-side">'\+form\+mini\('Prispengar'/);
+  assert.doesNotMatch(script, /entity-detail-side">'\+mini\('Prispengar'[^\n]*\+form/);
   assert.match(script, /if\(c\.rest\)/);
   assert.match(script, /if\(c\.market\)/);
   assert.match(script, /table\('Startmetod'/);
