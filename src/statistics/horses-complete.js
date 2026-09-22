@@ -13,6 +13,11 @@ export { getHorseFilterOptions, normalizeHorseStatsFilters };
 export async function getHorseRankings(env, options = {}) {
   if (options.mode === 'core') return getBaseHorseRankings(env, options);
   const filters = normalizeHorseStatsFilters(options);
+  if (options.mode === 'extended' && options.part === 'startpoints') {
+    const highestStartPoints = await getHorseStartPointRanking(env, filters);
+    return {filters,partial:true,rankings:{highestStartPoints},startPointsStatus:'verified_official_life_statistics'};
+  }
+  if (options.mode === 'extended' && options.part) return getBaseHorseRankings(env, options);
   const [data, highestStartPoints] = await Promise.all([
     getBaseHorseRankings(env, options),
     getHorseStartPointRanking(env, filters)

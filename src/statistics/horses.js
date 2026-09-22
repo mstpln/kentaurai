@@ -373,6 +373,29 @@ export async function getHorseRankings(env, options = {}) {
       startPointsStatus:'deferred'
     };
   }
+  if (options.mode === 'extended' && options.part) {
+    if (options.part === 'form') {
+      const form = await run(env,buildFormQuery(filters));
+      return {filters,partial:true,rankings:{bestFormLast10:form.map((row,index)=>({rank:index+1,id:row.entity_id,name:row.name,usedStarts:Number(row.used_starts),averagePlacing:Number(row.avg_placing)}))},startPointsStatus:'deferred'};
+    }
+    if (options.part === 'earnings') {
+      const earnings = await run(env,buildCoreRanking(filters,'earningsPerVerifiedStart'));
+      return {filters,partial:true,rankings:{highestEarningsPerStart:mapCoreRanking(earnings,'earningsPerVerifiedStart')},startPointsStatus:'deferred'};
+    }
+    if (options.part === 'opening') {
+      const start = await run(env,buildXlabsOpening200Ranking(filters));
+      return {filters,partial:true,rankings:{fastestFirst200:start.map((row,index)=>({rank:index+1,id:row.entity_id,name:row.name,measurements:Number(row.measurements),averageSeconds:Number(row.avg_seconds)}))},startPointsStatus:'deferred'};
+    }
+    if (options.part === 'closing') {
+      const close = await run(env,buildXlabsRanking(filters,'last_400_time'));
+      return {filters,partial:true,rankings:{strongestLast400:close.map((row,index)=>({rank:index+1,id:row.entity_id,name:row.name,measurements:Number(row.measurements),averageSeconds:Number(row.avg_seconds)}))},startPointsStatus:'deferred'};
+    }
+    if (options.part === 'rest') {
+      const restRows = await run(env,buildRestRankingSet(filters));
+      return {filters,partial:true,rankings:{firstAfterRest:mapRestRanking(rowsFor(restRows,'ranking_kind','first')),secondAfterRest:mapRestRanking(rowsFor(restRows,'ranking_kind','second'))},startPointsStatus:'deferred'};
+    }
+    throw new Error('unsupported horse statistics part');
+  }
   if (options.mode === 'extended') {
     const [earnings,form,start,close,restRows] = await Promise.all([
       run(env,buildCoreRanking(filters,'earningsPerVerifiedStart')),

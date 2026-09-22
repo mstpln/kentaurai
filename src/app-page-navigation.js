@@ -123,6 +123,7 @@ function restoreShared(view){
 async function restoreView(view){
   if(!view)return;
   cancelRankingLifecycle();
+  cancelEntityListLifecycle();
   restoring=true;
   clearTimeout(commitTimer);
   try{

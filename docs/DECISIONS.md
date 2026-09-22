@@ -226,3 +226,11 @@ A single race must not directly change model weights. Candidate learnings are re
 4. Historical progress equals completed dates divided by the inclusive requested date range. A date deliberately closed as neutral unavailable X-Labs coverage is completed work, not missing progress.
 5. The Settings-gear red badge represents an unseen current incident, not merely an active error. Opening a successfully rendered Settings page acknowledges the current incident. Repeated retry failures at the same checkpoint remain acknowledged; escalation to **Åtgärd krävs** creates a new notification. Recovery removes the active incident and resets acknowledgement state for future incidents.
 6. Settings health reads are observational only and must not make extra provider requests.
+
+## Statistics ranking reads must remain interruptible
+1. Horse, trainer and driver ranking pages paint `core` before any secondary family is requested.
+2. Secondary ranking families are requested in bounded sequential parts, with a browser paint boundary between parts. A later part must never be started after the user has navigated away.
+3. Category/list navigation must paint its destination shell before awaiting D1 and must cancel/ignore stale list responses.
+4. Client fetch cancellation is not treated as proof that already-started D1 work stopped server-side; bounding each server request is therefore part of the responsiveness contract.
+5. Canonical `Högre prissumma` semantics remain unchanged. Append-oriented STL/game/official-observation evidence is materialized in `race_scope_evidence`; mutable first-prize and race/class text remain read directly from `races`.
+6. The unsplit extended API path remains compatibility-only. The production ranking UI uses bounded parts and merges them progressively.

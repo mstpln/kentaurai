@@ -66,7 +66,7 @@ const horseCore={partial:true,rankings:{highestWinRate:[],highestTop3Rate:[],bes
 const horseExtended={partial:false,rankings:{fastestFirst200:[],highestEarningsPerStart:[],strongestLast400:[],firstAfterRest:[],secondAfterRest:[],highestStartPoints:[]}};
 const personCore={partial:true,definitions:{},rankings:{highestWinRate:[],highestTop3Rate:[],mostWins:[],bestFormLast30:[]}};
 
-test('ranking core paints before extended is requested', async () => {
+test('ranking core paints before progressive extended parts are requested', async () => {
   const runtime=rankingRuntime();
   vm.runInContext("state.tab='stats'",runtime.context);
   const rendering=vm.runInContext("renderEntityList('horses')",runtime.context);
@@ -76,11 +76,16 @@ test('ranking core paints before extended is requested', async () => {
   await flush();
   assert.match(runtime.document.appWrites.at(-1),/Läser resterande statistik/);
   assert.equal(runtime.requests.length,1,'extended must not start before the post-core paint boundary');
-  runtime.frames.shift()();
-  await flush();
-  assert.equal(runtime.requests.length,2);
-  assert.match(runtime.requests[1].path,/mode=extended/);
-  runtime.requests[1].resolve(horseExtended);
+  const parts=['form','opening','closing','earnings','rest','startpoints'];
+  for(let index=0;index<parts.length;index++){
+    assert.ok(runtime.frames.length>0,'each progressive part should wait for a paint boundary');
+    runtime.frames.shift()();
+    await flush();
+    assert.equal(runtime.requests.length,index+2);
+    assert.match(runtime.requests[index+1].path,new RegExp('mode=extended&part='+parts[index]));
+    runtime.requests[index+1].resolve({partial:true,rankings:{}});
+    await flush();
+  }
   await rendering;
   assert.doesNotMatch(runtime.document.appWrites.at(-1),/Läser resterande statistik/);
 });
@@ -111,6 +116,25 @@ test('category, tab and filter changes abort the previous ranking lifecycle', as
   assert.doesNotMatch(runtime.document.appWrites.at(-1),/Kunde inte läsa (häst|tränar|kusk)statistik/);
 });
 
+test('entity list navigation paints immediately and aborts the stale list read', async () => {
+  const runtime=rankingRuntime();
+  vm.runInContext("state.tab='list'",runtime.context);
+  const trainer=vm.runInContext("renderEntityList('trainers')",runtime.context);
+  assert.match(runtime.document.appWrites.at(-1),/Tränare/);
+  assert.match(runtime.document.appWrites.at(-1),/Läser tränare/);
+  assert.equal(runtime.requests.length,1);
+  const trainerSignal=runtime.requests[0].options.signal;
+  const horse=vm.runInContext("renderEntityList('horses')",runtime.context);
+  assert.equal(trainerSignal.aborted,true);
+  assert.match(runtime.document.appWrites.at(-1),/Hästar/);
+  assert.match(runtime.document.appWrites.at(-1),/Läser hästar/);
+  await trainer;
+  runtime.requests[1].resolve({items:[],total:0,offset:0,limit:20,hasMore:false});
+  await horse;
+  assert.match(runtime.document.appWrites.at(-1),/Hästar/);
+  assert.doesNotMatch(runtime.document.appWrites.at(-1),/Tränare/);
+});
+
 test('abort-resistant stale results cannot repaint the current category', async () => {
   const runtime=rankingRuntime({ignoreAbort:true});
   vm.runInContext("state.tab='stats'",runtime.context);
@@ -128,7 +152,7 @@ test('abort-resistant stale results cannot repaint the current category', async 
   await trainer;
 });
 
-test('extended failure preserves rendered core and abort remains silent', async () => {
+test('progressive part failure preserves core and cancellation stays silent', async () => {
   const runtime=rankingRuntime();
   vm.runInContext("state.tab='stats'",runtime.context);
   const rendering=vm.runInContext("renderEntityList('drivers')",runtime.context);
@@ -138,7 +162,13 @@ test('extended failure preserves rendered core and abort remains silent', async 
   runtime.frames.shift()();
   await flush();
   runtime.requests[1].reject(new Error('extended failed'));
+  await flush();
+  assert.match(runtime.document.appWrites.at(-1),/Viss statistik kunde inte läsas/);
+  assert.match(runtime.document.appWrites.at(-1),/Kuskar/);
+  assert.notEqual(runtime.document.appWrites.at(-1),'');
+  vm.runInContext('cancelRankingLifecycle()',runtime.context);
+  if(runtime.frames.length)runtime.frames.shift()();
   await rendering;
-  assert.equal(runtime.document.appWrites.at(-1),coreHtml);
   assert.doesNotMatch(runtime.document.appWrites.at(-1),/Kunde inte läsa kuskstatistik/);
+  assert.ok(coreHtml.includes('Kuskar'));
 });

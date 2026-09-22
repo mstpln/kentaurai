@@ -63,7 +63,7 @@ function horseStatsOptions(url) {
     period: url.searchParams.get('period'), raceScope: url.searchParams.get('race_scope'), trackId: url.searchParams.get('track_id'),
     raceType: url.searchParams.get('race_type'), breedType: url.searchParams.get('breed_type'), startMethod: url.searchParams.get('start_method'),
     distanceGroup: url.searchParams.get('distance_group'), sex: url.searchParams.get('sex'), age: url.searchParams.get('age'), minStarts: url.searchParams.get('min_starts'),
-    mode: url.searchParams.get('mode')
+    mode: url.searchParams.get('mode'), part: url.searchParams.get('part')
   };
 }
 
@@ -73,7 +73,7 @@ function personStatsOptions(url) {
     raceType: url.searchParams.get('race_type'), breedType: url.searchParams.get('breed_type'), startMethod: url.searchParams.get('start_method'),
     distanceGroup: url.searchParams.get('distance_group'), sex: url.searchParams.get('sex'), age: url.searchParams.get('age'),
     voltLane: url.searchParams.get('volt_lane'), handicapM: url.searchParams.get('handicap_m'), minStarts: url.searchParams.get('min_starts'),
-    mode: url.searchParams.get('mode')
+    mode: url.searchParams.get('mode'), part: url.searchParams.get('part')
   };
 }
 

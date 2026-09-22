@@ -437,6 +437,17 @@ export async function getTrainerRankings(env,options={}){
       highestWinRate:mapCoreRanking(rankingRows(coreRows,'winRate'),'winRate'),highestTop3Rate:mapCoreRanking(rankingRows(coreRows,'top3Rate'),'top3Rate'),mostWins:mapCoreRanking(rankingRows(coreRows,'wins'),'wins')
     }};
   }
+  if(options.mode==='extended'&&options.part){
+    if(options.part==='form'){const form=await run(env,buildFormQuery(f));return{filters:f,partial:true,definitions:{longshotPercentMax:DRIVER_LONGSHOT_PERCENT_MAX,market:DRIVER_MARKET_DEFINITION_VERSION,voltLaneGood:[1,6,7],restDays:REST_DAYS,distanceProfile:DISTANCE_PROFILE_VERSION},rankings:{bestFormLast30:mapForm(form)}}}
+    if(options.part==='annual'){const annual=await run(env,buildCoreRanking(f,'earnings',[],{includePeriod:false}));return{filters:f,partial:true,rankings:{mostEarningsThisYear:mapCoreRanking(annual,'earnings')}}}
+    if(options.part==='per-start'){const perStart=await run(env,buildCoreRanking(f,'earningsPerVerifiedStart'));return{filters:f,partial:true,rankings:{highestEarningsPerStart:mapCoreRanking(perStart,'earningsPerVerifiedStart')}}}
+    if(options.part==='performance'){const performance=await run(env,buildPerformanceRankingSet(f));return{filters:f,partial:true,rankings:{bestAuto:mapCoreRanking(categoryRows(performance,'auto'),'winRate'),bestVolt:mapCoreRanking(categoryRows(performance,'volt'),'winRate'),bestGoodVoltLane:mapCoreRanking(categoryRows(performance,'goodVolt'),'winRate'),bestOtherVoltLane:mapCoreRanking(categoryRows(performance,'otherVolt'),'winRate'),bestWithHandicap:mapCoreRanking(categoryRows(performance,'handicap'),'winRate')}}}
+    if(options.part==='home'){const home=await run(env,buildHomeRankingSet(f));return{filters:f,partial:true,rankings:{bestHomeTrack:mapCoreRanking(categoryRows(home,'home'),'winRate'),bestOtherTracks:mapCoreRanking(categoryRows(home,'away'),'winRate')}}}
+    if(options.part==='distance'){const distance=await run(env,buildDistanceProfileRankingSet(f));return{filters:f,partial:true,rankings:{bestShortDistance:mapCoreRanking(categoryRows(distance,'short'),'winRate'),bestMediumDistance:mapCoreRanking(categoryRows(distance,'medium'),'winRate'),bestLongDistance:mapCoreRanking(categoryRows(distance,'long'),'winRate')}}}
+    if(options.part==='market'){const market=await run(env,buildMarketRankingSet(f));return{filters:f,partial:true,definitions:{longshotPercentMax:DRIVER_LONGSHOT_PERCENT_MAX,market:DRIVER_MARKET_DEFINITION_VERSION},rankings:{favoriteResults:mapCoreRanking(categoryRows(market,'favorite'),'winRate'),longshotResults:mapCoreRanking(categoryRows(market,'longshot'),'winRate')}}}
+    if(options.part==='rest'){const rest=await run(env,buildRestRankingSet(f));return{filters:f,partial:true,rankings:{firstAfterRest:mapRest(categoryRows(rest,'first')),secondAfterRest:mapRest(categoryRows(rest,'second'))}}}
+    throw new Error('unsupported trainer statistics part');
+  }
   if(options.mode==='extended'){
     const [form,annual,perStart,performance,home,distance,market,rest]=await Promise.all([
       run(env,buildFormQuery(f)),run(env,buildCoreRanking(f,'earnings',[],{includePeriod:false})),run(env,buildCoreRanking(f,'earningsPerVerifiedStart')),

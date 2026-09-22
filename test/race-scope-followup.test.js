@@ -75,14 +75,9 @@ test('race level uses verified STL, V75/V85/V86 identity or at least 100k first 
 
   const higherPrizeEvidence = higherPrizeRaceEvidenceCondition('r');
   assert.match(higherPrizeEvidence, /first_prize_sek >= 100000/);
-  assert.match(higherPrizeEvidence, /game_legs/);
-  assert.match(higherPrizeEvidence, /game_rounds/);
-  assert.match(higherPrizeEvidence, /json_each/);
-  assert.match(higherPrizeEvidence, /gameTypes/);
-  assert.match(higherPrizeEvidence, /'V75', 'V85', 'V86'/);
-  assert.doesNotMatch(higherPrizeEvidence, /GS75/);
-  assert.match(higherPrizeEvidence, /^r\.id IN \(/, 'high-prize scope should materialize one reusable race-id set');
-  assert.doesNotMatch(higherPrizeEvidence, /WHERE[^\n]*race_id\s*=\s*r\.id/, 'high-prize scope must not execute correlated evidence lookups per result row');
+  assert.match(higherPrizeEvidence, /race_scope_evidence/);
+  assert.doesNotMatch(higherPrizeEvidence, /normalized_observations|json_each|game_legs|game_rounds/, 'hot statistics reads must not rescan source evidence');
+  assert.match(higherPrizeEvidence, /EXISTS[\s\S]*rse_scope\.race_id = r\.id/, 'high-prize scope should use the indexed materialized evidence lookup');
   assert.match(raceScopeCondition('weekday'), /^COALESCE\(/);
   assert.throws(() => normalizeRaceScope('gs75'), /race scope/);
 });
@@ -116,4 +111,31 @@ test('Bana separates Högre prissumma from Vardagstrav, includes historical V75 
     year: '2026', startMethod: 'all', distanceGroup: '2140', raceScope: 'stl'
   });
   assert.equal(legacyStl.totals.starts, 4, 'legacy STL-only API scope keeps its original deterministic meaning');
+});
+
+test('materialized game evidence follows game-leg upserts without stale race membership', () => {
+  const { db } = createTestEnv();
+  seedTrack(db);
+
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM race_scope_evidence WHERE race_id='scope-v85-feature' AND evidence_kind='game'").get().count,
+    1
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM race_scope_evidence WHERE race_id='scope-gs75' AND evidence_kind='game'").get().count,
+    0
+  );
+
+  db.prepare("UPDATE game_legs SET race_id='scope-gs75' WHERE game_round_id='scope-v85-round' AND leg_number=1").run();
+
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM race_scope_evidence WHERE race_id='scope-v85-feature' AND evidence_kind='game'").get().count,
+    0,
+    'old race membership must be removed when the game leg moves'
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM race_scope_evidence WHERE race_id='scope-gs75' AND evidence_kind='game'").get().count,
+    1,
+    'new race membership must be materialized by the same game-leg update'
+  );
 });
