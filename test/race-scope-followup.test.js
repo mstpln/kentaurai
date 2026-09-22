@@ -112,3 +112,30 @@ test('Bana separates Högre prissumma from Vardagstrav, includes historical V75 
   });
   assert.equal(legacyStl.totals.starts, 4, 'legacy STL-only API scope keeps its original deterministic meaning');
 });
+
+test('materialized game evidence follows game-leg upserts without stale race membership', () => {
+  const { db } = createTestEnv();
+  seedTrack(db);
+
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM race_scope_evidence WHERE race_id='scope-v85-feature' AND evidence_kind='game'").get().count,
+    1
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM race_scope_evidence WHERE race_id='scope-gs75' AND evidence_kind='game'").get().count,
+    0
+  );
+
+  db.prepare("UPDATE game_legs SET race_id='scope-gs75' WHERE game_round_id='scope-v85-round' AND leg_number=1").run();
+
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM race_scope_evidence WHERE race_id='scope-v85-feature' AND evidence_kind='game'").get().count,
+    0,
+    'old race membership must be removed when the game leg moves'
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS count FROM race_scope_evidence WHERE race_id='scope-gs75' AND evidence_kind='game'").get().count,
+    1,
+    'new race membership must be materialized by the same game-leg update'
+  );
+});
