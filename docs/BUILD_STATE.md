@@ -236,3 +236,11 @@ The external-analysis production release was accepted after:
 - Historical progress is the share of the requested date interval that is fully processed. X-Labs dates closed as verified neutral unavailable coverage count as processed, so legitimate source gaps do not prevent 100% completion.
 - A small red badge on the Settings gear means a current error/escalation has not yet been seen. Successfully opening Settings acknowledges the current incident; repeated retries at the same checkpoint do not re-notify, escalation to action-required does, and recovery clears acknowledgement state so a later incident can notify again.
 - Migration `0034_settings_alert_acknowledgements.sql` stores only alert acknowledgement keys/timestamps. It contains no provider payloads or private racing/editorial data.
+
+## Statistics responsiveness follow-up
+- Production browser observation showed horse statistics core becoming usable before the full extended payload, while in-page category navigation could leave the old category visible until the next list read completed.
+- Entity list navigation now paints the destination shell before awaiting D1, aborts stale list reads and guards against stale repaint.
+- Primary Statistik/Trend/Analys/Spel navigation and history restoration cancel both active ranking and entity-list lifecycles.
+- Ranking `core` remains the first paint. Extended ranking families are now requested as sequential bounded parts, with a paint boundary between parts. Navigating away prevents later parts from being started.
+- The canonical high-prize scope keeps its existing semantics, but expensive append-only STL/game/official-observation evidence is materialized in D1 by migration `0035_race_scope_evidence.sql`. First-prize and race-text evidence remain evaluated directly so factual corrections stay immediate.
+- Legacy unsplit extended API behavior remains readable for compatibility; the production UI uses only bounded progressive parts.
