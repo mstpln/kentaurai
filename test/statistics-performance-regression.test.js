@@ -22,9 +22,10 @@ test('statistics core endpoints avoid repeated ranking scans', async () => {
     const { env } = createTestEnv();
     const captures = capturePreparedQueries(env);
     await getHorseRankings(env, { mode:'core', period:'1y', asOfDate:'2026-09-20', minStarts:'3' });
-    assert.equal(captures.length, 3, 'horse core should be shared core aggregate + Form + opening speed');
+    assert.equal(captures.length, 2, 'horse core should be shared core aggregate + Form only');
     assert.equal(captures.filter((sql) => sql.includes('WITH horse_stats AS MATERIALIZED')).length, 1);
     assert.equal(captures.some((sql) => sql.includes('horse_start_points')), false, 'Start Points must stay out of the fast horse core response');
+    assert.equal(captures.some((sql) => sql.includes('xlabs_intervals')), false, 'opening speed must not block horse core');
   }
   {
     const { env } = createTestEnv();
@@ -47,8 +48,9 @@ test('statistics extended endpoints consolidate expensive ranking families', asy
     const { env } = createTestEnv();
     const captures = capturePreparedQueries(env);
     await getHorseRankings(env, { mode:'extended', period:'1y', asOfDate:'2026-09-20', minStarts:'3' });
-    assert.equal(captures.length, 4, 'horse extended should use earnings + closing speed + combined rest + Start Points');
+    assert.equal(captures.length, 5, 'horse extended should use earnings + opening speed + closing speed + combined rest + Start Points');
     assert.equal(captures.filter((sql) => sql.includes('ranking_kind')).length, 1);
+    assert.equal(captures.some((sql) => sql.includes('xlabs_intervals')), true);
   }
   {
     const { env } = createTestEnv();
@@ -68,19 +70,21 @@ test('statistics extended endpoints consolidate expensive ranking families', asy
   }
 });
 
-test('statistics UIs overlap core and extended reads while keeping core paint first', () => {
+test('statistics UIs complete and paint core before requesting extended data', () => {
   for (const [file, mergeName] of [
     ['../src/horse-statistics-ui.js','mergeHorseRankingPayload'],
     ['../src/trainer-statistics-ui.js','tMergeRankingPayload'],
     ['../src/driver-statistics-ui.js','dMergeRankingPayload']
   ]) {
     const source = fs.readFileSync(new URL(file, import.meta.url), 'utf8');
-    assert.match(source, /const corePromise=api\([^;]+mode=core/);
-    assert.match(source, /const extendedPromise=new Promise\(resolve=>setTimeout\(\(\)=>\{if\(token!==/);
+    assert.match(source, /await api\([^;]+mode=core[^;]+signal:lifecycle\.controller\.signal/);
+    assert.match(source, /await afterRankingCorePaint\(\)/);
     assert.match(source, /mode=extended/);
-    assert.match(source, /const core=await corePromise/);
-    assert.match(source, /const extendedResult=await extendedPromise/);
-    assert.ok(source.includes('const data='+mergeName+'(core,extendedResult.data)'));
+    assert.doesNotMatch(source, /setTimeout\([^)]*75|corePromise|extendedPromise/);
+    assert.ok(source.indexOf('render'+(mergeName==='mergeHorseRankingPayload'?'Horse':mergeName==='tMergeRankingPayload'?'Trainer':'Driver')+'RankingShell(core)') < source.indexOf("mode=extended"));
+    assert.ok(source.includes('const data='+mergeName+'(core,extended)'));
+    assert.match(source, /if\(isRankingAbort\(error\)\)return/);
+    assert.match(source, /cancelRankingLifecycle\(\)/);
   }
 });
 
@@ -94,6 +98,6 @@ test('entity detail statistics overlap lazy secondary reads and prewarm the real
   assert.match(detail, /const specialtiesPromise=delayedRequest\(base\+'\/calendar-specialties\?'/);
   assert.match(detail, /const formPromise=delayedRequest\(base\+'\/calendar-form\?'/);
   assert.match(performance, /race_scope:'high_prize'/);
-  assert.match(performance, /defaultRankingPath\(page,'core'\)/);
+  assert.doesNotMatch(performance, /defaultRankingPath|\/statistics\?'\+q\.toString\(\)/);
   assert.match(performance, /horses\|trainers\|drivers/);
 });
