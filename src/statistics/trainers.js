@@ -432,21 +432,19 @@ function mapForm(rows){return rows.map((row,index)=>({rank:index+1,id:row.entity
 export async function getTrainerRankings(env,options={}){
   if(!env.DB)throw new Error('DB is not configured');const f=normalizeTrainerStatsFilters(options);await validateTrack(env,f.trackId);
   if(options.mode==='core'){
-    const [coreRows,form]=await Promise.all([
-      run(env,buildCoreRankingSet(f)),run(env,buildFormQuery(f))
-    ]);
+    const coreRows=await run(env,buildCoreRankingSet(f));
     return {filters:f,partial:true,definitions:{longshotPercentMax:DRIVER_LONGSHOT_PERCENT_MAX,market:DRIVER_MARKET_DEFINITION_VERSION,voltLaneGood:[1,6,7],restDays:REST_DAYS,distanceProfile:DISTANCE_PROFILE_VERSION},rankings:{
-      highestWinRate:mapCoreRanking(rankingRows(coreRows,'winRate'),'winRate'),highestTop3Rate:mapCoreRanking(rankingRows(coreRows,'top3Rate'),'top3Rate'),mostWins:mapCoreRanking(rankingRows(coreRows,'wins'),'wins'),bestFormLast30:mapForm(form)
+      highestWinRate:mapCoreRanking(rankingRows(coreRows,'winRate'),'winRate'),highestTop3Rate:mapCoreRanking(rankingRows(coreRows,'top3Rate'),'top3Rate'),mostWins:mapCoreRanking(rankingRows(coreRows,'wins'),'wins')
     }};
   }
   if(options.mode==='extended'){
-    const [annual,perStart,performance,home,distance,market,rest]=await Promise.all([
-      run(env,buildCoreRanking(f,'earnings',[],{includePeriod:false})),run(env,buildCoreRanking(f,'earningsPerVerifiedStart')),
+    const [form,annual,perStart,performance,home,distance,market,rest]=await Promise.all([
+      run(env,buildFormQuery(f)),run(env,buildCoreRanking(f,'earnings',[],{includePeriod:false})),run(env,buildCoreRanking(f,'earningsPerVerifiedStart')),
       run(env,buildPerformanceRankingSet(f)),run(env,buildHomeRankingSet(f)),run(env,buildDistanceProfileRankingSet(f)),
       run(env,buildMarketRankingSet(f)),run(env,buildRestRankingSet(f))
     ]);
     return {filters:f,partial:false,definitions:{longshotPercentMax:DRIVER_LONGSHOT_PERCENT_MAX,market:DRIVER_MARKET_DEFINITION_VERSION,voltLaneGood:[1,6,7],restDays:REST_DAYS,distanceProfile:DISTANCE_PROFILE_VERSION},rankings:{
-      mostEarningsThisYear:mapCoreRanking(annual,'earnings'),highestEarningsPerStart:mapCoreRanking(perStart,'earningsPerVerifiedStart'),
+      bestFormLast30:mapForm(form),mostEarningsThisYear:mapCoreRanking(annual,'earnings'),highestEarningsPerStart:mapCoreRanking(perStart,'earningsPerVerifiedStart'),
       bestAuto:mapCoreRanking(categoryRows(performance,'auto'),'winRate'),bestVolt:mapCoreRanking(categoryRows(performance,'volt'),'winRate'),
       bestGoodVoltLane:mapCoreRanking(categoryRows(performance,'goodVolt'),'winRate'),bestOtherVoltLane:mapCoreRanking(categoryRows(performance,'otherVolt'),'winRate'),bestWithHandicap:mapCoreRanking(categoryRows(performance,'handicap'),'winRate'),
       bestHomeTrack:mapCoreRanking(categoryRows(home,'home'),'winRate'),bestOtherTracks:mapCoreRanking(categoryRows(home,'away'),'winRate'),
