@@ -34,6 +34,8 @@ test('primary Analysis workspace owns the approved external analysis workflow wh
   assert.match(html, /settingsAlertBadge/);
   assert.match(html, /settings-source-grid/);
   assert.match(html, /Historisk import/);
+  assert.match(html, /settings-history-jobs/);
+  assert.match(html, /job\.startDate\+' – '\+job\.endDate/);
   assert.match(html, /error_retrying:'Fel upptäckt'/);
   assert.match(html, /action_required:'Åtgärd krävs'/);
   assert.match(html, /\/app\/api\/settings\/alerts/);
