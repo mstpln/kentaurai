@@ -48,29 +48,44 @@ export function stlRaceEvidenceCondition(raceAlias = 'r') {
   return `(${classified} OR ${persistedEvidence} OR ${officialObservationEvidence})`;
 }
 
+function higherPrizeRaceIdSetSql() {
+  const storedRaceText = normalizedTextSql(`COALESCE(r_scope_set.race_name, '') || ' ' || COALESCE(r_scope_set.main_class, '') || ' ' || COALESCE(r_scope_set.class_flags_json, '')`);
+  const observationText = normalizedTextSql('no_scope_set.fields_json');
+  return `
+    SELECT r_scope_set.id AS race_id
+    FROM races r_scope_set
+    WHERE r_scope_set.first_prize_sek >= ${HIGHER_PRIZE_THRESHOLD_SEK}
+       OR ${explicitStlTextCondition(storedRaceText)}
+    UNION ALL
+    SELECT rsc_scope_set.race_id
+    FROM race_stl_classifications rsc_scope_set
+    UNION ALL
+    SELECT gl_scope_set.race_id
+    FROM game_legs gl_scope_set
+    JOIN game_rounds gr_scope_set ON gr_scope_set.id = gl_scope_set.game_round_id
+    WHERE UPPER(TRIM(gr_scope_set.game_type)) IN ('V75', 'V85', 'V86')
+    UNION ALL
+    SELECT no_scope_set.entity_id AS race_id
+    FROM normalized_observations no_scope_set
+    JOIN source_records sr_scope_set ON sr_scope_set.id = no_scope_set.source_record_id
+    WHERE no_scope_set.entity_type = 'race'
+      AND sr_scope_set.source_type = 'official_provider'
+      AND ${explicitStlTextCondition(observationText)}
+    UNION ALL
+    SELECT no_game_scope_set.entity_id AS race_id
+    FROM normalized_observations no_game_scope_set
+    JOIN source_records sr_game_scope_set ON sr_game_scope_set.id = no_game_scope_set.source_record_id
+    JOIN json_each(no_game_scope_set.fields_json, '$.gameTypes') game_type_scope_set
+    WHERE no_game_scope_set.entity_type = 'race'
+      AND sr_game_scope_set.source_type = 'official_provider'
+      AND json_valid(no_game_scope_set.fields_json)
+      AND json_type(no_game_scope_set.fields_json, '$.gameTypes') = 'array'
+      AND UPPER(TRIM(CAST(game_type_scope_set.value AS TEXT))) IN ('V75', 'V85', 'V86')
+  `;
+}
+
 export function higherPrizeRaceEvidenceCondition(raceAlias = 'r') {
-  const stlEvidence = stlRaceEvidenceCondition(raceAlias);
-  const storedGameEvidence = `EXISTS (
-    SELECT 1
-    FROM game_legs gl_scope
-    JOIN game_rounds gr_scope ON gr_scope.id = gl_scope.game_round_id
-    WHERE gl_scope.race_id = ${raceAlias}.id
-      AND UPPER(TRIM(gr_scope.game_type)) IN ('V75', 'V85', 'V86')
-  )`;
-  const historicalCalendarGameEvidence = `EXISTS (
-    SELECT 1
-    FROM normalized_observations no_game_scope
-    JOIN source_records sr_game_scope ON sr_game_scope.id = no_game_scope.source_record_id
-    JOIN json_each(no_game_scope.fields_json, '$.gameTypes') game_type_scope
-    WHERE no_game_scope.entity_type = 'race'
-      AND no_game_scope.entity_id = ${raceAlias}.id
-      AND sr_game_scope.source_type = 'official_provider'
-      AND json_valid(no_game_scope.fields_json)
-      AND json_type(no_game_scope.fields_json, '$.gameTypes') = 'array'
-      AND UPPER(TRIM(CAST(game_type_scope.value AS TEXT))) IN ('V75', 'V85', 'V86')
-  )`;
-  const prizeEvidence = `${raceAlias}.first_prize_sek >= ${HIGHER_PRIZE_THRESHOLD_SEK}`;
-  return `(${stlEvidence} OR ${storedGameEvidence} OR ${historicalCalendarGameEvidence} OR ${prizeEvidence})`;
+  return `${raceAlias}.id IN (${higherPrizeRaceIdSetSql()})`;
 }
 
 export function raceScopeCondition(scope, raceAlias = 'r') {
