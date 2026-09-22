@@ -57,6 +57,8 @@ const navigationCss = `
 .settings-button{justify-self:end!important;width:42px!important;height:42px!important;border:0!important;border-radius:0!important;background:transparent!important;color:#9c958b!important;display:grid!important;place-items:center!important;cursor:pointer!important;padding:9px!important;box-shadow:none!important}
 .settings-button:hover,.settings-button.active{border:0!important;background:transparent!important;color:var(--accent-soft)!important;box-shadow:none!important}
 .settings-button svg{width:23px!important;height:23px!important;display:block!important}
+#app.kentaurai-swipe-back-active{will-change:transform;transition:none!important}
+#app.kentaurai-swipe-back-settle{will-change:transform;transition:transform .14s ease-out!important}
 @media(max-width:760px){.top-inner{grid-template-columns:1fr!important}.settings-button{right:16px!important;top:10px!important;width:42px!important;height:42px!important}.brand{padding-right:48px}}
 </style>`;
 
@@ -107,6 +109,53 @@ function commitView(){
   history.pushState({...next,depth},'');
 }
 function scheduleCommit(){clearTimeout(commitTimer);commitTimer=setTimeout(commitView,0)}
+const SWIPE_EDGE_PX=24,SWIPE_TRIGGER_PX=72,SWIPE_MAX_VISUAL_PX=46;
+let swipe=null;
+function canSwipeBack(target){
+  const current=history.state;
+  if(!current||current.marker!==NAV_MARKER||Number(current.depth||0)<=0)return false;
+  if(!(target instanceof Element))return true;
+  return !target.closest('input,select,textarea,[contenteditable="true"],[data-no-back-swipe],.entity-detail-table-wrap,.table-wrap,.tabs,.stat-pills,.segment-group');
+}
+function clearSwipeVisual(settle=false){
+  app.classList.remove('kentaurai-swipe-back-active');
+  if(settle)app.classList.add('kentaurai-swipe-back-settle');
+  app.style.transform='';
+  if(settle)setTimeout(()=>app.classList.remove('kentaurai-swipe-back-settle'),160);
+}
+document.addEventListener('touchstart',event=>{
+  if(event.touches.length!==1)return;
+  const touch=event.touches[0];
+  if(touch.clientX>SWIPE_EDGE_PX||!canSwipeBack(event.target))return;
+  swipe={startX:touch.clientX,startY:touch.clientY,dx:0,dy:0,horizontal:false,cancelled:false};
+},{passive:true});
+document.addEventListener('touchmove',event=>{
+  if(!swipe||event.touches.length!==1)return;
+  const touch=event.touches[0];
+  swipe.dx=touch.clientX-swipe.startX;
+  swipe.dy=touch.clientY-swipe.startY;
+  if(swipe.dx<0){swipe.cancelled=true;clearSwipeVisual();return}
+  if(!swipe.horizontal){
+    if(Math.abs(swipe.dy)>12&&Math.abs(swipe.dy)>Math.abs(swipe.dx)){swipe.cancelled=true;clearSwipeVisual();return}
+    if(swipe.dx<10)return;
+    if(swipe.dx<=Math.abs(swipe.dy)*1.25){swipe.cancelled=true;clearSwipeVisual();return}
+    swipe.horizontal=true;
+    app.classList.add('kentaurai-swipe-back-active');
+  }
+  if(swipe.horizontal&&!swipe.cancelled){
+    event.preventDefault();
+    const visual=Math.min(SWIPE_MAX_VISUAL_PX,Math.max(0,swipe.dx)*0.38);
+    app.style.transform='translate3d('+visual+'px,0,0)';
+  }
+},{passive:false});
+document.addEventListener('touchend',()=>{
+  if(!swipe)return;
+  const shouldBack=swipe.horizontal&&!swipe.cancelled&&swipe.dx>=SWIPE_TRIGGER_PX;
+  swipe=null;
+  clearSwipeVisual(true);
+  if(shouldBack)history.back();
+},{passive:true});
+document.addEventListener('touchcancel',()=>{swipe=null;clearSwipeVisual(true)},{passive:true});
 function restoreShared(view){
   state.tab=view.tab||'list';
   state.listOffsets=copyObject(view.listOffsets);
