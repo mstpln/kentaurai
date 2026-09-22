@@ -362,10 +362,7 @@ export async function getDriverRankings(env, options = {}) {
   const filters = normalizeDriverStatsFilters(options);
   await validateTrack(env, filters.trackId);
   if (options.mode === 'core') {
-    const [coreRows,form] = await Promise.all([
-      run(env,buildCoreRankingSet(filters)),
-      run(env,buildFormQuery(filters))
-    ]);
+    const coreRows = await run(env,buildCoreRankingSet(filters));
     return {
       filters,
       partial:true,
@@ -373,13 +370,13 @@ export async function getDriverRankings(env, options = {}) {
       rankings:{
         highestWinRate:mapCoreRanking(rankingRows(coreRows,'winRate'),'winRate'),
         highestTop3Rate:mapCoreRanking(rankingRows(coreRows,'top3Rate'),'top3Rate'),
-        mostWins:mapCoreRanking(rankingRows(coreRows,'wins'),'wins'),
-        bestFormLast30:mapForm(form)
+        mostWins:mapCoreRanking(rankingRows(coreRows,'wins'),'wins')
       }
     };
   }
   if (options.mode === 'extended') {
-    const [yearEarnings,perStart,performance,market] = await Promise.all([
+    const [form,yearEarnings,perStart,performance,market] = await Promise.all([
+      run(env,buildFormQuery(filters)),
       run(env,buildCoreRanking(filters,'earnings',[],{includePeriod:false})),
       run(env,buildCoreRanking(filters,'earningsPerVerifiedStart')),
       run(env,buildPerformanceRankingSet(filters)),
@@ -390,6 +387,7 @@ export async function getDriverRankings(env, options = {}) {
       partial:false,
       definitions:{longshotPercentMax:DRIVER_LONGSHOT_PERCENT_MAX,market:DRIVER_MARKET_DEFINITION_VERSION,positions:DRIVER_POSITION_DEFINITION_VERSION,voltLaneGood:[1,6,7]},
       rankings:{
+        bestFormLast30:mapForm(form),
         mostEarningsThisYear:mapCoreRanking(yearEarnings,'earnings'),
         highestEarningsPerStart:mapCoreRanking(perStart,'earningsPerVerifiedStart'),
         bestFromLead:mapCoreRanking(categoryRows(performance,'leader'),'winRate'),
