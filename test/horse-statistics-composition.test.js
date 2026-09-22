@@ -24,6 +24,6 @@ test('horse statistics composes after Trend and before the shared final statisti
 test('horse statistics keeps list-ranking async guards and does not own entity detail rendering', async () => {
   const source = await readFile(new URL('../src/horse-statistics-ui.js', import.meta.url), 'utf8');
   assert.match(source, /token!==rankingToken\|\|state\.page!=='horses'\|\|state\.tab!=='stats'/);
-  assert.match(source, /rankingToken\+\+;return previousHorseEntityList/);
+  assert.match(source, /rankingToken\+\+;cancelRankingLifecycle\(\);return previousHorseEntityList/);
   assert.doesNotMatch(source, /detailToken|horseStatsBuildB|previousHorseRenderDetail|appendDetailStats|renderDetail=async function/);
 });
