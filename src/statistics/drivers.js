@@ -374,6 +374,29 @@ export async function getDriverRankings(env, options = {}) {
       }
     };
   }
+  if (options.mode === 'extended' && options.part) {
+    if (options.part === 'form') {
+      const form = await run(env,buildFormQuery(filters));
+      return {filters,partial:true,definitions:{longshotPercentMax:DRIVER_LONGSHOT_PERCENT_MAX,market:DRIVER_MARKET_DEFINITION_VERSION,positions:DRIVER_POSITION_DEFINITION_VERSION,voltLaneGood:[1,6,7]},rankings:{bestFormLast30:mapForm(form)}};
+    }
+    if (options.part === 'annual') {
+      const yearEarnings = await run(env,buildCoreRanking(filters,'earnings',[],{includePeriod:false}));
+      return {filters,partial:true,rankings:{mostEarningsThisYear:mapCoreRanking(yearEarnings,'earnings')}};
+    }
+    if (options.part === 'per-start') {
+      const perStart = await run(env,buildCoreRanking(filters,'earningsPerVerifiedStart'));
+      return {filters,partial:true,rankings:{highestEarningsPerStart:mapCoreRanking(perStart,'earningsPerVerifiedStart')}};
+    }
+    if (options.part === 'performance') {
+      const performance = await run(env,buildPerformanceRankingSet(filters));
+      return {filters,partial:true,rankings:{bestFromLead:mapCoreRanking(categoryRows(performance,'leader'),'winRate'),bestFromDeathSeat:mapCoreRanking(categoryRows(performance,'death'),'winRate'),bestFromBackRow:mapCoreRanking(categoryRows(performance,'backRow'),'winRate'),bestAuto:mapCoreRanking(categoryRows(performance,'auto'),'winRate'),bestVolt:mapCoreRanking(categoryRows(performance,'volt'),'winRate')}};
+    }
+    if (options.part === 'market') {
+      const market = await run(env,buildMarketRankingSet(filters));
+      return {filters,partial:true,definitions:{longshotPercentMax:DRIVER_LONGSHOT_PERCENT_MAX,market:DRIVER_MARKET_DEFINITION_VERSION,positions:DRIVER_POSITION_DEFINITION_VERSION,voltLaneGood:[1,6,7]},rankings:{favoriteResults:mapCoreRanking(categoryRows(market,'favorite'),'winRate'),longshotResults:mapCoreRanking(categoryRows(market,'longshot'),'winRate')}};
+    }
+    throw new Error('unsupported driver statistics part');
+  }
   if (options.mode === 'extended') {
     const [form,yearEarnings,perStart,performance,market] = await Promise.all([
       run(env,buildFormQuery(filters)),
