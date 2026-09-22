@@ -180,8 +180,8 @@ function sourceStatus(hasEvidence, issues) {
   return hasEvidence ? 'working' : 'never_run';
 }
 
-async function latestHistoricalOfficial(env) {
-  return env.DB.prepare(`
+async function historicalOfficialJobs(env) {
+  const { results } = await env.DB.prepare(`
     SELECT id, start_date, end_date, next_date, next_race_index, status,
            processed_dates, processed_races, reused_races, consecutive_errors,
            last_error, last_run_at,
@@ -190,12 +190,13 @@ async function latestHistoricalOfficial(env) {
     FROM historical_backfill_jobs
     WHERE start_date <> end_date
     ORDER BY datetime(created_at) DESC, id DESC
-    LIMIT 1
-  `).first();
+    LIMIT 6
+  `).all();
+  return results || [];
 }
 
-async function latestHistoricalXlabs(env) {
-  return env.DB.prepare(`
+async function historicalXlabsJobs(env) {
+  const { results } = await env.DB.prepare(`
     SELECT id, start_date, end_date, next_date, next_race_index, status,
            processed_dates, processed_races, reused_races, unavailable_dates,
            unavailable_races, consecutive_errors, last_error, last_run_at,
@@ -203,8 +204,18 @@ async function latestHistoricalXlabs(env) {
     FROM xlabs_backfill_jobs
     WHERE scope = 'historical_all'
     ORDER BY datetime(created_at) DESC, id DESC
-    LIMIT 1
-  `).first();
+    LIMIT 6
+  `).all();
+  return results || [];
+}
+
+function visibleHistoricalJobs(jobs, nowMs) {
+  return (jobs || []).map((job) => ({
+    id: job.id,
+    startDate: job.start_date,
+    endDate: job.end_date,
+    processing: historicalProcessing(job, nowMs)
+  }));
 }
 
 async function latestDailyXlabs(env) {
@@ -241,10 +252,13 @@ async function latestFamilyRun(env, family) {
   `).bind(pattern).first();
 }
 
-function sourceCard({ id, historicalJob, historicalProcessingState, supportingJobs = [], runs = [], fallbackRun, nowMs }) {
+function sourceCard({ id, historicalJob, historicalJobs = [], historicalProcessingState, supportingJobs = [], runs = [], fallbackRun, nowMs }) {
   const issues = [];
-  const historicalIssue = jobIssue(id, historicalJob, historicalProcessingState, nowMs, 'historical');
-  if (historicalIssue) issues.push(historicalIssue);
+  for (const job of historicalJobs) {
+    const processing = historicalProcessing(job, nowMs);
+    const historicalIssue = jobIssue(id, job, processing, nowMs, 'historical');
+    if (historicalIssue) issues.push(historicalIssue);
+  }
 
   for (const { job, scope } of supportingJobs) {
     const processing = historicalProcessing(job, nowMs);
@@ -282,6 +296,7 @@ function sourceCard({ id, historicalJob, historicalProcessingState, supportingJo
         ? 'Ingen körning registrerad ännu.'
         : issue?.message || 'Ett fel kräver uppmärksamhet.',
     processing: historicalProcessingState,
+    historicalJobs: visibleHistoricalJobs(historicalJobs, nowMs),
     issue,
     alerts: issues
   };
@@ -296,16 +311,16 @@ export async function getSettingsSourceHealth(env, options = {}) {
       : Date.now();
 
   const [
-    officialHistorical,
-    xlabsHistorical,
+    officialHistoricalJobs,
+    xlabsHistoricalJobs,
     xlabsDaily,
     officialCapture,
     officialNormalize,
     officialFallback,
     xlabsFallback
   ] = await Promise.all([
-    latestHistoricalOfficial(env),
-    latestHistoricalXlabs(env),
+    historicalOfficialJobs(env),
+    historicalXlabsJobs(env),
     latestDailyXlabs(env),
     latestRun(env, 'official_live_scheduled_capture'),
     latestRun(env, 'official_live_normalize_auto'),
@@ -313,12 +328,15 @@ export async function getSettingsSourceHealth(env, options = {}) {
     latestFamilyRun(env, 'xlabs')
   ]);
 
+  const officialHistorical = officialHistoricalJobs[0] || null;
+  const xlabsHistorical = xlabsHistoricalJobs[0] || null;
   const officialProcessing = historicalProcessing(officialHistorical, nowMs);
   const xlabsProcessing = historicalProcessing(xlabsHistorical, nowMs);
 
   const official = sourceCard({
     id: 'official',
     historicalJob: officialHistorical,
+    historicalJobs: officialHistoricalJobs,
     historicalProcessingState: officialProcessing,
     runs: [officialCapture, officialNormalize].filter(Boolean),
     fallbackRun: officialFallback,
@@ -328,6 +346,7 @@ export async function getSettingsSourceHealth(env, options = {}) {
   const xlabs = sourceCard({
     id: 'xlabs',
     historicalJob: xlabsHistorical,
+    historicalJobs: xlabsHistoricalJobs,
     historicalProcessingState: xlabsProcessing,
     supportingJobs: xlabsDaily ? [{ job: xlabsDaily, scope: 'daily' }] : [],
     fallbackRun: xlabsFallback,
