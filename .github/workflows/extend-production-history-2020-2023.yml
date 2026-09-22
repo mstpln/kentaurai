@@ -1,0 +1,201 @@
+name: Extend production history 2020-2023
+run-name: Extend production history 2020-2023 — @${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type START HISTORY EXTENSION 2020-09-08 TO 2023-09-07 to authorize the production job
+        required: true
+        type: string
+  schedule:
+    - cron: '17 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kentaurai-production-history-extension-2020-2023
+  cancel-in-progress: false
+
+env:
+  D1_DATABASE_ID: d8189e0e-6127-4ef2-88cc-534cb2217340
+  HISTORY_START_DATE: '2020-09-08'
+  HISTORY_END_DATE: '2023-09-07'
+  OFFICIAL_JOB_ID: backfill_official-se-trot-v2__2020-09-08__2023-09-07
+  XLABS_JOB_ID: xlabsbackfill_xlabs-race-v1__historical-all__2020-09-08__2023-09-07
+  D1_WARNING_BYTES: '8589934592'
+  D1_STOP_BYTES: '9126805504'
+
+jobs:
+  orchestrate:
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.confirmation == 'START HISTORY EXTENSION 2020-09-08 TO 2023-09-07')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Use Node.js 22
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+
+      - name: Run QA before production start or resume
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: npm run qa
+
+      - name: Capacity guard and history orchestration
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          MANUAL_RUN: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "CLOUDFLARE_API_TOKEN is not configured"; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "CLOUDFLARE_ACCOUNT_ID is not configured"; exit 1; }
+          echo "::add-mask::$CLOUDFLARE_API_TOKEN"
+
+          database_api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$D1_DATABASE_ID"
+          query_api="$database_api/query"
+          response_file="$(mktemp)"
+          metadata_file="$(mktemp)"
+          trap 'rm -f "$response_file" "$metadata_file"' EXIT
+
+          d1_query() {
+            local sql="$1"
+            local code
+            code="$(curl --silent --show-error --output "$response_file" --write-out '%{http_code}'               --request POST               --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN"               --header 'Content-Type: application/json'               --data "$(jq -cn --arg sql "$sql" '{sql:$sql}')"               "$query_api")"
+            [[ "$code" == "200" ]] || { echo "Cloudflare D1 query failed (HTTP $code)"; exit 1; }
+            jq -e '.success == true and (.result | length >= 1) and (.result | all(.success == true))' "$response_file" > /dev/null || {
+              echo "Cloudflare D1 query returned an unsuccessful result";
+              exit 1;
+            }
+          }
+
+          metadata_code="$(curl --silent --show-error --output "$metadata_file" --write-out '%{http_code}'             --request GET             --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN"             "$database_api?fields=uuid,name,file_size")"
+          [[ "$metadata_code" == "200" ]] || { echo "Cloudflare D1 metadata read failed (HTTP $metadata_code)"; exit 1; }
+          jq -e '.success == true and (.result.file_size | numbers)' "$metadata_file" > /dev/null || {
+            echo "Cloudflare D1 metadata did not contain a numeric file_size";
+            exit 1;
+          }
+          d1_bytes="$(jq -r '.result.file_size' "$metadata_file")"
+          d1_gib="$(awk -v bytes="$d1_bytes" 'BEGIN { printf "%.2f", bytes / 1073741824 }')"
+          echo "D1 capacity preflight: ${d1_gib} GiB used; warning at 8.00 GiB; hard stop at 8.50 GiB."
+
+          state_sql="SELECT
+            COALESCE((SELECT status FROM historical_backfill_jobs WHERE id = '$OFFICIAL_JOB_ID' LIMIT 1), 'absent') AS official_status,
+            COALESCE((SELECT status FROM xlabs_backfill_jobs WHERE id = '$XLABS_JOB_ID' LIMIT 1), 'absent') AS xlabs_status,
+            (SELECT COUNT(*) FROM historical_backfill_jobs WHERE status = 'running' AND start_date <> end_date AND id <> '$OFFICIAL_JOB_ID') AS other_official_running,
+            (SELECT COUNT(*) FROM xlabs_backfill_jobs WHERE status = 'running' AND scope = 'historical_all' AND id <> '$XLABS_JOB_ID') AS other_xlabs_running;"
+          d1_query "$state_sql"
+          official_status="$(jq -r '.result[0].results[0].official_status' "$response_file")"
+          xlabs_status="$(jq -r '.result[0].results[0].xlabs_status' "$response_file")"
+          other_official_running="$(jq -r '.result[0].results[0].other_official_running' "$response_file")"
+          other_xlabs_running="$(jq -r '.result[0].results[0].other_xlabs_running' "$response_file")"
+
+          if (( d1_bytes >= D1_STOP_BYTES )); then
+            if [[ "$official_status" == "running" || "$xlabs_status" == "running" ]]; then
+              stop_message="Capacity guard stopped the 2020-2023 history extension because D1 reached ${d1_gib} GiB (hard stop 8.50 GiB)."
+              d1_query "UPDATE historical_backfill_jobs
+                SET status='failed', consecutive_errors=3, last_error='${stop_message}',
+                    lease_token=NULL, lease_until=NULL, updated_at=CURRENT_TIMESTAMP
+                WHERE id='$OFFICIAL_JOB_ID' AND status='running';
+                UPDATE xlabs_backfill_jobs
+                SET status='failed', consecutive_errors=3, last_error='${stop_message}',
+                    retry_after=NULL, lease_token=NULL, lease_until=NULL, updated_at=CURRENT_TIMESTAMP
+                WHERE id='$XLABS_JOB_ID' AND status='running';"
+              echo "History extension paused by the D1 capacity guard."
+              exit 1
+            fi
+            echo "D1 is already at or above the hard stop; no extension work is active."
+            exit 0
+          fi
+
+          if (( d1_bytes >= D1_WARNING_BYTES )); then
+            echo "::warning::D1 history capacity is above 8.00 GiB and approaching the 8.50 GiB automatic stop."
+          fi
+
+          if [[ "$MANUAL_RUN" == "true" ]]; then
+            [[ "$other_official_running" == "0" ]] || { echo "Another multi-day official history job is running; refusing overlap."; exit 1; }
+            [[ "$other_xlabs_running" == "0" ]] || { echo "Another historical X-Labs job is running; refusing overlap."; exit 1; }
+
+            case "$official_status" in
+              absent)
+                d1_query "INSERT OR IGNORE INTO historical_backfill_jobs
+                  (id,start_date,end_date,next_date,status)
+                  VALUES ('$OFFICIAL_JOB_ID','$HISTORY_START_DATE','$HISTORY_END_DATE','$HISTORY_END_DATE','running');"
+                official_status="running"
+                ;;
+              failed)
+                d1_query "UPDATE historical_backfill_jobs
+                  SET status=CASE WHEN next_date >= start_date THEN 'running' ELSE status END,
+                      consecutive_errors=0,last_error=NULL,lease_token=NULL,lease_until=NULL,
+                      updated_at=CURRENT_TIMESTAMP
+                  WHERE id='$OFFICIAL_JOB_ID' AND status='failed';"
+                d1_query "SELECT status FROM historical_backfill_jobs WHERE id='$OFFICIAL_JOB_ID' LIMIT 1;"
+                official_status="$(jq -r '.result[0].results[0].status' "$response_file")"
+                ;;
+              running|completed)
+                ;;
+              *)
+                echo "Unexpected official extension job status: $official_status"
+                exit 1
+                ;;
+            esac
+          elif [[ "$official_status" == "absent" ]]; then
+            echo "History extension has not been authorized yet; scheduled guard is idle."
+            exit 0
+          fi
+
+          d1_query "SELECT status FROM historical_backfill_jobs WHERE id='$OFFICIAL_JOB_ID' LIMIT 1;"
+          official_status="$(jq -r '.result[0].results[0].status' "$response_file")"
+
+          if [[ "$official_status" == "completed" ]]; then
+            case "$xlabs_status" in
+              absent)
+                d1_query "INSERT OR IGNORE INTO xlabs_backfill_jobs
+                  (id,scope,start_date,end_date,next_date,status)
+                  VALUES ('$XLABS_JOB_ID','historical_all','$HISTORY_START_DATE','$HISTORY_END_DATE','$HISTORY_END_DATE','running');"
+                xlabs_status="running"
+                ;;
+              failed)
+                if [[ "$MANUAL_RUN" == "true" ]]; then
+                  d1_query "UPDATE xlabs_backfill_jobs
+                    SET status=CASE WHEN next_date >= start_date THEN 'running' ELSE status END,
+                        consecutive_errors=0,last_error=NULL,retry_after=NULL,
+                        lease_token=NULL,lease_until=NULL,updated_at=CURRENT_TIMESTAMP
+                    WHERE id='$XLABS_JOB_ID' AND status='failed';"
+                  d1_query "SELECT status FROM xlabs_backfill_jobs WHERE id='$XLABS_JOB_ID' LIMIT 1;"
+                  xlabs_status="$(jq -r '.result[0].results[0].status' "$response_file")"
+                fi
+                ;;
+              running|completed)
+                ;;
+              *)
+                echo "Unexpected X-Labs extension job status: $xlabs_status"
+                exit 1
+                ;;
+            esac
+          else
+            echo "Official history extension is $official_status; X-Labs extension will not start before official completion."
+          fi
+
+          postflight_sql="SELECT
+            (SELECT status FROM historical_backfill_jobs WHERE id='$OFFICIAL_JOB_ID' LIMIT 1) AS official_status,
+            COALESCE((SELECT status FROM xlabs_backfill_jobs WHERE id='$XLABS_JOB_ID' LIMIT 1),'absent') AS xlabs_status,
+            (SELECT COUNT(*) FROM historical_backfill_jobs WHERE id='$OFFICIAL_JOB_ID' AND start_date='$HISTORY_START_DATE' AND end_date='$HISTORY_END_DATE') AS official_exact,
+            (SELECT COUNT(*) FROM xlabs_backfill_jobs WHERE id='$XLABS_JOB_ID' AND scope='historical_all' AND start_date='$HISTORY_START_DATE' AND end_date='$HISTORY_END_DATE') AS xlabs_exact;"
+          d1_query "$postflight_sql"
+          jq -e '.result[0].results | length == 1 and .[0].official_exact == 1 and (.[0].official_status == "running" or .[0].official_status == "completed") and (.[0].xlabs_exact == 0 or .[0].xlabs_exact == 1)' "$response_file" > /dev/null || {
+            echo "History extension did not reach the expected safe state."
+            exit 1
+          }
+
+          final_official="$(jq -r '.result[0].results[0].official_status' "$response_file")"
+          final_xlabs="$(jq -r '.result[0].results[0].xlabs_status' "$response_file")"
+          echo "Official extension: $final_official"
+          echo "X-Labs extension: $final_xlabs"
