@@ -234,3 +234,12 @@ A single race must not directly change model weights. Candidate learnings are re
 4. Client fetch cancellation is not treated as proof that already-started D1 work stopped server-side; bounding each server request is therefore part of the responsiveness contract.
 5. Canonical `Högre prissumma` semantics remain unchanged. Append-oriented STL/game/official-observation evidence is materialized in `race_scope_evidence`; mutable first-prize and race/class text remain read directly from `races`.
 6. The unsplit extended API path remains compatibility-only. The production ranking UI uses bounded parts and merges them progressively.
+
+## Six-year history expansion policy
+1. KentaurAI may extend production history by one additional fixed three-year block, 2020-09-08 through 2023-09-07, rather than targeting ten years in one operation.
+2. Existing statistics, Form, Trend and analysis time-window semantics remain unchanged. More stored history does not make ten-year reads the default.
+3. Historical expansion reuses the existing resumable/idempotent official and X-Labs pipelines. Official facts must finish for the block before X-Labs enrichment starts.
+4. Production history blocks remain explicit operations. Deploying code never starts a new historical import automatically.
+5. The extension checks actual D1 file size through the Cloudflare API. At 8.00 GiB it warns; at 8.50 GiB it stops the fixed extension and surfaces an actionable job error, preserving margin below the paid D1 10 GB single-database ceiling.
+6. Concurrent long official-history or historical-all X-Labs jobs are refused to avoid overlapping backfill load.
+7. Settings must show historical blocks separately instead of replacing the previously completed block with only the newest job state.

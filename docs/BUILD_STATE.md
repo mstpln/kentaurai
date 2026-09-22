@@ -244,3 +244,13 @@ The external-analysis production release was accepted after:
 - Ranking `core` remains the first paint. Extended ranking families are now requested as sequential bounded parts, with a paint boundary between parts. Navigating away prevents later parts from being started.
 - The canonical high-prize scope keeps its existing semantics, but expensive append-only STL/game/official-observation evidence is materialized in D1 by migration `0035_race_scope_evidence.sql`. First-prize and race-text evidence remain evaluated directly so factual corrections stay immediate.
 - Legacy unsplit extended API behavior remains readable for compatibility; the production UI uses only bounded progressive parts.
+
+## Historical extension 2020-2023 candidate
+- Adds an explicitly authorized production history block for 2020-09-08 through 2023-09-07, extending the current roughly three-year baseline to roughly six years without changing statistics or analysis semantics.
+- The new workflow creates/resumes the existing official historical job first. The matching X-Labs historical job is created only after the official block is complete, preserving the existing official-first prerequisite.
+- The production minute scheduler remains the worker that advances bounded checkpoints; the GitHub workflow only authorizes/orchestrates the fixed block and checks capacity.
+- D1 capacity is read from Cloudflare's database metadata. The workflow warns at 8.00 GiB and stops the extension at 8.50 GiB, leaving headroom below the 10 GB per-database paid-plan limit.
+- The workflow refuses overlapping multi-day official or historical-all X-Labs jobs and can safely resume a failed fixed job after explicit manual authorization.
+- Settings exposes recent multi-day historical periods separately for each source so the existing 2023-2026 block and the new 2020-2023 block do not collapse into one ambiguous progress row.
+- No migration, model-weight change, statistics-query semantic change, or private racing payload is part of this candidate.
+- Merging/deploying the code does not start the historical extension. A manual workflow dispatch with the exact confirmation phrase is still required.

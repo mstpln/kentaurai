@@ -250,3 +250,45 @@ test('completed historical job reports 100 percent and Klar processing state', a
   assert.equal(official.processing.status, 'completed');
   assert.equal(official.processing.progressPercent, 100);
 });
+
+
+test('multiple historical periods stay visible as separate Settings jobs', async () => {
+  const { env, db } = createTestEnv();
+  insertOfficialHistorical(db, {
+    id: 'official-history-current',
+    start_date: '2023-09-08',
+    end_date: '2026-09-07',
+    next_date: '2023-09-07',
+    next_race_index: 0,
+    status: 'completed',
+    processed_dates: 1096,
+    processed_races: 12000,
+    last_run_at: '2099-09-21T18:00:00Z'
+  });
+  insertOfficialHistorical(db, {
+    id: 'official-history-extension',
+    start_date: '2020-09-08',
+    end_date: '2023-09-07',
+    next_date: '2022-09-07',
+    next_race_index: 1,
+    status: 'running',
+    processed_dates: 365,
+    processed_races: 4000,
+    last_run_at: '2099-09-21T19:59:00Z'
+  });
+  db.prepare("UPDATE historical_backfill_jobs SET created_at='2099-09-20T00:00:00Z' WHERE id='official-history-current'").run();
+  db.prepare("UPDATE historical_backfill_jobs SET created_at='2099-09-21T00:00:00Z' WHERE id='official-history-extension'").run();
+
+  const result = await getSettingsSourceHealth(env, { now: NOW });
+  const official = result.sources.find((source) => source.id === 'official');
+
+  assert.equal(official.processing.status, 'running');
+  assert.equal(official.historicalJobs.length, 2);
+  assert.deepEqual(
+    official.historicalJobs.map((job) => [job.startDate, job.endDate, job.processing.status]),
+    [
+      ['2020-09-08', '2023-09-07', 'running'],
+      ['2023-09-08', '2026-09-07', 'completed']
+    ]
+  );
+});
