@@ -187,7 +187,7 @@ async function renderData(){
   await acknowledgeSettingsAlerts();
  }catch(err){app.innerHTML=heading('Inställningar','Hantera data och uppdateringar')+'<div class="notice">Kunde inte läsa status: '+esc(err.message)+'</div>'}
 }
-async function renderSettings(){state.settingsOpen=true;state.settingsTab='data';state.detail=null;state.gameDetail=null;state.gameSystemId=null;settingsButton.classList.add('active');clearMainNav();return renderData()}
+async function renderSettings(){if(typeof cancelRankingLifecycle==='function')cancelRankingLifecycle();state.settingsOpen=true;state.settingsTab='data';state.detail=null;state.gameDetail=null;state.gameSystemId=null;settingsButton.classList.add('active');clearMainNav();return renderData()}
 window.__kentauraiAnalysis={render:renderAnalysis};
 settingsButton.onclick=()=>{renderSettings()};
 refreshSettingsAlertBadge();

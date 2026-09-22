@@ -44,7 +44,7 @@ function dRankingGrid(data){const r=data.rankings||{},limit=data.definitions?.lo
  dCard('Högst segerprocent','Vinster / starter',r.highestWinRate,x=>pct(x.winRate)+'<span class="driver-ranking-note">'+num(x.starts)+' starter</span>')+
  dCard('Högst topp 3-procent','Placering 1–3 / resultatstarter',r.highestTop3Rate,x=>pct(x.top3Rate)+'<span class="driver-ranking-note">'+num(x.resultStarts)+' resultat</span>')+
  dCard('Flest segrar','Volymmått',r.mostWins,x=>num(x.wins)+'<span class="driver-ranking-note">'+num(x.starts)+' starter</span>')+
- dCard('Bäst form – senaste 30','Endast officiella placeringar',r.bestFormLast30,x=>dNumValue(x.averagePlacing)+'<span class="driver-ranking-note">'+num(x.usedStarts)+' starter</span>');if(data.partial)return html+'</div><div class="driver-ranking-empty">Läser resterande statistik…</div>';return html+
+ dCard('Bäst form – senaste 30','Endast officiella placeringar',r.bestFormLast30,x=>dNumValue(x.averagePlacing)+'<span class="driver-ranking-note">'+num(x.usedStarts)+' starter</span>');if(data.partial)return html+'</div><div class="driver-ranking-empty driver-ranking-pending">Läser resterande statistik…</div>';return html+
  dCard('Mest inkört i år','Verifierad prissumma under kalenderåret',r.mostEarningsThisYear,x=>money(x.prizeSek)+'<span class="driver-ranking-note">'+num(x.prizeVerifiedStarts)+' prisstarter</span>')+
  dCard('Högst intjänat per start','Prispengar / verifierade prisstarter',r.highestEarningsPerStart,x=>money(x.earningsPerVerifiedStart)+'<span class="driver-ranking-note">'+num(x.prizeVerifiedStarts)+' prisstarter</span>')+
  dCard('Bäst från spets','Verifierad positionsflagga',r.bestFromLead,x=>pct(x.winRate)+'<span class="driver-ranking-note">'+num(x.starts)+' starter</span>')+
@@ -56,9 +56,27 @@ function dRankingGrid(data){const r=data.rankings||{},limit=data.definitions?.lo
  dCard('Resultat som skräll','≤ '+num(limit)+'% vid sista giltiga snapshot före spelstopp',r.longshotResults,x=>pct(x.winRate)+'<span class="driver-ranking-note">'+num(x.starts)+' skrällstarter</span>')+'</div>'}
 function dBindRows(){document.querySelectorAll('[data-ds-driver]').forEach(row=>row.onclick=()=>openDetail('drivers',row.dataset.dsDriver))}
 function dMergeRankingPayload(core,extended){return{...core,...extended,partial:false,rankings:{...(core.rankings||{}),...(extended.rankings||{})}}}
-async function renderDriverRankings(){const token=++driverRankingToken;state.detail=null;state.page='drivers';setNav('drivers');const key=dQuery();const cached=state.driverStatsDataKey===key?state.driverStatsData:null;app.innerHTML=heading('Kuskar','Sök och utforska kuskar')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+dToolbar()+(cached?dRankingGrid(cached):'<div class="driver-ranking-empty">Läser kuskstatistik…</div>');bindTabs(()=>renderEntityList('drivers'));dBindFilters(renderDriverRankings);if(cached){dBindRows();return}try{const corePromise=api('/drivers/statistics?'+key+'&mode=core');const extendedPromise=new Promise(resolve=>setTimeout(()=>{if(token!==driverRankingToken||state.page!=='drivers'||state.tab!=='stats'||state.detail){resolve(null);return}api('/drivers/statistics?'+key+'&mode=extended').then(data=>resolve({data}),error=>resolve({error}))},75));const core=await corePromise;if(token!==driverRankingToken||state.page!=='drivers'||state.tab!=='stats'||state.detail)return;app.innerHTML=heading('Kuskar','Sök och utforska kuskar')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+dToolbar()+dRankingGrid(core);bindTabs(()=>renderEntityList('drivers'));dBindFilters(renderDriverRankings);dBindRows();const extendedResult=await extendedPromise;if(!extendedResult||token!==driverRankingToken||state.page!=='drivers'||state.tab!=='stats'||state.detail)return;if(extendedResult.error)throw extendedResult.error;const data=dMergeRankingPayload(core,extendedResult.data);state.driverStatsData=data;state.driverStatsDataKey=key;app.innerHTML=heading('Kuskar','Sök och utforska kuskar')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+dToolbar()+dRankingGrid(data);bindTabs(()=>renderEntityList('drivers'));dBindFilters(renderDriverRankings);dBindRows()}catch(err){if(token===driverRankingToken&&state.page==='drivers'&&state.tab==='stats'&&!state.detail){driverRankingToken++;app.innerHTML+='<div class="driver-ranking-empty">Kunde inte läsa kuskstatistik: '+esc(err.message)+'</div>'}}}
+function renderDriverRankingShell(data){app.innerHTML=heading('Kuskar','Sök och utforska kuskar')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+dToolbar()+dRankingGrid(data);bindTabs(()=>renderEntityList('drivers'));dBindFilters(renderDriverRankings);dBindRows()}
+async function renderDriverRankings(){
+ const token=++driverRankingToken;cancelRankingLifecycle();state.detail=null;state.page='drivers';setNav('drivers');const key=dQuery();const cached=state.driverStatsDataKey===key?state.driverStatsData:null;
+ app.innerHTML=heading('Kuskar','Sök och utforska kuskar')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+dToolbar()+(cached?dRankingGrid(cached):'<div class="driver-ranking-empty">Läser kuskstatistik…</div>');bindTabs(()=>renderEntityList('drivers'));dBindFilters(renderDriverRankings);if(cached){dBindRows();return}
+ const lifecycle=beginRankingLifecycle();
+ try{
+  const core=await api('/drivers/statistics?'+key+'&mode=core',{signal:lifecycle.controller.signal});
+  if(!isCurrentRankingLifecycle(lifecycle)||token!==driverRankingToken||state.page!=='drivers'||state.tab!=='stats'||state.detail)return;
+  renderDriverRankingShell(core);
+  await afterRankingCorePaint();
+  if(!isCurrentRankingLifecycle(lifecycle)||token!==driverRankingToken||state.page!=='drivers'||state.tab!=='stats'||state.detail)return;
+  let extended;
+  try{extended=await api('/drivers/statistics?'+key+'&mode=extended',{signal:lifecycle.controller.signal})}
+  catch(error){if(isRankingAbort(error))return;if(isCurrentRankingLifecycle(lifecycle)){const pending=document.querySelector('.driver-ranking-pending');if(pending)pending.textContent='Kunde inte läsa resterande statistik.'}return}
+  if(!isCurrentRankingLifecycle(lifecycle)||token!==driverRankingToken||state.page!=='drivers'||state.tab!=='stats'||state.detail)return;
+  const data=dMergeRankingPayload(core,extended);state.driverStatsData=data;state.driverStatsDataKey=key;renderDriverRankingShell(data);
+ }catch(error){if(isRankingAbort(error))return;if(isCurrentRankingLifecycle(lifecycle)&&token===driverRankingToken&&state.page==='drivers'&&state.tab==='stats'&&!state.detail){driverRankingToken++;app.innerHTML+='<div class="driver-ranking-empty">Kunde inte läsa kuskstatistik: '+esc(error.message)+'</div>'}}
+ finally{completeRankingLifecycle(lifecycle)}
+}
 const previousDriverEntityList=renderEntityList;
-renderEntityList=async function(page){if(page==='drivers'&&state.tab==='stats')return renderDriverRankings();driverRankingToken++;return previousDriverEntityList(page)};
+renderEntityList=async function(page){if(page==='drivers'&&state.tab==='stats')return renderDriverRankings();driverRankingToken++;cancelRankingLifecycle();return previousDriverEntityList(page)};
 
 })();
 </script>`;

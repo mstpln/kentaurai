@@ -86,6 +86,7 @@ function bindStatisticsCategoryNav(){
   document.querySelectorAll('[data-statistics-page]').forEach(button=>button.onclick=()=>{
     const page=button.dataset.statisticsPage;
     if(!STATISTICS_PAGES.includes(page))return;
+    cancelRankingLifecycle();
     state.statisticsPage=page;
     state.detail=null;state.gameDetail=null;state.gameSystemId=null;state.trackDetail=null;
     if(page==='tracks')renderTracks();

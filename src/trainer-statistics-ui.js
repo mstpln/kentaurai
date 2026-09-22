@@ -39,7 +39,7 @@ function tRankingGrid(data){const r=data.rankings||{},limit=data.definitions?.lo
  tCard('Högst segerprocent','Vinster / starter',r.highestWinRate,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>')+
  tCard('Högst topp 3-procent','Placering 1–3 / resultatstarter',r.highestTop3Rate,x=>pct(x.top3Rate)+'<span class="trainer-ranking-note">'+num(x.resultStarts)+' resultat</span>')+
  tCard('Flest segrar','Volymmått',r.mostWins,x=>num(x.wins)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>')+
- tCard('Bäst form – senaste 30','Endast officiella placeringar',r.bestFormLast30,x=>tNum(x.averagePlacing)+'<span class="trainer-ranking-note">'+num(x.usedStarts)+' starter</span>');if(data.partial)return html+'</div><div class="trainer-ranking-empty">Läser resterande statistik…</div>';return html+
+ tCard('Bäst form – senaste 30','Endast officiella placeringar',r.bestFormLast30,x=>tNum(x.averagePlacing)+'<span class="trainer-ranking-note">'+num(x.usedStarts)+' starter</span>');if(data.partial)return html+'</div><div class="trainer-ranking-empty trainer-ranking-pending">Läser resterande statistik…</div>';return html+
  tCard('Mest inkört i år','Verifierad prissumma under kalenderåret',r.mostEarningsThisYear,x=>money(x.prizeSek)+'<span class="trainer-ranking-note">'+num(x.prizeVerifiedStarts)+' prisstarter</span>')+
  tCard('Högst intjänat per start','Prispengar / verifierade prisstarter',r.highestEarningsPerStart,x=>money(x.earningsPerVerifiedStart)+'<span class="trainer-ranking-note">'+num(x.prizeVerifiedStarts)+' prisstarter</span>')+
  tCard('Bäst i autostart','Resultat i autostart',r.bestAuto,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>')+
@@ -58,8 +58,26 @@ function tRankingGrid(data){const r=data.rankings||{},limit=data.definitions?.lo
  tCard('Andra starten efter vila','Hästens direkt följande faktiska start',r.secondAfterRest,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>')+'</div>'}
 function tBindRows(){document.querySelectorAll('[data-ts-trainer]').forEach(row=>row.onclick=()=>openDetail('trainers',row.dataset.tsTrainer))}
 function tMergeRankingPayload(core,extended){return{...core,...extended,partial:false,rankings:{...(core.rankings||{}),...(extended.rankings||{})}}}
-async function renderTrainerRankings(){const token=++trainerRankingToken;state.detail=null;state.page='trainers';setNav('trainers');const key=tQuery();const cached=state.trainerStatsDataKey===key?state.trainerStatsData:null;app.innerHTML=heading('Tränare','Sök och utforska tränare')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+tToolbar()+(cached?tRankingGrid(cached):'<div class="trainer-ranking-empty">Läser tränarstatistik…</div>');bindTabs(()=>renderEntityList('trainers'));tBindFilters(renderTrainerRankings);if(cached){tBindRows();return}try{const corePromise=api('/trainers/statistics?'+key+'&mode=core');const extendedPromise=new Promise(resolve=>setTimeout(()=>{if(token!==trainerRankingToken||state.page!=='trainers'||state.tab!=='stats'||state.detail){resolve(null);return}api('/trainers/statistics?'+key+'&mode=extended').then(data=>resolve({data}),error=>resolve({error}))},75));const core=await corePromise;if(token!==trainerRankingToken||state.page!=='trainers'||state.tab!=='stats'||state.detail)return;app.innerHTML=heading('Tränare','Sök och utforska tränare')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+tToolbar()+tRankingGrid(core);bindTabs(()=>renderEntityList('trainers'));tBindFilters(renderTrainerRankings);tBindRows();const extendedResult=await extendedPromise;if(!extendedResult||token!==trainerRankingToken||state.page!=='trainers'||state.tab!=='stats'||state.detail)return;if(extendedResult.error)throw extendedResult.error;const data=tMergeRankingPayload(core,extendedResult.data);state.trainerStatsData=data;state.trainerStatsDataKey=key;app.innerHTML=heading('Tränare','Sök och utforska tränare')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+tToolbar()+tRankingGrid(data);bindTabs(()=>renderEntityList('trainers'));tBindFilters(renderTrainerRankings);tBindRows()}catch(err){if(token===trainerRankingToken&&state.page==='trainers'&&state.tab==='stats'&&!state.detail){trainerRankingToken++;app.innerHTML+='<div class="trainer-ranking-empty">Kunde inte läsa tränarstatistik: '+esc(err.message)+'</div>'}}}
-const previousTrainerEntityList=renderEntityList;renderEntityList=async function(page){if(page==='trainers'&&state.tab==='stats')return renderTrainerRankings();trainerRankingToken++;return previousTrainerEntityList(page)};
+function renderTrainerRankingShell(data){app.innerHTML=heading('Tränare','Sök och utforska tränare')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+tToolbar()+tRankingGrid(data);bindTabs(()=>renderEntityList('trainers'));tBindFilters(renderTrainerRankings);tBindRows()}
+async function renderTrainerRankings(){
+ const token=++trainerRankingToken;cancelRankingLifecycle();state.detail=null;state.page='trainers';setNav('trainers');const key=tQuery();const cached=state.trainerStatsDataKey===key?state.trainerStatsData:null;
+ app.innerHTML=heading('Tränare','Sök och utforska tränare')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+tToolbar()+(cached?tRankingGrid(cached):'<div class="trainer-ranking-empty">Läser tränarstatistik…</div>');bindTabs(()=>renderEntityList('trainers'));tBindFilters(renderTrainerRankings);if(cached){tBindRows();return}
+ const lifecycle=beginRankingLifecycle();
+ try{
+  const core=await api('/trainers/statistics?'+key+'&mode=core',{signal:lifecycle.controller.signal});
+  if(!isCurrentRankingLifecycle(lifecycle)||token!==trainerRankingToken||state.page!=='trainers'||state.tab!=='stats'||state.detail)return;
+  renderTrainerRankingShell(core);
+  await afterRankingCorePaint();
+  if(!isCurrentRankingLifecycle(lifecycle)||token!==trainerRankingToken||state.page!=='trainers'||state.tab!=='stats'||state.detail)return;
+  let extended;
+  try{extended=await api('/trainers/statistics?'+key+'&mode=extended',{signal:lifecycle.controller.signal})}
+  catch(error){if(isRankingAbort(error))return;if(isCurrentRankingLifecycle(lifecycle)){const pending=document.querySelector('.trainer-ranking-pending');if(pending)pending.textContent='Kunde inte läsa resterande statistik.'}return}
+  if(!isCurrentRankingLifecycle(lifecycle)||token!==trainerRankingToken||state.page!=='trainers'||state.tab!=='stats'||state.detail)return;
+  const data=tMergeRankingPayload(core,extended);state.trainerStatsData=data;state.trainerStatsDataKey=key;renderTrainerRankingShell(data);
+ }catch(error){if(isRankingAbort(error))return;if(isCurrentRankingLifecycle(lifecycle)&&token===trainerRankingToken&&state.page==='trainers'&&state.tab==='stats'&&!state.detail){trainerRankingToken++;app.innerHTML+='<div class="trainer-ranking-empty">Kunde inte läsa tränarstatistik: '+esc(error.message)+'</div>'}}
+ finally{completeRankingLifecycle(lifecycle)}
+}
+const previousTrainerEntityList=renderEntityList;renderEntityList=async function(page){if(page==='trainers'&&state.tab==='stats')return renderTrainerRankings();trainerRankingToken++;cancelRankingLifecycle();return previousTrainerEntityList(page)};
 
 })();
 </script>`;

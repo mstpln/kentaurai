@@ -362,10 +362,9 @@ export async function getHorseRankings(env, options = {}) {
   const filters = normalizeHorseStatsFilters(options);
   await validateTrack(env, filters.trackId);
   if (options.mode === 'core') {
-    const [coreRows,form,start] = await Promise.all([
+    const [coreRows,form] = await Promise.all([
       run(env,buildCoreRankingSet(filters)),
-      run(env,buildFormQuery(filters)),
-      run(env,buildXlabsOpening200Ranking(filters))
+      run(env,buildFormQuery(filters))
     ]);
     return {
       filters,
@@ -373,15 +372,15 @@ export async function getHorseRankings(env, options = {}) {
       rankings:{
         highestWinRate:mapCoreRanking(rowsFor(coreRows,'ranking_metric','winRate'),'winRate'),
         highestTop3Rate:mapCoreRanking(rowsFor(coreRows,'ranking_metric','top3Rate'),'top3Rate'),
-        bestFormLast10:form.map((row,index)=>({rank:index+1,id:row.entity_id,name:row.name,usedStarts:Number(row.used_starts),averagePlacing:Number(row.avg_placing)})),
-        fastestFirst200:start.map((row,index)=>({rank:index+1,id:row.entity_id,name:row.name,measurements:Number(row.measurements),averageSeconds:Number(row.avg_seconds)}))
+        bestFormLast10:form.map((row,index)=>({rank:index+1,id:row.entity_id,name:row.name,usedStarts:Number(row.used_starts),averagePlacing:Number(row.avg_placing)}))
       },
       startPointsStatus:'deferred'
     };
   }
   if (options.mode === 'extended') {
-    const [earnings,close,restRows] = await Promise.all([
+    const [earnings,start,close,restRows] = await Promise.all([
       run(env,buildCoreRanking(filters,'earningsPerVerifiedStart')),
+      run(env,buildXlabsOpening200Ranking(filters)),
       run(env,buildXlabsRanking(filters,'last_400_time')),
       run(env,buildRestRankingSet(filters))
     ]);
@@ -390,6 +389,7 @@ export async function getHorseRankings(env, options = {}) {
       partial:false,
       rankings:{
         highestEarningsPerStart:mapCoreRanking(earnings,'earningsPerVerifiedStart'),
+        fastestFirst200:start.map((row,index)=>({rank:index+1,id:row.entity_id,name:row.name,measurements:Number(row.measurements),averageSeconds:Number(row.avg_seconds)})),
         strongestLast400:close.map((row,index)=>({rank:index+1,id:row.entity_id,name:row.name,measurements:Number(row.measurements),averageSeconds:Number(row.avg_seconds)})),
         firstAfterRest:mapRestRanking(rowsFor(restRows,'ranking_kind','first')),
         secondAfterRest:mapRestRanking(rowsFor(restRows,'ranking_kind','second')),

@@ -122,6 +122,7 @@ function restoreShared(view){
 }
 async function restoreView(view){
   if(!view)return;
+  cancelRankingLifecycle();
   restoring=true;
   clearTimeout(commitTimer);
   try{
