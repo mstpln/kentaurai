@@ -75,14 +75,9 @@ test('race level uses verified STL, V75/V85/V86 identity or at least 100k first 
 
   const higherPrizeEvidence = higherPrizeRaceEvidenceCondition('r');
   assert.match(higherPrizeEvidence, /first_prize_sek >= 100000/);
-  assert.match(higherPrizeEvidence, /game_legs/);
-  assert.match(higherPrizeEvidence, /game_rounds/);
-  assert.match(higherPrizeEvidence, /json_each/);
-  assert.match(higherPrizeEvidence, /gameTypes/);
-  assert.match(higherPrizeEvidence, /'V75', 'V85', 'V86'/);
-  assert.doesNotMatch(higherPrizeEvidence, /GS75/);
-  assert.match(higherPrizeEvidence, /^r\.id IN \(/, 'high-prize scope should materialize one reusable race-id set');
-  assert.doesNotMatch(higherPrizeEvidence, /WHERE[^\n]*race_id\s*=\s*r\.id/, 'high-prize scope must not execute correlated evidence lookups per result row');
+  assert.match(higherPrizeEvidence, /race_scope_evidence/);
+  assert.doesNotMatch(higherPrizeEvidence, /normalized_observations|json_each|game_legs|game_rounds/, 'hot statistics reads must not rescan source evidence');
+  assert.match(higherPrizeEvidence, /EXISTS[\s\S]*rse_scope\.race_id = r\.id/, 'high-prize scope should use the indexed materialized evidence lookup');
   assert.match(raceScopeCondition('weekday'), /^COALESCE\(/);
   assert.throws(() => normalizeRaceScope('gs75'), /race scope/);
 });
