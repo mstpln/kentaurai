@@ -39,41 +39,51 @@ function tRankingGrid(data){const r=data.rankings||{},limit=data.definitions?.lo
  tCard('Högst segerprocent','Vinster / starter',r.highestWinRate,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>')+
  tCard('Högst topp 3-procent','Placering 1–3 / resultatstarter',r.highestTop3Rate,x=>pct(x.top3Rate)+'<span class="trainer-ranking-note">'+num(x.resultStarts)+' resultat</span>')+
  tCard('Flest segrar','Volymmått',r.mostWins,x=>num(x.wins)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>')+
- (Object.hasOwn(r,'bestFormLast30')?tCard('Bäst form – senaste 30','Endast officiella placeringar',r.bestFormLast30,x=>tNum(x.averagePlacing)+'<span class="trainer-ranking-note">'+num(x.usedStarts)+' starter</span>'):'');if(data.partial)return html+'</div><div class="trainer-ranking-empty trainer-ranking-pending">Läser resterande statistik…</div>';return html+
- tCard('Mest inkört i år','Verifierad prissumma under kalenderåret',r.mostEarningsThisYear,x=>money(x.prizeSek)+'<span class="trainer-ranking-note">'+num(x.prizeVerifiedStarts)+' prisstarter</span>')+
- tCard('Högst intjänat per start','Prispengar / verifierade prisstarter',r.highestEarningsPerStart,x=>money(x.earningsPerVerifiedStart)+'<span class="trainer-ranking-note">'+num(x.prizeVerifiedStarts)+' prisstarter</span>')+
- tCard('Bäst i autostart','Resultat i autostart',r.bestAuto,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>')+
- tCard('Bäst i voltstart','Resultat i voltstart',r.bestVolt,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>')+
- tCard('Bäst från bra voltspår','Spår 1, 6 eller 7',r.bestGoodVoltLane,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>')+
- tCard('Bäst från övriga voltspår','Verifierat voltspår utanför 1/6/7',r.bestOtherVoltLane,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>')+
- tCard('Bäst på tillägg','Verifierad faktisk startdistans över grunddistans',r.bestWithHandicap,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>')+
- tCard('Bäst på hemmabana','Senaste verifierade officiella hemmabana',r.bestHomeTrack,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>')+
- tCard('Bäst på övriga banor','Exkluderar verifierad hemmabana',r.bestOtherTracks,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>')+
- tCard('Bäst kort distans','Canonical 640/1640-grupper',r.bestShortDistance,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>')+
- tCard('Bäst medeldistans','Canonical 2140-grupp',r.bestMediumDistance,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>')+
- tCard('Bäst lång distans','Canonical grupper från 2640 m',r.bestLongDistance,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>')+
- tCard('Resultat som favorit','Marknadsrank 1 vid sista giltiga snapshot före spelstopp',r.favoriteResults,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' favoritstarter</span>')+
- tCard('Resultat som skräll','≤ '+num(limit)+'% vid sista giltiga snapshot före spelstopp',r.longshotResults,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' skrällstarter</span>')+
- tCard('Första starten efter vila','Hästens första faktiska start efter minst 60 dagar',r.firstAfterRest,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>')+
- tCard('Andra starten efter vila','Hästens direkt följande faktiska start',r.secondAfterRest,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>')+'</div>'}
+ (Object.hasOwn(r,'bestFormLast30')?tCard('Bäst form – senaste 30','Endast officiella placeringar',r.bestFormLast30,x=>tNum(x.averagePlacing)+'<span class="trainer-ranking-note">'+num(x.usedStarts)+' starter</span>'):'')+
+ (Object.hasOwn(r,'mostEarningsThisYear')?tCard('Mest inkört i år','Verifierad prissumma under kalenderåret',r.mostEarningsThisYear,x=>money(x.prizeSek)+'<span class="trainer-ranking-note">'+num(x.prizeVerifiedStarts)+' prisstarter</span>'):'')+
+ (Object.hasOwn(r,'highestEarningsPerStart')?tCard('Högst intjänat per start','Prispengar / verifierade prisstarter',r.highestEarningsPerStart,x=>money(x.earningsPerVerifiedStart)+'<span class="trainer-ranking-note">'+num(x.prizeVerifiedStarts)+' prisstarter</span>'):'')+
+ (Object.hasOwn(r,'bestAuto')?tCard('Bäst i autostart','Resultat i autostart',r.bestAuto,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>'):'')+
+ (Object.hasOwn(r,'bestVolt')?tCard('Bäst i voltstart','Resultat i voltstart',r.bestVolt,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>'):'')+
+ (Object.hasOwn(r,'bestGoodVoltLane')?tCard('Bäst från bra voltspår','Spår 1, 6 eller 7',r.bestGoodVoltLane,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>'):'')+
+ (Object.hasOwn(r,'bestOtherVoltLane')?tCard('Bäst från övriga voltspår','Verifierat voltspår utanför 1/6/7',r.bestOtherVoltLane,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>'):'')+
+ (Object.hasOwn(r,'bestWithHandicap')?tCard('Bäst på tillägg','Verifierad faktisk startdistans över grunddistans',r.bestWithHandicap,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>'):'')+
+ (Object.hasOwn(r,'bestHomeTrack')?tCard('Bäst på hemmabana','Senaste verifierade officiella hemmabana',r.bestHomeTrack,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>'):'')+
+ (Object.hasOwn(r,'bestOtherTracks')?tCard('Bäst på övriga banor','Exkluderar verifierad hemmabana',r.bestOtherTracks,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>'):'')+
+ (Object.hasOwn(r,'bestShortDistance')?tCard('Bäst kort distans','Canonical 640/1640-grupper',r.bestShortDistance,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>'):'')+
+ (Object.hasOwn(r,'bestMediumDistance')?tCard('Bäst medeldistans','Canonical 2140-grupp',r.bestMediumDistance,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>'):'')+
+ (Object.hasOwn(r,'bestLongDistance')?tCard('Bäst lång distans','Canonical grupper från 2640 m',r.bestLongDistance,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>'):'')+
+ (Object.hasOwn(r,'favoriteResults')?tCard('Resultat som favorit','Marknadsrank 1 vid sista giltiga snapshot före spelstopp',r.favoriteResults,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' favoritstarter</span>'):'')+
+ (Object.hasOwn(r,'longshotResults')?tCard('Resultat som skräll','≤ '+num(limit)+'% vid sista giltiga snapshot före spelstopp',r.longshotResults,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' skrällstarter</span>'):'')+
+ (Object.hasOwn(r,'firstAfterRest')?tCard('Första starten efter vila','Hästens första faktiska start efter minst 60 dagar',r.firstAfterRest,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>'):'')+
+ (Object.hasOwn(r,'secondAfterRest')?tCard('Andra starten efter vila','Hästens direkt följande faktiska start',r.secondAfterRest,x=>pct(x.winRate)+'<span class="trainer-ranking-note">'+num(x.starts)+' starter</span>'):'')+'</div>';
+ if(data.partial)html+='<div class="trainer-ranking-empty trainer-ranking-pending">Läser resterande statistik…</div>';
+ if(data.extendedError)html+='<div class="trainer-ranking-empty">Viss statistik kunde inte läsas.</div>';
+ return html}
 function tBindRows(){document.querySelectorAll('[data-ts-trainer]').forEach(row=>row.onclick=()=>openDetail('trainers',row.dataset.tsTrainer))}
-function tMergeRankingPayload(core,extended){return{...core,...extended,partial:false,rankings:{...(core.rankings||{}),...(extended.rankings||{})}}}
+function tMergeRankingPayload(core,extended){return{...core,...extended,partial:extended.partial??core.partial,definitions:{...(core.definitions||{}),...(extended.definitions||{})},rankings:{...(core.rankings||{}),...(extended.rankings||{})}}}
 function renderTrainerRankingShell(data){app.innerHTML=heading('Tränare','Sök och utforska tränare')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+tToolbar()+tRankingGrid(data);bindTabs(()=>renderEntityList('trainers'));tBindFilters(renderTrainerRankings);tBindRows()}
 async function renderTrainerRankings(){
- const token=++trainerRankingToken;cancelRankingLifecycle();state.detail=null;state.page='trainers';setNav('trainers');const key=tQuery();const cached=state.trainerStatsDataKey===key?state.trainerStatsData:null;
+ const token=++trainerRankingToken;cancelRankingLifecycle();cancelEntityListLifecycle();state.detail=null;state.page='trainers';setNav('trainers');const key=tQuery();const cached=state.trainerStatsDataKey===key?state.trainerStatsData:null;
  app.innerHTML=heading('Tränare','Sök och utforska tränare')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+tToolbar()+(cached?tRankingGrid(cached):'<div class="trainer-ranking-empty">Läser tränarstatistik…</div>');bindTabs(()=>renderEntityList('trainers'));tBindFilters(renderTrainerRankings);if(cached){tBindRows();return}
  const lifecycle=beginRankingLifecycle();
  try{
   const core=await api('/trainers/statistics?'+key+'&mode=core',{signal:lifecycle.controller.signal});
   if(!isCurrentRankingLifecycle(lifecycle)||token!==trainerRankingToken||state.page!=='trainers'||state.tab!=='stats'||state.detail)return;
-  renderTrainerRankingShell(core);
-  await afterRankingCorePaint();
-  if(!isCurrentRankingLifecycle(lifecycle)||token!==trainerRankingToken||state.page!=='trainers'||state.tab!=='stats'||state.detail)return;
-  let extended;
-  try{extended=await api('/trainers/statistics?'+key+'&mode=extended',{signal:lifecycle.controller.signal})}
-  catch(error){if(isRankingAbort(error))return;if(isCurrentRankingLifecycle(lifecycle)){const pending=document.querySelector('.trainer-ranking-pending');if(pending)pending.textContent='Kunde inte läsa resterande statistik.'}return}
-  if(!isCurrentRankingLifecycle(lifecycle)||token!==trainerRankingToken||state.page!=='trainers'||state.tab!=='stats'||state.detail)return;
-  const data=tMergeRankingPayload(core,extended);state.trainerStatsData=data;state.trainerStatsDataKey=key;renderTrainerRankingShell(data);
+  let data={...core,partial:true,rankings:{...(core.rankings||{})}};renderTrainerRankingShell(data);
+  const parts=['form','annual','per-start','performance','home','distance','market','rest'];let hadError=false;
+  for(let index=0;index<parts.length;index++){
+   await afterRankingCorePaint();
+   if(!isCurrentRankingLifecycle(lifecycle)||token!==trainerRankingToken||state.page!=='trainers'||state.tab!=='stats'||state.detail)return;
+   try{
+    const fragment=await api('/trainers/statistics?'+key+'&mode=extended&part='+encodeURIComponent(parts[index]),{signal:lifecycle.controller.signal});
+    if(!isCurrentRankingLifecycle(lifecycle)||token!==trainerRankingToken||state.page!=='trainers'||state.tab!=='stats'||state.detail)return;
+    data=tMergeRankingPayload(data,fragment);data.partial=index<parts.length-1;data.extendedError=hadError;renderTrainerRankingShell(data);
+   }catch(error){
+    if(isRankingAbort(error))return;
+    hadError=true;data={...data,partial:index<parts.length-1,extendedError:true};renderTrainerRankingShell(data);
+   }
+  }
+  data={...data,partial:false,extendedError:hadError};if(!hadError){state.trainerStatsData=data;state.trainerStatsDataKey=key}renderTrainerRankingShell(data);
  }catch(error){if(isRankingAbort(error))return;if(isCurrentRankingLifecycle(lifecycle)&&token===trainerRankingToken&&state.page==='trainers'&&state.tab==='stats'&&!state.detail){trainerRankingToken++;app.innerHTML+='<div class="trainer-ranking-empty">Kunde inte läsa tränarstatistik: '+esc(error.message)+'</div>'}}
  finally{completeRankingLifecycle(lifecycle)}
 }
