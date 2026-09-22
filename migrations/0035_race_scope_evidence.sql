@@ -95,6 +95,33 @@ BEGIN
     );
 END;
 
+CREATE TRIGGER IF NOT EXISTS trg_race_scope_game_leg_update
+AFTER UPDATE OF race_id, game_round_id ON game_legs
+BEGIN
+  DELETE FROM race_scope_evidence
+  WHERE race_id = OLD.race_id
+    AND evidence_kind = 'game'
+    AND NOT EXISTS (
+      SELECT 1
+      FROM game_legs gl
+      JOIN game_rounds gr ON gr.id = gl.game_round_id
+      WHERE gl.race_id = OLD.race_id
+        AND UPPER(TRIM(gr.game_type)) IN ('V75', 'V85', 'V86')
+    );
+
+  INSERT INTO race_scope_evidence(race_id, evidence_kind)
+  SELECT NEW.race_id, 'game'
+  WHERE EXISTS (
+    SELECT 1 FROM game_rounds gr
+    WHERE gr.id = NEW.game_round_id
+      AND UPPER(TRIM(gr.game_type)) IN ('V75', 'V85', 'V86')
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM race_scope_evidence
+    WHERE race_id = NEW.race_id AND evidence_kind = 'game'
+  );
+END;
+
 CREATE TRIGGER IF NOT EXISTS trg_race_scope_game_round_update
 AFTER UPDATE OF game_type ON game_rounds
 BEGIN
