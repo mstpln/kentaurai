@@ -87,6 +87,7 @@ function bindStatisticsCategoryNav(){
     const page=button.dataset.statisticsPage;
     if(!STATISTICS_PAGES.includes(page))return;
     cancelRankingLifecycle();
+    cancelEntityListLifecycle();
     state.statisticsPage=page;
     state.detail=null;state.gameDetail=null;state.gameSystemId=null;state.trackDetail=null;
     if(page==='tracks')renderTracks();
@@ -115,14 +116,14 @@ function alignPrimaryNavigation(){
     '<button class="nav-item" data-page="statistics">'+STATISTICS_NAV_ICON+'Statistik</button>'+
     '<button class="nav-item" data-page="analysis">'+ANALYSIS_NAV_ICON+'Analys</button>'+
     '<button class="nav-item" data-page="games">'+GAMES_NAV_ICON+'Spel</button>';
-  inner.querySelector('[data-page="start"]').onclick=()=>{state.trackDetail=null;renderStart()};
+  inner.querySelector('[data-page="start"]').onclick=()=>{cancelRankingLifecycle();cancelEntityListLifecycle();state.trackDetail=null;renderStart()};
   inner.querySelector('[data-page="statistics"]').onclick=()=>{
-    state.detail=null;state.gameDetail=null;state.gameSystemId=null;state.trackDetail=null;
+    cancelRankingLifecycle();cancelEntityListLifecycle();state.detail=null;state.gameDetail=null;state.gameSystemId=null;state.trackDetail=null;
     const page=STATISTICS_PAGES.includes(state.statisticsPage)?state.statisticsPage:'horses';
     if(page==='tracks')renderTracks();else renderEntityList(page);
   };
-  inner.querySelector('[data-page="analysis"]').onclick=()=>{state.trackDetail=null;window.__kentauraiAnalysis?.render()};
-  inner.querySelector('[data-page="games"]').onclick=()=>{state.trackDetail=null;state.gameTab=state.gameTab||'upcoming';state.gameSystemId=null;renderGames()};
+  inner.querySelector('[data-page="analysis"]').onclick=()=>{cancelRankingLifecycle();cancelEntityListLifecycle();state.trackDetail=null;window.__kentauraiAnalysis?.render()};
+  inner.querySelector('[data-page="games"]').onclick=()=>{cancelRankingLifecycle();cancelEntityListLifecycle();state.trackDetail=null;state.gameTab=state.gameTab||'upcoming';state.gameSystemId=null;renderGames()};
   setNav(state.page||'start');
 }
 alignPrimaryNavigation();
