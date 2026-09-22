@@ -71,7 +71,7 @@ test('statistics selector is scoped away from Settings, Analysis and detail view
   const html = renderAppPage();
   assert.match(html, /const shouldShow=STATISTICS_PAGES\.includes\(state\.page\)&&!state\.settingsOpen&&!state\.detail&&!state\.trackDetail/);
   assert.match(html, /state\.page='analysis'/);
-  assert.match(html, /async function renderSettings\(\)\{state\.settingsOpen=true/);
+  assert.match(html, /async function renderSettings\(\)\{if\(typeof cancelRankingLifecycle==='function'\)cancelRankingLifecycle\(\);state\.settingsOpen=true/);
   assert.match(html, /window\.__kentauraiAnalysis=\{render:renderAnalysis\}/);
 });
 
