@@ -39,34 +39,45 @@ function bindFilters(callback){document.querySelectorAll('[data-hs-filter]').for
 function numberValue(v,d=1){return v==null?'—':Number(v).toFixed(d).replace('.',',')}
 function paceValue(v){if(v==null)return '—';const total=Number(v);const minutes=Math.floor(total/60);const seconds=(total-minutes*60).toFixed(1).padStart(4,'0').replace('.',',');return minutes+'.'+seconds+' min/km'}
 function card(title,note,rows,value){return '<section class="horse-ranking-card"><div class="horse-ranking-head"><h2>'+esc(title)+'</h2><span>'+esc(note)+'</span></div>'+(rows?.length?rows.map(row=>'<button type="button" class="horse-ranking-row" data-hs-horse="'+esc(row.id)+'"><span class="horse-ranking-rank">'+num(row.rank)+'</span><span class="horse-ranking-name">'+esc(row.name)+'</span><span class="horse-ranking-value">'+value(row)+'</span></button>').join(''):'<div class="horse-ranking-empty">Inget verifierat underlag för valt urval.</div>')+'</section>'}
-function rankingGrid(data){const r=data.rankings||{};let html='<div class="horse-ranking-grid">'+(r.fastestFirst200?
- card('Startsnabbaste','X-Labs första 200 m · lägst snitt-km-tempo',r.fastestFirst200,x=>paceValue(x.averageSeconds)+'<span class="horse-ranking-note">'+num(x.measurements)+' mätningar</span>'):'')+
+function rankingGrid(data){const r=data.rankings||{};let html='<div class="horse-ranking-grid">'+
+ (Object.hasOwn(r,'fastestFirst200')?card('Startsnabbaste','X-Labs första 200 m · lägst snitt-km-tempo',r.fastestFirst200,x=>paceValue(x.averageSeconds)+'<span class="horse-ranking-note">'+num(x.measurements)+' mätningar</span>'):'')+
  card('Högst segerprocent','Vinster / starter',r.highestWinRate,x=>esc(pct(x.winRate))+'<span class="horse-ranking-note">'+num(x.starts)+' starter</span>')+
  card('Högst topp 3-procent','Placering 1–3 / resultatstarter',r.highestTop3Rate,x=>esc(pct(x.top3Rate))+'<span class="horse-ranking-note">'+num(x.resultStarts)+' resultat</span>')+
- (Object.hasOwn(r,'bestFormLast10')?card('Bäst form – senaste 10','Endast officiella placeringar',r.bestFormLast10,x=>numberValue(x.averagePlacing,2)+'<span class="horse-ranking-note">'+num(x.usedStarts)+' starter</span>'):'');if(data.partial)return html+'</div><div class="horse-ranking-empty horse-ranking-pending">Läser resterande statistik…</div>';return html+
- card('Högst startpoäng','Senast verifierade officiella observation',r.highestStartPoints,x=>num(x.points)+'<span class="horse-ranking-note">'+esc(String(x.observedAt||'').slice(0,10))+'</span>')+
- card('Starkaste avslutare','X-Labs sista 400 m · lägst snitt-km-tempo',r.strongestLast400,x=>paceValue(x.averageSeconds)+'<span class="horse-ranking-note">'+num(x.measurements)+' mätningar</span>')+
- card('Högst snittintjäning/start','Prispengar / verifierade prisstarter',r.highestEarningsPerStart,x=>esc(money(x.earningsPerVerifiedStart))+'<span class="horse-ranking-note">'+num(x.prizeVerifiedStarts)+' prisstarter</span>')+
- card('Första starten efter vila','Minst 60 dagar sedan föregående faktiska start',r.firstAfterRest,x=>esc(pct(x.winRate))+'<span class="horse-ranking-note">'+num(x.starts)+' starter</span>')+
- card('Andra starten efter vila','Nästa start efter comeback utan ny 60-dagars vila',r.secondAfterRest,x=>esc(pct(x.winRate))+'<span class="horse-ranking-note">'+num(x.starts)+' starter</span>')+'</div>'}
+ (Object.hasOwn(r,'bestFormLast10')?card('Bäst form – senaste 10','Endast officiella placeringar',r.bestFormLast10,x=>numberValue(x.averagePlacing,2)+'<span class="horse-ranking-note">'+num(x.usedStarts)+' starter</span>'):'')+
+ (Object.hasOwn(r,'highestStartPoints')?card('Högst startpoäng','Senast verifierade officiella observation',r.highestStartPoints,x=>num(x.points)+'<span class="horse-ranking-note">'+esc(String(x.observedAt||'').slice(0,10))+'</span>'):'')+
+ (Object.hasOwn(r,'strongestLast400')?card('Starkaste avslutare','X-Labs sista 400 m · lägst snitt-km-tempo',r.strongestLast400,x=>paceValue(x.averageSeconds)+'<span class="horse-ranking-note">'+num(x.measurements)+' mätningar</span>'):'')+
+ (Object.hasOwn(r,'highestEarningsPerStart')?card('Högst snittintjäning/start','Prispengar / verifierade prisstarter',r.highestEarningsPerStart,x=>esc(money(x.earningsPerVerifiedStart))+'<span class="horse-ranking-note">'+num(x.prizeVerifiedStarts)+' prisstarter</span>'):'')+
+ (Object.hasOwn(r,'firstAfterRest')?card('Första starten efter vila','Minst 60 dagar sedan föregående faktiska start',r.firstAfterRest,x=>esc(pct(x.winRate))+'<span class="horse-ranking-note">'+num(x.starts)+' starter</span>'):'')+
+ (Object.hasOwn(r,'secondAfterRest')?card('Andra starten efter vila','Nästa start efter comeback utan ny 60-dagars vila',r.secondAfterRest,x=>esc(pct(x.winRate))+'<span class="horse-ranking-note">'+num(x.starts)+' starter</span>'):'')+'</div>';
+ if(data.partial)html+='<div class="horse-ranking-empty horse-ranking-pending">Läser resterande statistik…</div>';
+ if(data.extendedError)html+='<div class="horse-ranking-empty">Viss statistik kunde inte läsas.</div>';
+ return html}
 function bindRows(){document.querySelectorAll('[data-hs-horse]').forEach(row=>row.onclick=()=>openDetail('horses',row.dataset.hsHorse))}
-function mergeHorseRankingPayload(core,extended){return{...core,...extended,partial:false,rankings:{...(core.rankings||{}),...(extended.rankings||{})}}}
+function mergeHorseRankingPayload(core,extended){return{...core,...extended,partial:extended.partial??core.partial,rankings:{...(core.rankings||{}),...(extended.rankings||{})}}}
 function renderHorseRankingShell(data){app.innerHTML=heading('Hästar','Sök och utforska hästar')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+toolbar()+rankingGrid(data);bindTabs(()=>renderEntityList('horses'));bindFilters(renderHorseRankings);bindRows()}
 async function renderHorseRankings(){
- const token=++rankingToken;cancelRankingLifecycle();state.detail=null;state.page='horses';setNav('horses');const key=query();const cached=state.horseStatsDataKey===key?state.horseStatsData:null;
+ const token=++rankingToken;cancelRankingLifecycle();cancelEntityListLifecycle();state.detail=null;state.page='horses';setNav('horses');const key=query();const cached=state.horseStatsDataKey===key?state.horseStatsData:null;
  app.innerHTML=heading('Hästar','Sök och utforska hästar')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+toolbar()+(cached?rankingGrid(cached):'<div class="horse-ranking-empty">Läser häststatistik…</div>');bindTabs(()=>renderEntityList('horses'));bindFilters(renderHorseRankings);if(cached){bindRows();return}
  const lifecycle=beginRankingLifecycle();
  try{
   const core=await api('/horses/statistics?'+key+'&mode=core',{signal:lifecycle.controller.signal});
   if(!isCurrentRankingLifecycle(lifecycle)||token!==rankingToken||state.page!=='horses'||state.tab!=='stats'||state.detail)return;
-  renderHorseRankingShell(core);
-  await afterRankingCorePaint();
-  if(!isCurrentRankingLifecycle(lifecycle)||token!==rankingToken||state.page!=='horses'||state.tab!=='stats'||state.detail)return;
-  let extended;
-  try{extended=await api('/horses/statistics?'+key+'&mode=extended',{signal:lifecycle.controller.signal})}
-  catch(error){if(isRankingAbort(error))return;if(isCurrentRankingLifecycle(lifecycle)){const pending=document.querySelector('.horse-ranking-pending');if(pending)pending.textContent='Kunde inte läsa resterande statistik.'}return}
-  if(!isCurrentRankingLifecycle(lifecycle)||token!==rankingToken||state.page!=='horses'||state.tab!=='stats'||state.detail)return;
-  const data=mergeHorseRankingPayload(core,extended);state.horseStatsData=data;state.horseStatsDataKey=key;renderHorseRankingShell(data);
+  let data={...core,partial:true,rankings:{...(core.rankings||{})}};
+  renderHorseRankingShell(data);
+  const parts=['form','opening','closing','earnings','rest','startpoints'];let hadError=false;
+  for(let index=0;index<parts.length;index++){
+   await afterRankingCorePaint();
+   if(!isCurrentRankingLifecycle(lifecycle)||token!==rankingToken||state.page!=='horses'||state.tab!=='stats'||state.detail)return;
+   try{
+    const fragment=await api('/horses/statistics?'+key+'&mode=extended&part='+encodeURIComponent(parts[index]),{signal:lifecycle.controller.signal});
+    if(!isCurrentRankingLifecycle(lifecycle)||token!==rankingToken||state.page!=='horses'||state.tab!=='stats'||state.detail)return;
+    data=mergeHorseRankingPayload(data,fragment);data.partial=index<parts.length-1;data.extendedError=hadError;renderHorseRankingShell(data);
+   }catch(error){
+    if(isRankingAbort(error))return;
+    hadError=true;data={...data,partial:index<parts.length-1,extendedError:true};renderHorseRankingShell(data);
+   }
+  }
+  data={...data,partial:false,extendedError:hadError};if(!hadError){state.horseStatsData=data;state.horseStatsDataKey=key}renderHorseRankingShell(data);
  }catch(error){if(isRankingAbort(error))return;if(isCurrentRankingLifecycle(lifecycle)&&token===rankingToken&&state.page==='horses'&&state.tab==='stats'&&!state.detail){rankingToken++;app.innerHTML+='<div class="horse-ranking-empty">Kunde inte läsa häststatistik: '+esc(error.message)+'</div>'}}
  finally{completeRankingLifecycle(lifecycle)}
 }
