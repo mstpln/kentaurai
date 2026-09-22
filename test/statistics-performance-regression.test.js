@@ -22,7 +22,7 @@ test('statistics core endpoints avoid repeated ranking scans', async () => {
     const { env } = createTestEnv();
     const captures = capturePreparedQueries(env);
     await getHorseRankings(env, { mode:'core', period:'1y', asOfDate:'2026-09-20', minStarts:'3' });
-    assert.equal(captures.length, 2, 'horse core should be shared core aggregate + Form only');
+    assert.equal(captures.length, 1, 'horse core should be only the shared core aggregate; Form is lazy');
     assert.equal(captures.filter((sql) => sql.includes('WITH horse_stats AS MATERIALIZED')).length, 1);
     assert.equal(captures.some((sql) => sql.includes('horse_start_points')), false, 'Start Points must stay out of the fast horse core response');
     assert.equal(captures.some((sql) => sql.includes('xlabs_intervals')), false, 'opening speed must not block horse core');
@@ -31,14 +31,14 @@ test('statistics core endpoints avoid repeated ranking scans', async () => {
     const { env } = createTestEnv();
     const captures = capturePreparedQueries(env);
     await getTrainerRankings(env, { mode:'core', period:'1y', asOfDate:'2026-09-20', minStarts:'10' });
-    assert.equal(captures.length, 2, 'trainer core should aggregate the three basic rankings in one scan plus Form');
+    assert.equal(captures.length, 1, 'trainer core should aggregate the three basic rankings in one scan; Form is lazy');
     assert.equal(captures.filter((sql) => sql.includes('WITH trainer_stats AS MATERIALIZED')).length, 1);
   }
   {
     const { env } = createTestEnv();
     const captures = capturePreparedQueries(env);
     await getDriverRankings(env, { mode:'core', period:'1y', asOfDate:'2026-09-20', minStarts:'10' });
-    assert.equal(captures.length, 2, 'driver core should aggregate the three basic rankings in one scan plus Form');
+    assert.equal(captures.length, 1, 'driver core should aggregate the three basic rankings in one scan; Form is lazy');
     assert.equal(captures.filter((sql) => sql.includes('WITH driver_stats AS MATERIALIZED')).length, 1);
   }
 });
@@ -48,7 +48,7 @@ test('statistics extended endpoints consolidate expensive ranking families', asy
     const { env } = createTestEnv();
     const captures = capturePreparedQueries(env);
     await getHorseRankings(env, { mode:'extended', period:'1y', asOfDate:'2026-09-20', minStarts:'3' });
-    assert.equal(captures.length, 5, 'horse extended should use earnings + opening speed + closing speed + combined rest + Start Points');
+    assert.equal(captures.length, 6, 'horse extended should use Form + earnings + opening speed + closing speed + combined rest + Start Points');
     assert.equal(captures.filter((sql) => sql.includes('ranking_kind')).length, 1);
     assert.equal(captures.some((sql) => sql.includes('xlabs_intervals')), true);
   }
@@ -56,7 +56,7 @@ test('statistics extended endpoints consolidate expensive ranking families', asy
     const { env } = createTestEnv();
     const captures = capturePreparedQueries(env);
     await getTrainerRankings(env, { mode:'extended', period:'1y', asOfDate:'2026-09-20', minStarts:'10' });
-    assert.equal(captures.length, 7, 'trainer extended should collapse performance, home, distance, market and rest ranking families');
+    assert.equal(captures.length, 8, 'trainer extended should include lazy Form plus consolidated performance, home, distance, market and rest ranking families');
     assert.equal(captures.some((sql) => sql.includes("'goodVolt'")), true);
     assert.equal(captures.some((sql) => sql.includes("'favorite'")), true);
   }
@@ -64,7 +64,7 @@ test('statistics extended endpoints consolidate expensive ranking families', asy
     const { env } = createTestEnv();
     const captures = capturePreparedQueries(env);
     await getDriverRankings(env, { mode:'extended', period:'1y', asOfDate:'2026-09-20', minStarts:'10' });
-    assert.equal(captures.length, 4, 'driver extended should collapse performance and market ranking families');
+    assert.equal(captures.length, 5, 'driver extended should include lazy Form plus consolidated performance and market ranking families');
     assert.equal(captures.some((sql) => sql.includes("'backRow'")), true);
     assert.equal(captures.some((sql) => sql.includes("'longshot'")), true);
   }
