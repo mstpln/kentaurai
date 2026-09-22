@@ -81,6 +81,8 @@ test('race level uses verified STL, V75/V85/V86 identity or at least 100k first 
   assert.match(higherPrizeEvidence, /gameTypes/);
   assert.match(higherPrizeEvidence, /'V75', 'V85', 'V86'/);
   assert.doesNotMatch(higherPrizeEvidence, /GS75/);
+  assert.match(higherPrizeEvidence, /^r\.id IN \(/, 'high-prize scope should materialize one reusable race-id set');
+  assert.doesNotMatch(higherPrizeEvidence, /WHERE[^\n]*race_id\s*=\s*r\.id/, 'high-prize scope must not execute correlated evidence lookups per result row');
   assert.match(raceScopeCondition('weekday'), /^COALESCE\(/);
   assert.throws(() => normalizeRaceScope('gs75'), /race scope/);
 });
