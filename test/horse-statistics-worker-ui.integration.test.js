@@ -28,8 +28,10 @@ test('horse statistics routes are private through actual Worker', async () => {
   const cookie=await authenticatedCookie(env);
   response=await worker.fetch(new Request(url,{headers:{cookie}}),env);assert.equal(response.status,200);
   const data=await response.json();assert.equal(data.rankings.highestWinRate[0].id,'horse-h');assert.equal(data.startPointsStatus,'verified_official_life_statistics');
+  response=await worker.fetch(new Request(url+'&mode=core',{headers:{cookie}}),env);assert.equal(response.status,200);
+  const core=await response.json();assert.equal(Object.hasOwn(core.rankings,'fastestFirst200'),false);
   response=await worker.fetch(new Request(url+'&mode=extended',{headers:{cookie}}),env);assert.equal(response.status,200);
-  const extended=await response.json();assert.equal(Object.hasOwn(extended.rankings,'highestWinRate'),false);assert.equal(Object.hasOwn(extended.rankings,'strongestLast400'),true);
+  const extended=await response.json();assert.equal(Object.hasOwn(extended.rankings,'highestWinRate'),false);assert.equal(Object.hasOwn(extended.rankings,'fastestFirst200'),true);assert.equal(Object.hasOwn(extended.rankings,'strongestLast400'),true);
   response=await worker.fetch(new Request('https://example.test/app/api/horses/horse-h/statistics?period=1y',{headers:{cookie}}),env);assert.equal(response.status,200);
   const detail=await response.json();assert.equal(detail.summary.winRate,1);assert.equal(detail.startPointsStatus,'verified_official_life_statistics');assert.equal(detail.currentStartPoints,null);
 });
