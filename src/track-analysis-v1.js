@@ -419,7 +419,7 @@ function scenarioWinnerSummary(rows) {
   const strongest = [...eligible].sort((a,b) =>
     b.winner_share-a.winner_share || b.wins-a.wins || b.starts-a.starts
   )[0];
-  let text = `Flest vinnare kommer från ${scenarioPhrase(strongest.scenario_key)}: ${Math.round(strongest.winner_share*100)} % av vinnarna har legat där runt 500 m kvar.`;
+  let text = `Bland vinnarna där löpningsscenariot kan klassificeras kommer flest från ${scenarioPhrase(strongest.scenario_key)}: ${Math.round(strongest.winner_share*100)} % har legat där runt 500 m kvar.`;
 
   const strongestDirection = comparisonDirection(
     strongest.winner_share,strongest.winner_observations,
