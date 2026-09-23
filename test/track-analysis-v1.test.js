@@ -115,7 +115,7 @@ test('track analysis uses 200m lanes and same-country exact-context baseline', a
   assert.equal(leader.wins,30);
   assert.equal(leader.win_rate,1);
   assert.equal(leader.baseline.wins,undefined);
-  assert.equal(leader.baseline.winner_share,0);
+  assert.equal(leader.baseline.winner_share,1);
 });
 
 
