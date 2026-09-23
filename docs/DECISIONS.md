@@ -256,6 +256,8 @@ A single race must not directly change model weights. Candidate learnings are re
 9. Short-analysis comparison claims require a normal per-lane/winner sample and conservative uncertainty separation from the same-context Swedish comparison set. Raw table deltas may still be displayed, but the narrative must not promote small-sample noise into a track conclusion. Backoff support must preserve an explicitly selected start method; autostart evidence may never become a voltstart conclusion or vice versa.
 10. Winner-scenario coverage uses winner entries, not distinct races, so dead heats and ambiguous multi-winner factual states cannot overstate scenario coverage. Winner-share prose explicitly refers to winners whose scenario could be classified.
 11. `Kort analys` is presented as bullet points for scanability; this is presentation only and does not change the deterministic calculation contract.
+12. A numerical maximum alone is not a Bananalys track characteristic. Absolute strongest-lane and dominant-winner-scenario prose requires conservative separation from the runner-up under the normal-sample/Wilson safeguards; otherwise the absolute claim is omitted (and winner-scenario prose may explicitly state that no scenario clearly stands out).
+13. Bananalys `Alla` start methods means the union of supported factual Auto + Volt rows. Unknown or unsupported start-method values stay outside lane/scenario samples and their coverage denominators rather than being silently mixed into the analysis.
 
 
 ## X-Labs trip reconstruction quarantines only proven deterministic duplicate-target sources
