@@ -98,7 +98,7 @@ test('track analysis uses 200m lanes and same-country exact-context baseline', a
   assert.equal(data.coverage.trip_scenario.winner_scenario_coverage,1);
   assert.equal(data.analysis_support,null);
   assert.match(data.short_analysis.join(' '), /Spår 1 når spets oftast efter 200 m/);
-  assert.match(data.short_analysis.join(' '), /kommer flest från spets/);
+  assert.match(data.short_analysis.join(' '), /tydligt större andel från spets/);
   assert.match(data.short_analysis.join(' '), /snittet/);
   assert.doesNotMatch(data.short_analysis.join(' '), /baseline/i);
   assert.doesNotMatch(data.short_analysis.join(' '), /observationer/i);
@@ -208,6 +208,39 @@ test('winner-scenario coverage uses winner entries so dead heats do not inflate 
   assert.equal(data.coverage.eligible.winner_entries,31);
   assert.equal(data.coverage.trip_scenario.winners_with_scenario,30);
   assert.equal(data.coverage.trip_scenario.winner_scenario_coverage,0.9677);
+});
+
+
+test('winner-scenario short analysis does not promote a flat largest share into a track characteristic', async () => {
+  const {env,db}=createTestEnv();
+  seedTrackAnalysis(db);
+  const scenarios=['leader','pocket','death_seat','second_over','third_over','back'];
+  function setScenario(entryId,key) {
+    db.prepare(`UPDATE race_positions
+      SET leader=?,pocket=?,death_seat=?,second_over=?,third_over=?,event_json=?
+      WHERE id=?`).run(
+        key==='leader'?1:0,
+        key==='pocket'?1:0,
+        key==='death_seat'?1:0,
+        key==='second_over'?1:0,
+        key==='third_over'?1:0,
+        JSON.stringify({scenario_key:key}),
+        `pos-${entryId}`
+      );
+  }
+  for (let raceIndex=0;raceIndex<30;raceIndex+=1) {
+    const key=scenarios[raceIndex%scenarios.length];
+    setScenario(`entry-${(raceIndex*3)+1}`,key);
+    setScenario(`entry-${107+(raceIndex*3)}`,key);
+  }
+
+  const data=await getTrackAnalysisV1(env,'track-a',{startMethod:'auto',distanceGroup:'2140'});
+  const winnerShares=data.trip_scenario_500m_remaining.rows.map(row=>row.winner_share);
+  assert.ok(winnerShares.every(value=>Math.abs(value-(1/6))<0.001));
+  const summary=data.short_analysis.join(' ');
+  assert.match(summary,/inget enskilt scenario som sticker ut tydligt/i);
+  assert.doesNotMatch(summary,/kommer flest från/i);
+  assert.doesNotMatch(summary,/tydligt större andel från/i);
 });
 
 test('track analysis as-of excludes sources that were not available before cutoff', async () => {
