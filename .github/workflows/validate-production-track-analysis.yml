@@ -1,0 +1,143 @@
+name: Validate production track analysis
+
+on:
+  push:
+    branches:
+      - diagnose-trip-scenarios-prod
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout feature head
+        uses: actions/checkout@v5
+        with:
+          ref: feature/track-analysis-v1
+
+      - name: Validate production data against track-analysis v1
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          D1_DATABASE_ID: d8189e0e-6127-4ef2-88cc-534cb2217340
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { getTrackAnalysisV1 } from './src/track-analysis-v1.js';
+
+          const token = process.env.CLOUDFLARE_API_TOKEN;
+          const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+          const database = process.env.D1_DATABASE_ID;
+          if (!token || !account || !database) throw new Error('production validation credentials are unavailable');
+          const endpoint = `https://api.cloudflare.com/client/v4/accounts/${account}/d1/database/${database}/query`;
+
+          async function query(sql, params = []) {
+            const response = await fetch(endpoint, {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ sql, params })
+            });
+            if (!response.ok) throw new Error('production validation query failed');
+            const payload = await response.json();
+            if (!payload?.success || !payload?.result?.[0]?.success) throw new Error('production validation query was not successful');
+            return payload.result[0].results || [];
+          }
+
+          const env = {
+            DB: {
+              prepare(sql) {
+                let params = [];
+                return {
+                  bind(...values) { params = values; return this; },
+                  async all() { return { results: await query(sql, params) }; },
+                  async first() { return (await query(sql, params))[0] || null; }
+                };
+              }
+            }
+          };
+
+          const combos = await query(`
+            WITH combos AS (
+              SELECT r.track_id,
+                CASE
+                  WHEN LOWER(COALESCE(r.start_method,'')) IN ('auto','autostart') THEN 'auto'
+                  WHEN LOWER(COALESCE(r.start_method,'')) IN ('volt','volte','voltstart') THEN 'volt'
+                  ELSE NULL
+                END AS method,
+                CASE
+                  WHEN r.distance_m BETWEEN 1540 AND 1740 THEN '1640'
+                  WHEN r.distance_m BETWEEN 2040 AND 2240 THEN '2140'
+                  WHEN r.distance_m BETWEEN 2540 AND 2740 THEN '2640'
+                  WHEN r.distance_m BETWEEN 3040 AND 3240 THEN '3140'
+                  ELSE NULL
+                END AS distance_group,
+                COUNT(DISTINCT r.id) AS races
+              FROM race_positions rp
+              JOIN race_entries re ON re.id=rp.race_entry_id
+              JOIN races r ON r.id=re.race_id
+              JOIN race_results rr ON rr.race_entry_id=re.id
+              WHERE rp.classification_version='xlabs-trip-classification-v1'
+                AND re.scratched=0
+                AND rr.result_status='official'
+              GROUP BY r.track_id,method,distance_group
+            )
+            SELECT * FROM combos
+            WHERE method IS NOT NULL AND distance_group IS NOT NULL
+            ORDER BY races DESC
+          `);
+          if (!combos.length) throw new Error('no production track-analysis combinations exist');
+
+          const normal = combos.find(row => Number(row.races) >= 25);
+          const limited = combos.find(row => Number(row.races) >= 10 && Number(row.races) < 25);
+          if (!normal || !limited) throw new Error('production sample tiers do not cover normal and limited validation');
+
+          const totals = new Map();
+          for (const row of combos) {
+            const keyMethod = `${row.track_id}|${row.method}`;
+            const keyTrack = String(row.track_id);
+            totals.set(keyMethod, (totals.get(keyMethod) || 0) + Number(row.races));
+            totals.set(keyTrack, (totals.get(keyTrack) || 0) + Number(row.races));
+          }
+          const sparse = combos.find(row =>
+            Number(row.races) < 10 &&
+            ((totals.get(`${row.track_id}|${row.method}`) || 0) >= 10 || (totals.get(String(row.track_id)) || 0) >= 10)
+          );
+          if (!sparse) throw new Error('no sparse production combination with a valid backoff sample exists');
+
+          async function validateCandidate(candidate, expectedStatus, expectBackoff) {
+            const data = await getTrackAnalysisV1(env, candidate.track_id, {
+              startMethod: candidate.method,
+              distanceGroup: candidate.distance_group
+            });
+            if (data?.contract_version !== 'kentaurai-track-analysis-v1') throw new Error('track-analysis contract mismatch');
+            if (data.selection.start_method !== candidate.method || data.selection.distance_group !== candidate.distance_group) throw new Error('selection mismatch');
+            if (data.selected_sample.sample_status !== expectedStatus) throw new Error('sample status mismatch');
+            if ((data.analysis_basis.backoff_level !== 'exact') !== expectBackoff) throw new Error('backoff behavior mismatch');
+            if (data.start_position_100m?.checkpoint_m !== 100 || data.start_position_200m?.checkpoint_m !== 200) throw new Error('early checkpoint contract mismatch');
+            if ((data.trip_scenario_500m_remaining?.rows || []).length !== 6) throw new Error('scenario contract mismatch');
+            if (!data.coverage?.position_200m || !data.coverage?.trip_scenario) throw new Error('coverage contract missing');
+            if (expectBackoff && !data.analysis_support) throw new Error('backoff support missing');
+            if (!expectBackoff && data.analysis_support) throw new Error('unexpected backoff support');
+            const baselineEvidence = (data.start_position_200m.sections || []).some(section =>
+              (section.rows || []).some(row => Number(row.baseline?.observations || 0) > 0)
+            ) || (data.trip_scenario_500m_remaining.rows || []).some(row => Number(row.baseline?.starts || 0) > 0);
+            if (!baselineEvidence) throw new Error('same-country baseline evidence is unavailable for validation candidate');
+          }
+
+          await validateCandidate(normal, 'normal', false);
+          await validateCandidate(limited, 'limited', false);
+          await validateCandidate(sparse, 'sparse', true);
+
+          const overall = await getTrackAnalysisV1(env, normal.track_id, { startMethod: 'all', distanceGroup: 'all' });
+          const methods = new Set((overall.start_position_200m?.sections || []).map(section => section.start_method));
+          if ([...methods].some(method => !['auto','volt'].includes(method))) throw new Error('combined start-method lane section detected');
+          if (!overall.short_analysis || !Array.isArray(overall.short_analysis)) throw new Error('deterministic short analysis missing');
+
+          console.log('Production track-analysis validation: PASS');
+          NODE
