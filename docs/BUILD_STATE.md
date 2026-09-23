@@ -303,3 +303,13 @@ The external-analysis production release was accepted after:
 - Winner-scenario coverage is entry-based, preserving correct denominators for dead heats. Scenario-share prose is explicit that it refers to classified winners.
 - `Kort analys` renders as bullet points. No schema migration, backfill, model-weight change or production data mutation is part of this follow-up.
 - A merely largest percentage is not enough for an absolute track conclusion. `Kort analys` now requires conservative separation from the runner-up before calling one lane or winner scenario clearly strongest; otherwise that absolute claim is suppressed. `Alla startmetoder` is explicitly limited to supported Auto/Volt facts so unknown source values cannot leak into samples or coverage denominators.
+
+
+## Bananalys natural-summary + mixed scenario timing
+- Branch: `feature/bananalys-natural-summary-mixed-scenario`.
+- `Kort analys` now starts with what is observed on the selected track: top observed 200 m lead lanes, then same-context Swedish comparison, then top three / bottom three start lanes by observed win rate, followed by natural scenario win-rate wording.
+- User-facing summary copy avoids internal data-contract language such as classified-winner phrasing, baseline terminology and observation jargon. Coverage/uncertainty remains in the separate `Analysunderlag` line.
+- Absolute statements and comparative statements remain distinct: an observed leader/top lane may be reported from the track data, while words such as `tydligt` still require the conservative comparison safeguards.
+- Scenario win-rate timing is intentionally asymmetric: `Spets` is measured from the reliable 500 m-after-start C3 checkpoint; all other named C4 positions remain measured around 500 m remaining.
+- The scenario table exposes the measurement point per row and compares scenario win rate, not winner-share, against the same-country baseline.
+- No model weights, market logic, Spårstatistik tab ownership or production data are changed by this build.
