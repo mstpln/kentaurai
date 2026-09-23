@@ -243,3 +243,10 @@ A single race must not directly change model weights. Candidate learnings are re
 5. The extension checks actual D1 file size through the Cloudflare API. At 8.00 GiB it warns; at 8.50 GiB it stops the fixed extension and surfaces an actionable job error, preserving margin below the paid D1 10 GB single-database ceiling.
 6. Concurrent long official-history or historical-all X-Labs jobs are refused to avoid overlapping backfill load.
 7. Settings must show historical blocks separately instead of replacing the previously completed block with only the newest job state.
+
+## Track UI and home-trainer read contract
+1. Upcoming Spel detail is a distinct internal-history view even though it shares the `games` primary page; round identity must therefore participate in the history signature.
+2. Back buttons and back-swipe must resolve to the same stored internal view.
+3. Bana → Spårstatistik follows the same compact filter language as Trend/entity statistics: visible period control, sliders trigger, dropdown detail filters, active-filter count.
+4. Hemmatränare remains defined by the latest verified official trainer observation. Performance changes may narrow candidate work and add indexes, but must not change that factual rule.
+5. The common first Hemmatränare page should not execute the same expensive latest-observation pipeline twice merely to obtain total count.
