@@ -138,13 +138,13 @@ test('round batch builder preserves per-race evidence output at one shared cutof
   seedHistoricalStart(db, { suffix: 'a', horseId: 'horse-1', date: '2026-08-01' });
   seedHistoricalStart(db, { suffix: 'b', horseId: 'horse-2', date: '2026-08-02', opening: 73000 });
 
-  for (const [raceId,horseId,number] of [
-    ['target-race-1','horse-1',1],
-    ['target-race-2','horse-2',1]
+  for (const [raceId,horseId,number,trackId] of [
+    ['target-race-1','horse-1',1,'track-a'],
+    ['target-race-2','horse-2',1,'track-b']
   ]) {
     seedRace(db, {
       raceId, date: '2026-09-20', scheduledAt: '2026-09-20T13:00:00.000Z',
-      trackId: 'track-a', method: 'auto', distance: 2140
+      trackId, method: 'auto', distance: 2140
     });
     seedEntry(db, { id: raceId + '-entry', raceId, horseId, number });
   }
