@@ -68,6 +68,8 @@ test('rendered app shell has a borderless data-only settings gear and in-app his
   assert.match(html, /trackDetail:state\.trackDetail\|\|null/);
   assert.match(html, /trackTab:state\.trackTab\|\|'overview'/);
   assert.match(html, /state\.upcomingRound=view\.upcomingRound\|\|null/);
+  assert.match(html, /function scheduleReplace\(\)/);
+  assert.match(html, /target\?\.closest\('\[data-history-replace\]'\)/);
   assert.match(html, /state\.settingsTab='data'/);
   assert.match(html, /view\.page==='analysis'/);
   assert.match(html, /__kentauraiAnalysis/);
