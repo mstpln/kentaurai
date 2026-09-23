@@ -52,26 +52,29 @@ test('mobile entity statistic tables fit all six columns without horizontal scro
   assert.match(html, /white-space:nowrap!important/);
 });
 
-test('Bana detail owns all-method, race-level, STL and race-type filters in the canonical lane flow', () => {
+test('Bana Spårstatistik follows the canonical filter icon and dropdown interaction', () => {
   const html = renderAppPage();
   assert.match(html, /\['overview','Översikt'\],\['lanes','Spårstatistik'\],\['home','Hemmatränare'\]/);
   assert.match(html, /startMethod:'all',raceScope:'all'/);
-  assert.match(html, /\[\['all','All data'\],\['auto','Autostart'\],\['volt','Voltstart'\]\]/);
+  assert.match(html, /TRACK_FILTER_ICON/);
+  assert.match(html, /id="trackFilterToggle"/);
+  assert.match(html, /aria-label="Detaljfilter"/);
+  assert.match(html, /track-stats-filter-count/);
+  assert.match(html, /track-stats-period/);
+  assert.match(html, /data-track-year/);
+  assert.match(html, /Alla startmetoder/);
   assert.match(html, /Loppnivå/);
   assert.match(html, /\[\['all','All data'\],\['high_prize','Högre prissumma'\],\['weekday','Vardagstrav'\]\]/);
-  assert.doesNotMatch(html, /STL-lopp/);
-  assert.match(html, /race_scope:f\.raceScope/);
-  assert.match(html, /data-track-race-scope/);
-  assert.match(html, /f\.raceScope=b\.dataset\.trackRaceScope;trackLaneView\(detail\)/);
   assert.match(html, /STL-klass/);
   assert.match(html, /Lopptyp/);
   assert.match(html, /Alla STL-klasser/);
   assert.match(html, /Alla lopptyper/);
   assert.match(html, /data-canonical-track-class-filters="true"/);
+  assert.match(html, /document\.querySelectorAll\('\[data-track-race-scope\]'\)\.forEach\(s=>s\.onchange/);
+  assert.match(html, /document\.querySelectorAll\('\[data-track-distance\]'\)\.forEach\(s=>s\.onchange/);
   assert.match(html, /if\(f\.stlClass!=='all'\)q\.set\('stl_class',f\.stlClass\)/);
   assert.match(html, /if\(f\.raceType!=='all'\)q\.set\('race_type',f\.raceType\)/);
-  assert.doesNotMatch(html, /Alla år/);
-  assert.doesNotMatch(html, /Alla startmetoder/);
+  assert.doesNotMatch(html, /trackFilterButtons/);
 });
 
 test('Bana overview uses the approved physical profile layout and canonical back icon', () => {
