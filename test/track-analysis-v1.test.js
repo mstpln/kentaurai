@@ -42,7 +42,7 @@ function seedTrackAnalysis(db) {
 
       const rank200 = pattern === 'lane2' ? (lane === 2 ? 1 : lane === 1 ? 2 : 3) : lane;
       const rank100 = lane;
-      for (const [checkpointKey,checkpointM,rank] of [['100m',100,rank100],['200m',200,rank200]]) {
+      for (const [checkpointKey,checkpointM,rank] of [['100m',100,rank100],['200m',200,rank200],['500m',500,rank200]]) {
         db.prepare(`INSERT INTO race_position_checkpoints
           (id,race_entry_id,source_record_id,checkpoint_key,checkpoint_m,frame_index,observed_at,elapsed_ms,
            leader_progress_m,distance_to_finish_m,position_rank,meters_behind_leader,observed_field_count,
@@ -97,19 +97,25 @@ test('track analysis uses 200m lanes and same-country exact-context baseline', a
   assert.equal(data.coverage.position_200m.observation_coverage,1);
   assert.equal(data.coverage.trip_scenario.winner_scenario_coverage,1);
   assert.equal(data.analysis_support,null);
-  assert.match(data.short_analysis.join(' '), /Spår 1 når spets tydligt oftast efter 200 m/);
-  assert.match(data.short_analysis.join(' '), /tydligt större andel från spets/);
-  assert.match(data.short_analysis.join(' '), /snittet/);
-  assert.doesNotMatch(data.short_analysis.join(' '), /baseline/i);
-  assert.doesNotMatch(data.short_analysis.join(' '), /observationer/i);
+  const summary=data.short_analysis.join(' ');
+  assert.match(summary,/Högst observerad spetsfrekvens efter 200 m har spår 1 \(100 %\)/);
+  assert.match(summary,/Jämfört med andra svenska banor/);
+  assert.match(summary,/Högst observerad segerprocent har/);
+  assert.match(summary,/Hästar som satt i ledningen 500 m efter start vann 100 % av loppen/);
+  assert.doesNotMatch(summary,/Bland vinnarna där löpningsscenariot kan klassificeras/i);
+  assert.doesNotMatch(summary,/baseline/i);
+  assert.doesNotMatch(summary,/observationer/i);
   assert.equal(data.track_context.home_stretch_m.value,190);
   assert.equal(data.track_context.home_stretch_m.evidence_type,'verified');
   assert.equal(data.track_context.home_stretch_m.source_type,'measurement');
   assert.equal(data.track_context.home_stretch_m.verified_at,'2026-01-01T10:00:00Z');
   const leader=data.trip_scenario_500m_remaining.rows.find(row=>row.scenario_key==='leader');
+  assert.equal(leader.measurement_point,'500m_after_start');
+  assert.equal(leader.measurement_label,'500 m efter start');
   assert.equal(leader.wins,30);
+  assert.equal(leader.win_rate,1);
   assert.equal(leader.baseline.wins,undefined);
-  assert.equal(leader.baseline.winner_share,0);
+  assert.equal(leader.baseline.winner_share,1);
 });
 
 
@@ -144,7 +150,7 @@ test('track analysis retains exact sparse metrics while broadening interpretatio
 
   const supportLane1=data.analysis_support.start_position_200m.sections[0].rows.find(row=>row.lane===1);
   assert.equal(supportLane1.observations,35);
-  assert.ok(data.short_analysis.some((line)=>line.includes('används även')));
+  assert.ok(data.short_analysis.some((line)=>line.includes('Högst observerad')));
   assert.equal(data.coverage.trip_scenario.races_with_any_scenario,5);
   assert.equal(data.analysis_support.coverage.trip_scenario.races_with_any_scenario,35);
 });
@@ -173,7 +179,7 @@ test('voltstart lane analysis uses only ground-distance tier entries', async () 
       .run(row.entry,'volt-a',row.horse,row.lane,row.lane,row.tier,row.handicap,2140+row.handicap);
     db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,source_record_id) VALUES (?,?,'official','src-result')")
       .run(row.entry,row.placing);
-    for (const checkpoint of [100,200]) {
+    for (const checkpoint of [100,200,500]) {
       db.prepare(`INSERT INTO race_position_checkpoints
         (id,race_entry_id,source_record_id,checkpoint_key,checkpoint_m,frame_index,observed_at,elapsed_ms,
          leader_progress_m,distance_to_finish_m,position_rank,meters_behind_leader,observed_field_count,
@@ -211,36 +217,25 @@ test('winner-scenario coverage uses winner entries so dead heats do not inflate 
 });
 
 
-test('winner-scenario short analysis does not promote a flat largest share into a track characteristic', async () => {
+test('scenario win rates use leader after 500m from start and other positions 500m before finish', async () => {
   const {env,db}=createTestEnv();
   seedTrackAnalysis(db);
-  const scenarios=['leader','pocket','death_seat','second_over','third_over','back'];
-  function setScenario(entryId,key) {
-    db.prepare(`UPDATE race_positions
-      SET leader=?,pocket=?,death_seat=?,second_over=?,third_over=?,event_json=?
-      WHERE id=?`).run(
-        key==='leader'?1:0,
-        key==='pocket'?1:0,
-        key==='death_seat'?1:0,
-        key==='second_over'?1:0,
-        key==='third_over'?1:0,
-        JSON.stringify({scenario_key:key}),
-        `pos-${entryId}`
-      );
-  }
-  for (let raceIndex=0;raceIndex<30;raceIndex+=1) {
-    const key=scenarios[raceIndex%scenarios.length];
-    setScenario(`entry-${(raceIndex*3)+1}`,key);
-    setScenario(`entry-${107+(raceIndex*3)}`,key);
-  }
-
+  // Deliberately make the late C4 leader flag disagree with the early 500 m checkpoint.
+  db.prepare("UPDATE race_positions SET leader=0,death_seat=1,event_json=? WHERE id='pos-entry-1'")
+    .run(JSON.stringify({scenario_key:'death_seat'}));
   const data=await getTrackAnalysisV1(env,'track-a',{startMethod:'auto',distanceGroup:'2140'});
-  const winnerShares=data.trip_scenario_500m_remaining.rows.map(row=>row.winner_share);
-  assert.ok(winnerShares.every(value=>Math.abs(value-(1/6))<0.001));
-  const summary=data.short_analysis.join(' ');
-  assert.match(summary,/inget enskilt scenario som sticker ut tydligt/i);
-  assert.doesNotMatch(summary,/kommer flest från/i);
-  assert.doesNotMatch(summary,/tydligt större andel från/i);
+  const leader=data.trip_scenario_500m_remaining.rows.find(row=>row.scenario_key==='leader');
+  const death=data.trip_scenario_500m_remaining.rows.find(row=>row.scenario_key==='death_seat');
+  assert.equal(leader.measurement_point,'500m_after_start');
+  assert.equal(leader.measurement_label,'500 m efter start');
+  assert.equal(leader.starts,30);
+  assert.equal(leader.wins,30);
+  assert.equal(death.measurement_point,'500m_remaining');
+  assert.equal(death.measurement_label,'500 m kvar');
+  assert.equal(death.starts,31);
+  assert.match(data.short_analysis.join(' '),/ledningen 500 m efter start/);
+  assert.match(data.short_analysis.join(' '),/Bland övriga positioner 500 m kvar/);
+  assert.doesNotMatch(data.short_analysis.join(' '),/Bland vinnarna där löpningsscenariot kan klassificeras/i);
 });
 
 
@@ -311,6 +306,24 @@ test('absolute lane short analysis needs at least two adequately sampled lanes',
   assert.equal(section.rows.find(row=>row.lane===3).observations,24);
   assert.doesNotMatch(data.short_analysis.join(' '),/Spår 1 når spets tydligt oftast/i);
   assert.doesNotMatch(data.short_analysis.join(' '),/Spår 1 ligger tydligt oftast/i);
+});
+
+
+test('short analysis lists top three best and worst starting lanes by observed win rate', async () => {
+  const {env,db}=createTestEnv();
+  seedTrackAnalysis(db);
+  const data=await getTrackAnalysisV1(env,'track-a',{startMethod:'auto',distanceGroup:'2140'});
+  const text=data.short_analysis.join(' ');
+  assert.match(text,/Högst observerad segerprocent har spår 1 \(100 %\), spår 2 \(0 %\) och spår 3 \(0 %\)/);
+  assert.match(text,/Lägst har spår 2 \(0 %\), spår 3 \(0 %\) och spår 1 \(100 %\)/);
+});
+
+test('short analysis keeps data-quality wording out of the user-facing conclusions', async () => {
+  const {env,db}=createTestEnv();
+  seedTrackAnalysis(db);
+  const data=await getTrackAnalysisV1(env,'track-a',{startMethod:'auto',distanceGroup:'2140'});
+  const text=data.short_analysis.join(' ');
+  assert.doesNotMatch(text,/klassificer|underlag|observation|baseline|winner/i);
 });
 
 test('track analysis as-of excludes sources that were not available before cutoff', async () => {

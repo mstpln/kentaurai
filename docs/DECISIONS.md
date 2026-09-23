@@ -267,3 +267,12 @@ A single race must not directly change model weights. Candidate learnings are re
 4. Quarantine is intentionally narrow: timestamp ordering, mapping, storage, database and all other unknown/technical failures retain the existing fail-closed retry behavior and stop after three consecutive errors.
 5. Quarantine records keep job/source provenance plus a bounded public-safe failure code; raw payloads remain private.
 6. Existing failed reconstruction jobs resume in place after an explicitly authorized production action; deployment alone does not restart a production backfill.
+
+
+## Bananalys natural language and scenario timing
+1. `Kort analys` describes the selected track before comparison. Observed maxima are factual descriptions; `tydligt bättre/sämre` remains reserved for comparisons that pass the existing sample/effect/uncertainty safeguards.
+2. The summary includes the three highest and three lowest observed starting-lane win rates, ordered by percentage, when those lanes have result starts in the selected Bananalys context.
+3. Technical data-quality wording belongs in `Analysunderlag`, not in the natural-language conclusions.
+4. For scenario win rates, `Spets` means leading at the C3 checkpoint 500 m after start. `Rygg ledaren`, `Dödens`, `2:a utvändigt`, `3:e utvändigt` and `Bakifrån` continue to use the existing C4 position around 500 m remaining.
+5. Because the scenario rows use different measurement points by design, every row carries an explicit natural Swedish measurement label and the table must not imply a common checkpoint.
+6. Spårstatistik remains a separate factual tab; this build does not move it under Bananalys.

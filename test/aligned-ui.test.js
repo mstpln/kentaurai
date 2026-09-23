@@ -117,13 +117,15 @@ test('Bana Bananalys uses the agreed compact filters, winner focus and analysis 
   assert.ok(scenarioTable);
   assert.match(scenarioTable[0], /Seger %/);
   assert.match(scenarioTable[0], /Andel vinnare/);
-  assert.match(scenarioTable[0], /Vinst vs\. snittet/);
+  assert.match(scenarioTable[0], /Seger % vs\. snittet/);
+  assert.match(scenarioTable[0], /measurement_label/);
   assert.doesNotMatch(scenarioTable[0], /<th>Förekomst<\/th>/);
   assert.doesNotMatch(scenarioTable[0], /<th>Topp 3 %<\/th>/);
   assert.doesNotMatch(scenarioTable[0], /<th>Baseline<\/th>/);
   assert.match(html, /Analysunderlag/);
-  assert.match(html, /200 m täckning/);
-  assert.match(html, /Vinnarscenario/);
+  assert.match(html, /Spårdata 200 m/);
+  assert.match(html, /Spets efter 500 m/);
+  assert.match(html, /Positioner 500 m kvar/);
   assert.match(html, /Breddat underlag/);
   assert.match(html, /track-analysis-copy:before/);
   assert.match(html, /track-analysis-copy ul/);
