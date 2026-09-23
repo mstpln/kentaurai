@@ -254,23 +254,19 @@ test('C3 reconstruction quarantines deterministic duplicate-target telemetry and
     SELECT status,processed_sources,quarantined_sources,consecutive_errors,last_error,cursor_source_record_id
     FROM xlabs_position_reconstruction_jobs WHERE id=?
   `).get(job.id);
-  assert.deepEqual(storedAfterBad, {
-    status: 'running',
-    processed_sources: 1,
-    quarantined_sources: 1,
-    consecutive_errors: 0,
-    last_error: null,
-    cursor_source_record_id: 'src_bad_duplicate'
-  });
+  assert.equal(storedAfterBad.status, 'running');
+  assert.equal(storedAfterBad.processed_sources, 1);
+  assert.equal(storedAfterBad.quarantined_sources, 1);
+  assert.equal(storedAfterBad.consecutive_errors, 0);
+  assert.equal(storedAfterBad.last_error, null);
+  assert.equal(storedAfterBad.cursor_source_record_id, 'src_bad_duplicate');
   const quarantine = db.prepare(`
     SELECT source_record_id,failure_code,reconstruction_version
     FROM xlabs_position_reconstruction_quarantine WHERE job_id=?
   `).get(job.id);
-  assert.deepEqual(quarantine, {
-    source_record_id: 'src_bad_duplicate',
-    failure_code: 'duplicate_target',
-    reconstruction_version: XLABS_POSITION_RECONSTRUCTION_VERSION
-  });
+  assert.equal(quarantine.source_record_id, 'src_bad_duplicate');
+  assert.equal(quarantine.failure_code, 'duplicate_target');
+  assert.equal(quarantine.reconstruction_version, XLABS_POSITION_RECONSTRUCTION_VERSION);
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM race_position_checkpoints WHERE source_record_id='src_bad_duplicate'`).get().n, 0);
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM race_positions WHERE source_record_id='src_bad_duplicate'`).get().n, 0);
 
@@ -285,12 +281,10 @@ test('C3 reconstruction quarantines deterministic duplicate-target telemetry and
     SELECT status,processed_sources,quarantined_sources,cursor_source_record_id
     FROM xlabs_position_reconstruction_jobs WHERE id=?
   `).get(job.id);
-  assert.deepEqual(final, {
-    status: 'completed',
-    processed_sources: 2,
-    quarantined_sources: 1,
-    cursor_source_record_id: 'src_good_after'
-  });
+  assert.equal(final.status, 'completed');
+  assert.equal(final.processed_sources, 2);
+  assert.equal(final.quarantined_sources, 1);
+  assert.equal(final.cursor_source_record_id, 'src_good_after');
 });
 
 test('C3 reconstruction still fails closed on non-quarantinable telemetry errors', async () => {
@@ -312,12 +306,10 @@ test('C3 reconstruction still fails closed on non-quarantinable telemetry errors
     SELECT status,processed_sources,quarantined_sources,consecutive_errors,cursor_source_record_id
     FROM xlabs_position_reconstruction_jobs WHERE id=?
   `).get(job.id);
-  assert.deepEqual(stored, {
-    status: 'failed',
-    processed_sources: 0,
-    quarantined_sources: 0,
-    consecutive_errors: 3,
-    cursor_source_record_id: null
-  });
+  assert.equal(stored.status, 'failed');
+  assert.equal(stored.processed_sources, 0);
+  assert.equal(stored.quarantined_sources, 0);
+  assert.equal(stored.consecutive_errors, 3);
+  assert.equal(stored.cursor_source_record_id, null);
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM xlabs_position_reconstruction_quarantine WHERE job_id=?`).get(job.id).n, 0);
 });
