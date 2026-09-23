@@ -5,6 +5,7 @@ import { getHorseFilterOptions } from './statistics/horses-complete.js';
 import {
   getCalendarYearDetailForm,
   getCalendarYearDetailSpecialties,
+  getHorseCalendarYearTripScenarios,
   getDriverCalendarYearDetailStatistics,
   getHorseCalendarYearDetailStatistics,
   getTrainerCalendarYearDetailStatistics
@@ -174,6 +175,19 @@ export default {
       try {
         const entityType = calendarFormMatch[1];
         const data = await getCalendarYearDetailForm(env, entityType, decodeURIComponent(calendarFormMatch[2]), calendarOptions(url));
+        return data ? json(data) : json({ error: 'not_found' }, 404);
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    const horseTripScenariosMatch = path.match(/^\/app\/api\/horses\/([^/]+)\/calendar-trip-scenarios$/);
+    if (request.method === 'GET' && horseTripScenariosMatch) {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        const data = await getHorseCalendarYearTripScenarios(env, decodeURIComponent(horseTripScenariosMatch[1]), calendarOptions(url));
         return data ? json(data) : json({ error: 'not_found' }, 404);
       } catch (error) {
         console.error(error);
