@@ -14,6 +14,7 @@ const POSITION_LONGITUDINAL_CONFIDENCE_MIN = 0.65;
 const LEAD_COMPARISON_MIN_DELTA_PP = 3;
 const TOP3_COMPARISON_MIN_DELTA_PP = 5;
 const WINNER_SHARE_COMPARISON_MIN_DELTA_PP = 2;
+const WINNER_PROFILE_MIN_DELTA_PP = 5;
 
 const STANDARD_DISTANCE_GROUPS = [640, 1640, 2140, 2640, 3140, 3640, 4140];
 const DISTANCE_TOLERANCE_M = 100;
@@ -423,19 +424,31 @@ function scenarioWinnerSummary(rows) {
   if (winnerObservations < TRACK_ANALYSIS_SAMPLE_POLICY.normalMinRaces) return null;
   const eligible = (rows || []).filter((row) => row.winner_share != null);
   if (!eligible.length) return null;
-  const strongest = [...eligible].sort((a,b) =>
+  const ordered = [...eligible].sort((a,b) =>
     b.winner_share-a.winner_share || b.wins-a.wins || b.starts-a.starts
-  )[0];
-  let text = `Bland vinnarna där löpningsscenariot kan klassificeras kommer flest från ${scenarioPhrase(strongest.scenario_key)}: ${Math.round(strongest.winner_share*100)} % har legat där runt 500 m kvar.`;
+  );
+  const strongest = ordered[0];
+  const runnerUp = ordered[1] || null;
+  // "Largest" is not enough for narrative dominance. The leading scenario must
+  // be materially and conservatively separated from the runner-up.
+  const strongestIsClear = !runnerUp || comparisonDirection(
+    strongest.winner_share,strongest.winner_observations,
+    runnerUp.winner_share,runnerUp.winner_observations,
+    WINNER_PROFILE_MIN_DELTA_PP
+  ) === 'higher';
 
-  const strongestDirection = comparisonDirection(
+  let text = strongestIsClear
+    ? `Bland vinnarna där löpningsscenariot kan klassificeras kommer en tydligt större andel från ${scenarioPhrase(strongest.scenario_key)}: ${Math.round(strongest.winner_share*100)} % har legat där runt 500 m kvar.`
+    : 'Bland vinnarna där löpningsscenariot kan klassificeras finns inget enskilt scenario som sticker ut tydligt i det här underlaget.';
+
+  const strongestDirection = strongestIsClear ? comparisonDirection(
     strongest.winner_share,strongest.winner_observations,
     strongest.baseline?.winner_share,strongest.baseline?.winner_observations,
     WINNER_SHARE_COMPARISON_MIN_DELTA_PP
-  );
+  ) : null;
   if (strongestDirection === 'higher') text += ' Det är tydligt oftare än snittet.';
   else if (strongestDirection === 'lower') text += ' Det är tydligt mer sällan än snittet.';
-  else if (strongest.winner_share_delta_pp != null && Math.abs(strongest.winner_share_delta_pp) < 1.5) text += ' Det är ungefär i nivå med snittet.';
+  else if (strongestIsClear && strongest.winner_share_delta_pp != null && Math.abs(strongest.winner_share_delta_pp) < 1.5) text += ' Det är ungefär i nivå med snittet.';
 
   const deviations = eligible
     .map((row) => ({
@@ -446,7 +459,7 @@ function scenarioWinnerSummary(rows) {
         WINNER_SHARE_COMPARISON_MIN_DELTA_PP
       )
     }))
-    .filter(({row,direction}) => row.scenario_key !== strongest.scenario_key && direction)
+    .filter(({row,direction}) => direction && (!strongestIsClear || row.scenario_key !== strongest.scenario_key))
     .sort((a,b) => Math.abs(b.row.winner_share_delta_pp)-Math.abs(a.row.winner_share_delta_pp));
   const more = deviations.filter(({direction}) => direction === 'higher').slice(0,2).map(({row}) => scenarioPhrase(row.scenario_key));
   const less = deviations.filter(({direction}) => direction === 'lower').slice(0,2).map(({row}) => scenarioPhrase(row.scenario_key));
