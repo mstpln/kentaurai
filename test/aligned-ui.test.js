@@ -125,7 +125,7 @@ test('Bana Bananalys uses the agreed compact filters, winner focus and analysis 
   assert.match(html, /Analysunderlag/);
   assert.match(html, /Spårdata 200 m/);
   assert.match(html, /Spets efter 500 m/);
-  assert.match(html, /Övriga scenarier 500 m kvar/);
+  assert.match(html, /Positioner 500 m kvar/);
   assert.match(html, /Breddat underlag/);
   assert.match(html, /track-analysis-copy:before/);
   assert.match(html, /track-analysis-copy ul/);
