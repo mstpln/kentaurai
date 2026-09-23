@@ -96,17 +96,26 @@ test('Bana profile keeps physical facts separate from the dedicated Bananalys ta
 });
 
 
-test('Bana Bananalys uses the agreed 200m, scenario and analysis-evidence structure', () => {
+test('Bana Bananalys uses the agreed compact filters, winner focus and analysis evidence', () => {
   const html = renderAppPage();
+  assert.match(html, /trackAnalysisFilterToggle/);
+  assert.match(html, /TRACK_FILTER_ICON/);
   assert.match(html, /data-track-analysis-method/);
   assert.match(html, /data-track-analysis-distance/);
+  assert.match(html, /track-analysis-filter-stack/);
   assert.match(html, /Start & första position/);
-  assert.match(html, /Spets 200 m/);
-  assert.match(html, /Topp 3 200 m/);
-  assert.match(html, /Medianpos\./);
-  assert.match(html, /Mot baseline/);
+  assert.match(html, /Spets, 200 m/);
+  assert.match(html, /Topp 3, 200 m/);
+  assert.match(html, /Spets vs\. snittet/);
+  assert.doesNotMatch(html, /Medianpos\./);
+  assert.doesNotMatch(html, /Mot baseline/);
   assert.match(html, /Löpningsscenario & vinnarprofil/);
+  assert.match(html, /Seger %/);
   assert.match(html, /Andel vinnare/);
+  assert.match(html, /Vinst vs\. snittet/);
+  assert.doesNotMatch(html, /<th>Förekomst<\/th>/);
+  assert.doesNotMatch(html, /<th>Topp 3 %<\/th>/);
+  assert.doesNotMatch(html, /<th>Baseline<\/th>/);
   assert.match(html, /Analysunderlag/);
   assert.match(html, /200 m täckning/);
   assert.match(html, /Vinnarscenario/);
