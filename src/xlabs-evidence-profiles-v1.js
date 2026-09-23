@@ -505,12 +505,13 @@ export function buildXlabsEvidenceProfiles({
   };
 }
 
-function featureRowsCte(scopeSql = '1=1') {
+function featureRowsCte(scopeSql = '1=1', entryIndex = 'idx_entries_race') {
+  const indexedBy = entryIndex === 'idx_entries_horse' ? 'idx_entries_horse' : 'idx_entries_race';
   return `
     WITH scoped_entries AS MATERIALIZED (
       SELECT re.id AS race_entry_id
       FROM races r
-      JOIN race_entries re INDEXED BY idx_entries_race ON re.race_id=r.id
+      JOIN race_entries re INDEXED BY ${indexedBy} ON re.race_id=r.id
       WHERE COALESCE(re.scratched,0)=0
         AND re.horse_id IS NOT NULL
         AND ${scopeSql}
@@ -657,7 +658,7 @@ async function loadHorseHistory(env, cutoff, horseIds) {
     const group = horseIds.slice(index, index + SQL_CHUNK_SIZE);
     const placeholders = group.map(() => '?').join(',');
     const scopeSql = `re.horse_id IN (${placeholders})`;
-    const sql = `${featureRowsCte(scopeSql)}
+    const sql = `${featureRowsCte(scopeSql, 'idx_entries_horse')}
       SELECT * FROM feature_rows
       ORDER BY horse_id, race_date, scheduled_start_at, race_entry_id
     `;
