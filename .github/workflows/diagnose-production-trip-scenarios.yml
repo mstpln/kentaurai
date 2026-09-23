@@ -34,7 +34,7 @@ jobs:
             code="$(curl --silent --show-error --output "$out" --write-out '%{http_code}'               --request POST               --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN"               --header 'Content-Type: application/json'               --data "$(jq -cn --arg sql "$sql" '{sql:$sql}')"               "$api")"
             [[ "$code" == "200" ]]
             jq -e '.success == true and (.result | length >= 1) and (.result | all(.success == true))' "$out" >/dev/null
-            jq -c '.result[0].results'
+            jq -c '.result[0].results' "$out"
           }
 
           echo "=== TRIP_JOB ==="
