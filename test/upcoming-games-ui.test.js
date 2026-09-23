@@ -6,6 +6,8 @@ import worker from '../src/worker-v078.js';
 test('upcoming games UI installs factual Spel navigation and responsive contracts', () => {
   const html = enhanceUpcomingGamesHtml('<html><head></head><body><script>const state={};function renderGames(){};</script></body></html>');
   assert.match(html, /Kommande/);
+  assert.match(html, /id="ugBack">← Kommande/);
+  assert.match(html, /if\(state\.upcomingRound\)return ugOpenRound\(state\.upcomingRound\)/);
   assert.match(html, /Historik/);
   assert.match(html, /Översikt/);
   assert.match(html, /Närmaste omgång först/);
