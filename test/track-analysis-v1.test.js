@@ -48,8 +48,10 @@ function seedTrackAnalysis(db) {
         VALUES (?,?,?,'200m',200,1,'2026-06-01T12:00:00Z',10000,200,1940,?,?,3,3,1,1,1,'xlabs-position-reconstruction-v1')`)
         .run(`cp-${entryId}`,entryId,'src-x',rank200,rank200 === 1 ? 0 : rank200 * 2);
 
-      const leader = placing === 1 ? 1 : 0;
-      const scenarioKey = leader ? 'leader' : lane === 2 ? 'death_seat' : 'back';
+      const scenarioKey = pattern === 'lane1'
+        ? (lane === 1 ? 'leader' : lane === 2 ? 'death_seat' : 'back')
+        : (lane === 2 ? 'death_seat' : lane === 1 ? 'leader' : 'back');
+      const leader = scenarioKey === 'leader' ? 1 : 0;
       db.prepare(`INSERT INTO race_positions
         (id,race_entry_id,observed_at_m,leader,death_seat,event_json,source_record_id,evidence_type,confidence,classification_version)
         VALUES (?,?,500,?,?,?,'src-x','calculated_xlabs',0.95,'xlabs-trip-classification-v1')`)
