@@ -101,7 +101,8 @@ export function createTestEnv() {
     '../../migrations/0033_xlabs_trip_classification_v1.sql',
     '../../migrations/0034_settings_alert_acknowledgements.sql',
     '../../migrations/0035_race_scope_evidence.sql',
-    '../../migrations/0037_xlabs_position_reconstruction_quarantine.sql'
+    '../../migrations/0037_xlabs_position_reconstruction_quarantine.sql',
+    '../../migrations/0038_track_analysis_v1.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }
