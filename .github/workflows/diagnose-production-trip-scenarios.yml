@@ -172,7 +172,7 @@ jobs:
             CASE WHEN LOWER(COALESCE(r.start_method,'')) LIKE '%auto%' THEN 'auto'
                  WHEN LOWER(COALESCE(r.start_method,'')) LIKE '%volt%' THEN 'volt'
                  ELSE 'other' END AS method,
-            re.start_position AS lane,
+            re.actual_lane AS lane,
             COUNT(*) AS starts,
             SUM(CASE WHEN rr.placing=1 THEN 1 ELSE 0 END) AS wins,
             SUM(CASE WHEN rr.placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) AS top3
@@ -182,8 +182,8 @@ jobs:
           JOIN race_results rr ON rr.race_entry_id=re.id
           WHERE rp.classification_version='xlabs-trip-classification-v1'
             AND re.scratched=0
-            AND re.start_position BETWEEN 1 AND 8
-          GROUP BY method,re.start_position ORDER BY method,re.start_position;"
+            AND re.actual_lane BETWEEN 1 AND 8
+          GROUP BY method,re.actual_lane ORDER BY method,re.actual_lane;"
 
           echo "=== WINNER_SCENARIO_DISTRIBUTION ==="
           query "SELECT
