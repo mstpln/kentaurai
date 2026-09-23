@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createTestEnv } from './helpers/d1.js';
-import { buildXlabsEvidenceProfilesForRace } from '../src/xlabs-evidence-profiles-v1.js';
+import { buildXlabsEvidenceProfilesForRace, buildXlabsEvidenceProfilesForRaces } from '../src/xlabs-evidence-profiles-v1.js';
 
 function insert(db, sql, ...args) { db.prepare(sql).run(...args); }
 
@@ -130,6 +130,36 @@ test('DB wrapper replays deterministically at the same cutoff', async () => {
   const first = await buildXlabsEvidenceProfilesForRace(env, options);
   const second = await buildXlabsEvidenceProfilesForRace(env, options);
   assert.deepEqual(first, second);
+});
+
+
+test('round batch builder preserves per-race evidence output at one shared cutoff', async () => {
+  const { db, env } = createTestEnv();
+  seedHistoricalStart(db, { suffix: 'a', horseId: 'horse-1', date: '2026-08-01' });
+  seedHistoricalStart(db, { suffix: 'b', horseId: 'horse-2', date: '2026-08-02', opening: 73000 });
+
+  for (const [raceId,horseId,number,trackId] of [
+    ['target-race-1','horse-1',1,'track-a'],
+    ['target-race-2','horse-2',1,'track-b']
+  ]) {
+    seedRace(db, {
+      raceId, date: '2026-09-20', scheduledAt: '2026-09-20T13:00:00.000Z',
+      trackId, method: 'auto', distance: 2140
+    });
+    seedEntry(db, { id: raceId + '-entry', raceId, horseId, number });
+  }
+
+  const options={asOf:'2026-09-15T06:00:00.000Z'};
+  const batched=await buildXlabsEvidenceProfilesForRaces(env,{
+    raceIds:['target-race-1','target-race-2'],
+    ...options
+  });
+  const single1=await buildXlabsEvidenceProfilesForRace(env,{raceId:'target-race-1',...options});
+  const single2=await buildXlabsEvidenceProfilesForRace(env,{raceId:'target-race-2',...options});
+
+  assert.deepEqual(batched.get('target-race-1'),single1);
+  assert.deepEqual(batched.get('target-race-2'),single2);
+  assert.equal(batched.size,2);
 });
 
 test('DB wrapper loads a 128-horse target field without exceeding the D1 parameter boundary', async () => {

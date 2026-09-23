@@ -405,7 +405,9 @@ export async function buildEquipmentResponseV1ForEntries(env, raceEntryIds, asOf
   const trainerHistoryLimit = integer(options.trainerHistoryLimit ?? EQUIPMENT_RESPONSE_POLICY.trainerHistoryLimit, 'trainerHistoryLimit', { max: 1000 });
 
   const targets = await loadTargets(env, entryIds);
-  const relevantHistory = await buildRelevantHistoryForEntries(env, entryIds, requested.iso, options.relevantHistoryOptions || {});
+  const relevantHistory = options.relevantHistory instanceof Map
+    ? options.relevantHistory
+    : await buildRelevantHistoryForEntries(env, entryIds, requested.iso, options.relevantHistoryOptions || {});
   const cutoffByEntry = new Map(entryIds.map((entryId) => [entryId, requireInstant(relevantHistory.get(entryId)?.targetCutoff, `targetCutoff for ${entryId}`)]));
   const horseHistory = await loadHorseHistory(env, targets.map((target) => target.horse_id));
 

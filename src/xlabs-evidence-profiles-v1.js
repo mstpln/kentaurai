@@ -505,15 +505,26 @@ export function buildXlabsEvidenceProfiles({
   };
 }
 
-function featureRowsCte() {
+function featureRowsCte(scopeSql = '1=1', entryIndex = 'idx_entries_race') {
+  const indexedBy = entryIndex === 'idx_entries_horse' ? 'idx_entries_horse' : 'idx_entries_race';
   return `
-    WITH opening_ranked AS (
+    WITH scoped_entries AS MATERIALIZED (
+      SELECT re.id AS race_entry_id
+      FROM races r
+      JOIN race_entries re INDEXED BY ${indexedBy} ON re.race_id=r.id
+      WHERE COALESCE(re.scratched,0)=0
+        AND re.horse_id IS NOT NULL
+        AND ${scopeSql}
+    ),
+    opening_ranked AS (
       SELECT xi.race_entry_id, xi.km_pace_ms, xi.source_record_id, sr.fetched_at,
         ROW_NUMBER() OVER (
           PARTITION BY xi.race_entry_id
           ORDER BY julianday(sr.fetched_at) DESC, xi.source_record_id DESC
         ) AS rn
-      FROM xlabs_intervals xi
+      FROM scoped_entries se
+      JOIN xlabs_intervals xi INDEXED BY idx_xlabs_intervals_entry_source
+        ON xi.race_entry_id=se.race_entry_id
       JOIN source_records sr ON sr.id=xi.source_record_id
       WHERE xi.mapper_version=?
         AND xi.eligibility_status='valid'
@@ -527,7 +538,8 @@ function featureRowsCte() {
           PARTITION BY x.race_entry_id
           ORDER BY julianday(sr.fetched_at) DESC, x.source_record_id DESC
         ) AS rn
-      FROM xlabs_data x
+      FROM scoped_entries se
+      JOIN xlabs_data x INDEXED BY idx_xlabs_entry ON x.race_entry_id=se.race_entry_id
       JOIN source_records sr ON sr.id=x.source_record_id
       WHERE x.quality_status='xlabs-telemetry-v1'
         AND sr.source_type='xlabs_race_json'
@@ -569,23 +581,22 @@ function featureRowsCte() {
         oi.fetched_at AS opening_source_selected_at,
         v1.source_record_id AS v1_source_record_id,
         v1.fetched_at AS v1_source_selected_at
-      FROM race_entries re
+      FROM scoped_entries se
+      JOIN race_entries re ON re.id=se.race_entry_id
       JOIN races r ON r.id=re.race_id
       JOIN race_results rr ON rr.race_entry_id=re.id
       JOIN source_records result_sr ON result_sr.id=rr.source_record_id AND result_sr.source_type='official_provider'
       LEFT JOIN race_stl_classifications rsc ON rsc.race_id=r.id
       LEFT JOIN opening_ranked oi ON oi.race_entry_id=re.id AND oi.rn=1
       LEFT JOIN v1_ranked v1 ON v1.race_entry_id=re.id AND v1.rn=1
-      WHERE COALESCE(re.scratched,0)=0
-        AND re.horse_id IS NOT NULL
-        AND julianday(result_sr.fetched_at)<=julianday(?)
+      WHERE julianday(result_sr.fetched_at)<=julianday(?)
         AND julianday(COALESCE(r.scheduled_start_at, r.race_date || 'T00:00:00Z'))<julianday(?)
     )
   `;
 }
 
-function featureRowsBindings(cutoff) {
-  return [XLABS_INTERVALS_V2_VERSION, cutoff, cutoff, cutoff, cutoff];
+function featureRowsBindings(cutoff, scopeBindings = []) {
+  return [...scopeBindings, XLABS_INTERVALS_V2_VERSION, cutoff, cutoff, cutoff, cutoff];
 }
 
 function methodSql(alias = 'fr') {
@@ -646,12 +657,12 @@ async function loadHorseHistory(env, cutoff, horseIds) {
   for (let index = 0; index < horseIds.length; index += SQL_CHUNK_SIZE) {
     const group = horseIds.slice(index, index + SQL_CHUNK_SIZE);
     const placeholders = group.map(() => '?').join(',');
-    const sql = `${featureRowsCte()}
+    const scopeSql = `re.horse_id IN (${placeholders})`;
+    const sql = `${featureRowsCte(scopeSql, 'idx_entries_horse')}
       SELECT * FROM feature_rows
-      WHERE horse_id IN (${placeholders})
       ORDER BY horse_id, race_date, scheduled_start_at, race_entry_id
     `;
-    const { results } = await env.DB.prepare(sql).bind(...featureRowsBindings(cutoff), ...group).all();
+    const { results } = await env.DB.prepare(sql).bind(...featureRowsBindings(cutoff, group)).all();
     rows.push(...(results || []));
   }
   return rows.sort((left, right) =>
@@ -662,8 +673,40 @@ async function loadHorseHistory(env, cutoff, horseIds) {
   );
 }
 
-async function loadPopulationAggregates(env, cutoff) {
-  const sql = `${featureRowsCte()},
+function yearStartIso(value) {
+  const ms = Date.parse(String(value || '').slice(0,10) + 'T00:00:00.000Z');
+  if (!Number.isFinite(ms)) return null;
+  const date = new Date(ms);
+  return `${date.getUTCFullYear()}-01-01`;
+}
+
+function addYearsIso(value, years) {
+  const year = Number(String(value).slice(0,4));
+  if (!Number.isInteger(year)) return null;
+  return `${year + years}-01-01`;
+}
+
+async function populationDateBounds(env, cutoff) {
+  const cutoffDate = String(cutoff).slice(0,10);
+  const row = await env.DB.prepare(`
+    SELECT MIN(race_date) AS first_date, MAX(race_date) AS last_date
+    FROM races
+    WHERE race_date < ?
+  `).bind(cutoffDate).first();
+  const first = yearStartIso(row?.first_date);
+  const last = yearStartIso(row?.last_date);
+  if (!first || !last) return [];
+  const end = addYearsIso(last, 1);
+  const ranges = [];
+  for (let cursor = first; cursor < end; cursor = addYearsIso(cursor, 1)) {
+    ranges.push([cursor, addYearsIso(cursor, 1)]);
+  }
+  return ranges;
+}
+
+async function loadPopulationAggregateShard(env, cutoff, startDate, endDate) {
+  const scopeSql = 'r.race_date >= ? AND r.race_date < ?';
+  const sql = `${featureRowsCte(scopeSql)},
     dimensions (dimension) AS (
       VALUES ('overall'),('year'),('track'),('method'),('distance'),
         ('method_distance'),('class'),('race_type'),('field_size')
@@ -687,17 +730,120 @@ async function loadPopulationAggregates(env, cutoff) {
     )
     SELECT dimension,bucket,COUNT(*) AS eligible,
       SUM(CASE WHEN opening_100_km_pace_ms IS NOT NULL THEN 1 ELSE 0 END) AS opening_100_km_pace_ms_measured,
-      AVG(opening_100_km_pace_ms) AS opening_100_km_pace_ms_mean,
+      TOTAL(opening_100_km_pace_ms) AS opening_100_km_pace_ms_sum,
       SUM(CASE WHEN closing_400_km_pace_ms IS NOT NULL THEN 1 ELSE 0 END) AS closing_400_km_pace_ms_measured,
-      AVG(closing_400_km_pace_ms) AS closing_400_km_pace_ms_mean,
+      TOTAL(closing_400_km_pace_ms) AS closing_400_km_pace_ms_sum,
       SUM(CASE WHEN extra_distance_pct IS NOT NULL THEN 1 ELSE 0 END) AS extra_distance_pct_measured,
-      AVG(extra_distance_pct) AS extra_distance_pct_mean
+      TOTAL(extra_distance_pct) AS extra_distance_pct_sum
     FROM expanded
     GROUP BY dimension,bucket
     ORDER BY dimension,bucket
   `;
-  const { results } = await env.DB.prepare(sql).bind(...featureRowsBindings(cutoff)).all();
+  const { results } = await env.DB.prepare(sql)
+    .bind(...featureRowsBindings(cutoff, [startDate, endDate])).all();
   return results || [];
+}
+
+function mergePopulationAggregateShards(shards) {
+  const merged = new Map();
+  for (const rows of shards) {
+    for (const row of rows || []) {
+      const key = `${row.dimension}\u0000${row.bucket}`;
+      if (!merged.has(key)) {
+        merged.set(key, {
+          dimension: row.dimension,
+          bucket: row.bucket,
+          eligible: 0,
+          opening_100_km_pace_ms_measured: 0,
+          opening_100_km_pace_ms_sum: 0,
+          closing_400_km_pace_ms_measured: 0,
+          closing_400_km_pace_ms_sum: 0,
+          extra_distance_pct_measured: 0,
+          extra_distance_pct_sum: 0
+        });
+      }
+      const target = merged.get(key);
+      target.eligible += Number(row.eligible || 0);
+      for (const featureName of Object.keys(FEATURE_SPECS)) {
+        target[`${featureName}_measured`] += Number(row[`${featureName}_measured`] || 0);
+        target[`${featureName}_sum`] += Number(row[`${featureName}_sum`] || 0);
+      }
+    }
+  }
+  return [...merged.values()].map((row) => {
+    const out = { dimension: row.dimension, bucket: row.bucket, eligible: row.eligible };
+    for (const featureName of Object.keys(FEATURE_SPECS)) {
+      const measured = row[`${featureName}_measured`];
+      out[`${featureName}_measured`] = measured;
+      out[`${featureName}_mean`] = measured > 0 ? row[`${featureName}_sum`] / measured : null;
+    }
+    return out;
+  }).sort((a,b) => String(a.dimension).localeCompare(String(b.dimension)) || String(a.bucket).localeCompare(String(b.bucket)));
+}
+
+async function loadPopulationAggregates(env, cutoff) {
+  const ranges = await populationDateBounds(env, cutoff);
+  if (!ranges.length) return [];
+  const shards = [];
+  // D1's CPU limit applies to an individual query. Keep each population
+  // aggregation bounded to one calendar year instead of ranking/cross-joining
+  // the entire nationwide history in one statement. Annual shards keep the
+  // number of D1 subrequests low while cutting the per-query population sharply.
+  for (const [startDate,endDate] of ranges) {
+    shards.push(await loadPopulationAggregateShard(env, cutoff, startDate, endDate));
+  }
+  return mergePopulationAggregateShards(shards);
+}
+
+function contenderIdsForRace(frontContenderEntryIdsByRace, raceId) {
+  if (frontContenderEntryIdsByRace instanceof Map) return frontContenderEntryIdsByRace.get(raceId) || [];
+  if (frontContenderEntryIdsByRace && typeof frontContenderEntryIdsByRace === 'object') {
+    return frontContenderEntryIdsByRace[raceId] || [];
+  }
+  return [];
+}
+
+export async function buildXlabsEvidenceProfilesForRaces(env, {
+  raceIds,
+  asOf,
+  frontContenderEntryIdsByRace = {}
+} = {}) {
+  if (!env?.DB) throw new Error('DB is not configured');
+  if (!Array.isArray(raceIds)) throw new Error('raceIds must be an array');
+  const ids = [...new Set(raceIds.map((value) => requiredText(value, 'raceId')))];
+  if (!ids.length) return new Map();
+
+  const targets = [];
+  for (const raceId of ids) targets.push({ raceId, ...await loadTargetRace(env, raceId) });
+
+  const byCutoff = new Map();
+  for (const target of targets) {
+    const cutoff = targetCutoff(target.race, asOf);
+    if (!byCutoff.has(cutoff)) byCutoff.set(cutoff, []);
+    byCutoff.get(cutoff).push(target);
+  }
+
+  const out = new Map();
+  for (const [cutoff, group] of byCutoff) {
+    const horseIds = [...new Set(group.flatMap(({ entries }) => entries
+      .filter((entry) => Number(entry.scratched || 0) !== 1 && entry.horse_id != null)
+      .map((entry) => String(entry.horse_id))))];
+    const [historyRows,populationAggregates] = await Promise.all([
+      loadHorseHistory(env, cutoff, horseIds),
+      loadPopulationAggregates(env, cutoff)
+    ]);
+    for (const target of group) {
+      out.set(target.raceId, buildXlabsEvidenceProfiles({
+        target: target.race,
+        entries: target.entries,
+        historyRows,
+        populationAggregates,
+        frontContenderEntryIds: contenderIdsForRace(frontContenderEntryIdsByRace, target.raceId),
+        asOf: cutoff
+      }));
+    }
+  }
+  return out;
 }
 
 export async function buildXlabsEvidenceProfilesForRace(env, {
@@ -705,23 +851,11 @@ export async function buildXlabsEvidenceProfilesForRace(env, {
   asOf,
   frontContenderEntryIds = []
 } = {}) {
-  if (!env?.DB) throw new Error('DB is not configured');
   const id = requiredText(raceId, 'raceId');
-  const { race, entries } = await loadTargetRace(env, id);
-  const cutoff = targetCutoff(race, asOf);
-  const horseIds = [...new Set(entries
-    .filter((entry) => Number(entry.scratched || 0) !== 1 && entry.horse_id != null)
-    .map((entry) => String(entry.horse_id)))];
-  const [historyRows, populationAggregates] = await Promise.all([
-    loadHorseHistory(env, cutoff, horseIds),
-    loadPopulationAggregates(env, cutoff)
-  ]);
-  return buildXlabsEvidenceProfiles({
-    target: race,
-    entries,
-    historyRows,
-    populationAggregates,
-    frontContenderEntryIds,
-    asOf: cutoff
+  const byRace = await buildXlabsEvidenceProfilesForRaces(env, {
+    raceIds: [id],
+    asOf,
+    frontContenderEntryIdsByRace: { [id]: frontContenderEntryIds }
   });
+  return byRace.get(id);
 }

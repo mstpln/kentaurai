@@ -736,7 +736,9 @@ export async function buildPerformanceFeaturesV3ForEntries(env, raceEntryIds, as
   if (!entryIds.length) return new Map();
 
   const historyOptions = options.history || {};
-  const histories = await buildRelevantHistoryForEntries(env, entryIds, asOf, historyOptions);
+  const histories = options.relevantHistory instanceof Map
+    ? options.relevantHistory
+    : await buildRelevantHistoryForEntries(env, entryIds, asOf, historyOptions);
   const raceIds = [...new Set([...histories.values()].map((history) => history.target.raceId))];
   const raceContexts = await loadRaceContexts(env, raceIds);
   const snapshotCache = new Map();
