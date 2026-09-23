@@ -276,6 +276,10 @@ function seedWideStep1Round(db) {
 test('D1 Step 1 handles a full 128-entry round without truncation, market leakage or post-as-of leakage', async () => {
   const { env, db } = createTestEnv();
   seedWideStep1Round(db);
+  db.prepare(`INSERT INTO race_positions
+    (id,race_entry_id,observed_at_m,leader,event_json,source_record_id,evidence_type,confidence,classification_version)
+    VALUES ('wide_trip_1','wide_history_entry_1',500,1,?,'wide_history_xlabs_1','calculated_xlabs',0.95,'xlabs-trip-classification-v1')`)
+    .run(JSON.stringify({ scenario_key:'leader', scenario_label:'Spets' }));
 
   const pack = await createPreMarketAnalysisPackV3(env,'wide_round',{asOf:'2099-02-01T11:30:00Z'});
   const legFiles = pack.files.filter((file) => /^\d{2}_leg_\d/.test(file.name));
@@ -290,6 +294,9 @@ test('D1 Step 1 handles a full 128-entry round without truncation, market leakag
   assert.equal(entries.find((entry) => entry.race_entry_id === 'wide_entry_1').current_facts.actual_lane,1);
   assert.equal(entries.filter((entry) => entry.history_selection?.counts?.totalSafe === 1).length,128);
   assert.equal(entries.filter((entry) => entry.relevant_history?.length === 1).length,128);
+  assert.equal(entries.find((entry) => entry.race_entry_id === 'wide_entry_1').relevant_history[0].trip_scenario_500m_remaining.scenario_key,'leader');
+  assert.ok(legFiles.every((file) => file.payload.track_analysis?.contract_version === 'kentaurai-track-analysis-v1'));
+  assert.equal(pack.manifest.source_family_coverage.trip_scenario_selected_history.observed,1);
   assert.equal(entries.filter((entry) => entry.xlabs?.evidence_profile?.features?.opening_100_km_pace_ms?.measurement_depth?.measured_starts === 1).length,128);
   assert.equal(entries.filter((entry) => entry.features?.person_context?.driver?.baseline_365d?.starts === 1).length,128);
   assert.equal(entries.filter((entry) => entry.features?.race_priors?.priors?.race_outcome?.win_rate?.sample_size > 0).length,128);
