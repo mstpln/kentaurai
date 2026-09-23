@@ -54,7 +54,7 @@ test('mobile entity statistic tables fit all six columns without horizontal scro
 
 test('Bana Spårstatistik follows the canonical filter icon and dropdown interaction', () => {
   const html = renderAppPage();
-  assert.match(html, /\['overview','Översikt'\],\['lanes','Spårstatistik'\],\['home','Hemmatränare'\]/);
+  assert.match(html, /\['overview','Banprofil'\],\['analysis','Bananalys'\],\['lanes','Spårstatistik'\],\['home','Hemmatränare'\]/);
   assert.match(html, /startMethod:'all',raceScope:'all'/);
   assert.match(html, /TRACK_FILTER_ICON/);
   assert.match(html, /id="trackFilterToggle"/);
@@ -77,9 +77,10 @@ test('Bana Spårstatistik follows the canonical filter icon and dropdown interac
   assert.doesNotMatch(html, /trackFilterButtons/);
 });
 
-test('Bana overview uses the approved physical profile layout and canonical back icon', () => {
+test('Bana profile keeps physical facts separate from the dedicated Bananalys tab', () => {
   const html = renderAppPage();
-  assert.match(html, /<h2>Bananalys<\/h2>/);
+  assert.match(html, /\['overview','Banprofil'\],\['analysis','Bananalys'\]/);
+  assert.doesNotMatch(html, /track-analysis-empty/);
   assert.match(html, /trackFactBlock\('Grundmått'/);
   assert.match(html, /trackFactBlock\('Start & bredd'/);
   assert.match(html, /trackFactBlock\('Till första sväng'/);
@@ -92,6 +93,25 @@ test('Bana overview uses the approved physical profile layout and canonical back
   assert.doesNotMatch(html, /↩ <span>Banor<\/span>/);
   assert.doesNotMatch(html, /Banan i korthet/);
   assert.doesNotMatch(html, /\["Underlag",p\.surface\]/);
+});
+
+
+test('Bana Bananalys uses the agreed 200m, scenario and analysis-evidence structure', () => {
+  const html = renderAppPage();
+  assert.match(html, /data-track-analysis-method/);
+  assert.match(html, /data-track-analysis-distance/);
+  assert.match(html, /Start & första position/);
+  assert.match(html, /Spets 200 m/);
+  assert.match(html, /Topp 3 200 m/);
+  assert.match(html, /Medianpos\./);
+  assert.match(html, /Mot baseline/);
+  assert.match(html, /Löpningsscenario & vinnarprofil/);
+  assert.match(html, /Andel vinnare/);
+  assert.match(html, /Analysunderlag/);
+  assert.match(html, /Breddat underlag/);
+  assert.match(html, /track-analysis-copy:before/);
+  assert.doesNotMatch(html, /Exakt kombination/);
+  assert.doesNotMatch(html, /Startgalopp/);
 });
 
 test('Bana overview localizes Sweden and renders contact facts only when present with HTTPS defense in depth', () => {
