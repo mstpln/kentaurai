@@ -299,5 +299,6 @@ The external-analysis production release was accepted after:
 - Audit found that the first Bananalys implementation could mix voltstart handicap tiers into lane statistics and could turn small raw percentage differences into overly confident prose.
 - Early-position lane metrics now require complete-field C3 rank evidence plus minimum longitudinal confidence. Voltstart lane metrics use only `start_tier = 1` (ground distance); add-on tiers remain available to scenario analysis but do not contaminate lane effects.
 - Narrative comparisons require at least 25 observations on both the track and comparison side plus a minimum effect size and non-overlapping Wilson intervals. Small samples remain visible in raw tables but do not become confident prose.
+- Interpretation backoff now preserves a selected start method: a sparse Auto/Volt distance may broaden across distances within the same method, but it cannot borrow the other start method and present it as support for the selected one.
 - Winner-scenario coverage is entry-based, preserving correct denominators for dead heats. Scenario-share prose is explicit that it refers to classified winners.
 - `Kort analys` renders as bullet points. No schema migration, backfill, model-weight change or production data mutation is part of this follow-up.
