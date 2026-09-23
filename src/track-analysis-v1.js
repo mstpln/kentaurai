@@ -519,11 +519,10 @@ function laneComparisonSummary(sections) {
 function laneWinSummary(laneOutcomes) {
   const rows=(laneOutcomes?.rows||[]).filter((row)=>row.result_starts>0&&row.win_rate!=null);
   if(rows.length<2)return null;
-  const count=Math.min(3,Math.floor(rows.length/2));
+  const count=Math.min(3,rows.length);
   if(!count)return null;
   const best=[...rows].sort((a,b)=>b.win_rate-a.win_rate||b.result_starts-a.result_starts||a.lane-b.lane).slice(0,count);
-  const bestLanes=new Set(best.map((row)=>row.lane));
-  const worst=[...rows].filter((row)=>!bestLanes.has(row.lane)).sort((a,b)=>a.win_rate-b.win_rate||b.result_starts-a.result_starts||a.lane-b.lane).slice(0,count);
+  const worst=[...rows].sort((a,b)=>a.win_rate-b.win_rate||b.result_starts-a.result_starts||a.lane-b.lane).slice(0,count);
   if(!worst.length)return null;
   return `Högst observerad segerprocent har ${laneLabelList(best,'win_rate')}. Lägst har ${laneLabelList(worst,'win_rate')}.`;
 }
@@ -533,10 +532,22 @@ function scenarioWinSummary(rows) {
   const other=(rows||[]).filter((row)=>row.scenario_key!=='leader'&&row.starts>0&&row.win_rate!=null)
     .sort((a,b)=>b.win_rate-a.win_rate||b.starts-a.starts||SCENARIO_ORDER.indexOf(a.scenario_key)-SCENARIO_ORDER.indexOf(b.scenario_key)).slice(0,3);
   const parts=[];
-  if(leader)parts.push(`Hästar som satt i ledningen 500 m efter start vann ${Math.round(leader.win_rate*100)} % av loppen.`);
+  if(leader){
+    let text=`Hästar som satt i ledningen 500 m efter start vann ${Math.round(leader.win_rate*100)} % av loppen.`;
+    const direction=comparisonDirection(leader.win_rate,leader.starts,leader.baseline?.win_rate,leader.baseline?.starts,SCENARIO_WIN_COMPARISON_MIN_DELTA_PP);
+    if(direction==='higher')text+=' Det är tydligt högre än på andra svenska banor.';
+    else if(direction==='lower')text+=' Det är tydligt lägre än på andra svenska banor.';
+    parts.push(text);
+  }
   if(other.length){
     const labels=swedishList(other.map((row)=>`${scenarioPhrase(row.scenario_key)} (${Math.round(row.win_rate*100)} %)`));
-    parts.push(`Med 500 m kvar var segerprocenten högst för ${labels}.`);
+    let text=`Med 500 m kvar var segerprocenten högst för ${labels}.`;
+    const standout=other.find((row)=>comparisonDirection(row.win_rate,row.starts,row.baseline?.win_rate,row.baseline?.starts,SCENARIO_WIN_COMPARISON_MIN_DELTA_PP));
+    if(standout){
+      const direction=comparisonDirection(standout.win_rate,standout.starts,standout.baseline?.win_rate,standout.baseline?.starts,SCENARIO_WIN_COMPARISON_MIN_DELTA_PP);
+      text+=` ${scenarioPhrase(standout.scenario_key).replace(/^./,(ch)=>ch.toUpperCase())} ger en tydligt ${direction==='higher'?'högre':'lägre'} segerprocent här än på andra svenska banor.`;
+    }
+    parts.push(text);
   }
   return parts.length?parts.join(' '):null;
 }
