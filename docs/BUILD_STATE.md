@@ -292,3 +292,12 @@ The external-analysis production release was accepted after:
 - Scenario UI is winner-focused: **Scenario / Seger % / Andel vinnare / Vinst vs. snittet / Underlag**. Occurrence, Topp 3 and the raw baseline column are hidden from the UI.
 - Kort analys remains deterministic code, but now prioritizes which lanes reach the lead or a strong early position versus the Swedish comparison set, plus which C4 scenarios winners come from. Internal `baseline` wording is not shown to the user.
 - No schema migration, backfill, model-weight change, Step 1 export contract change or private-data mutation is required.
+
+
+## Bananalys calculation-integrity follow-up
+- Branch: `fix/bananalys-calculation-integrity`.
+- Audit found that the first Bananalys implementation could mix voltstart handicap tiers into lane statistics and could turn small raw percentage differences into overly confident prose.
+- Early-position lane metrics now require complete-field C3 rank evidence plus minimum longitudinal confidence. Voltstart lane metrics use only `start_tier = 1` (ground distance); add-on tiers remain available to scenario analysis but do not contaminate lane effects.
+- Narrative comparisons require at least 25 observations on both the track and comparison side plus a minimum effect size and non-overlapping Wilson intervals. Small samples remain visible in raw tables but do not become confident prose.
+- Winner-scenario coverage is entry-based, preserving correct denominators for dead heats. Scenario-share prose is explicit that it refers to classified winners.
+- `Kort analys` renders as bullet points. No schema migration, backfill, model-weight change or production data mutation is part of this follow-up.
