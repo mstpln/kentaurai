@@ -122,7 +122,13 @@ jobs:
             if ((data.analysis_basis.backoff_level !== 'exact') !== expectBackoff) throw new Error('backoff behavior mismatch');
             if (data.start_position_100m?.checkpoint_m !== 100 || data.start_position_200m?.checkpoint_m !== 200) throw new Error('early checkpoint contract mismatch');
             if ((data.trip_scenario_500m_remaining?.rows || []).length !== 6) throw new Error('scenario contract mismatch');
-            if (!data.coverage?.position_200m || !data.coverage?.trip_scenario) throw new Error('coverage contract missing');
+            if (!data.coverage?.position_200m || !data.coverage?.trip_scenario || !data.coverage?.eligible) throw new Error('coverage contract missing');
+            const p200 = data.coverage.position_200m.observation_coverage;
+            const winnerCoverage = data.coverage.trip_scenario.winner_scenario_coverage;
+            if (p200 != null && (p200 < 0 || p200 > 1)) throw new Error('200m coverage is outside [0,1]');
+            if (winnerCoverage != null && (winnerCoverage < 0 || winnerCoverage > 1)) throw new Error('winner scenario coverage is outside [0,1]');
+            if (data.coverage.position_200m.observations > data.coverage.eligible.lane_starts) throw new Error('200m observations exceed eligible lane starts');
+            if (data.coverage.trip_scenario.winners_with_scenario > data.coverage.eligible.winner_races) throw new Error('winner scenarios exceed eligible winner races');
             if (expectBackoff && !data.analysis_support) throw new Error('backoff support missing');
             if (!expectBackoff && data.analysis_support) throw new Error('unexpected backoff support');
             const baselineEvidence = (data.start_position_200m.sections || []).some(section =>
