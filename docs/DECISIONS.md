@@ -250,3 +250,12 @@ A single race must not directly change model weights. Candidate learnings are re
 3. Bana → Spårstatistik follows the same compact filter language as Trend/entity statistics: visible period control, sliders trigger, dropdown detail filters, active-filter count.
 4. Hemmatränare remains defined by the latest verified official trainer observation. Performance changes may narrow candidate work and add indexes, but must not change that factual rule.
 5. The common first Hemmatränare page should not execute the same expensive latest-observation pipeline twice merely to obtain total count.
+
+
+## X-Labs trip reconstruction quarantines only proven deterministic duplicate-target sources
+1. A captured X-Labs race source that deterministically fails reconstruction because one telemetry frame contains the same target number more than once is preserved unchanged in private raw storage and recorded as quarantined for that reconstruction job.
+2. No position checkpoint, trip label or replacement fact is invented for a quarantined source.
+3. The reconstruction cursor may advance past that source because repeating the same immutable payload cannot succeed without changing source semantics.
+4. Quarantine is intentionally narrow: timestamp ordering, mapping, storage, database and all other unknown/technical failures retain the existing fail-closed retry behavior and stop after three consecutive errors.
+5. Quarantine records keep job/source provenance plus a bounded public-safe failure code; raw payloads remain private.
+6. Existing failed reconstruction jobs resume in place after an explicitly authorized production action; deployment alone does not restart a production backfill.

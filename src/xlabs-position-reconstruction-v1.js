@@ -27,6 +27,13 @@ export const XLABS_POSITION_RECONSTRUCTION_POLICY = Object.freeze({
 
 const SOURCE_TYPE = 'xlabs_race_json';
 const PERSIST_BATCH_SIZE = 50;
+const QUARANTINE_FAILURE_DUPLICATE_TARGET = 'duplicate_target';
+
+function quarantinablePositionError(error) {
+  const message = String(error?.message || '');
+  if (/^(?:X-Labs interval )?frame \d+ contains duplicate target \d+$/.test(message)) return QUARANTINE_FAILURE_DUPLICATE_TARGET;
+  return null;
+}
 
 function requiredText(value, field) {
   const text = String(value ?? '').trim();
@@ -679,6 +686,7 @@ export async function getXlabsPositionReconstructionJob(env, jobId) {
     processedSources: Number(job.processed_sources || 0),
     insertedRows: Number(job.inserted_rows || 0),
     skippedRows: Number(job.skipped_rows || 0),
+    quarantinedSources: Number(job.quarantined_sources || 0),
     consecutiveErrors: Number(job.consecutive_errors || 0),
     lastError: job.last_error || null,
     lastRunAt: job.last_run_at || null,
@@ -731,13 +739,42 @@ export async function stepXlabsPositionReconstructionJob(env, jobId = null) {
     ).run();
     return { jobId: job.id, status: 'running', done: false, sourceRecordId: source.id, result };
   } catch (error) {
+    const failureCode = quarantinablePositionError(error);
+    const attemptedAt = new Date().toISOString();
+    if (failureCode) {
+      const quarantineId = stableId('xposq', job.id, source.id, XLABS_POSITION_RECONSTRUCTION_VERSION);
+      await env.DB.batch([
+        env.DB.prepare(`
+          INSERT INTO xlabs_position_reconstruction_quarantine
+            (id,job_id,source_record_id,failure_code,reconstruction_version,quarantined_at)
+          VALUES (?,?,?,?,?,?)
+          ON CONFLICT(job_id,source_record_id,reconstruction_version) DO NOTHING
+        `).bind(quarantineId,job.id,source.id,failureCode,XLABS_POSITION_RECONSTRUCTION_VERSION,attemptedAt),
+        env.DB.prepare(`
+          UPDATE xlabs_position_reconstruction_jobs
+          SET cursor_external_id=?,cursor_fetched_at=?,cursor_source_record_id=?,
+              processed_sources=processed_sources+1,
+              quarantined_sources=(SELECT COUNT(*) FROM xlabs_position_reconstruction_quarantine WHERE job_id=?),
+              consecutive_errors=0,last_error=NULL,last_attempt_source_record_id=?,last_run_at=?,updated_at=CURRENT_TIMESTAMP
+          WHERE id=?
+        `).bind(source.external_id,source.fetched_at,source.id,job.id,source.id,attemptedAt,job.id)
+      ]);
+      return {
+        jobId: job.id,
+        status: 'running',
+        done: false,
+        sourceRecordId: source.id,
+        quarantined: true,
+        failureCode
+      };
+    }
     const nextErrors = Number(job.consecutive_errors || 0) + 1;
     const status = nextErrors >= 3 ? 'failed' : 'running';
     await env.DB.prepare(`
       UPDATE xlabs_position_reconstruction_jobs
       SET consecutive_errors=?,status=?,last_error=?,last_attempt_source_record_id=?,last_run_at=?,updated_at=CURRENT_TIMESTAMP
       WHERE id=?
-    `).bind(nextErrors,status,error.message,source.id,new Date().toISOString(),job.id).run();
+    `).bind(nextErrors,status,error.message,source.id,attemptedAt,job.id).run();
     throw error;
   }
 }

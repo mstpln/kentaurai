@@ -102,13 +102,13 @@ function seedOfficialRace(db) {
   }
 }
 
-function seedCapturedTelemetry(db, objects, payload = syntheticOvalTelemetry(), sourceId = SOURCE_ID) {
+function seedCapturedTelemetry(db, objects, payload = syntheticOvalTelemetry(), sourceId = SOURCE_ID, fetchedAt = FETCHED_AT) {
   const key = `raw/xlabs_race_json/2099-01-02/${sourceId}.json`;
   objects.set(key, { body: JSON.stringify(payload), options: {} });
   db.prepare(`INSERT INTO source_records
     (id, source_type, external_id, fetched_at, raw_object_key, content_hash, quality_status, rights_status, metadata_json)
     VALUES (?, 'xlabs_race_json', '2099-01-02:7:5', ?, ?, ?, 'normalized_verified_subset', 'unknown', ?)`)
-    .run(sourceId, FETCHED_AT, key, `synthetic-${sourceId}-hash`, JSON.stringify({ date: '2099-01-02', requestedTrackId: 7, xlabsTrackId: 7, raceNumber: 5 }));
+    .run(sourceId, fetchedAt, key, `synthetic-${sourceId}-hash`, JSON.stringify({ date: '2099-01-02', requestedTrackId: 7, xlabsTrackId: 7, raceNumber: 5 }));
 }
 
 test('C3 reconstructs obvious longitudinal order, gaps and lateral geometry on a synthetic oval', () => {
@@ -233,4 +233,83 @@ test('C3 selective reconstruction job is date-bounded, checkpointed and advances
   const oldBackfill = db.prepare(`SELECT status,next_date FROM xlabs_backfill_jobs WHERE id='existing-backfill'`).get();
   assert.equal(oldBackfill.status, 'failed');
   assert.equal(oldBackfill.next_date, '2098-06-01');
+});
+
+
+test('C3 reconstruction quarantines deterministic duplicate-target telemetry and advances without inventing rows', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedOfficialRace(db);
+  const duplicatePayload = syntheticOvalTelemetry();
+  duplicatePayload[10].targets.push({ ...duplicatePayload[10].targets[0] });
+  seedCapturedTelemetry(db, objects, duplicatePayload, 'src_bad_duplicate', '2099-01-02T12:00:00.000Z');
+  seedCapturedTelemetry(db, objects, syntheticOvalTelemetry(), 'src_good_after', '2099-01-02T13:00:00.000Z');
+
+  const job = await createXlabsPositionReconstructionJob(env, { startDate: '2099-01-02', endDate: '2099-01-02' });
+  const first = await stepXlabsPositionReconstructionJob(env, job.id);
+  assert.equal(first.quarantined, true);
+  assert.equal(first.failureCode, 'duplicate_target');
+  assert.equal(first.sourceRecordId, 'src_bad_duplicate');
+
+  const storedAfterBad = db.prepare(`
+    SELECT status,processed_sources,quarantined_sources,consecutive_errors,last_error,cursor_source_record_id
+    FROM xlabs_position_reconstruction_jobs WHERE id=?
+  `).get(job.id);
+  assert.equal(storedAfterBad.status, 'running');
+  assert.equal(storedAfterBad.processed_sources, 1);
+  assert.equal(storedAfterBad.quarantined_sources, 1);
+  assert.equal(storedAfterBad.consecutive_errors, 0);
+  assert.equal(storedAfterBad.last_error, null);
+  assert.equal(storedAfterBad.cursor_source_record_id, 'src_bad_duplicate');
+  const quarantine = db.prepare(`
+    SELECT source_record_id,failure_code,reconstruction_version
+    FROM xlabs_position_reconstruction_quarantine WHERE job_id=?
+  `).get(job.id);
+  assert.equal(quarantine.source_record_id, 'src_bad_duplicate');
+  assert.equal(quarantine.failure_code, 'duplicate_target');
+  assert.equal(quarantine.reconstruction_version, XLABS_POSITION_RECONSTRUCTION_VERSION);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM race_position_checkpoints WHERE source_record_id='src_bad_duplicate'`).get().n, 0);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM race_positions WHERE source_record_id='src_bad_duplicate'`).get().n, 0);
+
+  const second = await stepXlabsPositionReconstructionJob(env, job.id);
+  assert.equal(second.quarantined, undefined);
+  assert.equal(second.sourceRecordId, 'src_good_after');
+  assert.ok(second.result.counts.inserted > 0);
+
+  const third = await stepXlabsPositionReconstructionJob(env, job.id);
+  assert.equal(third.status, 'completed');
+  const final = db.prepare(`
+    SELECT status,processed_sources,quarantined_sources,cursor_source_record_id
+    FROM xlabs_position_reconstruction_jobs WHERE id=?
+  `).get(job.id);
+  assert.equal(final.status, 'completed');
+  assert.equal(final.processed_sources, 2);
+  assert.equal(final.quarantined_sources, 1);
+  assert.equal(final.cursor_source_record_id, 'src_good_after');
+});
+
+test('C3 reconstruction still fails closed on non-quarantinable telemetry errors', async () => {
+  const { env, db, objects } = createTestEnv();
+  seedOfficialRace(db);
+  const invalidPayload = syntheticOvalTelemetry();
+  invalidPayload[1] = { ...invalidPayload[1], timestamp: invalidPayload[0].timestamp };
+  seedCapturedTelemetry(db, objects, invalidPayload, 'src_bad_timestamp');
+
+  const job = await createXlabsPositionReconstructionJob(env, { startDate: '2099-01-02', endDate: '2099-01-02' });
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await assert.rejects(
+      () => stepXlabsPositionReconstructionJob(env, job.id),
+      /timestamps must be strictly increasing/
+    );
+  }
+
+  const stored = db.prepare(`
+    SELECT status,processed_sources,quarantined_sources,consecutive_errors,cursor_source_record_id
+    FROM xlabs_position_reconstruction_jobs WHERE id=?
+  `).get(job.id);
+  assert.equal(stored.status, 'failed');
+  assert.equal(stored.processed_sources, 0);
+  assert.equal(stored.quarantined_sources, 0);
+  assert.equal(stored.consecutive_errors, 3);
+  assert.equal(stored.cursor_source_record_id, null);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM xlabs_position_reconstruction_quarantine WHERE job_id=?`).get(job.id).n, 0);
 });
