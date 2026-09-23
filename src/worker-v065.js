@@ -201,7 +201,9 @@ export default {
       if (denied) return denied;
       try {
         const entityType = calendarSpecialtiesMatch[1];
-        const data = await calendarSpecialties(env, entityType, decodeURIComponent(calendarSpecialtiesMatch[2]), calendarOptions(url));
+        const options = calendarOptions(url);
+        if (entityType === 'horses') options.includeTripScenarios = false;
+        const data = await calendarSpecialties(env, entityType, decodeURIComponent(calendarSpecialtiesMatch[2]), options);
         return data ? json(data) : json({ error: 'not_found' }, 404);
       } catch (error) {
         console.error(error);
