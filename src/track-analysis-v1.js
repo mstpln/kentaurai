@@ -498,20 +498,29 @@ function observedLeadSummary(sections) {
   return sentences.length?sentences.join(' '):null;
 }
 
-function laneComparisonSummary(sections) {
+function comparisonTrackPhrase(countryCode) {
+  if (countryCode === 'SE') return 'andra svenska banor';
+  if (countryCode === 'NO') return 'andra norska banor';
+  if (countryCode === 'DK') return 'andra danska banor';
+  return 'andra banor i samma land';
+}
+
+function laneComparisonSummary(sections,countryCode) {
   const visible=(sections||[]).filter((section)=>(section.observations||0)>0);
   const multiple=visible.length>1;
   const sentences=[];
+  const comparison= comparisonTrackPhrase(countryCode);
   for(const section of visible){
     const rows=rowsWithNormalLaneSample(section);
     const higher=rows.filter((row)=>comparisonDirection(row.lead_rate,row.observations,row.baseline?.lead_rate,row.baseline?.observations,LEAD_COMPARISON_MIN_DELTA_PP)==='higher').map((row)=>row.lane);
     const lower=rows.filter((row)=>comparisonDirection(row.lead_rate,row.observations,row.baseline?.lead_rate,row.baseline?.observations,LEAD_COMPARISON_MIN_DELTA_PP)==='lower').map((row)=>row.lane);
     if(!higher.length&&!lower.length)continue;
     const prefix=multiple?`${section.start_method==='auto'?'Autostart':'Voltstart'}: `:'';
-    const parts=[];
-    if(higher.length)parts.push(`spår ${swedishList(higher)} når ledningen tydligt oftare här`);
-    if(lower.length)parts.push(`spår ${swedishList(lower)} tydligt mer sällan`);
-    sentences.push(`${prefix}Jämfört med andra svenska banor når ${parts.join(', medan ')}.`);
+    let text='';
+    if(higher.length&&lower.length) text=`Jämfört med ${comparison} når spår ${swedishList(higher)} ledningen tydligt oftare här, medan spår ${swedishList(lower)} gör det tydligt mer sällan.`;
+    else if(higher.length) text=`Jämfört med ${comparison} når spår ${swedishList(higher)} ledningen tydligt oftare här.`;
+    else text=`Jämfört med ${comparison} når spår ${swedishList(lower)} ledningen tydligt mer sällan här.`;
+    sentences.push(prefix+text);
   }
   return sentences.length?sentences.join(' '):null;
 }
@@ -527,25 +536,26 @@ function laneWinSummary(laneOutcomes) {
   return `Högst observerad segerprocent har ${laneLabelList(best,'win_rate')}. Lägst har ${laneLabelList(worst,'win_rate')}.`;
 }
 
-function scenarioWinSummary(rows) {
+function scenarioWinSummary(rows,countryCode) {
   const leader=(rows||[]).find((row)=>row.scenario_key==='leader'&&row.starts>0&&row.win_rate!=null);
   const other=(rows||[]).filter((row)=>row.scenario_key!=='leader'&&row.starts>0&&row.win_rate!=null)
     .sort((a,b)=>b.win_rate-a.win_rate||b.starts-a.starts||SCENARIO_ORDER.indexOf(a.scenario_key)-SCENARIO_ORDER.indexOf(b.scenario_key)).slice(0,3);
   const parts=[];
+  const comparison=comparisonTrackPhrase(countryCode);
   if(leader){
     let text=`Hästar som satt i ledningen 500 m efter start vann ${Math.round(leader.win_rate*100)} % av loppen.`;
     const direction=comparisonDirection(leader.win_rate,leader.starts,leader.baseline?.win_rate,leader.baseline?.starts,SCENARIO_WIN_COMPARISON_MIN_DELTA_PP);
-    if(direction==='higher')text+=' Det är tydligt högre än på andra svenska banor.';
-    else if(direction==='lower')text+=' Det är tydligt lägre än på andra svenska banor.';
+    if(direction==='higher')text+=` Det är tydligt högre än på ${comparison}.`;
+    else if(direction==='lower')text+=` Det är tydligt lägre än på ${comparison}.`;
     parts.push(text);
   }
   if(other.length){
     const labels=swedishList(other.map((row)=>`${scenarioPhrase(row.scenario_key)} (${Math.round(row.win_rate*100)} %)`));
-    let text=`Med 500 m kvar var segerprocenten högst för ${labels}.`;
+    let text=`Bland övriga positioner 500 m kvar var segerprocenten högst för ${labels}.`;
     const standout=other.find((row)=>comparisonDirection(row.win_rate,row.starts,row.baseline?.win_rate,row.baseline?.starts,SCENARIO_WIN_COMPARISON_MIN_DELTA_PP));
     if(standout){
       const direction=comparisonDirection(standout.win_rate,standout.starts,standout.baseline?.win_rate,standout.baseline?.starts,SCENARIO_WIN_COMPARISON_MIN_DELTA_PP);
-      text+=` ${scenarioPhrase(standout.scenario_key).replace(/^./,(ch)=>ch.toUpperCase())} ger en tydligt ${direction==='higher'?'högre':'lägre'} segerprocent här än på andra svenska banor.`;
+      text+=` ${scenarioPhrase(standout.scenario_key).replace(/^./,(ch)=>ch.toUpperCase())} ger en tydligt ${direction==='higher'?'högre':'lägre'} segerprocent här än på ${comparison}.`;
     }
     parts.push(text);
   }
@@ -560,13 +570,13 @@ function hasNormalWinnerSample(rows) {
   return Number(rows?.find((row)=>row.scenario_key!=='leader')?.winner_observations || 0) >= TRACK_ANALYSIS_SAMPLE_POLICY.normalMinRaces;
 }
 
-function buildSummary({laneSections,comparisonLaneSections,laneOutcomes,scenarioRows}) {
+function buildSummary({laneSections,comparisonLaneSections,laneOutcomes,scenarioRows,countryCode}) {
   const out=[];
   for(const item of [
     observedLeadSummary(laneSections),
-    laneComparisonSummary(comparisonLaneSections),
+    laneComparisonSummary(comparisonLaneSections,countryCode),
     laneWinSummary(laneOutcomes),
-    scenarioWinSummary(scenarioRows)
+    scenarioWinSummary(scenarioRows,countryCode)
   ]) if(item) out.push(item);
   return out.slice(0,5);
 }
@@ -629,7 +639,6 @@ export async function getTrackAnalysisV1(env,trackIdValue,options={}){
   const useLaneSupport=!exactLaneNormal&&!sameBasis&&hasNormalLaneSample(basisStart200Sections);
   const useScenarioSupport=!exactWinnerNormal&&!sameBasis&&hasNormalWinnerSample(basisScenarios);
   const comparisonLaneSections=useLaneSupport?basisStart200Sections:exactStart200Sections;
-  const comparisonScenarioRows=useScenarioSupport?basisScenarios:exactScenarios;
   const result={
     contract_version:TRACK_ANALYSIS_CONTRACT,
     analysis_version:TRACK_ANALYSIS_VERSION,
@@ -654,7 +663,7 @@ export async function getTrackAnalysisV1(env,trackIdValue,options={}){
       period:sourcePeriod(basisPos,basisScen)
     }
   };
-  result.short_analysis=buildSummary({laneSections:exactStart200Sections,comparisonLaneSections,laneOutcomes:exactLaneOutcomes,scenarioRows:exactScenarios,comparisonScenarioRows});
+  result.short_analysis=buildSummary({laneSections:exactStart200Sections,comparisonLaneSections,laneOutcomes:exactLaneOutcomes,scenarioRows:exactScenarios,countryCode:track.country_code||null});
   return result;
 }
 
