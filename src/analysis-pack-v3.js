@@ -36,6 +36,18 @@ import {
   buildXlabsEvidenceProfilesForRace
 } from './xlabs-evidence-profiles-v1.js';
 import { XLABS_POSITION_RECONSTRUCTION_VERSION } from './xlabs-position-reconstruction-v1.js';
+import {
+  XLABS_TRIP_CLASSIFICATION_CONTRACT,
+  XLABS_TRIP_CLASSIFICATION_VERSION
+} from './xlabs-trip-classification-v1.js';
+import {
+  TRACK_ANALYSIS_CONTRACT,
+  TRACK_ANALYSIS_VERSION,
+  getTrackAnalysisV1,
+  loadTripScenariosForEntries,
+  normalizeTrackAnalysisStartMethod,
+  trackAnalysisDistanceGroup
+} from './track-analysis-v1.js';
 import { getOfficialHorseSnapshotsAsOf } from './import/official-snapshots.js';
 
 export const ANALYSIS_PACK_V3_CONTRACT = 'kentaurai-analysis-pack-v3';
@@ -644,7 +656,11 @@ function manifestVersions() {
       relevant_history_contract: RELEVANT_HISTORY_CONTRACT_VERSION,
       relevant_history_selection: RELEVANT_HISTORY_SELECTION_VERSION,
       xlabs_evidence_contract: XLABS_EVIDENCE_PROFILE_CONTRACT,
-      xlabs_evidence: XLABS_EVIDENCE_PROFILE_VERSION
+      xlabs_evidence: XLABS_EVIDENCE_PROFILE_VERSION,
+      xlabs_trip_classification_contract: XLABS_TRIP_CLASSIFICATION_CONTRACT,
+      xlabs_trip_classification: XLABS_TRIP_CLASSIFICATION_VERSION,
+      track_analysis_contract: TRACK_ANALYSIS_CONTRACT,
+      track_analysis: TRACK_ANALYSIS_VERSION
     },
     parserVersions: { race_proposition: RACE_PROPOSITION_PARSER_VERSION },
     reconstructionVersions: { xlabs_position: XLABS_POSITION_RECONSTRUCTION_VERSION }
@@ -688,7 +704,29 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
   const xlabsByRace = new Map();
   for (const raceId of raceIds) xlabsByRace.set(raceId, await buildXlabsEvidenceProfilesForRace(env,{raceId,asOf,frontContenderEntryIds:[]}));
   const historyIds = [...new Set([...history.values()].flatMap((item) => item.relevantHistoryUnion.map((start) => start.raceEntryId)))];
-  const trajectories = await loadTrajectories(env,historyIds,asOf);
+  const [trajectories,tripScenarios] = await Promise.all([
+    loadTrajectories(env,historyIds,asOf),
+    loadTripScenariosForEntries(env,historyIds,asOf)
+  ]);
+  const trackAnalysisCache = new Map();
+  async function trackAnalysisForRace(raceRow, observation) {
+    if (!raceRow?.track_id) return null;
+    const fields = observation?.fields || {};
+    let startMethod = 'all';
+    try { startMethod = normalizeTrackAnalysisStartMethod(fields.startMethod || 'all'); } catch { startMethod = 'all'; }
+    const distanceGroup = trackAnalysisDistanceGroup(fields.distanceM) || 'all';
+    const key = [raceRow.track_id,startMethod,distanceGroup,asOf].join('|');
+    if (!trackAnalysisCache.has(key)) {
+      const value = await getTrackAnalysisV1(env,raceRow.track_id,{ startMethod,distanceGroup,asOf });
+      if (value) {
+        const { generated_at: _generatedAt, ...stableValue } = value;
+        trackAnalysisCache.set(key,stableValue);
+      } else {
+        trackAnalysisCache.set(key,null);
+      }
+    }
+    return trackAnalysisCache.get(key);
+  }
 
   const warnings = [];
   if (cutoff.clamped) warnings.push({ code: 'as_of_clamped_to_pre_market_cutoff', requested_as_of: cutoff.requestedAsOf, effective_as_of: asOf, cutoff_source: cutoff.cutoffSource });
@@ -700,11 +738,14 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
   const legs = [];
   let historiesSelected = 0;
   let historiesWithTrajectory = 0;
+  let historiesWithTripScenario = 0;
   for (let legNumber = 1; legNumber <= 8; legNumber += 1) {
     const legRows = rows.filter((row) => Number(row.leg_number) === legNumber);
     const raceId = legRows[0].race_id;
     const xRace = xlabsByRace.get(raceId);
     const profileByEntry = new Map((xRace?.profiles || []).map((profile) => [profile.race_entry_id, profile]));
+    const raceRow = legRows[0];
+    const trackAnalysis = await trackAnalysisForRace(raceRow,raceObs.get(raceId));
     const entries = legRows.map((row) => {
       const id = row.race_entry_id;
       const eq = equipment.get(id) || null;
@@ -715,9 +756,11 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
       const hist = history.get(id);
       const relevantHistory = (hist?.relevantHistoryUnion || []).map((start) => {
         const reconstruction = trajectories.get(start.raceEntryId) || null;
+        const tripScenario = tripScenarios.get(start.raceEntryId) || null;
         historiesSelected += 1;
         if (reconstruction) historiesWithTrajectory += 1;
-        return { ...start, trajectory_reconstruction: reconstruction };
+        if (tripScenario) historiesWithTripScenario += 1;
+        return { ...start, trajectory_reconstruction: reconstruction, trip_scenario_500m_remaining: tripScenario };
       });
       const measuredHistory = relevantHistory.filter((start) => start.trajectory_reconstruction != null).length;
       return {
@@ -741,11 +784,11 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
         current_signals:[]
       };
     });
-    const raceRow = legRows[0];
     const facts = entries.map((entry) => entry.current_facts);
     legs.push({
       leg_number:legNumber,
       race:raceFact(raceRow,raceObs.get(raceId),trackObs.get(raceRow.track_id),propositions.get(raceId)||null,firstPrizes.get(raceId)||null,facts),
+      track_analysis:trackAnalysis,
       xlabs_diagnostics:xRace?{coverage:xRace.coverage,population_shift:xRace.population_shift,separation:xRace.separation}:null,
       entries,
       warnings:facts.some((fact)=>!fact.scratch_status_verified)?[{code:'scratch_status_unverified'}]:[]
@@ -771,14 +814,16 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
     relevant_history:coverageCounter(historyKnown,eligibleCount),
     current_equipment:coverageCounter(equipmentKnown,eligibleCount),
     xlabs_measured_history:coverageCounter(xlabsKnown,eligibleCount),
-    trajectory_reconstruction_selected_history:coverageCounter(historiesWithTrajectory,historiesSelected)
+    trajectory_reconstruction_selected_history:coverageCounter(historiesWithTrajectory,historiesSelected),
+    trip_scenario_selected_history:coverageCounter(historiesWithTripScenario,historiesSelected)
   };
   const sourceFreshness = {
     official_current:maxIso([...raceObs.values(),...entryObs.values(),...horseObs.values(),...driverObs.values(),...trainerObs.values(),...trackObs.values()].map((value)=>value.observedAt)),
     official_snapshots:maxIso([...snapshots.values()].flatMap((snapshot)=>[
       snapshot?.age?.observedAt,snapshot?.currentRecord?.observedAt,snapshot?.officialStatistics?.year?.observedAt,snapshot?.officialStatistics?.life?.observedAt
     ])),
-    xlabs:maxIso([...xlabsByRace.values()].flatMap((value)=>sourceRefTimes(value)))
+    xlabs:maxIso([...xlabsByRace.values()].flatMap((value)=>sourceRefTimes(value))),
+    trip_scenarios:maxIso([...tripScenarios.values()].map((value)=>value.source_selected_at))
   };
   const versions = manifestVersions();
   return buildAnalysisPackV3Files({
