@@ -235,39 +235,70 @@ async function loadPositionRows(env, { trackId = null, countryCode = null, exclu
 
 
 async function loadEarly500Rows(env, { trackId = null, countryCode = null, excludeTrackId = null, startMethod, distanceGroup, asOf }) {
-  const conditions = [
+  // Start from the much smaller race/entry context and probe the 500 m checkpoint
+  // by race_entry_id. On production history, starting from checkpoint_key='500m'
+  // can force D1 to scan the nationwide checkpoint population before track,
+  // distance and start-method filters are applied.
+  const entryConditions = [
+    're.scratched = 0',
+    "rr.result_status = 'official'"
+  ];
+  const entryBindings = [];
+  if (trackId) { entryConditions.push('r.track_id = ?'); entryBindings.push(trackId); }
+  if (countryCode) { entryConditions.push('t.country_code = ?'); entryBindings.push(countryCode); }
+  if (excludeTrackId) { entryConditions.push('r.track_id <> ?'); entryBindings.push(excludeTrackId); }
+  appendContextConditions(entryConditions, entryBindings, { startMethod, distanceGroup, asOf });
+  if (asOf) {
+    entryConditions.push('rr.source_record_id IS NOT NULL');
+    entryConditions.push('julianday(rrs.fetched_at) <= julianday(?)');
+    entryBindings.push(asOf);
+  }
+
+  const checkpointConditions = [
     'rpc.reconstruction_version = ?',
     "rpc.checkpoint_key = '500m'",
     'rpc.position_rank IS NOT NULL',
     'rpc.field_coverage >= ?',
-    'rpc.longitudinal_confidence >= ?',
-    're.scratched = 0',
-    "rr.result_status = 'official'"
+    'rpc.longitudinal_confidence >= ?'
   ];
-  const bindings = [XLABS_POSITION_RECONSTRUCTION_VERSION, POSITION_EXACT_FIELD_COVERAGE_MIN, POSITION_LONGITUDINAL_CONFIDENCE_MIN];
-  if (trackId) { conditions.push('r.track_id = ?'); bindings.push(trackId); }
-  if (countryCode) { conditions.push('t.country_code = ?'); bindings.push(countryCode); }
-  if (excludeTrackId) { conditions.push('r.track_id <> ?'); bindings.push(excludeTrackId); }
-  appendContextConditions(conditions, bindings, { startMethod, distanceGroup, asOf });
-  appendAsOfSourceConditions(conditions, bindings, { asOf });
+  const checkpointBindings = [
+    XLABS_POSITION_RECONSTRUCTION_VERSION,
+    POSITION_EXACT_FIELD_COVERAGE_MIN,
+    POSITION_LONGITUDINAL_CONFIDENCE_MIN
+  ];
+  if (asOf) {
+    checkpointConditions.push('julianday(sr.fetched_at) <= julianday(?)');
+    checkpointBindings.push(asOf);
+  }
+
   const { results } = await env.DB.prepare(`
-    WITH ranked AS (
-      SELECT rpc.id,rpc.race_entry_id,rpc.checkpoint_key,rpc.position_rank,rpc.meters_behind_leader,
-        rpc.field_coverage,rpc.longitudinal_confidence,rpc.source_record_id,
-        r.id AS race_id,r.race_date,${canonicalStartMethodSql()} AS start_method,r.distance_m,
-        rr.placing,sr.fetched_at AS source_selected_at,
-        ROW_NUMBER() OVER (PARTITION BY rpc.race_entry_id,rpc.checkpoint_key ORDER BY julianday(sr.fetched_at) DESC,rpc.id DESC) AS row_number
-      FROM race_position_checkpoints rpc
-      JOIN source_records sr ON sr.id=rpc.source_record_id
-      JOIN race_entries re ON re.id=rpc.race_entry_id
-      JOIN races r ON r.id=re.race_id
-      JOIN tracks t ON t.id=r.track_id
+    WITH eligible_entries AS MATERIALIZED (
+      SELECT re.id AS race_entry_id,r.id AS race_id,r.race_date,
+        ${canonicalStartMethodSql()} AS start_method,r.distance_m,rr.placing
+      FROM tracks t
+      JOIN races r ON r.track_id=t.id
+      JOIN race_entries re INDEXED BY idx_entries_race ON re.race_id=r.id
       JOIN race_results rr ON rr.race_entry_id=re.id
       LEFT JOIN source_records rrs ON rrs.id=rr.source_record_id
-      WHERE ${conditions.join(' AND ')}
+      WHERE ${entryConditions.join(' AND ')}
+    ),
+    ranked AS (
+      SELECT rpc.id,rpc.race_entry_id,rpc.position_rank,rpc.meters_behind_leader,
+        rpc.field_coverage,rpc.longitudinal_confidence,rpc.source_record_id,
+        e.race_id,e.race_date,e.start_method,e.distance_m,e.placing,
+        sr.fetched_at AS source_selected_at,
+        ROW_NUMBER() OVER (
+          PARTITION BY rpc.race_entry_id,rpc.checkpoint_key
+          ORDER BY julianday(sr.fetched_at) DESC,rpc.id DESC
+        ) AS row_number
+      FROM eligible_entries e
+      JOIN race_position_checkpoints rpc INDEXED BY idx_position_checkpoints_entry_analysis
+        ON rpc.race_entry_id=e.race_entry_id
+      JOIN source_records sr ON sr.id=rpc.source_record_id
+      WHERE ${checkpointConditions.join(' AND ')}
     )
     SELECT * FROM ranked WHERE row_number=1 ORDER BY race_date,race_id,race_entry_id
-  `).bind(...bindings).all();
+  `).bind(...entryBindings, ...checkpointBindings).all();
   return (results || []).map((row)=>({
     raceEntryId:row.race_entry_id,raceId:row.race_id,raceDate:row.race_date,startMethod:row.start_method,
     distanceM:finiteOrNull(row.distance_m),placing:finiteOrNull(row.placing),positionRank:finiteOrNull(row.position_rank),
