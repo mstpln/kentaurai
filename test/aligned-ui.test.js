@@ -126,6 +126,9 @@ test('Bana Bananalys uses the agreed compact filters, winner focus and analysis 
   assert.match(html, /Vinnarscenario/);
   assert.match(html, /Breddat underlag/);
   assert.match(html, /track-analysis-copy:before/);
+  assert.match(html, /track-analysis-copy ul/);
+  assert.match(html, /const copy=\(data\.short_analysis\|\|\[\]\)\.length\?'<ul>'/);
+  assert.match(html, /map\(x=>'<li>'\+esc\(x\)\+'<\/li>'\)/);
   assert.match(html, /Bananalysen kunde inte läsas just nu/);
   assert.match(html, /current\.startMethod!==requestMethod/);
   assert.match(html, /current\.distanceGroup!==requestDistance/);
