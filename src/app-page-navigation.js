@@ -93,6 +93,10 @@ function currentView(){
     gameOffsets:copyObject(state.gameOffsets),
     gameDetail:state.gameDetail||null,
     gameSystemId:state.gameSystemId||null,
+    upcomingRound:state.upcomingRound||null,
+    upcomingLeg:Number(state.upcomingLeg||1),
+    trackDetail:state.trackDetail||null,
+    trackTab:state.trackTab||'overview',
     startHistoryOffsets:copyObject(state.startHistoryOffsets),
     linkedHorseOffsets:copyObject(state.linkedHorseOffsets),
     settingsOpen:Boolean(state.settingsOpen),
@@ -165,6 +169,10 @@ function restoreShared(view){
   state.gameSort=view.gameSort||'latest';
   state.gameOffsets=copyObject(view.gameOffsets);
   state.gameSystemId=view.gameSystemId||null;
+  state.upcomingRound=view.upcomingRound||null;
+  state.upcomingLeg=Number(view.upcomingLeg||1);
+  state.trackDetail=view.trackDetail||null;
+  state.trackTab=view.trackTab||'overview';
   state.startHistoryOffsets=copyObject(view.startHistoryOffsets);
   state.linkedHorseOffsets=copyObject(view.linkedHorseOffsets);
   state.settingsTab='data';
