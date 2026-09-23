@@ -320,3 +320,10 @@ The external-analysis production release was accepted after:
 - Root cause in code review: Bananalys evidence queries began from nationwide X-Labs position tables and only later joined to the selected track/context. Step 1 embeds Bananalys and can request several track/distance contexts in one export, multiplying those broad scans.
 - The fix keeps the same calculations and output contract but changes C3/C4 reads to first materialize eligible race entries for the selected track/country, start method, distance and as-of cutoff, then probe X-Labs evidence by `race_entry_id` through existing entry-first indexes.
 - No facts, feature definitions, market-blind rules, model weights, private data or production racing rows are changed.
+
+
+## Step 1 D1 CPU root-cause fix
+- Codex review of the still-failing production export identified the dominant remaining cost in `xlabs-evidence-profiles-v1.js`: nationwide X-Labs ranking/population CTEs were rebuilt for every one of the eight target races.
+- The fix batches the round at the shared Step 1 cutoff, pushes target horse IDs inside the X-Labs ranking scope, and shards nationwide population aggregation into bounded calendar-month queries before deterministically merging counts/sums back to the existing aggregate contract.
+- The already-built Step 1 relevant-history map is now reused by performance, equipment and person-context feature builders instead of being rebuilt three additional times.
+- No analysis definition, market-blind boundary, model weight or output contract changes are intended. Population means are reconstructed from exact shard sums/counts rather than averaging shard averages.
