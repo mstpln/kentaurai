@@ -252,6 +252,10 @@ A single race must not directly change model weights. Candidate learnings are re
 5. The common first Hemmatränare page should not execute the same expensive latest-observation pipeline twice merely to obtain total count.
 6. Bana → Bananalys uses the same sliders-icon/dropdown filter language as the rest of Statistik. The lane table keeps Spets/Topp 3 at 200 m but presents only **Spets vs. snittet** as the comparison column; median position is not shown. The scenario table is winner-focused: **Seger % / Andel vinnare / Vinst vs. snittet / Underlag**; occurrence, Topp 3 and raw baseline columns remain available in the derived data contract but are not shown in this UI.
 7. Bananalys short copy summarizes practical lane-to-lead/early-position patterns and where winners come from, using natural Swedish and `snittet` rather than internal `baseline` language. Deterministic sample/backoff safeguards remain unchanged.
+8. Bananalys lane calculations use only reliable C3 ranks: full-field checkpoint coverage plus sufficient longitudinal confidence. Voltstart lane statistics are restricted to the ground-distance tier (`start_tier = 1`); handicap/tillägg tiers must never be mixed into a lane effect for the base start line.
+9. Short-analysis comparison claims require a normal per-lane/winner sample and conservative uncertainty separation from the same-context Swedish comparison set. Raw table deltas may still be displayed, but the narrative must not promote small-sample noise into a track conclusion.
+10. Winner-scenario coverage uses winner entries, not distinct races, so dead heats and ambiguous multi-winner factual states cannot overstate scenario coverage. Winner-share prose explicitly refers to winners whose scenario could be classified.
+11. `Kort analys` is presented as bullet points for scanability; this is presentation only and does not change the deterministic calculation contract.
 
 
 ## X-Labs trip reconstruction quarantines only proven deterministic duplicate-target sources
