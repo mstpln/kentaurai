@@ -70,6 +70,18 @@ test('critical detail statistics render defers filter options and specialty read
 });
 
 
+test('horse trip scenarios load independently and distinguish loading empty and error states', () => {
+  const script = statsScriptFrom(enhanced());
+  assert.match(script, /calendar-trip-scenarios\?'/);
+  assert.match(script, /id="entityDetailTripScenarios"/);
+  assert.match(script, /Läser löpningsscenario…/);
+  assert.match(script, /Ingen löpningsscenariostatistik för valt urval\./);
+  assert.match(script, /Kunde inte läsa löpningsscenario\./);
+  assert.doesNotMatch(script, /specialtyContent\([^\n]*tripScenarioResults/);
+  assert.match(script, /tripScenarioPromise=s\.page==='horses'/);
+  assert.match(script, /scenarioTable\(result\?\.data\?\.tripScenarioResults,'ready'\)/);
+});
+
 test('detail pages reuse the exact start-page sliders icon and year-based selector', () => {
   const html = enhanced();
   assert.match(html, /M4 7h10M18 7h2M14 4v6M4 17h2M10 17h10M10 14v6/);
