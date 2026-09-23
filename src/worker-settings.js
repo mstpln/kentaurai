@@ -13,6 +13,7 @@ import {
 import { getEnhancedGameHistoryDetail } from './routes/game-detail-display.js';
 import { getFilteredEntityStatBreakdowns } from './routes/entity-stat-breakdowns.js';
 import { getTrackDetail, getTrackHomeTrainers, getTrackLaneStats, listTracks } from './routes/tracks.js';
+import { getTrackAnalysisV1 } from './track-analysis-v1.js';
 import { getHorseDetailStatistics, getHorseFilterOptions, getHorseRankings } from './statistics/horses.js';
 import { getTrendFilterOptions, getTrendLeaderboard } from './statistics/trend.js';
 import { enhanceHorseStatisticsHtml } from './horse-statistics-ui.js';
@@ -225,6 +226,22 @@ export default {
         const data = await getTrackHomeTrainers(env, decodeURIComponent(trackHomeTrainerMatch[1]), {
           limit: url.searchParams.get('limit'),
           offset: url.searchParams.get('offset')
+        });
+        return data ? json(data) : json({ error: 'not_found' }, 404);
+      } catch (error) {
+        console.error(error);
+        return json({ error: 'request_failed', message: error.message }, 400);
+      }
+    }
+
+    const trackAnalysisMatch = path.match(/^\/app\/api\/tracks\/([^/]+)\/analysis$/);
+    if (request.method === 'GET' && trackAnalysisMatch) {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        const data = await getTrackAnalysisV1(env, decodeURIComponent(trackAnalysisMatch[1]), {
+          startMethod: url.searchParams.get('start_method'),
+          distanceGroup: url.searchParams.get('distance_group')
         });
         return data ? json(data) : json({ error: 'not_found' }, 404);
       } catch (error) {

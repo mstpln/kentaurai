@@ -229,6 +229,9 @@ test('external workflow exposes independent Step 1, Step 2 and registration cont
 
   assert.match(getExternalAnalysisStep1Prompt('openai'), /Marknadsblind analys/);
   assert.match(getExternalAnalysisStep1Prompt('openai'), /Bygg inget system/);
+  assert.match(getExternalAnalysisStep1Prompt('openai'), /track_analysis/);
+  assert.match(getExternalAnalysisStep1Prompt('openai'), /dubbelräkna inte/);
+  assert.match(getExternalAnalysisStep1Prompt('openai'), /Baseline/);
   assert.match(getExternalAnalysisStep2Prompt('anthropic'), /Marknadsanalys/);
   assert.match(getExternalAnalysisStep2Prompt('anthropic'), /Bygg inget system/);
   assert.doesNotMatch(getExternalAnalysisStep2Prompt('anthropic'), /SYSTEMREGLER/);

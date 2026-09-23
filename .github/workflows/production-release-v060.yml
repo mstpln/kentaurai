@@ -135,6 +135,10 @@ jobs:
           grep -q 'idx_xlabs_position_quarantine_job' /tmp/xlabs-position-quarantine-schema-check.txt
           grep -q 'idx_xlabs_position_quarantine_source' /tmp/xlabs-position-quarantine-schema-check.txt
 
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT name FROM d1_migrations WHERE name='0038_track_analysis_v1.sql'; SELECT name FROM sqlite_master WHERE type='index' AND name='idx_position_checkpoints_track_analysis';" > /tmp/track-analysis-schema-check.txt
+          grep -q '0038_track_analysis_v1.sql' /tmp/track-analysis-schema-check.txt
+          grep -q 'idx_position_checkpoints_track_analysis' /tmp/track-analysis-schema-check.txt
+
           grep -q 'idx_races_track_date' /tmp/migration-check.txt
           grep -q 'idx_odds_entry_time' /tmp/migration-check.txt
           grep -q 'idx_equipment_entry' /tmp/migration-check.txt
@@ -219,6 +223,7 @@ jobs:
             '/app/api/settings/f4-step2-bundle?round_id=private-probe' \
             '/app/api/settings/f3-operational-status' \
             '/app/api/settings/external-rounds?scope=analysis' \
+            '/app/api/tracks/private-probe/analysis?start_method=all&distance_group=all' \
             '/app/api/settings/external-step1-prompt?provider=openai' \
             '/app/api/settings/external-market?round_id=private-probe' \
             '/app/api/settings/external-step2-prompt?provider=openai' \
@@ -265,4 +270,4 @@ jobs:
         run: |
           echo 'KentaurAI v0.6.0 production release completed.'
           echo "Worker: $WORKER_URL"
-          echo 'Required production schema through migration 0034, Settings alert acknowledgement storage, track physical-profile storage, X-Labs interval repair state, external analysis lineage/evidence storage, external F1/F2 evidence integration, worker-v078 runtime, controlled legacy boundary, exact app version, health, login and private route checks passed.'
+          echo 'Required production schema through migration 0038, Settings alert acknowledgement storage, track physical-profile and Bananalys read-index storage, X-Labs interval repair state, external analysis lineage/evidence storage, external F1/F2 evidence integration, worker-v078 runtime, controlled legacy boundary, exact app version, health, login and private route checks passed.'

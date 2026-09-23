@@ -20,7 +20,7 @@ Production release #64 is the currently deployed baseline. The production entryp
 10. Registered analysis/system data feeds Spel plus external-aware F1 replay and F2 post-race diagnostics. Historical sealed-v3 paths remain compatibility-only.
 
 
-C4 named X-Labs trip labels are implemented as a conservative calculated layer on top of C3. Stable evidence around 500 m remaining can populate the existing `race_positions` model as `calculated_xlabs`; production backfill is still an explicit workflow-dispatch action rather than a release side effect, and unsupported/ambiguous labels remain null.
+C4 named X-Labs trip labels are implemented as a conservative calculated layer on top of C3. Stable evidence around 500 m remaining populates the existing `race_positions` model as `calculated_xlabs`; the bounded production reconstruction through the current stored historical target interval is complete, while unsupported/ambiguous labels remain null.
 
 The current build contains:
 - D1 normalized relational schema and provenance model
@@ -39,7 +39,7 @@ The current build contains:
 - paginated full start-history reads per horse/trainer/driver, with all stored measurement families enriched only for the current page
 - paginated linked-horse history for trainer/driver profiles
 - Trend workspace with category/time-period controls
-- Bana list/detail with Översikt, Spårstatistik and Hemmatränare; track statistics combine period, start method, distance, STL class and race type
+- Bana list/detail with Banprofil, Bananalys, Spårstatistik and Hemmatränare; Bananalys combines deterministic 200 m start-position evidence and conservative C4 trip scenarios with same-country baselines and transparent sample/backoff handling
 - nullable track address/website presentation with fact-level provenance for private enrichment
 - structured physical track profiles with provenance-backed width/curve/banking facts and distance-specific first-turn distances; values distinguish verified measurements from deterministic calculations and preserve unknowns/conflicts
 - Spel area with Översikt / V85 / V86 plus saved-round post-race detail
@@ -68,7 +68,7 @@ Trend is the first primary workspace. It switches between Tränare / Hästar / K
 
 Entity detail views group profile/activity data and measured start history instead of flattening every field into one page. Stored race/start/result facts, market/odds histories, equipment, X-Labs, positions, conditions, calculated features, AI analyses and structured editorial signals are separated into natural sections. Unknown facts remain null/unknown. Start history is paginated rather than capped to a fixed latest-100 window, so the same interface can support the planned multi-year backfill.
 
-Bana is a factual workspace inside Statistik. Track overview presents only stored facts and hides missing contact fields. The user-facing country label is localized while DB/API country codes remain unchanged. Spårstatistik uses deterministic race classifications and applies all selected filters with AND semantics; the all/default period label remains literally `All data`.
+Bana is a factual workspace inside Statistik. Banprofil presents stored physical facts and hides missing contact fields. Bananalys is a separate deterministic derived workspace with Alla/Auto/Volt and distance context, individual 200 m lane outcomes, C4 trip-scenario/winner profiles, same-country baselines and explicit sample/backoff metadata. The user-facing country label is localized while DB/API country codes remain unchanged. Spårstatistik remains the detailed factual lane-statistics inspector and applies its existing filters with AND semantics; the all/default period label remains literally `All data`.
 
 Analys is a primary workspace for the existing external-AI round workflow, including blind analysis, market analysis, external evidence registration and system registration. Settings is data-only and no longer owns a separate AI/Data tab switcher.
 

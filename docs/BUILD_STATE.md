@@ -272,3 +272,14 @@ The external-analysis production release was accepted after:
 - All other reconstruction failures preserve the existing retry-three-times/fail-closed behavior and do not advance the cursor.
 - The production release workflow verifies the new quarantine schema before Worker deployment.
 - Merging/deploying this code does not resume the stopped production reconstruction job. Resumption remains a separate explicit production action.
+
+
+## Track analysis v1 candidate
+- Branch: `feature/track-analysis-v1`.
+- Bana is split into **Banprofil / Bananalys / Spårstatistik / Hemmatränare**; the former empty Bananalys placeholder is removed from Banprofil.
+- Bananalys uses persisted C3 rank at 200 m for individual lanes and persisted conservative C4 labels around 500 m remaining. Auto and volt stay separate when Startmetod = Alla.
+- Baseline is the same country/context excluding the current track. Exact data remains visible; 10-24 races is limited, <10 uses transparent interpretation backoff, and 25+ is normally interpretable.
+- Step 1 export receives the same deterministic track-analysis contract plus relevant historical C4 labels; market data remains excluded and Step 2/Step 3 contracts are unchanged.
+- The user-facing Step 1 copy prompt explains sample, baseline/backoff and double-counting rules. No new AI call, gallop localization or separate aggregate backfill is introduced.
+- Migration `0038_track_analysis_v1.sql` adds only the composite C3 checkpoint read index required by the new 100 m/200 m analysis path; it introduces no new derived storage.
+- The bounded C4 production reconstruction for the current stored target interval is complete; unsupported/ambiguous labels remain null.
