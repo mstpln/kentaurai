@@ -334,16 +334,16 @@ function laneSummary(section, multipleMethods) {
   ];
   if (leadBetter.length || leadWorse.length) {
     const parts = [];
-    if (leadBetter.length) parts.push(`spår ${swedishList(leadBetter)} når spets oftare än snittet`);
-    if (leadWorse.length) parts.push(`spår ${swedishList(leadWorse)} gör det mer sällan`);
+    if (leadBetter.length) parts.push(`Spår ${swedishList(leadBetter)} når spets oftare än snittet`);
+    if (leadWorse.length) parts.push(`${leadBetter.length?'spår':'Spår'} ${swedishList(leadWorse)} gör det mer sällan`);
     sentences.push(`${parts.join(', medan ')}.`);
   } else {
     sentences.push('Spetsutfallet per spår ligger överlag nära snittet.');
   }
   if (positionBetter.length || positionWorse.length) {
     const parts = [];
-    if (positionBetter.length) parts.push(`spår ${swedishList(positionBetter)} ger oftare en plats bland de tre främsta efter 200 m`);
-    if (positionWorse.length) parts.push(`spår ${swedishList(positionWorse)} gör det mer sällan`);
+    if (positionBetter.length) parts.push(`Spår ${swedishList(positionBetter)} ger oftare en plats bland de tre främsta efter 200 m`);
+    if (positionWorse.length) parts.push(`${positionBetter.length?'spår':'Spår'} ${swedishList(positionWorse)} gör det mer sällan`);
     sentences.push(`${parts.join(', medan ')} jämfört med snittet.`);
   }
   return sentences.join(' ');
