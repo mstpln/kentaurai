@@ -313,3 +313,10 @@ The external-analysis production release was accepted after:
 - Scenario win-rate timing is intentionally asymmetric: `Spets` is measured from the reliable 500 m-after-start C3 checkpoint; all other named C4 positions remain measured around 500 m remaining.
 - The scenario table exposes the measurement point per row and compares scenario win rate, not winner-share, against the same-country baseline.
 - No model weights, market logic, Spårstatistik tab ownership or production data are changed by this build.
+
+
+## Step 1 D1 CPU-limit follow-up
+- A production Step 1 export exposed `D1_ERROR: D1 DB exceeded its CPU time limit and was reset` after Bananalys added additional 500 m scenario reads.
+- Root cause in code review: Bananalys evidence queries began from nationwide X-Labs position tables and only later joined to the selected track/context. Step 1 embeds Bananalys and can request several track/distance contexts in one export, multiplying those broad scans.
+- The fix keeps the same calculations and output contract but changes C3/C4 reads to first materialize eligible race entries for the selected track/country, start method, distance and as-of cutoff, then probe X-Labs evidence by `race_entry_id` through existing entry-first indexes.
+- No facts, feature definitions, market-blind rules, model weights, private data or production racing rows are changed.
