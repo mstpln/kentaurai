@@ -94,12 +94,29 @@ test('track analysis uses 200m lanes and same-country exact-context baseline', a
   assert.equal(lane1.baseline.lead_rate,0);
   assert.equal(lane1.lead_delta_pp,100);
   assert.equal(data.start_position_100m.sections[0].rows.find(row=>row.lane===1).lead_rate,1);
+  assert.equal(data.coverage.position_200m.observation_coverage,1);
+  assert.equal(data.coverage.trip_scenario.winner_scenario_coverage,1);
   assert.equal(data.analysis_support,null);
   assert.equal(data.track_context.home_stretch_m.value,190);
   const leader=data.trip_scenario_500m_remaining.rows.find(row=>row.scenario_key==='leader');
   assert.equal(leader.wins,12);
   assert.equal(leader.baseline.wins,undefined);
   assert.equal(leader.baseline.winner_share,0);
+});
+
+
+test('track analysis coverage denominators expose missing 200m and winner-scenario evidence', async () => {
+  const {env,db}=createTestEnv();
+  seedTrackAnalysis(db);
+  db.prepare("DELETE FROM race_position_checkpoints WHERE id='cp-200m-entry-1'").run();
+  db.prepare("DELETE FROM race_positions WHERE id='pos-entry-1'").run();
+  const data=await getTrackAnalysisV1(env,'track-a',{startMethod:'auto',distanceGroup:'2140'});
+  assert.equal(data.coverage.eligible.lane_starts,36);
+  assert.equal(data.coverage.position_200m.observations,35);
+  assert.equal(data.coverage.position_200m.observation_coverage,0.9722);
+  assert.equal(data.coverage.eligible.winner_races,12);
+  assert.equal(data.coverage.trip_scenario.winners_with_scenario,11);
+  assert.equal(data.coverage.trip_scenario.winner_scenario_coverage,0.9167);
 });
 
 test('track analysis retains exact sparse metrics while broadening interpretation support', async () => {
