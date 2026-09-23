@@ -300,8 +300,111 @@ function aggregateScenarios(rows,baselineRows) {
 
 function coverage(pos100,pos200,scen,eligible){const races=new Set(scen.map(r=>r.raceId)),wins=new Set(scen.filter(r=>r.placing===1).map(r=>r.raceId));return {eligible:{official_starts:eligible.officialStarts,official_races:eligible.officialRaces,lane_starts:eligible.laneStarts,winner_races:eligible.winnerRaces},position_100m:{observations:pos100.length,races:new Set(pos100.map(r=>r.raceId)).size,observation_coverage:round(ratio(pos100.length,eligible.laneStarts))},position_200m:{observations:pos200.length,races:new Set(pos200.map(r=>r.raceId)).size,observation_coverage:round(ratio(pos200.length,eligible.laneStarts))},trip_scenario:{observations:scen.length,races_with_any_scenario:races.size,observation_coverage:round(ratio(scen.length,eligible.officialStarts)),winners_with_scenario:wins.size,winner_scenario_coverage:round(ratio(wins.size,eligible.winnerRaces))}};}
 function sourcePeriod(a,b){const d=[...a,...b].map(r=>r.raceDate).filter(Boolean).sort();return {first_race_date:d[0]||null,last_race_date:d.at(-1)||null};}
-function strongestObservedLane(sections){return sections.flatMap(s=>s.rows.map(r=>({...r,method:s.start_method}))).filter(r=>r.observations>=10&&r.lead_rate!=null).sort((a,b)=>b.lead_rate-a.lead_rate||b.observations-a.observations||a.lane-b.lane)[0]||null;}
-function buildSummary({selectedSample,basis,start100Sections,start200Sections,scenarioRows}){const out=[];if(basis.backoff_level!=='exact')out.push(`Den valda kombinationen har ${selectedSample.races} lopp med klassificerat scenario. Analysen är därför breddad till ${basis.label} (${basis.races} lopp).`);else if(basis.sample_status==='limited')out.push(`Underlaget är begränsat till ${basis.races} lopp för den valda kombinationen.`);else if(basis.sample_status==='sparse')out.push(`Underlaget är tunt: ${basis.races} lopp med klassificerat scenario finns tillgängliga.`);const lane=strongestObservedLane(start200Sections);if(lane){const m=start200Sections.length>1?` ${lane.method==='auto'?'auto':'volt'}`:'',base=lane.baseline?.lead_rate;const early=start100Sections.find(s=>s.start_method===lane.method)?.rows?.find(r=>r.lane===lane.lane);const earlyText=early?.lead_rate==null?'':` Efter 100 m är motsvarande spetsandel ${Math.round(early.lead_rate*100)} % av ${early.observations} observationer.`;out.push(`Högst observerad spetsandel efter 200 m är spår ${lane.lane}${m}: ${Math.round(lane.lead_rate*100)} % av ${lane.observations} observationer${base==null?'':` mot ${Math.round(base*100)} % i baseline`}.${earlyText}`);}const leader=scenarioRows.find(r=>r.scenario_key==='leader');if(leader?.winner_share!=null&&leader.starts>=10){const base=leader.baseline?.winner_share;out.push(`Spets står för ${Math.round(leader.winner_share*100)} % av vinnarna med klassificerat scenario${base==null?'':` mot ${Math.round(base*100)} % i baseline`}.`);}return out.slice(0,3);}
+function swedishList(values) {
+  const items = values.filter(Boolean).map(String);
+  if (!items.length) return '';
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} och ${items[1]}`;
+  return `${items.slice(0,-1).join(', ')} och ${items.at(-1)}`;
+}
+
+function scenarioPhrase(key) {
+  if (key === 'back') return 'längre bak i fältet';
+  return SCENARIO_LABELS[key]?.toLowerCase() || key;
+}
+
+function laneSummary(section, multipleMethods) {
+  const rows = (section?.rows || []).filter((row) =>
+    row.observations >= TRACK_ANALYSIS_SAMPLE_POLICY.limitedMinRaces &&
+    row.lead_rate != null
+  );
+  if (!rows.length) return null;
+
+  const method = multipleMethods ? `${section.label}: ` : '';
+  const strongest = [...rows].sort((a,b) =>
+    b.lead_rate-a.lead_rate || b.observations-a.observations || a.lane-b.lane
+  )[0];
+  const leadBetter = rows.filter((row) => row.lead_delta_pp != null && row.lead_delta_pp >= 3).map((row) => row.lane);
+  const leadWorse = rows.filter((row) => row.lead_delta_pp != null && row.lead_delta_pp <= -3).map((row) => row.lane);
+  const positionBetter = rows.filter((row) => row.top3_delta_pp != null && row.top3_delta_pp >= 5).map((row) => row.lane);
+  const positionWorse = rows.filter((row) => row.top3_delta_pp != null && row.top3_delta_pp <= -5).map((row) => row.lane);
+
+  const sentences = [
+    `${method}Spår ${strongest.lane} når spets oftast efter 200 m (${Math.round(strongest.lead_rate*100)} %).`
+  ];
+  if (leadBetter.length || leadWorse.length) {
+    const parts = [];
+    if (leadBetter.length) parts.push(`spår ${swedishList(leadBetter)} når spets oftare än snittet`);
+    if (leadWorse.length) parts.push(`spår ${swedishList(leadWorse)} gör det mer sällan`);
+    sentences.push(`${parts.join(', medan ')}.`);
+  } else {
+    sentences.push('Spetsutfallet per spår ligger överlag nära snittet.');
+  }
+  if (positionBetter.length || positionWorse.length) {
+    const parts = [];
+    if (positionBetter.length) parts.push(`spår ${swedishList(positionBetter)} ger oftare en plats bland de tre främsta efter 200 m`);
+    if (positionWorse.length) parts.push(`spår ${swedishList(positionWorse)} gör det mer sällan`);
+    sentences.push(`${parts.join(', medan ')} jämfört med snittet.`);
+  }
+  return sentences.join(' ');
+}
+
+function scenarioWinnerSummary(rows) {
+  const eligible = (rows || []).filter((row) =>
+    row.starts >= TRACK_ANALYSIS_SAMPLE_POLICY.limitedMinRaces &&
+    row.winner_share != null
+  );
+  if (!eligible.length) return null;
+  const strongest = [...eligible].sort((a,b) =>
+    b.winner_share-a.winner_share || b.starts-a.starts
+  )[0];
+  const delta = strongest.winner_share_delta_pp;
+  let comparison = '';
+  if (delta != null) {
+    if (Math.abs(delta) < 1.5) comparison = ' Det är ungefär i nivå med snittet.';
+    else if (delta >= 5) comparison = ' Det är tydligt oftare än snittet.';
+    else if (delta >= 1.5) comparison = ' Det är något oftare än snittet.';
+    else if (delta <= -5) comparison = ' Det är tydligt mer sällan än snittet.';
+    else comparison = ' Det är något mer sällan än snittet.';
+  }
+  let text = `Flest vinnare kommer från ${scenarioPhrase(strongest.scenario_key)}: ${Math.round(strongest.winner_share*100)} % av vinnarna har legat där runt 500 m kvar.${comparison}`;
+
+  const deviations = eligible
+    .filter((row) => row.scenario_key !== strongest.scenario_key && row.winner_share_delta_pp != null && Math.abs(row.winner_share_delta_pp) >= 2)
+    .sort((a,b) => Math.abs(b.winner_share_delta_pp)-Math.abs(a.winner_share_delta_pp));
+  const more = deviations.filter((row) => row.winner_share_delta_pp > 0).slice(0,2).map((row) => scenarioPhrase(row.scenario_key));
+  const less = deviations.filter((row) => row.winner_share_delta_pp < 0).slice(0,2).map((row) => scenarioPhrase(row.scenario_key));
+  if (more.length || less.length) {
+    const parts = [];
+    if (more.length) parts.push(`Vinnare kommer också oftare från ${swedishList(more)} än snittet`);
+    if (less.length) parts.push(`${swedishList(less)} är mindre vanliga vinnarlägen`);
+    text += ` ${parts.join(', medan ')}.`;
+  } else {
+    text += ' I övrigt ligger vinnarprofilen nära snittet.';
+  }
+  return text;
+}
+
+function buildSummary({selectedSample,basis,start100Sections,start200Sections,scenarioRows}) {
+  const out = [];
+  const laneSections = (start200Sections || []).filter((section) => section.observations > 0);
+  const multipleMethods = laneSections.length > 1;
+  for (const section of laneSections) {
+    const summary = laneSummary(section,multipleMethods);
+    if (summary) out.push(summary);
+  }
+  const winnerSummary = scenarioWinnerSummary(scenarioRows);
+  if (winnerSummary) out.push(winnerSummary);
+
+  if (basis.backoff_level !== 'exact') {
+    out.push(`Underlaget för den valda kombinationen är tunt, så analysen använder även ${basis.label.toLowerCase()} som stöd.`);
+  } else if (basis.sample_status === 'limited') {
+    out.push(`Underlaget är begränsat till ${basis.races} lopp, så slutsatserna bör läsas med viss försiktighet.`);
+  } else if (basis.sample_status === 'sparse') {
+    out.push(`Underlaget är tunt: ${basis.races} lopp finns tillgängliga.`);
+  }
+  return out.slice(0,4);
+}
 
 async function loadTrackContext(env,trackId,{startMethod,distanceGroup,asOf}){
   const cond=["track_id=?","status='active'"],bind=[trackId],date=asOf?String(asOf).slice(0,10):null;
