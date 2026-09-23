@@ -1,0 +1,56 @@
+name: Diagnose production trip scenarios
+
+on:
+  push:
+    branches:
+      - diagnose-trip-scenarios-prod
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Read aggregate production status
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          D1_DATABASE_ID: d8189e0e-6127-4ef2-88cc-534cb2217340
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          echo "::add-mask::$CLOUDFLARE_API_TOKEN"
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$D1_DATABASE_ID/query"
+          out="$(mktemp)"
+          trap 'rm -f "$out"' EXIT
+
+          query() {
+            local sql="$1"
+            local code
+            code="$(curl --silent --show-error --output "$out" --write-out '%{http_code}'               --request POST               --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN"               --header 'Content-Type: application/json'               --data "$(jq -cn --arg sql "$sql" '{sql:$sql}')"               "$api")"
+            [[ "$code" == "200" ]]
+            jq -e '.success == true and (.result | length >= 1) and (.result | all(.success == true))' "$out" >/dev/null
+            jq -c '.result[0].results'
+          }
+
+          echo "=== TRIP_JOB ==="
+          query "SELECT status,start_date,end_date,processed_sources,inserted_rows,skipped_rows,consecutive_errors,last_run_at,(last_error IS NOT NULL) AS has_error FROM xlabs_position_reconstruction_jobs WHERE id='xposjob_xlabs-trip-classification-v1__existing' LIMIT 1;"
+
+          echo "=== SOURCE_INVENTORY ==="
+          query "SELECT COUNT(*) AS stored_sources,MIN(SUBSTR(external_id,1,10)) AS min_date,MAX(SUBSTR(external_id,1,10)) AS max_date FROM source_records WHERE source_type='xlabs_race_json' AND raw_object_key IS NOT NULL;"
+
+          echo "=== CLASSIFICATION_TOTALS ==="
+          query "SELECT COUNT(*) AS rows,COUNT(DISTINCT race_entry_id) AS entries,COUNT(DISTINCT source_record_id) AS source_records FROM race_positions WHERE classification_version='xlabs-trip-classification-v1';"
+
+          echo "=== CLASSIFICATION_BY_SCENARIO ==="
+          query "SELECT CASE WHEN leader=1 THEN 'leader' WHEN pocket=1 THEN 'pocket' WHEN death_seat=1 THEN 'death_seat' WHEN second_over=1 THEN 'second_over' WHEN third_over=1 THEN 'third_over' WHEN json_extract(event_json,'$.scenario_key')='back' THEN 'back' ELSE 'unknown' END AS scenario,COUNT(*) AS rows FROM race_positions WHERE classification_version='xlabs-trip-classification-v1' GROUP BY scenario ORDER BY scenario;"
+
+          echo "=== UI_ELIGIBLE_BY_YEAR ==="
+          query "SELECT SUBSTR(r.race_date,1,4) AS year,COUNT(*) AS rows,COUNT(DISTINCT re.horse_id) AS horses,COUNT(DISTINCT r.id) AS races FROM race_positions rp JOIN race_entries re ON re.id=rp.race_entry_id JOIN races r ON r.id=re.race_id JOIN race_results rr ON rr.race_entry_id=re.id WHERE rp.classification_version='xlabs-trip-classification-v1' AND re.horse_id IS NOT NULL AND re.scratched=0 GROUP BY SUBSTR(r.race_date,1,4) ORDER BY year DESC;"
+
+          echo "=== NORMALIZE_RUNS ==="
+          query "SELECT status,COUNT(*) AS runs FROM import_runs WHERE source_type='xlabs_position_reconstruction_v1_normalize' GROUP BY status ORDER BY status;"
