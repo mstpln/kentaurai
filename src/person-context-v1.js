@@ -23,7 +23,7 @@ function dedupe(refs){const m=new Map();for(const ref of refs.filter(Boolean))m.
 export async function buildPersonContextV1ForEntries(env,raceEntryIds,asOf,options={}){
   if(!env?.DB)throw new Error('DB is not configured');if(!Array.isArray(raceEntryIds))throw new Error('raceEntryIds must be an array');
   const requested=personContextInstant(asOf),ids=[...new Set(raceEntryIds.map((v)=>String(v??'').trim()).filter(Boolean))];if(!ids.length)return new Map();
-  const [targets,relevant]=await Promise.all([loadPersonContextTargets(env,ids),buildRelevantHistoryForEntries(env,ids,requested.iso,options.relevantHistoryOptions||{})]);
+  const targets=await loadPersonContextTargets(env,ids),relevant=options.relevantHistory instanceof Map?options.relevantHistory:await buildRelevantHistoryForEntries(env,ids,requested.iso,options.relevantHistoryOptions||{});
   const groups=new Map();
   for(const id of ids){const cutoff=personContextInstant(relevant.get(id)?.targetCutoff,`targetCutoff for ${id}`);if(!groups.has(cutoff.iso))groups.set(cutoff.iso,[]);groups.get(cutoff.iso).push(targets.get(id));}
   const cache=new Map();
