@@ -98,7 +98,7 @@ test('track analysis uses 200m lanes and same-country exact-context baseline', a
   assert.equal(data.coverage.trip_scenario.winner_scenario_coverage,1);
   assert.equal(data.analysis_support,null);
   assert.match(data.short_analysis.join(' '), /Spår 1 når spets oftast efter 200 m/);
-  assert.match(data.short_analysis.join(' '), /Flest vinnare kommer från spets/);
+  assert.match(data.short_analysis.join(' '), /kommer flest från spets/);
   assert.match(data.short_analysis.join(' '), /snittet/);
   assert.doesNotMatch(data.short_analysis.join(' '), /baseline/i);
   assert.doesNotMatch(data.short_analysis.join(' '), /observationer/i);
