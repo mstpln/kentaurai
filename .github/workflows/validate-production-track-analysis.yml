@@ -1,9 +1,7 @@
 name: Validate production track analysis
 
 on:
-  push:
-    branches:
-      - diagnose-trip-scenarios-prod
+  workflow_dispatch:
 
 permissions:
   contents: read
