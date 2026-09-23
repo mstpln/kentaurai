@@ -41,12 +41,15 @@ function seedTrackAnalysis(db) {
         .run(entryId,placing);
 
       const rank200 = pattern === 'lane2' ? (lane === 2 ? 1 : lane === 1 ? 2 : 3) : lane;
-      db.prepare(`INSERT INTO race_position_checkpoints
-        (id,race_entry_id,source_record_id,checkpoint_key,checkpoint_m,frame_index,observed_at,elapsed_ms,
-         leader_progress_m,distance_to_finish_m,position_rank,meters_behind_leader,observed_field_count,
-         active_field_size,field_coverage,local_target_coverage,longitudinal_confidence,reconstruction_version)
-        VALUES (?,?,?,'200m',200,1,'2026-06-01T12:00:00Z',10000,200,1940,?,?,3,3,1,1,1,'xlabs-position-reconstruction-v1')`)
-        .run(`cp-${entryId}`,entryId,'src-x',rank200,rank200 === 1 ? 0 : rank200 * 2);
+      const rank100 = lane;
+      for (const [checkpointKey,checkpointM,rank] of [['100m',100,rank100],['200m',200,rank200]]) {
+        db.prepare(`INSERT INTO race_position_checkpoints
+          (id,race_entry_id,source_record_id,checkpoint_key,checkpoint_m,frame_index,observed_at,elapsed_ms,
+           leader_progress_m,distance_to_finish_m,position_rank,meters_behind_leader,observed_field_count,
+           active_field_size,field_coverage,local_target_coverage,longitudinal_confidence,reconstruction_version)
+          VALUES (?,?,?,?,?,1,'2026-06-01T12:00:00Z',10000,?,1940,?,?,3,3,1,1,1,'xlabs-position-reconstruction-v1')`)
+          .run(`cp-${checkpointKey}-${entryId}`,entryId,'src-x',checkpointKey,checkpointM,checkpointM,rank,rank === 1 ? 0 : rank * 2);
+      }
 
       const scenarioKey = pattern === 'lane1'
         ? (lane === 1 ? 'leader' : lane === 2 ? 'death_seat' : 'back')
@@ -90,6 +93,7 @@ test('track analysis uses 200m lanes and same-country exact-context baseline', a
   assert.equal(lane1.baseline.observations,12);
   assert.equal(lane1.baseline.lead_rate,0);
   assert.equal(lane1.lead_delta_pp,100);
+  assert.equal(data.start_position_100m.sections[0].rows.find(row=>row.lane===1).lead_rate,1);
   assert.equal(data.analysis_support,null);
   assert.equal(data.track_context.home_stretch_m.value,190);
   const leader=data.trip_scenario_500m_remaining.rows.find(row=>row.scenario_key==='leader');
@@ -116,8 +120,8 @@ test('track analysis retains exact sparse metrics while broadening interpretatio
   const supportLane1=data.analysis_support.start_position_200m.sections[0].rows.find(row=>row.lane===1);
   assert.equal(supportLane1.observations,17);
   assert.ok(data.short_analysis[0].includes('breddad'));
-  assert.equal(data.coverage.trip_scenario.races,5);
-  assert.equal(data.analysis_support.coverage.trip_scenario.races,17);
+  assert.equal(data.coverage.trip_scenario.races_with_any_scenario,5);
+  assert.equal(data.analysis_support.coverage.trip_scenario.races_with_any_scenario,17);
 });
 
 test('track analysis as-of excludes sources that were not available before cutoff', async () => {
