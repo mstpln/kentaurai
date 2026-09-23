@@ -296,6 +296,23 @@ test('absolute lane short analysis suppresses flat numerical maxima', async () =
   assert.doesNotMatch(summary,/Spår \d+ ligger tydligt oftast/i);
 });
 
+
+test('absolute lane short analysis needs at least two adequately sampled lanes', async () => {
+  const {env,db}=createTestEnv();
+  seedTrackAnalysis(db);
+  for (let raceIndex=0;raceIndex<6;raceIndex+=1) {
+    db.prepare("DELETE FROM race_position_checkpoints WHERE id=?").run(`cp-200m-entry-${(raceIndex*3)+2}`);
+    db.prepare("DELETE FROM race_position_checkpoints WHERE id=?").run(`cp-200m-entry-${(raceIndex*3)+3}`);
+  }
+  const data=await getTrackAnalysisV1(env,'track-a',{startMethod:'auto',distanceGroup:'2140'});
+  const section=data.start_position_200m.sections[0];
+  assert.equal(section.rows.find(row=>row.lane===1).observations,30);
+  assert.equal(section.rows.find(row=>row.lane===2).observations,24);
+  assert.equal(section.rows.find(row=>row.lane===3).observations,24);
+  assert.doesNotMatch(data.short_analysis.join(' '),/Spår 1 når spets tydligt oftast/i);
+  assert.doesNotMatch(data.short_analysis.join(' '),/Spår 1 ligger tydligt oftast/i);
+});
+
 test('track analysis as-of excludes sources that were not available before cutoff', async () => {
   const {env,db}=createTestEnv();
   seedTrackAnalysis(db);
