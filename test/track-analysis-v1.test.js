@@ -234,7 +234,7 @@ test('scenario win rates use leader after 500m from start and other positions 50
   assert.equal(death.measurement_label,'500 m kvar');
   assert.equal(death.starts,31);
   assert.match(data.short_analysis.join(' '),/ledningen 500 m efter start/);
-  assert.match(data.short_analysis.join(' '),/Med 500 m kvar/);
+  assert.match(data.short_analysis.join(' '),/Bland övriga positioner 500 m kvar/);
   assert.doesNotMatch(data.short_analysis.join(' '),/Bland vinnarna där löpningsscenariot kan klassificeras/i);
 });
 
