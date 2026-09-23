@@ -281,12 +281,19 @@ async function resolveAnalysisBasis(env,trackId,selected) {
   const selectedRaces=await countScenarioRaces(env,trackId,selected), selectedStatus=sampleStatus(selectedRaces);
   if (selectedRaces>=10) return {selectedRaces,selectedStatus,startMethod:selected.startMethod,distanceGroup:selected.distanceGroup,backoffLevel:'exact'};
   const candidates=[];
-  if (selected.startMethod!=='all'&&selected.distanceGroup!=='all') candidates.push(
-    {startMethod:selected.startMethod,distanceGroup:'all',backoffLevel:'track_start_method'},
-    {startMethod:'all',distanceGroup:selected.distanceGroup,backoffLevel:'track_distance'});
-  if (selected.startMethod!=='all'||selected.distanceGroup!=='all') candidates.push({startMethod:'all',distanceGroup:'all',backoffLevel:'track_overall'});
+  // Start method fundamentally changes lane semantics. Interpretation support may broaden
+  // distance, but must never silently cross from auto to volt or vice versa.
+  if (selected.startMethod!=='all'&&selected.distanceGroup!=='all') {
+    candidates.push({startMethod:selected.startMethod,distanceGroup:'all',backoffLevel:'track_start_method'});
+  } else if (selected.startMethod==='all'&&selected.distanceGroup!=='all') {
+    candidates.push({startMethod:'all',distanceGroup:'all',backoffLevel:'track_overall'});
+  }
   let fallback={startMethod:selected.startMethod,distanceGroup:selected.distanceGroup,backoffLevel:'exact',races:selectedRaces};
-  for (const candidate of candidates) { const races=await countScenarioRaces(env,trackId,{...candidate,asOf:selected.asOf}); fallback={...candidate,races}; if (races>=10) break; }
+  for (const candidate of candidates) {
+    const races=await countScenarioRaces(env,trackId,{...candidate,asOf:selected.asOf});
+    fallback={...candidate,races};
+    if (races>=10) break;
+  }
   return {selectedRaces,selectedStatus,startMethod:fallback.startMethod,distanceGroup:fallback.distanceGroup,backoffLevel:fallback.backoffLevel,basisRaces:fallback.races};
 }
 
