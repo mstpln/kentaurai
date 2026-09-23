@@ -97,7 +97,7 @@ test('track analysis uses 200m lanes and same-country exact-context baseline', a
   assert.equal(data.coverage.position_200m.observation_coverage,1);
   assert.equal(data.coverage.trip_scenario.winner_scenario_coverage,1);
   assert.equal(data.analysis_support,null);
-  assert.match(data.short_analysis.join(' '), /Spår 1 når spets oftast efter 200 m/);
+  assert.match(data.short_analysis.join(' '), /Spår 1 når spets tydligt oftast efter 200 m/);
   assert.match(data.short_analysis.join(' '), /tydligt större andel från spets/);
   assert.match(data.short_analysis.join(' '), /snittet/);
   assert.doesNotMatch(data.short_analysis.join(' '), /baseline/i);
@@ -241,6 +241,59 @@ test('winner-scenario short analysis does not promote a flat largest share into 
   assert.match(summary,/inget enskilt scenario som sticker ut tydligt/i);
   assert.doesNotMatch(summary,/kommer flest från/i);
   assert.doesNotMatch(summary,/tydligt större andel från/i);
+});
+
+
+test('all start-method scope excludes unknown methods from Bananalys samples and denominators', async () => {
+  const {env,db}=createTestEnv();
+  seedTrackAnalysis(db);
+  db.prepare("INSERT INTO races (id,track_id,race_date,race_number,distance_m,start_method,status) VALUES ('unknown-method-race','track-a','2026-07-02',1,2140,'unknown','results')").run();
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('unknown-method-horse','Unknown Method Horse')").run();
+  db.prepare("INSERT INTO race_entries (id,race_id,horse_id,start_number,actual_lane,start_tier,handicap_m,actual_start_distance_m,scratched) VALUES ('unknown-method-entry','unknown-method-race','unknown-method-horse',1,1,1,0,2140,0)").run();
+  db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,source_record_id) VALUES ('unknown-method-entry',1,'official','src-result')").run();
+  for (const checkpoint of [100,200]) {
+    db.prepare(`INSERT INTO race_position_checkpoints
+      (id,race_entry_id,source_record_id,checkpoint_key,checkpoint_m,frame_index,observed_at,elapsed_ms,
+       leader_progress_m,distance_to_finish_m,position_rank,meters_behind_leader,observed_field_count,
+       active_field_size,field_coverage,local_target_coverage,longitudinal_confidence,reconstruction_version)
+      VALUES (?,?,?,?,?,1,'2026-07-02T12:00:00Z',10000,?,1940,1,0,1,1,1,1,1,'xlabs-position-reconstruction-v1')`)
+      .run(`unknown-method-cp-${checkpoint}`,'unknown-method-entry','src-x',`${checkpoint}m`,checkpoint,checkpoint);
+  }
+  db.prepare(`INSERT INTO race_positions
+    (id,race_entry_id,observed_at_m,leader,event_json,source_record_id,evidence_type,confidence,classification_version)
+    VALUES ('unknown-method-pos','unknown-method-entry',500,1,?,'src-x','calculated_xlabs',0.95,'xlabs-trip-classification-v1')`)
+    .run(JSON.stringify({scenario_key:'leader'}));
+
+  const data=await getTrackAnalysisV1(env,'track-a',{startMethod:'all',distanceGroup:'2140'});
+  assert.equal(data.selected_sample.races,30);
+  assert.equal(data.coverage.eligible.official_races,30);
+  assert.equal(data.coverage.eligible.official_starts,90);
+  assert.equal(data.coverage.position_200m.observations,90);
+  assert.equal(data.coverage.trip_scenario.observations,90);
+});
+
+test('absolute lane short analysis suppresses flat numerical maxima', async () => {
+  const {env,db}=createTestEnv();
+  seedTrackAnalysis(db);
+  function flattenRace(firstEntryId, raceIndex) {
+    const leaderLane=(raceIndex%3)+1;
+    const otherLanes=[1,2,3].filter(lane=>lane!==leaderLane);
+    const rankByLane=new Map([[leaderLane,1],[otherLanes[0],2],[otherLanes[1],3]]);
+    for (let lane=1;lane<=3;lane+=1) {
+      db.prepare("UPDATE race_position_checkpoints SET position_rank=? WHERE id=?")
+        .run(rankByLane.get(lane),`cp-200m-entry-${firstEntryId+lane-1}`);
+    }
+  }
+  for (let raceIndex=0;raceIndex<30;raceIndex+=1) {
+    flattenRace((raceIndex*3)+1,raceIndex);
+    flattenRace(106+(raceIndex*3),raceIndex);
+  }
+  const data=await getTrackAnalysisV1(env,'track-a',{startMethod:'auto',distanceGroup:'2140'});
+  const rows=data.start_position_200m.sections[0].rows.filter(row=>row.lane<=3);
+  assert.ok(rows.every(row=>Math.abs(row.lead_rate-(1/3))<0.001));
+  const summary=data.short_analysis.join(' ');
+  assert.doesNotMatch(summary,/Spår \d+ når spets tydligt oftast/i);
+  assert.doesNotMatch(summary,/Spår \d+ ligger tydligt oftast/i);
 });
 
 test('track analysis as-of excludes sources that were not available before cutoff', async () => {
