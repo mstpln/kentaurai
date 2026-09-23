@@ -33,7 +33,7 @@ import { RACE_PROPOSITION_PARSER_VERSION } from './race-proposition-v1.js';
 import {
   XLABS_EVIDENCE_PROFILE_CONTRACT,
   XLABS_EVIDENCE_PROFILE_VERSION,
-  buildXlabsEvidenceProfilesForRace
+  buildXlabsEvidenceProfilesForRaces
 } from './xlabs-evidence-profiles-v1.js';
 import { XLABS_POSITION_RECONSTRUCTION_VERSION } from './xlabs-position-reconstruction-v1.js';
 import {
@@ -701,8 +701,11 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
     buildPersonContextV1ForEntries(env,eligibleIds,asOf),
     buildRacePriorsV1ForEntries(env,eligibleIds,asOf)
   ]);
-  const xlabsByRace = new Map();
-  for (const raceId of raceIds) xlabsByRace.set(raceId, await buildXlabsEvidenceProfilesForRace(env,{raceId,asOf,frontContenderEntryIds:[]}));
+  const xlabsByRace = await buildXlabsEvidenceProfilesForRaces(env,{
+    raceIds,
+    asOf,
+    frontContenderEntryIdsByRace:{}
+  });
   const historyIds = [...new Set([...history.values()].flatMap((item) => item.relevantHistoryUnion.map((start) => start.raceEntryId)))];
   const [trajectories,tripScenarios] = await Promise.all([
     loadTrajectories(env,historyIds,asOf),
