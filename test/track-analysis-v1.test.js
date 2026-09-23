@@ -97,6 +97,11 @@ test('track analysis uses 200m lanes and same-country exact-context baseline', a
   assert.equal(data.coverage.position_200m.observation_coverage,1);
   assert.equal(data.coverage.trip_scenario.winner_scenario_coverage,1);
   assert.equal(data.analysis_support,null);
+  assert.match(data.short_analysis.join(' '), /Spår 1 når spets oftast efter 200 m/);
+  assert.match(data.short_analysis.join(' '), /Flest vinnare kommer från spets/);
+  assert.match(data.short_analysis.join(' '), /snittet/);
+  assert.doesNotMatch(data.short_analysis.join(' '), /baseline/i);
+  assert.doesNotMatch(data.short_analysis.join(' '), /observationer/i);
   assert.equal(data.track_context.home_stretch_m.value,190);
   assert.equal(data.track_context.home_stretch_m.evidence_type,'verified');
   assert.equal(data.track_context.home_stretch_m.source_type,'measurement');
@@ -139,7 +144,7 @@ test('track analysis retains exact sparse metrics while broadening interpretatio
 
   const supportLane1=data.analysis_support.start_position_200m.sections[0].rows.find(row=>row.lane===1);
   assert.equal(supportLane1.observations,17);
-  assert.ok(data.short_analysis[0].includes('breddad'));
+  assert.ok(data.short_analysis.some((line)=>line.includes('använder även')));
   assert.equal(data.coverage.trip_scenario.races_with_any_scenario,5);
   assert.equal(data.analysis_support.coverage.trip_scenario.races_with_any_scenario,17);
 });

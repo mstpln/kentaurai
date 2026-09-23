@@ -283,3 +283,12 @@ The external-analysis production release was accepted after:
 - The user-facing Step 1 copy prompt explains sample, baseline/backoff and double-counting rules. No new AI call, gallop localization or separate aggregate backfill is introduced.
 - Migration `0038_track_analysis_v1.sql` adds only the composite C3 checkpoint read index required by the new 100 m/200 m analysis path; it introduces no new derived storage.
 - The bounded C4 production reconstruction for the current stored target interval is complete; unsupported/ambiguous labels remain null.
+
+
+## Bananalys usability v2 candidate
+- Branch: `feature/bananalys-usability-v2`.
+- Bananalys filter controls now reuse the existing Statistik sliders-icon pattern; Startmetod and Distans appear as dropdowns only when the filter panel is opened.
+- Start-position UI keeps the underlying 200 m metrics but shows only **Spår / Spets, 200 m / Topp 3, 200 m / Spets vs. snittet / Underlag**. Median position and the Topp-3 comparison delta are hidden from the UI, not deleted from the derived contract.
+- Scenario UI is winner-focused: **Scenario / Seger % / Andel vinnare / Vinst vs. snittet / Underlag**. Occurrence, Topp 3 and the raw baseline column are hidden from the UI.
+- Kort analys remains deterministic code, but now prioritizes which lanes reach the lead or a strong early position versus the Swedish comparison set, plus which C4 scenarios winners come from. Internal `baseline` wording is not shown to the user.
+- No schema migration, backfill, model-weight change, Step 1 export contract change or private-data mutation is required.
