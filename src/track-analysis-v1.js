@@ -215,6 +215,35 @@ async function loadPositionRows(env, { trackId = null, countryCode = null, exclu
 function sampleStatus(races) { return races>=25?'normal':races>=10?'limited':'sparse'; }
 function contextLabel(method,distance) { return `${method==='auto'?'Autostart':method==='volt'?'Voltstart':'Alla startmetoder'}, ${distance==='all'?'alla distanser':distance+' m'}`; }
 
+async function loadEligibleCoverageCounts(env, trackId, { startMethod, distanceGroup, asOf }) {
+  const conditions=['r.track_id = ?','re.scratched = 0',"rr.result_status = 'official'"];
+  const bindings=[trackId];
+  appendContextConditions(conditions,bindings,{startMethod,distanceGroup,asOf});
+  if(asOf){
+    conditions.push('rr.source_record_id IS NOT NULL');
+    conditions.push('julianday(rrs.fetched_at) <= julianday(?)');
+    bindings.push(asOf);
+  }
+  const row=await env.DB.prepare(`
+    SELECT
+      COUNT(*) AS official_starts,
+      COUNT(DISTINCT r.id) AS official_races,
+      SUM(CASE WHEN re.actual_lane BETWEEN 1 AND 8 THEN 1 ELSE 0 END) AS lane_starts,
+      COUNT(DISTINCT CASE WHEN rr.placing=1 THEN r.id END) AS winner_races
+    FROM race_entries re
+    JOIN races r ON r.id=re.race_id
+    JOIN race_results rr ON rr.race_entry_id=re.id
+    LEFT JOIN source_records rrs ON rrs.id=rr.source_record_id
+    WHERE ${conditions.join(' AND ')}
+  `).bind(...bindings).first();
+  return {
+    officialStarts:Number(row?.official_starts||0),
+    officialRaces:Number(row?.official_races||0),
+    laneStarts:Number(row?.lane_starts||0),
+    winnerRaces:Number(row?.winner_races||0)
+  };
+}
+
 async function countScenarioRaces(env, trackId, { startMethod, distanceGroup, asOf }) {
   const conditions=['rp.classification_version = ?','r.track_id = ?','re.scratched = 0',"rr.result_status = 'official'"];
   const bindings=[XLABS_TRIP_CLASSIFICATION_VERSION,trackId];
@@ -269,7 +298,7 @@ function aggregateScenarios(rows,baselineRows) {
     occurrence_delta_pp:percentagePointDelta(row.occurrence_rate,b?.occurrence_rate),win_rate_delta_pp:percentagePointDelta(row.win_rate,b?.win_rate),top3_delta_pp:percentagePointDelta(row.top3_rate,b?.top3_rate),winner_share_delta_pp:percentagePointDelta(row.winner_share,b?.winner_share)};});
 }
 
-function coverage(pos100,pos200,scen){const races=new Set(scen.map(r=>r.raceId)),wins=new Set(scen.filter(r=>r.placing===1).map(r=>r.raceId));return {position_100m:{observations:pos100.length,races:new Set(pos100.map(r=>r.raceId)).size},position_200m:{observations:pos200.length,races:new Set(pos200.map(r=>r.raceId)).size},trip_scenario:{observations:scen.length,races_with_any_scenario:races.size,winners_with_scenario:wins.size,winner_scenario_share_of_scenario_races:round(ratio(wins.size,races.size))}};}
+function coverage(pos100,pos200,scen,eligible){const races=new Set(scen.map(r=>r.raceId)),wins=new Set(scen.filter(r=>r.placing===1).map(r=>r.raceId));return {eligible:{official_starts:eligible.officialStarts,official_races:eligible.officialRaces,lane_starts:eligible.laneStarts,winner_races:eligible.winnerRaces},position_100m:{observations:pos100.length,races:new Set(pos100.map(r=>r.raceId)).size,observation_coverage:round(ratio(pos100.length,eligible.laneStarts))},position_200m:{observations:pos200.length,races:new Set(pos200.map(r=>r.raceId)).size,observation_coverage:round(ratio(pos200.length,eligible.laneStarts))},trip_scenario:{observations:scen.length,races_with_any_scenario:races.size,observation_coverage:round(ratio(scen.length,eligible.officialStarts)),winners_with_scenario:wins.size,winner_scenario_coverage:round(ratio(wins.size,eligible.winnerRaces))}};}
 function sourcePeriod(a,b){const d=[...a,...b].map(r=>r.raceDate).filter(Boolean).sort();return {first_race_date:d[0]||null,last_race_date:d.at(-1)||null};}
 function strongestObservedLane(sections){return sections.flatMap(s=>s.rows.map(r=>({...r,method:s.start_method}))).filter(r=>r.observations>=10&&r.lead_rate!=null).sort((a,b)=>b.lead_rate-a.lead_rate||b.observations-a.observations||a.lane-b.lane)[0]||null;}
 function buildSummary({selectedSample,basis,start100Sections,start200Sections,scenarioRows}){const out=[];if(basis.backoff_level!=='exact')out.push(`Den valda kombinationen har ${selectedSample.races} lopp med klassificerat scenario. Analysen är därför breddad till ${basis.label} (${basis.races} lopp).`);else if(basis.sample_status==='limited')out.push(`Underlaget är begränsat till ${basis.races} lopp för den valda kombinationen.`);else if(basis.sample_status==='sparse')out.push(`Underlaget är tunt: ${basis.races} lopp med klassificerat scenario finns tillgängliga.`);const lane=strongestObservedLane(start200Sections);if(lane){const m=start200Sections.length>1?` ${lane.method==='auto'?'auto':'volt'}`:'',base=lane.baseline?.lead_rate;const early=start100Sections.find(s=>s.start_method===lane.method)?.rows?.find(r=>r.lane===lane.lane);const earlyText=early?.lead_rate==null?'':` Efter 100 m är motsvarande spetsandel ${Math.round(early.lead_rate*100)} % av ${early.observations} observationer.`;out.push(`Högst observerad spetsandel efter 200 m är spår ${lane.lane}${m}: ${Math.round(lane.lead_rate*100)} % av ${lane.observations} observationer${base==null?'':` mot ${Math.round(base*100)} % i baseline`}.${earlyText}`);}const leader=scenarioRows.find(r=>r.scenario_key==='leader');if(leader?.winner_share!=null&&leader.starts>=10){const base=leader.baseline?.winner_share;out.push(`Spets står för ${Math.round(leader.winner_share*100)} % av vinnarna med klassificerat scenario${base==null?'':` mot ${Math.round(base*100)} % i baseline`}.`);}return out.slice(0,3);}
@@ -291,20 +320,22 @@ export async function getTrackAnalysisV1(env,trackIdValue,options={}){
   const selectedContext={startMethod,distanceGroup,asOf};
   const basisContext={startMethod:resolved.startMethod,distanceGroup:resolved.distanceGroup,asOf};
   const sameBasis=resolved.backoffLevel==='exact';
-  const [exactPos,exactBaselinePos,exactScen,exactBaselineScen,trackContext]=await Promise.all([
+  const [exactPos,exactBaselinePos,exactScen,exactBaselineScen,exactEligible,trackContext]=await Promise.all([
     loadPositionRows(env,{trackId,...selectedContext}),
     track.country_code?loadPositionRows(env,{countryCode:track.country_code,excludeTrackId:trackId,...selectedContext}):[],
     loadScenarioRows(env,{trackId,...selectedContext}),
     track.country_code?loadScenarioRows(env,{countryCode:track.country_code,excludeTrackId:trackId,...selectedContext}):[],
+    loadEligibleCoverageCounts(env,trackId,selectedContext),
     loadTrackContext(env,trackId,selectedContext)
   ]);
-  const [basisPos,basisBaselinePos,basisScen,basisBaselineScen]=sameBasis
-    ? [exactPos,exactBaselinePos,exactScen,exactBaselineScen]
+  const [basisPos,basisBaselinePos,basisScen,basisBaselineScen,basisEligible]=sameBasis
+    ? [exactPos,exactBaselinePos,exactScen,exactBaselineScen,exactEligible]
     : await Promise.all([
         loadPositionRows(env,{trackId,...basisContext}),
         track.country_code?loadPositionRows(env,{countryCode:track.country_code,excludeTrackId:trackId,...basisContext}):[],
         loadScenarioRows(env,{trackId,...basisContext}),
-        track.country_code?loadScenarioRows(env,{countryCode:track.country_code,excludeTrackId:trackId,...basisContext}):[]
+        track.country_code?loadScenarioRows(env,{countryCode:track.country_code,excludeTrackId:trackId,...basisContext}):[],
+        loadEligibleCoverageCounts(env,trackId,basisContext)
       ]);
   const exactPos100=exactPos.filter(r=>r.checkpointKey==='100m'),exactPos200=exactPos.filter(r=>r.checkpointKey==='200m');
   const exactBaselinePos100=exactBaselinePos.filter(r=>r.checkpointKey==='100m'),exactBaselinePos200=exactBaselinePos.filter(r=>r.checkpointKey==='200m');
@@ -332,13 +363,13 @@ export async function getTrackAnalysisV1(env,trackIdValue,options={}){
     start_position_100m:{checkpoint_m:100,role:'supporting_start_signal',sections:exactStart100Sections},
     start_position_200m:{checkpoint_m:200,role:'primary_early_position',sections:exactStart200Sections},
     trip_scenario_500m_remaining:{decision_distance_remaining_m:500,rows:exactScenarios},
-    coverage:coverage(exactPos100,exactPos200,exactScen),
+    coverage:coverage(exactPos100,exactPos200,exactScen,exactEligible),
     period:sourcePeriod(exactPos,exactScen),
     analysis_support:sameBasis?null:{
       start_position_100m:{checkpoint_m:100,role:'supporting_start_signal',sections:basisStart100Sections},
       start_position_200m:{checkpoint_m:200,role:'primary_early_position',sections:basisStart200Sections},
       trip_scenario_500m_remaining:{decision_distance_remaining_m:500,rows:basisScenarios},
-      coverage:coverage(basisPos100,basisPos200,basisScen),
+      coverage:coverage(basisPos100,basisPos200,basisScen,basisEligible),
       period:sourcePeriod(basisPos,basisScen)
     }
   };
