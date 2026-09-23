@@ -108,6 +108,10 @@ function appendContextConditions(conditions, bindings, { startMethod, distanceGr
   if (startMethod !== 'all') {
     conditions.push(`${canonicalStartMethodSql(alias)} = ?`);
     bindings.push(startMethod);
+  } else {
+    // "Alla" is the union of the two supported factual start methods, not a
+    // license to mix unknown/unsupported source values into denominators.
+    conditions.push(`${canonicalStartMethodSql(alias)} IN ('auto','volt')`);
   }
   conditions.push(distanceCondition(distanceGroup, bindings, alias));
   if (asOf) {
