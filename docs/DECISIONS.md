@@ -250,6 +250,8 @@ A single race must not directly change model weights. Candidate learnings are re
 3. Bana → Spårstatistik follows the same compact filter language as Trend/entity statistics: visible period control, sliders trigger, dropdown detail filters, active-filter count.
 4. Hemmatränare remains defined by the latest verified official trainer observation. Performance changes may narrow candidate work and add indexes, but must not change that factual rule.
 5. The common first Hemmatränare page should not execute the same expensive latest-observation pipeline twice merely to obtain total count.
+6. Bana → Bananalys uses the same sliders-icon/dropdown filter language as the rest of Statistik. The lane table keeps Spets/Topp 3 at 200 m but presents only **Spets vs. snittet** as the comparison column; median position is not shown. The scenario table is winner-focused: **Seger % / Andel vinnare / Vinst vs. snittet / Underlag**; occurrence, Topp 3 and raw baseline columns remain available in the derived data contract but are not shown in this UI.
+7. Bananalys short copy summarizes practical lane-to-lead/early-position patterns and where winners come from, using natural Swedish and `snittet` rather than internal `baseline` language. Deterministic sample/backoff safeguards remain unchanged.
 
 
 ## X-Labs trip reconstruction quarantines only proven deterministic duplicate-target sources
