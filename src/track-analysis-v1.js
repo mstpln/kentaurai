@@ -378,12 +378,27 @@ function laneSummary(section, multipleMethods) {
   if (!rows.length) return null;
 
   const method = multipleMethods ? `${section.label}: ` : '';
-  const strongestLead = [...rows].sort((a,b) =>
+  const leadOrdered = [...rows].sort((a,b) =>
     b.lead_rate-a.lead_rate || b.observations-a.observations || a.lane-b.lane
-  )[0];
-  const strongestPosition = [...rows].filter((row)=>row.top3_rate!=null).sort((a,b) =>
+  );
+  const strongestLead = leadOrdered[0];
+  const leadRunnerUp = leadOrdered[1] || null;
+  const strongestLeadIsClear = !leadRunnerUp || comparisonDirection(
+    strongestLead.lead_rate,strongestLead.observations,
+    leadRunnerUp.lead_rate,leadRunnerUp.observations,
+    LEAD_COMPARISON_MIN_DELTA_PP
+  ) === 'higher';
+
+  const positionOrdered = [...rows].filter((row)=>row.top3_rate!=null).sort((a,b) =>
     b.top3_rate-a.top3_rate || b.observations-a.observations || a.lane-b.lane
-  )[0] || null;
+  );
+  const strongestPosition = positionOrdered[0] || null;
+  const positionRunnerUp = positionOrdered[1] || null;
+  const strongestPositionIsClear = strongestPosition && (!positionRunnerUp || comparisonDirection(
+    strongestPosition.top3_rate,strongestPosition.observations,
+    positionRunnerUp.top3_rate,positionRunnerUp.observations,
+    TOP3_COMPARISON_MIN_DELTA_PP
+  ) === 'higher');
 
   const leadBetter = rows.filter((row) =>
     comparisonDirection(row.lead_rate,row.observations,row.baseline?.lead_rate,row.baseline?.observations,LEAD_COMPARISON_MIN_DELTA_PP)==='higher'
@@ -398,25 +413,26 @@ function laneSummary(section, multipleMethods) {
     comparisonDirection(row.top3_rate,row.observations,row.baseline?.top3_rate,row.baseline?.observations,TOP3_COMPARISON_MIN_DELTA_PP)==='lower'
   ).map((row)=>row.lane);
 
-  const parts = [
-    `${method}Spår ${strongestLead.lane} når spets oftast efter 200 m (${Math.round(strongestLead.lead_rate*100)} %).`
-  ];
-  if (strongestPosition) {
-    parts.push(`Spår ${strongestPosition.lane} ligger oftast bland de tre främsta efter 200 m (${Math.round(strongestPosition.top3_rate*100)} %).`);
+  const parts = [];
+  if (strongestLeadIsClear) {
+    parts.push(`${method}Spår ${strongestLead.lane} når spets tydligt oftast efter 200 m (${Math.round(strongestLead.lead_rate*100)} %).`);
+  }
+  if (strongestPositionIsClear) {
+    parts.push(`${method && !parts.length ? method : ''}Spår ${strongestPosition.lane} ligger tydligt oftast bland de tre främsta efter 200 m (${Math.round(strongestPosition.top3_rate*100)} %).`);
   }
   if (leadBetter.length || leadWorse.length) {
     const comparison = [];
     if (leadBetter.length) comparison.push(`Spår ${swedishList(leadBetter)} når spets tydligt oftare än snittet`);
     if (leadWorse.length) comparison.push(`${leadBetter.length?'spår':'Spår'} ${swedishList(leadWorse)} gör det tydligt mer sällan`);
-    parts.push(`${comparison.join(', medan ')}.`);
+    parts.push(`${method && !parts.length ? method : ''}${comparison.join(', medan ')}.`);
   }
   if (positionBetter.length || positionWorse.length) {
     const comparison = [];
     if (positionBetter.length) comparison.push(`Spår ${swedishList(positionBetter)} ger tydligt oftare en plats bland de tre främsta än snittet`);
     if (positionWorse.length) comparison.push(`${positionBetter.length?'spår':'Spår'} ${swedishList(positionWorse)} gör det tydligt mer sällan`);
-    parts.push(`${comparison.join(', medan ')}.`);
+    parts.push(`${method && !parts.length ? method : ''}${comparison.join(', medan ')}.`);
   }
-  return parts.join(' ');
+  return parts.length ? parts.join(' ') : null;
 }
 
 function scenarioWinnerSummary(rows) {
