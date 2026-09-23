@@ -1,9 +1,7 @@
 name: Diagnose production trip scenarios
 
 on:
-  push:
-    branches:
-      - diagnose-trip-scenarios-prod
+  workflow_dispatch:
 
 permissions:
   contents: read
