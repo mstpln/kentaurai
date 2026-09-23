@@ -552,6 +552,12 @@ export async function getCalendarYearDetailSpecialties(env,entityType,entityId,o
   return{entityType,filters,...await loadSpecialties(env,id,filters,config),definitions:definitions()};
 }
 
+export async function getHorseCalendarYearTripScenarios(env,entityId,options={}){
+  const prepared=await prepareDetail(env,'horses',entityId,options);if(!prepared)return null;
+  const {id,filters}=prepared;
+  return{entityType:'horses',filters,tripScenarioResults:await loadHorseTripScenarios(env,id,filters)};
+}
+
 export async function getCalendarYearDetailForm(env,entityType,entityId,options={}){
   const prepared=await prepareDetail(env,entityType,entityId,options);if(!prepared)return null;
   const {config,id,filters}=prepared;
