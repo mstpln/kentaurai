@@ -694,11 +694,11 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
     const fields = entryObs.get(id)?.fields || {};
     return !(fields.scratchSemanticsVerified === true && boolOrNull(fields.scratched) === true);
   });
-  const [history,performance,equipment,personContext,racePriors] = await Promise.all([
-    buildRelevantHistoryForEntries(env,eligibleIds,asOf),
-    buildPerformanceFeaturesV3ForEntries(env,eligibleIds,asOf),
-    buildEquipmentResponseV1ForEntries(env,eligibleIds,asOf),
-    buildPersonContextV1ForEntries(env,eligibleIds,asOf),
+  const history = await buildRelevantHistoryForEntries(env,eligibleIds,asOf);
+  const [performance,equipment,personContext,racePriors] = await Promise.all([
+    buildPerformanceFeaturesV3ForEntries(env,eligibleIds,asOf,{relevantHistory:history}),
+    buildEquipmentResponseV1ForEntries(env,eligibleIds,asOf,{relevantHistory:history}),
+    buildPersonContextV1ForEntries(env,eligibleIds,asOf,{relevantHistory:history}),
     buildRacePriorsV1ForEntries(env,eligibleIds,asOf)
   ]);
   const xlabsByRace = await buildXlabsEvidenceProfilesForRaces(env,{
