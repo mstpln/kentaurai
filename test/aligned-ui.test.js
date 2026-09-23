@@ -112,6 +112,9 @@ test('Bana Bananalys uses the agreed 200m, scenario and analysis-evidence struct
   assert.match(html, /Vinnarscenario/);
   assert.match(html, /Breddat underlag/);
   assert.match(html, /track-analysis-copy:before/);
+  assert.match(html, /Bananalysen kunde inte läsas just nu/);
+  assert.match(html, /current\.startMethod!==requestMethod/);
+  assert.match(html, /current\.distanceGroup!==requestDistance/);
   assert.doesNotMatch(html, /Exakt kombination/);
   assert.doesNotMatch(html, /Startgalopp/);
 });
