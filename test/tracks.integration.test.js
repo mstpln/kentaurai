@@ -223,4 +223,11 @@ test('track app routes require a private app session and return track data when 
   assert.equal(response.status, 200);
   const stats = await response.json();
   assert.equal(stats.totals.starts, 4);
+
+  response = await worker.fetch(new Request('https://example.test/app/api/tracks/track-a/analysis?start_method=all&distance_group=all', { headers: { cookie } }), env);
+  assert.equal(response.status, 200);
+  const analysis = await response.json();
+  assert.equal(analysis.contract_version, 'kentaurai-track-analysis-v1');
+  assert.equal(analysis.selection.start_method, 'all');
+  assert.equal(analysis.selection.distance_group, 'all');
 });
