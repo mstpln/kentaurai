@@ -1,7 +1,10 @@
 name: Validate production track analysis
+# Final exact-head validation for PR #247.
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - diagnose-trip-scenarios-prod
 
 permissions:
   contents: read
