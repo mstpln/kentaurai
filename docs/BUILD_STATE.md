@@ -262,3 +262,13 @@ The external-analysis production release was accepted after:
 - Track history state also preserves `trackDetail` and `trackTab`.
 - Bana → Hemmatränare narrows official observation candidates before latest-observation ranking, avoids the duplicate count query on the common first page, and adds a dedicated home-track expression index in migration 0036.
 - No statistics semantics or factual source rules change.
+
+
+## Trip-scenario backfill resilience candidate
+- Branch: `fix/trip-scenario-backfill-resilience`.
+- Production diagnosis found the C4 reconstruction cursor blocked by an immutable telemetry source containing a duplicate active target within one frame.
+- Migration `0037_xlabs_position_reconstruction_quarantine.sql` adds durable source/job quarantine provenance and a per-job quarantined-source counter.
+- Only the exact deterministic duplicate-target validation error is quarantinable. The source remains unchanged in R2, writes no reconstructed/checkpoint/scenario facts, and the cursor advances to the next stored source.
+- All other reconstruction failures preserve the existing retry-three-times/fail-closed behavior and do not advance the cursor.
+- The production release workflow verifies the new quarantine schema before Worker deployment.
+- Merging/deploying this code does not resume the stopped production reconstruction job. Resumption remains a separate explicit production action.
