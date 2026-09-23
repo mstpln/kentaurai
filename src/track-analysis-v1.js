@@ -287,12 +287,55 @@ async function loadTrackContext(env,trackId,{startMethod,distanceGroup,asOf}){
 export async function getTrackAnalysisV1(env,trackIdValue,options={}){
   if(!env?.DB)throw new Error('DB is not configured');const trackId=String(trackIdValue||'').trim();if(!trackId)return null;const track=await loadTrack(env,trackId);if(!track)return null;
   const startMethod=normalizeTrackAnalysisStartMethod(options.startMethod??'all'),distanceGroup=normalizeTrackAnalysisDistanceGroup(options.distanceGroup??'all'),asOf=options.asOf==null?null:new Date(options.asOf).toISOString();
-  const resolved=await resolveAnalysisBasis(env,trackId,{startMethod,distanceGroup,asOf}),ctx={startMethod:resolved.startMethod,distanceGroup:resolved.distanceGroup,asOf};
-  const [pos,bpos,scen,bscen,trackContext]=await Promise.all([loadPositionRows(env,{trackId,...ctx}),track.country_code?loadPositionRows(env,{countryCode:track.country_code,excludeTrackId:trackId,...ctx}):[],loadScenarioRows(env,{trackId,...ctx}),track.country_code?loadScenarioRows(env,{countryCode:track.country_code,excludeTrackId:trackId,...ctx}):[],loadTrackContext(env,trackId,{startMethod,distanceGroup,asOf})]);
-  const races=new Set(scen.map(r=>r.raceId)).size,startSections=aggregateStartPositions(pos,bpos,resolved.startMethod),scenarios=aggregateScenarios(scen,bscen);
-  const basis={start_method:resolved.startMethod,distance_group:resolved.distanceGroup,label:contextLabel(resolved.startMethod,resolved.distanceGroup),backoff_level:resolved.backoffLevel,races,sample_status:sampleStatus(races)},selectedSample={races:resolved.selectedRaces,sample_status:resolved.selectedStatus};
-  const result={contract_version:TRACK_ANALYSIS_CONTRACT,analysis_version:TRACK_ANALYSIS_VERSION,generated_at:new Date().toISOString(),as_of:asOf,track:{id:track.id,name:track.canonical_name,country_code:track.country_code||null},selection:{start_method:startMethod,distance_group:distanceGroup},selected_sample:selectedSample,analysis_basis:basis,track_context:trackContext,start_position_200m:{checkpoint_m:200,sections:startSections},trip_scenario_500m_remaining:{decision_distance_remaining_m:500,rows:scenarios},coverage:coverage(pos,scen),period:sourcePeriod(pos,scen)};
-  result.short_analysis=buildSummary({selectedSample,basis,startSections,scenarioRows:scenarios});return result;
+  const resolved=await resolveAnalysisBasis(env,trackId,{startMethod,distanceGroup,asOf});
+  const selectedContext={startMethod,distanceGroup,asOf};
+  const basisContext={startMethod:resolved.startMethod,distanceGroup:resolved.distanceGroup,asOf};
+  const sameBasis=resolved.backoffLevel==='exact';
+  const [exactPos,exactBaselinePos,exactScen,exactBaselineScen,trackContext]=await Promise.all([
+    loadPositionRows(env,{trackId,...selectedContext}),
+    track.country_code?loadPositionRows(env,{countryCode:track.country_code,excludeTrackId:trackId,...selectedContext}):[],
+    loadScenarioRows(env,{trackId,...selectedContext}),
+    track.country_code?loadScenarioRows(env,{countryCode:track.country_code,excludeTrackId:trackId,...selectedContext}):[],
+    loadTrackContext(env,trackId,selectedContext)
+  ]);
+  const [basisPos,basisBaselinePos,basisScen,basisBaselineScen]=sameBasis
+    ? [exactPos,exactBaselinePos,exactScen,exactBaselineScen]
+    : await Promise.all([
+        loadPositionRows(env,{trackId,...basisContext}),
+        track.country_code?loadPositionRows(env,{countryCode:track.country_code,excludeTrackId:trackId,...basisContext}):[],
+        loadScenarioRows(env,{trackId,...basisContext}),
+        track.country_code?loadScenarioRows(env,{countryCode:track.country_code,excludeTrackId:trackId,...basisContext}):[]
+      ]);
+  const exactStartSections=aggregateStartPositions(exactPos,exactBaselinePos,startMethod);
+  const exactScenarios=aggregateScenarios(exactScen,exactBaselineScen);
+  const basisStartSections=aggregateStartPositions(basisPos,basisBaselinePos,resolved.startMethod);
+  const basisScenarios=aggregateScenarios(basisScen,basisBaselineScen);
+  const basisRaces=new Set(basisScen.map(r=>r.raceId)).size;
+  const basis={start_method:resolved.startMethod,distance_group:resolved.distanceGroup,label:contextLabel(resolved.startMethod,resolved.distanceGroup),backoff_level:resolved.backoffLevel,races:basisRaces,sample_status:sampleStatus(basisRaces)};
+  const selectedSample={races:resolved.selectedRaces,sample_status:resolved.selectedStatus};
+  const result={
+    contract_version:TRACK_ANALYSIS_CONTRACT,
+    analysis_version:TRACK_ANALYSIS_VERSION,
+    generated_at:new Date().toISOString(),
+    as_of:asOf,
+    track:{id:track.id,name:track.canonical_name,country_code:track.country_code||null},
+    selection:{start_method:startMethod,distance_group:distanceGroup},
+    selected_sample:selectedSample,
+    analysis_basis:basis,
+    track_context:trackContext,
+    start_position_200m:{checkpoint_m:200,sections:exactStartSections},
+    trip_scenario_500m_remaining:{decision_distance_remaining_m:500,rows:exactScenarios},
+    coverage:coverage(exactPos,exactScen),
+    period:sourcePeriod(exactPos,exactScen),
+    analysis_support:sameBasis?null:{
+      start_position_200m:{checkpoint_m:200,sections:basisStartSections},
+      trip_scenario_500m_remaining:{decision_distance_remaining_m:500,rows:basisScenarios},
+      coverage:coverage(basisPos,basisScen),
+      period:sourcePeriod(basisPos,basisScen)
+    }
+  };
+  result.short_analysis=buildSummary({selectedSample,basis,startSections:basisStartSections,scenarioRows:basisScenarios});
+  return result;
 }
 
 export async function loadTripScenariosForEntries(env,entryIds,asOf=null){if(!env?.DB)throw new Error('DB is not configured');const ids=[...new Set((entryIds||[]).filter(Boolean).map(String))],out=new Map();for(const group of chunks(ids)){const bindings=[XLABS_TRIP_CLASSIFICATION_VERSION,...group],condition=asOf?'AND julianday(sr.fetched_at) <= julianday(?)':'';if(asOf)bindings.push(new Date(asOf).toISOString());const {results}=await env.DB.prepare(`WITH ranked AS (SELECT rp.*,sr.fetched_at,ROW_NUMBER() OVER (PARTITION BY rp.race_entry_id ORDER BY julianday(sr.fetched_at) DESC,rp.id DESC) row_number FROM race_positions rp JOIN source_records sr ON sr.id=rp.source_record_id WHERE rp.classification_version=? AND rp.race_entry_id IN (${group.map(()=>'?').join(',')}) ${condition}) SELECT * FROM ranked WHERE row_number=1`).bind(...bindings).all();for(const row of results||[]){const key=scenarioKeyFromRow(row);if(!key)continue;out.set(row.race_entry_id,{contract_version:'kentaurai-xlabs-trip-classification-v1',classification_version:row.classification_version,scenario_key:key,scenario_label:scenarioLabelFromRow(row),observed_at_m:finiteOrNull(row.observed_at_m),confidence:finiteOrNull(row.confidence),evidence_type:row.evidence_type||null,source_record_id:row.source_record_id||null,source_selected_at:row.fetched_at||null});}}return out;}
