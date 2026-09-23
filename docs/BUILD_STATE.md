@@ -254,3 +254,11 @@ The external-analysis production release was accepted after:
 - Settings exposes recent multi-day historical periods separately for each source so the existing 2023-2026 block and the new 2020-2023 block do not collapse into one ambiguous progress row.
 - No migration, model-weight change, statistics-query semantic change, or private racing payload is part of this candidate.
 - Merging/deploying the code does not start the historical extension. A manual workflow dispatch with the exact confirmation phrase is still required.
+
+## Navigation and track consistency candidate
+- Upcoming round detail now has its own history signature via `upcomingRound`/`upcomingLeg`, so Back/back-swipe returns to Spel → Kommande rather than the prior primary workspace.
+- The Kommande detail back control uses the same left-arrow language as the canonical entity/game back buttons.
+- Bana → Spårstatistik now follows the shared compact filter interaction: period stays visible, detailed filters open from the sliders icon, and the opened filter panel uses dropdowns consistently.
+- Track history state also preserves `trackDetail` and `trackTab`.
+- Bana → Hemmatränare narrows official observation candidates before latest-observation ranking, avoids the duplicate count query on the common first page, and adds a dedicated home-track expression index in migration 0036.
+- No statistics semantics or factual source rules change.
