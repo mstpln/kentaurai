@@ -10,6 +10,7 @@ import {
   getDriverCalendarYearForm,
   getHorseCalendarYearDetailStatistics,
   getHorseCalendarYearForm,
+  getHorseCalendarYearTripScenarios,
   getTrainerCalendarYearDetailStatistics,
   getTrainerCalendarYearForm
 } from '../src/entity-detail-calendar-statistics.js';
@@ -24,6 +25,7 @@ test('shared calendar statistics exports one implementation for all supported de
   assert.equal(typeof getDriverCalendarYearDetailStatistics, 'function');
   assert.equal(typeof getHorseCalendarYearDetailStatistics, 'function');
   assert.equal(typeof getHorseCalendarYearForm, 'function');
+  assert.equal(typeof getHorseCalendarYearTripScenarios, 'function');
   assert.equal(typeof getDriverCalendarYearForm, 'function');
   assert.equal(typeof getTrainerCalendarYearForm, 'function');
   assert.equal(typeof getTrainerCalendarHomeTrackResults, 'function');
@@ -124,7 +126,7 @@ test('horse core calendar stays fast while Form 1-100 loads separately and dista
 
 test('new calendar detail routes remain private before touching D1', async () => {
   for (const page of ['trainers', 'drivers', 'horses']) {
-    for (const route of ['calendar-statistics', 'calendar-specialties', 'calendar-form']) {
+    for (const route of ['calendar-statistics', 'calendar-specialties', 'calendar-form', ...(page === 'horses' ? ['calendar-trip-scenarios'] : [])]) {
       const response = await worker.fetch(new Request(`https://example.test/app/api/${page}/example/${route}?year=2026`), {}, {});
       assert.equal(response.status, 503);
       assert.deepEqual(await response.json(), { error: 'service_unavailable' });
@@ -221,6 +223,36 @@ test('driver Form market component uses only the final source-backed snapshot at
   assert.notEqual(data.formLast.score,null);
 });
 
+
+test('horse trip scenario endpoint data is isolated and honors the UI default high-prize scope', async () => {
+  const { createTestEnv } = await import('./helpers/d1.js');
+  const { env, db } = createTestEnv();
+  db.prepare("INSERT INTO tracks (id,canonical_name,country_code) VALUES ('trip-track','Trip','SE')").run();
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('trip-horse','Trip Häst')").run();
+  db.prepare("INSERT INTO source_records (id,source_type,fetched_at,quality_status) VALUES ('trip-src','xlabs_race_json','2026-09-10T15:00:00Z','normalized_verified_subset')").run();
+
+  for (const [suffix,date,firstPrize,placing,leader] of [
+    ['high','2026-09-01',100000,1,1],
+    ['low','2026-09-02',50000,2,0]
+  ]) {
+    const raceId='trip-r-'+suffix, entryId='trip-e-'+suffix;
+    db.prepare("INSERT INTO races (id,track_id,race_date,race_number,distance_m,start_method,first_prize_sek,status) VALUES (?,'trip-track',?,1,2140,'auto',?,'results')").run(raceId,date,firstPrize);
+    db.prepare("INSERT INTO race_entries (id,race_id,horse_id,start_number,scratched) VALUES (?,?,'trip-horse',1,0)").run(entryId,raceId);
+    db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,gallop,disqualified) VALUES (?,?,'official',0,0)").run(entryId,placing);
+    db.prepare(`INSERT INTO race_positions
+      (id,race_entry_id,observed_at_m,position,leader,pocket,death_seat,second_over,third_over,event_json,source_record_id,evidence_type,confidence,classification_version)
+      VALUES (?,?,500,1,?,0,0,0,0,?,'trip-src','calculated_xlabs',0.95,'xlabs-trip-classification-v1')`).run(
+      'trip-p-'+suffix,entryId,leader,leader?'{}':'{"scenario_key":"back"}'
+    );
+  }
+
+  const data=await getHorseCalendarYearTripScenarios(env,'trip-horse',{
+    year:2026,asOfDate:'2026-09-20',raceScope:'high_prize'
+  });
+  assert.equal(data.entityType,'horses');
+  assert.equal(data.filters.raceScope,'high_prize');
+  assert.deepEqual(data.tripScenarioResults.map(row=>[row.scenario,row.starts,row.wins]),[['leader',1,1]]);
+});
 
 test('horse specialties aggregate verified C4 race scenarios with active calendar filters', async () => {
   const { createTestEnv } = await import('./helpers/d1.js');
