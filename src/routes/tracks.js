@@ -311,20 +311,35 @@ export async function getTrackDetail(env, id, options = {}) {
 
 function homeTrainerCte() {
   return `
-    WITH latest_trainer_observation AS (
-      SELECT o.entity_id AS trainer_id, o.fields_json,
-        ROW_NUMBER() OVER (
-          PARTITION BY o.entity_id
-          ORDER BY o.observed_at DESC, o.created_at DESC, o.id DESC
-        ) AS row_number
+    WITH official_track_ids AS (
+      SELECT external_id FROM track_external_ids
+      WHERE track_id = ? AND source_type = 'official'
+    ), candidate_trainers AS MATERIALIZED (
+      SELECT DISTINCT o.entity_id AS trainer_id
       FROM normalized_observations o
       JOIN source_records sr ON sr.id = o.source_record_id
       WHERE o.entity_type = 'trainer'
         AND sr.source_type = 'official_provider'
         AND json_valid(o.fields_json)
-    ), official_track_ids AS (
-      SELECT external_id FROM track_external_ids
-      WHERE track_id = ? AND source_type = 'official'
+        AND (
+          CAST(json_extract(o.fields_json, '$.homeTrackExternalId') AS TEXT) IN (SELECT external_id FROM official_track_ids)
+          OR (
+            json_extract(o.fields_json, '$.homeTrackExternalId') IS NULL
+            AND LOWER(TRIM(COALESCE(json_extract(o.fields_json, '$.homeTrackName'), ''))) = LOWER(TRIM(?))
+          )
+        )
+    ), latest_trainer_observation AS (
+      SELECT o.entity_id AS trainer_id, o.fields_json,
+        ROW_NUMBER() OVER (
+          PARTITION BY o.entity_id
+          ORDER BY o.observed_at DESC, o.created_at DESC, o.id DESC
+        ) AS row_number
+      FROM candidate_trainers c
+      JOIN normalized_observations o INDEXED BY idx_normalized_observations_entity
+        ON o.entity_type = 'trainer' AND o.entity_id = c.trainer_id
+      JOIN source_records sr ON sr.id = o.source_record_id
+      WHERE sr.source_type = 'official_provider'
+        AND json_valid(o.fields_json)
     )
   `;
 }
@@ -333,7 +348,6 @@ async function countHomeTrainers(env, trackId, trackName) {
   return env.DB.prepare(`${homeTrainerCte()}
     SELECT COUNT(*) AS total
     FROM latest_trainer_observation o
-    JOIN trainers tr ON tr.id = o.trainer_id
     WHERE o.row_number = 1
       AND (
         CAST(json_extract(o.fields_json, '$.homeTrackExternalId') AS TEXT) IN (SELECT external_id FROM official_track_ids)
@@ -342,7 +356,7 @@ async function countHomeTrainers(env, trackId, trackName) {
           AND LOWER(TRIM(COALESCE(json_extract(o.fields_json, '$.homeTrackName'), ''))) = LOWER(TRIM(?))
         )
       )
-  `).bind(trackId, trackName).first();
+  `).bind(trackId, trackName, trackName).first();
 }
 
 export async function getTrackHomeTrainers(env, id, options = {}) {
@@ -353,10 +367,10 @@ export async function getTrackHomeTrainers(env, id, options = {}) {
   if (!track) return null;
   const limit = clampLimit(options.limit);
   const offset = clampOffset(options.offset);
-  const countRow = await countHomeTrainers(env, trackId, track.canonical_name);
   const { results } = await env.DB.prepare(`${homeTrainerCte()}
     SELECT tr.id, tr.canonical_name AS name,
-      json_extract(o.fields_json, '$.location') AS location
+      json_extract(o.fields_json, '$.location') AS location,
+      COUNT(*) OVER() AS total_count
     FROM latest_trainer_observation o
     JOIN trainers tr ON tr.id = o.trainer_id
     WHERE o.row_number = 1
@@ -369,8 +383,12 @@ export async function getTrackHomeTrainers(env, id, options = {}) {
       )
     ORDER BY tr.canonical_name COLLATE NOCASE ASC, tr.id ASC
     LIMIT ? OFFSET ?
-  `).bind(trackId, track.canonical_name, limit, offset).all();
-  const total = Number(countRow?.total ?? 0);
+  `).bind(trackId, track.canonical_name, track.canonical_name, limit, offset).all();
+  let total = Number(results?.[0]?.total_count ?? 0);
+  if (!results?.length && offset > 0) {
+    const countRow = await countHomeTrainers(env, trackId, track.canonical_name);
+    total = Number(countRow?.total ?? 0);
+  }
   return {
     trackId,
     items: (results || []).map((row) => ({ id: row.id, name: row.name, location: row.location || null })),

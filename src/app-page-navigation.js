@@ -93,6 +93,10 @@ function currentView(){
     gameOffsets:copyObject(state.gameOffsets),
     gameDetail:state.gameDetail||null,
     gameSystemId:state.gameSystemId||null,
+    upcomingRound:state.upcomingRound||null,
+    upcomingLeg:Number(state.upcomingLeg||1),
+    trackDetail:state.trackDetail||null,
+    trackTab:state.trackTab||'overview',
     startHistoryOffsets:copyObject(state.startHistoryOffsets),
     linkedHorseOffsets:copyObject(state.linkedHorseOffsets),
     settingsOpen:Boolean(state.settingsOpen),
@@ -109,6 +113,13 @@ function commitView(){
   history.pushState({...next,depth},'');
 }
 function scheduleCommit(){clearTimeout(commitTimer);commitTimer=setTimeout(commitView,0)}
+function replaceView(){
+  if(restoring)return;
+  const current=history.state;
+  const depth=current&&current.marker===NAV_MARKER?Number(current.depth||0):0;
+  history.replaceState(makeHistoryState(depth),'');
+}
+function scheduleReplace(){clearTimeout(commitTimer);commitTimer=setTimeout(replaceView,0)}
 const SWIPE_EDGE_PX=24,SWIPE_TRIGGER_PX=72,SWIPE_MAX_VISUAL_PX=46;
 let swipe=null;
 function canSwipeBack(target){
@@ -165,6 +176,10 @@ function restoreShared(view){
   state.gameSort=view.gameSort||'latest';
   state.gameOffsets=copyObject(view.gameOffsets);
   state.gameSystemId=view.gameSystemId||null;
+  state.upcomingRound=view.upcomingRound||null;
+  state.upcomingLeg=Number(view.upcomingLeg||1);
+  state.trackDetail=view.trackDetail||null;
+  state.trackTab=view.trackTab||'overview';
   state.startHistoryOffsets=copyObject(view.startHistoryOffsets);
   state.linkedHorseOffsets=copyObject(view.linkedHorseOffsets);
   state.settingsTab='data';
@@ -228,6 +243,7 @@ document.addEventListener('click',event=>{
     history.back();
     return;
   }
+  if(target?.closest('[data-history-replace]')){scheduleReplace();return}
   scheduleCommit();
 },true);
 

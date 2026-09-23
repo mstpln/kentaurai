@@ -63,6 +63,13 @@ test('rendered app shell has a borderless data-only settings gear and in-app his
   assert.match(html, /translate3d\('\+visual\+'px,0,0\)'/);
   assert.match(html, /input,select,textarea,\[contenteditable="true"\],\[data-no-back-swipe\]/);
   assert.match(html, /settingsTab:state\.settingsTab\|\|'data'/);
+  assert.match(html, /upcomingRound:state\.upcomingRound\|\|null/);
+  assert.match(html, /upcomingLeg:Number\(state\.upcomingLeg\|\|1\)/);
+  assert.match(html, /trackDetail:state\.trackDetail\|\|null/);
+  assert.match(html, /trackTab:state\.trackTab\|\|'overview'/);
+  assert.match(html, /state\.upcomingRound=view\.upcomingRound\|\|null/);
+  assert.match(html, /function scheduleReplace\(\)/);
+  assert.match(html, /target\?\.closest\('\[data-history-replace\]'\)/);
   assert.match(html, /state\.settingsTab='data'/);
   assert.match(html, /view\.page==='analysis'/);
   assert.match(html, /__kentauraiAnalysis/);
