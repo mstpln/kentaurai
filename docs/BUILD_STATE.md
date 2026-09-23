@@ -324,6 +324,6 @@ The external-analysis production release was accepted after:
 
 ## Step 1 D1 CPU root-cause fix
 - Codex review of the still-failing production export identified the dominant remaining cost in `xlabs-evidence-profiles-v1.js`: nationwide X-Labs ranking/population CTEs were rebuilt for every one of the eight target races.
-- The fix batches the round at the shared Step 1 cutoff, pushes target horse IDs inside the X-Labs ranking scope, and shards nationwide population aggregation into bounded calendar-month queries before deterministically merging counts/sums back to the existing aggregate contract.
+- The fix batches the round at the shared Step 1 cutoff, pushes target horse IDs inside the X-Labs ranking scope, and shards nationwide population aggregation into bounded calendar-year queries before deterministically merging counts/sums back to the existing aggregate contract.
 - The already-built Step 1 relevant-history map is now reused by performance, equipment and person-context feature builders instead of being rebuilt three additional times.
 - No analysis definition, market-blind boundary, model weight or output contract changes are intended. Population means are reconstructed from exact shard sums/counts rather than averaging shard averages.
