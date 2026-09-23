@@ -7,7 +7,7 @@ const migration = readFileSync(new URL('../migrations/0036_trainer_home_track_lo
 
 test('home-trainer lookup narrows candidates before ranking latest observations', () => {
   assert.match(routeSource, /candidate_trainers AS MATERIALIZED/);
-  assert.match(routeSource, /JOIN candidate_trainers c/);
+  assert.match(routeSource, /FROM candidate_trainers c/);
   assert.match(routeSource, /INDEXED BY idx_normalized_observations_entity/);
   assert.match(routeSource, /COUNT\(\*\) OVER\(\) AS total_count/);
 });
