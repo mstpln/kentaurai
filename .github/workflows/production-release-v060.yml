@@ -128,6 +128,13 @@ jobs:
           npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT alert_key, acknowledged_at FROM settings_alert_acknowledgements LIMIT 0; SELECT name FROM sqlite_master WHERE type='table' AND name='settings_alert_acknowledgements'; SELECT name FROM d1_migrations WHERE name='0034_settings_alert_acknowledgements.sql';" > /tmp/settings-alert-schema-check.txt
           grep -q 'settings_alert_acknowledgements' /tmp/settings-alert-schema-check.txt
           grep -q '0034_settings_alert_acknowledgements.sql' /tmp/settings-alert-schema-check.txt
+
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT quarantined_sources FROM xlabs_position_reconstruction_jobs LIMIT 0; SELECT id,job_id,source_record_id,failure_code,reconstruction_version,quarantined_at FROM xlabs_position_reconstruction_quarantine LIMIT 0; SELECT name FROM sqlite_master WHERE type='table' AND name='xlabs_position_reconstruction_quarantine'; SELECT name FROM d1_migrations WHERE name='0037_xlabs_position_reconstruction_quarantine.sql'; SELECT name FROM sqlite_master WHERE type='index' AND name IN ('idx_xlabs_position_quarantine_job','idx_xlabs_position_quarantine_source') ORDER BY name;" > /tmp/xlabs-position-quarantine-schema-check.txt
+          grep -q 'xlabs_position_reconstruction_quarantine' /tmp/xlabs-position-quarantine-schema-check.txt
+          grep -q '0037_xlabs_position_reconstruction_quarantine.sql' /tmp/xlabs-position-quarantine-schema-check.txt
+          grep -q 'idx_xlabs_position_quarantine_job' /tmp/xlabs-position-quarantine-schema-check.txt
+          grep -q 'idx_xlabs_position_quarantine_source' /tmp/xlabs-position-quarantine-schema-check.txt
+
           grep -q 'idx_races_track_date' /tmp/migration-check.txt
           grep -q 'idx_odds_entry_time' /tmp/migration-check.txt
           grep -q 'idx_equipment_entry' /tmp/migration-check.txt
