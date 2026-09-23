@@ -672,17 +672,17 @@ async function loadHorseHistory(env, cutoff, horseIds) {
   );
 }
 
-function monthStartIso(value) {
+function yearStartIso(value) {
   const ms = Date.parse(String(value || '').slice(0,10) + 'T00:00:00.000Z');
   if (!Number.isFinite(ms)) return null;
   const date = new Date(ms);
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1)).toISOString().slice(0,10);
+  return `${date.getUTCFullYear()}-01-01`;
 }
 
-function addMonthsIso(value, months) {
-  const ms = Date.parse(value + 'T00:00:00.000Z');
-  const date = new Date(ms);
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, 1)).toISOString().slice(0,10);
+function addYearsIso(value, years) {
+  const year = Number(String(value).slice(0,4));
+  if (!Number.isInteger(year)) return null;
+  return `${year + years}-01-01`;
 }
 
 async function populationDateBounds(env, cutoff) {
@@ -692,13 +692,13 @@ async function populationDateBounds(env, cutoff) {
     FROM races
     WHERE race_date < ?
   `).bind(cutoffDate).first();
-  const first = monthStartIso(row?.first_date);
-  const last = monthStartIso(row?.last_date);
+  const first = yearStartIso(row?.first_date);
+  const last = yearStartIso(row?.last_date);
   if (!first || !last) return [];
-  const end = addMonthsIso(last, 1);
+  const end = addYearsIso(last, 1);
   const ranges = [];
-  for (let cursor = first; cursor < end; cursor = addMonthsIso(cursor, 1)) {
-    ranges.push([cursor, addMonthsIso(cursor, 1)]);
+  for (let cursor = first; cursor < end; cursor = addYearsIso(cursor, 1)) {
+    ranges.push([cursor, addYearsIso(cursor, 1)]);
   }
   return ranges;
 }
@@ -785,8 +785,9 @@ async function loadPopulationAggregates(env, cutoff) {
   if (!ranges.length) return [];
   const shards = [];
   // D1's CPU limit applies to an individual query. Keep each population
-  // aggregation bounded to one calendar month instead of ranking/cross-joining
-  // the entire nationwide history in one statement.
+  // aggregation bounded to one calendar year instead of ranking/cross-joining
+  // the entire nationwide history in one statement. Annual shards keep the
+  // number of D1 subrequests low while cutting the per-query population sharply.
   for (const [startDate,endDate] of ranges) {
     shards.push(await loadPopulationAggregateShard(env, cutoff, startDate, endDate));
   }
