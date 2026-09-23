@@ -266,7 +266,7 @@ The external-analysis production release was accepted after:
 
 ## Trip-scenario backfill resilience candidate
 - Branch: `fix/trip-scenario-backfill-resilience`.
-- Production diagnosis found the C4 reconstruction cursor blocked by an immutable telemetry source containing a duplicate active target within one frame.
+- Production diagnosis found the C4 reconstruction cursor blocked by an immutable telemetry source containing a duplicate target within one frame.
 - Migration `0037_xlabs_position_reconstruction_quarantine.sql` adds durable source/job quarantine provenance and a per-job quarantined-source counter.
 - Only the exact deterministic duplicate-target validation error is quarantinable. The source remains unchanged in R2, writes no reconstructed/checkpoint/scenario facts, and the cursor advances to the next stored source.
 - All other reconstruction failures preserve the existing retry-three-times/fail-closed behavior and do not advance the cursor.
