@@ -194,6 +194,20 @@ test('voltstart lane analysis uses only ground-distance tier entries', async () 
   assert.equal(section.rows.find(row=>row.lane===1).observations,1);
   assert.equal(section.rows.find(row=>row.lane===4).observations,0);
   assert.equal(data.coverage.eligible.lane_starts,1);
+  assert.doesNotMatch(data.short_analysis.join(' '), /når spets oftast/i);
+  assert.doesNotMatch(data.short_analysis.join(' '), /tydligt oftare än snittet/i);
+});
+
+test('winner-scenario coverage uses winner entries so dead heats do not inflate coverage', async () => {
+  const {env,db}=createTestEnv();
+  seedTrackAnalysis(db);
+  db.prepare("UPDATE race_results SET placing=1 WHERE race_entry_id='entry-2'").run();
+  db.prepare("DELETE FROM race_positions WHERE id='pos-entry-2'").run();
+  const data=await getTrackAnalysisV1(env,'track-a',{startMethod:'auto',distanceGroup:'2140'});
+  assert.equal(data.coverage.eligible.winner_races,30);
+  assert.equal(data.coverage.eligible.winner_entries,31);
+  assert.equal(data.coverage.trip_scenario.winners_with_scenario,30);
+  assert.equal(data.coverage.trip_scenario.winner_scenario_coverage,0.9677);
 });
 
 test('track analysis as-of excludes sources that were not available before cutoff', async () => {
