@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=97704ed56875c7659ea75664fd7321bcff537dfc
-release_nonce=2026-09-23-upcoming-back-icon-pr244-1
+source_main=225536938867422f6669cd2fd9017b9634815c57
+release_nonce=2026-09-23-trip-scenario-pr245-1
