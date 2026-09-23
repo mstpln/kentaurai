@@ -43,6 +43,12 @@ jobs:
           echo "=== SOURCE_INVENTORY ==="
           query "SELECT COUNT(*) AS stored_sources,MIN(SUBSTR(external_id,1,10)) AS min_date,MAX(SUBSTR(external_id,1,10)) AS max_date FROM source_records WHERE source_type='xlabs_race_json' AND raw_object_key IS NOT NULL;"
 
+          echo "=== JOB_RANGE_INVENTORY ==="
+          query "WITH j AS (SELECT start_date,end_date FROM xlabs_position_reconstruction_jobs WHERE id='xposjob_xlabs-trip-classification-v1__existing' LIMIT 1) SELECT COUNT(*) AS job_sources FROM source_records,j WHERE source_type='xlabs_race_json' AND raw_object_key IS NOT NULL AND SUBSTR(external_id,1,10) BETWEEN j.start_date AND j.end_date;"
+
+          echo "=== JOB_QUARANTINE ==="
+          query "SELECT COUNT(*) AS quarantined_sources FROM xlabs_position_reconstruction_quarantine WHERE job_id='xposjob_xlabs-trip-classification-v1__existing';"
+
           echo "=== CLASSIFICATION_TOTALS ==="
           query "SELECT COUNT(*) AS rows,COUNT(DISTINCT race_entry_id) AS entries,COUNT(DISTINCT source_record_id) AS source_records FROM race_positions WHERE classification_version='xlabs-trip-classification-v1';"
 
