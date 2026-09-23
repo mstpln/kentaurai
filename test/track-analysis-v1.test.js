@@ -144,7 +144,7 @@ test('track analysis retains exact sparse metrics while broadening interpretatio
 
   const supportLane1=data.analysis_support.start_position_200m.sections[0].rows.find(row=>row.lane===1);
   assert.equal(supportLane1.observations,35);
-  assert.ok(data.short_analysis.some((line)=>line.includes('använder även')));
+  assert.ok(data.short_analysis.some((line)=>line.includes('används även')));
   assert.equal(data.coverage.trip_scenario.races_with_any_scenario,5);
   assert.equal(data.analysis_support.coverage.trip_scenario.races_with_any_scenario,35);
 });
