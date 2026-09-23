@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=68d6b03f4afde7518748c0ca463e233da3da86cb
-release_nonce=2026-09-23-navigation-track-pr243-1
+source_main=97704ed56875c7659ea75664fd7321bcff537dfc
+release_nonce=2026-09-23-upcoming-back-icon-pr244-1
