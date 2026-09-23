@@ -113,6 +113,13 @@ function commitView(){
   history.pushState({...next,depth},'');
 }
 function scheduleCommit(){clearTimeout(commitTimer);commitTimer=setTimeout(commitView,0)}
+function replaceView(){
+  if(restoring)return;
+  const current=history.state;
+  const depth=current&&current.marker===NAV_MARKER?Number(current.depth||0):0;
+  history.replaceState(makeHistoryState(depth),'');
+}
+function scheduleReplace(){clearTimeout(commitTimer);commitTimer=setTimeout(replaceView,0)}
 const SWIPE_EDGE_PX=24,SWIPE_TRIGGER_PX=72,SWIPE_MAX_VISUAL_PX=46;
 let swipe=null;
 function canSwipeBack(target){
@@ -236,6 +243,7 @@ document.addEventListener('click',event=>{
     history.back();
     return;
   }
+  if(target?.closest('[data-history-replace]')){scheduleReplace();return}
   scheduleCommit();
 },true);
 
