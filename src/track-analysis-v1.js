@@ -387,7 +387,7 @@ function laneSummary(section, multipleMethods) {
   );
   const strongestLead = leadOrdered[0];
   const leadRunnerUp = leadOrdered[1] || null;
-  const strongestLeadIsClear = !leadRunnerUp || comparisonDirection(
+  const strongestLeadIsClear = Boolean(leadRunnerUp) && comparisonDirection(
     strongestLead.lead_rate,strongestLead.observations,
     leadRunnerUp.lead_rate,leadRunnerUp.observations,
     LEAD_COMPARISON_MIN_DELTA_PP
@@ -398,11 +398,11 @@ function laneSummary(section, multipleMethods) {
   );
   const strongestPosition = positionOrdered[0] || null;
   const positionRunnerUp = positionOrdered[1] || null;
-  const strongestPositionIsClear = strongestPosition && (!positionRunnerUp || comparisonDirection(
+  const strongestPositionIsClear = Boolean(strongestPosition && positionRunnerUp) && comparisonDirection(
     strongestPosition.top3_rate,strongestPosition.observations,
     positionRunnerUp.top3_rate,positionRunnerUp.observations,
     TOP3_COMPARISON_MIN_DELTA_PP
-  ) === 'higher');
+  ) === 'higher';
 
   const leadBetter = rows.filter((row) =>
     comparisonDirection(row.lead_rate,row.observations,row.baseline?.lead_rate,row.baseline?.observations,LEAD_COMPARISON_MIN_DELTA_PP)==='higher'
