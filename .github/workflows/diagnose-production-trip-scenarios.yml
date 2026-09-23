@@ -54,3 +54,39 @@ jobs:
 
           echo "=== NORMALIZE_RUNS ==="
           query "SELECT status,COUNT(*) AS runs FROM import_runs WHERE source_type='xlabs_position_reconstruction_v1_normalize' GROUP BY status ORDER BY status;"
+
+          echo "=== UI_DEFAULT_SCOPE_COVERAGE ==="
+          query "SELECT
+            COUNT(*) AS scenario_rows,
+            COUNT(DISTINCT re.horse_id) AS horses,
+            COUNT(DISTINCT r.id) AS races
+          FROM race_positions rp
+          JOIN race_entries re ON re.id=rp.race_entry_id
+          JOIN races r ON r.id=re.race_id
+          JOIN race_results rr ON rr.race_entry_id=re.id
+          WHERE rp.classification_version='xlabs-trip-classification-v1'
+            AND re.horse_id IS NOT NULL
+            AND re.scratched=0
+            AND SUBSTR(r.race_date,1,4)='2026'
+            AND (
+              r.first_prize_sek >= 100000
+              OR EXISTS (SELECT 1 FROM race_scope_evidence rse WHERE rse.race_id=r.id)
+              OR UPPER(COALESCE(r.race_name,'') || ' ' || COALESCE(r.main_class,'')) LIKE '%STL%'
+              OR UPPER(COALESCE(r.race_name,'') || ' ' || COALESCE(r.main_class,'')) LIKE '%SVENSKA TRAVLIG%'
+            );"
+
+          echo "=== JOB_FAILURE_CLASS ==="
+          query "SELECT
+            CASE
+              WHEN last_error IS NULL THEN 'none'
+              WHEN LOWER(last_error) LIKE '%raw object%' OR LOWER(last_error) LIKE '%r2%' THEN 'raw_storage'
+              WHEN LOWER(last_error) LIKE '%json%' OR LOWER(last_error) LIKE '%payload%' THEN 'payload_validation'
+              WHEN LOWER(last_error) LIKE '%track%' OR LOWER(last_error) LIKE '%race%' OR LOWER(last_error) LIKE '%entry%' THEN 'race_mapping'
+              WHEN LOWER(last_error) LIKE '%timestamp%' OR LOWER(last_error) LIKE '%distance%' OR LOWER(last_error) LIKE '%frame%' OR LOWER(last_error) LIKE '%target%' THEN 'telemetry_reconstruction'
+              WHEN LOWER(last_error) LIKE '%constraint%' OR LOWER(last_error) LIKE '%unique%' OR LOWER(last_error) LIKE '%foreign key%' THEN 'database_constraint'
+              ELSE 'other'
+            END AS failure_class,
+            LENGTH(COALESCE(last_error,'')) AS error_length
+          FROM xlabs_position_reconstruction_jobs
+          WHERE id='xposjob_xlabs-trip-classification-v1__existing'
+          LIMIT 1;"
