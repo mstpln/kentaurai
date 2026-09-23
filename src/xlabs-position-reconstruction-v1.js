@@ -31,7 +31,7 @@ const QUARANTINE_FAILURE_DUPLICATE_TARGET = 'duplicate_target';
 
 function quarantinablePositionError(error) {
   const message = String(error?.message || '');
-  if (/^frame \d+ contains duplicate target \d+$/.test(message)) return QUARANTINE_FAILURE_DUPLICATE_TARGET;
+  if (/^(?:X-Labs interval )?frame \d+ contains duplicate target \d+$/.test(message)) return QUARANTINE_FAILURE_DUPLICATE_TARGET;
   return null;
 }
 
