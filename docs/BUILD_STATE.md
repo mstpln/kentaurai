@@ -281,4 +281,5 @@ The external-analysis production release was accepted after:
 - Baseline is the same country/context excluding the current track. Exact data remains visible; 10-24 races is limited, <10 uses transparent interpretation backoff, and 25+ is normally interpretable.
 - Step 1 export receives the same deterministic track-analysis contract plus relevant historical C4 labels; market data remains excluded and Step 2/Step 3 contracts are unchanged.
 - The user-facing Step 1 copy prompt explains sample, baseline/backoff and double-counting rules. No new AI call, gallop localization or separate aggregate backfill is introduced.
+- Migration `0038_track_analysis_v1.sql` adds only the composite C3 checkpoint read index required by the new 100 m/200 m analysis path; it introduces no new derived storage.
 - The bounded C4 production reconstruction for the current stored target interval is complete; unsupported/ambiguous labels remain null.
