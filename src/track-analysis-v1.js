@@ -2,7 +2,7 @@ import { XLABS_POSITION_RECONSTRUCTION_VERSION } from './xlabs-position-reconstr
 import { XLABS_TRIP_CLASSIFICATION_VERSION } from './xlabs-trip-classification-v1.js';
 
 export const TRACK_ANALYSIS_CONTRACT = 'kentaurai-track-analysis-v1';
-export const TRACK_ANALYSIS_VERSION = 'track-analysis-v1.1';
+export const TRACK_ANALYSIS_VERSION = 'track-analysis-v1.2';
 export const TRACK_ANALYSIS_SAMPLE_POLICY = Object.freeze({
   normalMinRaces: 25,
   limitedMinRaces: 10,
@@ -13,8 +13,7 @@ const POSITION_EXACT_FIELD_COVERAGE_MIN = 0.999;
 const POSITION_LONGITUDINAL_CONFIDENCE_MIN = 0.65;
 const LEAD_COMPARISON_MIN_DELTA_PP = 3;
 const TOP3_COMPARISON_MIN_DELTA_PP = 5;
-const WINNER_SHARE_COMPARISON_MIN_DELTA_PP = 2;
-const WINNER_PROFILE_MIN_DELTA_PP = 5;
+const SCENARIO_WIN_COMPARISON_MIN_DELTA_PP = 3;
 
 const STANDARD_DISTANCE_GROUPS = [640, 1640, 2140, 2640, 3140, 3640, 4140];
 const DISTANCE_TOLERANCE_M = 100;
@@ -234,6 +233,75 @@ async function loadPositionRows(env, { trackId = null, countryCode = null, exclu
     sourceRecordId:row.source_record_id,sourceSelectedAt:row.source_selected_at||null}));
 }
 
+
+async function loadEarly500Rows(env, { trackId = null, countryCode = null, excludeTrackId = null, startMethod, distanceGroup, asOf }) {
+  const conditions = [
+    'rpc.reconstruction_version = ?',
+    "rpc.checkpoint_key = '500m'",
+    'rpc.position_rank IS NOT NULL',
+    'rpc.field_coverage >= ?',
+    'rpc.longitudinal_confidence >= ?',
+    're.scratched = 0',
+    "rr.result_status = 'official'"
+  ];
+  const bindings = [XLABS_POSITION_RECONSTRUCTION_VERSION, POSITION_EXACT_FIELD_COVERAGE_MIN, POSITION_LONGITUDINAL_CONFIDENCE_MIN];
+  if (trackId) { conditions.push('r.track_id = ?'); bindings.push(trackId); }
+  if (countryCode) { conditions.push('t.country_code = ?'); bindings.push(countryCode); }
+  if (excludeTrackId) { conditions.push('r.track_id <> ?'); bindings.push(excludeTrackId); }
+  appendContextConditions(conditions, bindings, { startMethod, distanceGroup, asOf });
+  appendAsOfSourceConditions(conditions, bindings, { asOf });
+  const { results } = await env.DB.prepare(`
+    WITH ranked AS (
+      SELECT rpc.id,rpc.race_entry_id,rpc.checkpoint_key,rpc.position_rank,rpc.meters_behind_leader,
+        rpc.field_coverage,rpc.longitudinal_confidence,rpc.source_record_id,
+        r.id AS race_id,r.race_date,${canonicalStartMethodSql()} AS start_method,r.distance_m,
+        rr.placing,sr.fetched_at AS source_selected_at,
+        ROW_NUMBER() OVER (PARTITION BY rpc.race_entry_id,rpc.checkpoint_key ORDER BY julianday(sr.fetched_at) DESC,rpc.id DESC) AS row_number
+      FROM race_position_checkpoints rpc
+      JOIN source_records sr ON sr.id=rpc.source_record_id
+      JOIN race_entries re ON re.id=rpc.race_entry_id
+      JOIN races r ON r.id=re.race_id
+      JOIN tracks t ON t.id=r.track_id
+      JOIN race_results rr ON rr.race_entry_id=re.id
+      LEFT JOIN source_records rrs ON rrs.id=rr.source_record_id
+      WHERE ${conditions.join(' AND ')}
+    )
+    SELECT * FROM ranked WHERE row_number=1 ORDER BY race_date,race_id,race_entry_id
+  `).bind(...bindings).all();
+  return (results || []).map((row)=>({
+    raceEntryId:row.race_entry_id,raceId:row.race_id,raceDate:row.race_date,startMethod:row.start_method,
+    distanceM:finiteOrNull(row.distance_m),placing:finiteOrNull(row.placing),positionRank:finiteOrNull(row.position_rank),
+    metersBehindLeader:finiteOrNull(row.meters_behind_leader),fieldCoverage:finiteOrNull(row.field_coverage),
+    longitudinalConfidence:finiteOrNull(row.longitudinal_confidence),sourceRecordId:row.source_record_id,
+    sourceSelectedAt:row.source_selected_at||null
+  }));
+}
+
+async function loadLaneOutcomeRows(env, trackId, { startMethod, distanceGroup, asOf }) {
+  const conditions=['r.track_id = ?','re.scratched = 0','re.actual_lane BETWEEN 1 AND 8',"rr.result_status = 'official'"];
+  const bindings=[trackId];
+  appendContextConditions(conditions,bindings,{startMethod,distanceGroup,asOf});
+  if(asOf){
+    conditions.push('rr.source_record_id IS NOT NULL');
+    conditions.push('julianday(rrs.fetched_at) <= julianday(?)');
+    bindings.push(asOf);
+  }
+  const {results}=await env.DB.prepare(`
+    SELECT r.id AS race_id,r.race_date,${canonicalStartMethodSql()} AS start_method,
+      re.actual_lane,rr.placing
+    FROM race_entries re
+    JOIN races r ON r.id=re.race_id
+    JOIN race_results rr ON rr.race_entry_id=re.id
+    LEFT JOIN source_records rrs ON rrs.id=rr.source_record_id
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY r.race_date,r.id,re.actual_lane
+  `).bind(...bindings).all();
+  return (results||[]).map((row)=>({
+    raceId:row.race_id,raceDate:row.race_date,startMethod:row.start_method,
+    lane:finiteOrNull(row.actual_lane),placing:finiteOrNull(row.placing)
+  }));
+}
+
 function sampleStatus(races) { return races>=25?'normal':races>=10?'limited':'sparse'; }
 function contextLabel(method,distance) { return `${method==='auto'?'Autostart':method==='volt'?'Voltstart':'Alla startmetoder'}, ${distance==='all'?'alla distanser':distance+' m'}`; }
 
@@ -327,11 +395,46 @@ function scenarioMetrics(rows) {
 
 function aggregateScenarios(rows,baselineRows) {
   const base=new Map(scenarioMetrics(baselineRows).map(r=>[r.scenario_key,r]));
-  return scenarioMetrics(rows).map(row=>{const b=base.get(row.scenario_key); return {...row,baseline:b?{starts:b.starts,races:b.races,winner_observations:b.winner_observations,occurrence_rate:b.occurrence_rate,win_rate:b.win_rate,top3_rate:b.top3_rate,winner_share:b.winner_share}:null,
+  return scenarioMetrics(rows).map(row=>{const b=base.get(row.scenario_key); return {...row,measurement_point:'500m_remaining',measurement_label:'500 m kvar',baseline:b?{starts:b.starts,races:b.races,winner_observations:b.winner_observations,occurrence_rate:b.occurrence_rate,win_rate:b.win_rate,top3_rate:b.top3_rate,winner_share:b.winner_share}:null,
     occurrence_delta_pp:percentagePointDelta(row.occurrence_rate,b?.occurrence_rate),win_rate_delta_pp:percentagePointDelta(row.win_rate,b?.win_rate),top3_delta_pp:percentagePointDelta(row.top3_rate,b?.top3_rate),winner_share_delta_pp:percentagePointDelta(row.winner_share,b?.winner_share)};});
 }
 
-function coverage(pos100,pos200,scen,eligible){const races=new Set(scen.map(r=>r.raceId)),wins=new Set(scen.filter(r=>r.placing===1).map(r=>r.raceEntryId));return {eligible:{official_starts:eligible.officialStarts,official_races:eligible.officialRaces,lane_starts:eligible.laneStarts,winner_races:eligible.winnerRaces,winner_entries:eligible.winnerEntries},position_100m:{observations:pos100.length,races:new Set(pos100.map(r=>r.raceId)).size,observation_coverage:round(ratio(pos100.length,eligible.laneStarts))},position_200m:{observations:pos200.length,races:new Set(pos200.map(r=>r.raceId)).size,observation_coverage:round(ratio(pos200.length,eligible.laneStarts))},trip_scenario:{observations:scen.length,races_with_any_scenario:races.size,observation_coverage:round(ratio(scen.length,eligible.officialStarts)),winners_with_scenario:wins.size,winner_scenario_coverage:round(ratio(wins.size,eligible.winnerEntries))}};}
+function earlyLeaderMetric(rows) {
+  const leaders=(rows||[]).filter((row)=>row.positionRank===1);
+  const winners=(rows||[]).filter((row)=>row.placing===1);
+  const wins=leaders.filter((row)=>row.placing===1).length;
+  const top3=leaders.filter((row)=>row.placing>=1&&row.placing<=3).length;
+  return {
+    scenario_key:'leader',scenario_label:SCENARIO_LABELS.leader,
+    measurement_point:'500m_after_start',measurement_label:'500 m efter start',
+    starts:leaders.length,races:new Set(leaders.map((row)=>row.raceId)).size,winner_observations:winners.length,
+    occurrence_rate:round(ratio(leaders.length,rows.length)),wins,win_rate:round(ratio(wins,leaders.length)),
+    top3,top3_rate:round(ratio(top3,leaders.length)),winner_share:round(ratio(wins,winners.length))
+  };
+}
+
+function aggregateMixedScenarios(lateRows,baselineLateRows,earlyRows,baselineEarlyRows) {
+  const late=aggregateScenarios(lateRows,baselineLateRows).filter((row)=>row.scenario_key!=='leader');
+  const leader=earlyLeaderMetric(earlyRows),baseLeader=earlyLeaderMetric(baselineEarlyRows);
+  const leaderWithBaseline={...leader,baseline:{starts:baseLeader.starts,races:baseLeader.races,winner_observations:baseLeader.winner_observations,occurrence_rate:baseLeader.occurrence_rate,win_rate:baseLeader.win_rate,top3_rate:baseLeader.top3_rate,winner_share:baseLeader.winner_share},
+    occurrence_delta_pp:percentagePointDelta(leader.occurrence_rate,baseLeader.occurrence_rate),
+    win_rate_delta_pp:percentagePointDelta(leader.win_rate,baseLeader.win_rate),
+    top3_delta_pp:percentagePointDelta(leader.top3_rate,baseLeader.top3_rate),
+    winner_share_delta_pp:percentagePointDelta(leader.winner_share,baseLeader.winner_share)};
+  return [leaderWithBaseline,...late];
+}
+
+function aggregateLaneOutcomes(rows) {
+  const out=[];
+  for(let lane=1;lane<=8;lane++){
+    const a=(rows||[]).filter((row)=>row.lane===lane);
+    const wins=a.filter((row)=>row.placing===1).length;
+    out.push({lane,result_starts:a.length,wins,win_rate:round(ratio(wins,a.length))});
+  }
+  return {result_starts:(rows||[]).length,rows:out};
+}
+
+function coverage(pos100,pos200,scen,eligible,early500=[]){const races=new Set(scen.map(r=>r.raceId)),wins=new Set(scen.filter(r=>r.placing===1).map(r=>r.raceEntryId)),earlyRaces=new Set(early500.map(r=>r.raceId)),earlyWinners=new Set(early500.filter(r=>r.placing===1).map(r=>r.raceEntryId));return {eligible:{official_starts:eligible.officialStarts,official_races:eligible.officialRaces,lane_starts:eligible.laneStarts,winner_races:eligible.winnerRaces,winner_entries:eligible.winnerEntries},position_100m:{observations:pos100.length,races:new Set(pos100.map(r=>r.raceId)).size,observation_coverage:round(ratio(pos100.length,eligible.laneStarts))},position_200m:{observations:pos200.length,races:new Set(pos200.map(r=>r.raceId)).size,observation_coverage:round(ratio(pos200.length,eligible.laneStarts))},leader_500m_after_start:{observations:early500.length,races:earlyRaces.size,observation_coverage:round(ratio(early500.length,eligible.officialStarts)),winners_with_observation:earlyWinners.size,winner_coverage:round(ratio(earlyWinners.size,eligible.winnerEntries))},trip_scenario:{observations:scen.length,races_with_any_scenario:races.size,observation_coverage:round(ratio(scen.length,eligible.officialStarts)),winners_with_scenario:wins.size,winner_scenario_coverage:round(ratio(wins.size,eligible.winnerEntries))}};}
 function sourcePeriod(a,b){const d=[...a,...b].map(r=>r.raceDate).filter(Boolean).sort();return {first_race_date:d[0]||null,last_race_date:d.at(-1)||null};}
 function swedishList(values) {
   const items = values.filter(Boolean).map(String);
@@ -377,119 +480,65 @@ function rowsWithNormalLaneSample(section) {
   );
 }
 
-function laneSummary(section, multipleMethods) {
-  const rows = rowsWithNormalLaneSample(section);
-  if (!rows.length) return null;
-
-  const method = multipleMethods ? `${section.label}: ` : '';
-  const leadOrdered = [...rows].sort((a,b) =>
-    b.lead_rate-a.lead_rate || b.observations-a.observations || a.lane-b.lane
-  );
-  const strongestLead = leadOrdered[0];
-  const leadRunnerUp = leadOrdered[1] || null;
-  const strongestLeadIsClear = Boolean(leadRunnerUp) && comparisonDirection(
-    strongestLead.lead_rate,strongestLead.observations,
-    leadRunnerUp.lead_rate,leadRunnerUp.observations,
-    LEAD_COMPARISON_MIN_DELTA_PP
-  ) === 'higher';
-
-  const positionOrdered = [...rows].filter((row)=>row.top3_rate!=null).sort((a,b) =>
-    b.top3_rate-a.top3_rate || b.observations-a.observations || a.lane-b.lane
-  );
-  const strongestPosition = positionOrdered[0] || null;
-  const positionRunnerUp = positionOrdered[1] || null;
-  const strongestPositionIsClear = Boolean(strongestPosition && positionRunnerUp) && comparisonDirection(
-    strongestPosition.top3_rate,strongestPosition.observations,
-    positionRunnerUp.top3_rate,positionRunnerUp.observations,
-    TOP3_COMPARISON_MIN_DELTA_PP
-  ) === 'higher';
-
-  const leadBetter = rows.filter((row) =>
-    comparisonDirection(row.lead_rate,row.observations,row.baseline?.lead_rate,row.baseline?.observations,LEAD_COMPARISON_MIN_DELTA_PP)==='higher'
-  ).map((row)=>row.lane);
-  const leadWorse = rows.filter((row) =>
-    comparisonDirection(row.lead_rate,row.observations,row.baseline?.lead_rate,row.baseline?.observations,LEAD_COMPARISON_MIN_DELTA_PP)==='lower'
-  ).map((row)=>row.lane);
-  const positionBetter = rows.filter((row) =>
-    comparisonDirection(row.top3_rate,row.observations,row.baseline?.top3_rate,row.baseline?.observations,TOP3_COMPARISON_MIN_DELTA_PP)==='higher'
-  ).map((row)=>row.lane);
-  const positionWorse = rows.filter((row) =>
-    comparisonDirection(row.top3_rate,row.observations,row.baseline?.top3_rate,row.baseline?.observations,TOP3_COMPARISON_MIN_DELTA_PP)==='lower'
-  ).map((row)=>row.lane);
-
-  const parts = [];
-  if (strongestLeadIsClear) {
-    parts.push(`${method}Spår ${strongestLead.lane} når spets tydligt oftast efter 200 m (${Math.round(strongestLead.lead_rate*100)} %).`);
-  }
-  if (strongestPositionIsClear) {
-    parts.push(`${method && !parts.length ? method : ''}Spår ${strongestPosition.lane} ligger tydligt oftast bland de tre främsta efter 200 m (${Math.round(strongestPosition.top3_rate*100)} %).`);
-  }
-  if (leadBetter.length || leadWorse.length) {
-    const comparison = [];
-    if (leadBetter.length) comparison.push(`Spår ${swedishList(leadBetter)} når spets tydligt oftare än snittet`);
-    if (leadWorse.length) comparison.push(`${leadBetter.length?'spår':'Spår'} ${swedishList(leadWorse)} gör det tydligt mer sällan`);
-    parts.push(`${method && !parts.length ? method : ''}${comparison.join(', medan ')}.`);
-  }
-  if (positionBetter.length || positionWorse.length) {
-    const comparison = [];
-    if (positionBetter.length) comparison.push(`Spår ${swedishList(positionBetter)} ger tydligt oftare en plats bland de tre främsta än snittet`);
-    if (positionWorse.length) comparison.push(`${positionBetter.length?'spår':'Spår'} ${swedishList(positionWorse)} gör det tydligt mer sällan`);
-    parts.push(`${method && !parts.length ? method : ''}${comparison.join(', medan ')}.`);
-  }
-  return parts.length ? parts.join(' ') : null;
+function laneLabelList(rows,field) {
+  return swedishList(rows.map((row)=>`spår ${row.lane} (${Math.round(Number(row[field]||0)*100)} %)`));
 }
 
-function scenarioWinnerSummary(rows) {
-  const winnerObservations = Number(rows?.[0]?.winner_observations || 0);
-  if (winnerObservations < TRACK_ANALYSIS_SAMPLE_POLICY.normalMinRaces) return null;
-  const eligible = (rows || []).filter((row) => row.winner_share != null);
-  if (!eligible.length) return null;
-  const ordered = [...eligible].sort((a,b) =>
-    b.winner_share-a.winner_share || b.wins-a.wins || b.starts-a.starts
-  );
-  const strongest = ordered[0];
-  const runnerUp = ordered[1] || null;
-  // "Largest" is not enough for narrative dominance. The leading scenario must
-  // be materially and conservatively separated from the runner-up.
-  const strongestIsClear = !runnerUp || comparisonDirection(
-    strongest.winner_share,strongest.winner_observations,
-    runnerUp.winner_share,runnerUp.winner_observations,
-    WINNER_PROFILE_MIN_DELTA_PP
-  ) === 'higher';
-
-  let text = strongestIsClear
-    ? `Bland vinnarna där löpningsscenariot kan klassificeras kommer en tydligt större andel från ${scenarioPhrase(strongest.scenario_key)}: ${Math.round(strongest.winner_share*100)} % har legat där runt 500 m kvar.`
-    : 'Bland vinnarna där löpningsscenariot kan klassificeras finns inget enskilt scenario som sticker ut tydligt i det här underlaget.';
-
-  const strongestDirection = strongestIsClear ? comparisonDirection(
-    strongest.winner_share,strongest.winner_observations,
-    strongest.baseline?.winner_share,strongest.baseline?.winner_observations,
-    WINNER_SHARE_COMPARISON_MIN_DELTA_PP
-  ) : null;
-  if (strongestDirection === 'higher') text += ' Det är tydligt oftare än snittet.';
-  else if (strongestDirection === 'lower') text += ' Det är tydligt mer sällan än snittet.';
-  else if (strongestIsClear && strongest.winner_share_delta_pp != null && Math.abs(strongest.winner_share_delta_pp) < 1.5) text += ' Det är ungefär i nivå med snittet.';
-
-  const deviations = eligible
-    .map((row) => ({
-      row,
-      direction: comparisonDirection(
-        row.winner_share,row.winner_observations,
-        row.baseline?.winner_share,row.baseline?.winner_observations,
-        WINNER_SHARE_COMPARISON_MIN_DELTA_PP
-      )
-    }))
-    .filter(({row,direction}) => direction && (!strongestIsClear || row.scenario_key !== strongest.scenario_key))
-    .sort((a,b) => Math.abs(b.row.winner_share_delta_pp)-Math.abs(a.row.winner_share_delta_pp));
-  const more = deviations.filter(({direction}) => direction === 'higher').slice(0,2).map(({row}) => scenarioPhrase(row.scenario_key));
-  const less = deviations.filter(({direction}) => direction === 'lower').slice(0,2).map(({row}) => scenarioPhrase(row.scenario_key));
-  if (more.length || less.length) {
-    const comparison = [];
-    if (more.length) comparison.push(`Vinnare kommer också tydligt oftare från ${swedishList(more)} än snittet`);
-    if (less.length) comparison.push(`${swedishList(less)} är tydligt mindre vanliga vinnarlägen`);
-    text += ` ${comparison.join(', medan ')}.`;
+function observedLeadSummary(sections) {
+  const visible=(sections||[]).filter((section)=>(section.observations||0)>0);
+  const multiple=visible.length>1;
+  const sentences=[];
+  for(const section of visible){
+    const rows=(section.rows||[]).filter((row)=>row.observations>0&&row.lead_rate!=null)
+      .sort((a,b)=>b.lead_rate-a.lead_rate||b.observations-a.observations||a.lane-b.lane).slice(0,3);
+    if(!rows.length)continue;
+    const prefix=multiple?`${section.start_method==='auto'?'Autostart':'Voltstart'}: `:'';
+    sentences.push(`${prefix}Högst observerad spetsfrekvens efter 200 m har ${laneLabelList(rows,'lead_rate')}.`);
   }
-  return text;
+  return sentences.length?sentences.join(' '):null;
+}
+
+function laneComparisonSummary(sections) {
+  const visible=(sections||[]).filter((section)=>(section.observations||0)>0);
+  const multiple=visible.length>1;
+  const sentences=[];
+  for(const section of visible){
+    const rows=rowsWithNormalLaneSample(section);
+    const higher=rows.filter((row)=>comparisonDirection(row.lead_rate,row.observations,row.baseline?.lead_rate,row.baseline?.observations,LEAD_COMPARISON_MIN_DELTA_PP)==='higher').map((row)=>row.lane);
+    const lower=rows.filter((row)=>comparisonDirection(row.lead_rate,row.observations,row.baseline?.lead_rate,row.baseline?.observations,LEAD_COMPARISON_MIN_DELTA_PP)==='lower').map((row)=>row.lane);
+    if(!higher.length&&!lower.length)continue;
+    const prefix=multiple?`${section.start_method==='auto'?'Autostart':'Voltstart'}: `:'';
+    const parts=[];
+    if(higher.length)parts.push(`spår ${swedishList(higher)} når ledningen tydligt oftare här`);
+    if(lower.length)parts.push(`spår ${swedishList(lower)} tydligt mer sällan`);
+    sentences.push(`${prefix}Jämfört med andra svenska banor når ${parts.join(', medan ')}.`);
+  }
+  return sentences.length?sentences.join(' '):null;
+}
+
+function laneWinSummary(laneOutcomes) {
+  const rows=(laneOutcomes?.rows||[]).filter((row)=>row.result_starts>0&&row.win_rate!=null);
+  if(rows.length<2)return null;
+  const count=Math.min(3,Math.floor(rows.length/2));
+  if(!count)return null;
+  const best=[...rows].sort((a,b)=>b.win_rate-a.win_rate||b.result_starts-a.result_starts||a.lane-b.lane).slice(0,count);
+  const bestLanes=new Set(best.map((row)=>row.lane));
+  const worst=[...rows].filter((row)=>!bestLanes.has(row.lane)).sort((a,b)=>a.win_rate-b.win_rate||b.result_starts-a.result_starts||a.lane-b.lane).slice(0,count);
+  if(!worst.length)return null;
+  return `Högst observerad segerprocent har ${laneLabelList(best,'win_rate')}. Lägst har ${laneLabelList(worst,'win_rate')}.`;
+}
+
+function scenarioWinSummary(rows) {
+  const leader=(rows||[]).find((row)=>row.scenario_key==='leader'&&row.starts>0&&row.win_rate!=null);
+  const other=(rows||[]).filter((row)=>row.scenario_key!=='leader'&&row.starts>0&&row.win_rate!=null)
+    .sort((a,b)=>b.win_rate-a.win_rate||b.starts-a.starts||SCENARIO_ORDER.indexOf(a.scenario_key)-SCENARIO_ORDER.indexOf(b.scenario_key)).slice(0,3);
+  const parts=[];
+  if(leader)parts.push(`Hästar som satt i ledningen 500 m efter start vann ${Math.round(leader.win_rate*100)} % av loppen.`);
+  if(other.length){
+    const labels=swedishList(other.map((row)=>`${scenarioPhrase(row.scenario_key)} (${Math.round(row.win_rate*100)} %)`));
+    parts.push(`Med 500 m kvar var segerprocenten högst för ${labels}.`);
+  }
+  return parts.length?parts.join(' '):null;
 }
 
 function hasNormalLaneSample(sections) {
@@ -497,27 +546,17 @@ function hasNormalLaneSample(sections) {
 }
 
 function hasNormalWinnerSample(rows) {
-  return Number(rows?.[0]?.winner_observations || 0) >= TRACK_ANALYSIS_SAMPLE_POLICY.normalMinRaces;
+  return Number(rows?.find((row)=>row.scenario_key!=='leader')?.winner_observations || 0) >= TRACK_ANALYSIS_SAMPLE_POLICY.normalMinRaces;
 }
 
-function buildSummary({selectedSample,basis,laneSections,scenarioRows,usedLaneSupport=false,usedScenarioSupport=false}) {
-  const out = [];
-  const visibleLaneSections = (laneSections || []).filter((section) => section.observations > 0);
-  const multipleMethods = visibleLaneSections.length > 1;
-  for (const section of visibleLaneSections) {
-    const item = laneSummary(section,multipleMethods);
-    if (item) out.push(item);
-  }
-  const winnerSummary = scenarioWinnerSummary(scenarioRows);
-  if (winnerSummary) out.push(winnerSummary);
-
-  if (usedLaneSupport || usedScenarioSupport) {
-    out.push(`Underlaget för valt filter är tunt. Därför används även ${basis.label.toLowerCase()} som stöd i de delar där det behövs.`);
-  } else if (!out.length && selectedSample.sample_status === 'limited') {
-    out.push(`Underlaget är begränsat till ${selectedSample.races} lopp med klassificerat scenario. Det är för lite för säkra slutsatser i punktanalysen.`);
-  } else if (!out.length && selectedSample.sample_status === 'sparse') {
-    out.push(`Underlaget är tunt: ${selectedSample.races} lopp med klassificerat scenario finns tillgängliga.`);
-  }
+function buildSummary({laneSections,comparisonLaneSections,laneOutcomes,scenarioRows}) {
+  const out=[];
+  for(const item of [
+    observedLeadSummary(laneSections),
+    laneComparisonSummary(comparisonLaneSections),
+    laneWinSummary(laneOutcomes),
+    scenarioWinSummary(scenarioRows)
+  ]) if(item) out.push(item);
   return out.slice(0,5);
 }
 
@@ -538,21 +577,26 @@ export async function getTrackAnalysisV1(env,trackIdValue,options={}){
   const selectedContext={startMethod,distanceGroup,asOf};
   const basisContext={startMethod:resolved.startMethod,distanceGroup:resolved.distanceGroup,asOf};
   const sameBasis=resolved.backoffLevel==='exact';
-  const [exactPos,exactBaselinePos,exactScen,exactBaselineScen,exactEligible,trackContext]=await Promise.all([
+  const [exactPos,exactBaselinePos,exactScen,exactBaselineScen,exactEarly500,exactBaselineEarly500,exactLaneOutcomeRows,exactEligible,trackContext]=await Promise.all([
     loadPositionRows(env,{trackId,...selectedContext}),
     track.country_code?loadPositionRows(env,{countryCode:track.country_code,excludeTrackId:trackId,...selectedContext}):[],
     loadScenarioRows(env,{trackId,...selectedContext}),
     track.country_code?loadScenarioRows(env,{countryCode:track.country_code,excludeTrackId:trackId,...selectedContext}):[],
+    loadEarly500Rows(env,{trackId,...selectedContext}),
+    track.country_code?loadEarly500Rows(env,{countryCode:track.country_code,excludeTrackId:trackId,...selectedContext}):[],
+    loadLaneOutcomeRows(env,trackId,selectedContext),
     loadEligibleCoverageCounts(env,trackId,selectedContext),
     loadTrackContext(env,trackId,selectedContext)
   ]);
-  const [basisPos,basisBaselinePos,basisScen,basisBaselineScen,basisEligible]=sameBasis
-    ? [exactPos,exactBaselinePos,exactScen,exactBaselineScen,exactEligible]
+  const [basisPos,basisBaselinePos,basisScen,basisBaselineScen,basisEarly500,basisBaselineEarly500,basisEligible]=sameBasis
+    ? [exactPos,exactBaselinePos,exactScen,exactBaselineScen,exactEarly500,exactBaselineEarly500,exactEligible]
     : await Promise.all([
         loadPositionRows(env,{trackId,...basisContext}),
         track.country_code?loadPositionRows(env,{countryCode:track.country_code,excludeTrackId:trackId,...basisContext}):[],
         loadScenarioRows(env,{trackId,...basisContext}),
         track.country_code?loadScenarioRows(env,{countryCode:track.country_code,excludeTrackId:trackId,...basisContext}):[],
+        loadEarly500Rows(env,{trackId,...basisContext}),
+        track.country_code?loadEarly500Rows(env,{countryCode:track.country_code,excludeTrackId:trackId,...basisContext}):[],
         loadEligibleCoverageCounts(env,trackId,basisContext)
       ]);
   const exactPos100=exactPos.filter(r=>r.checkpointKey==='100m'),exactPos200=exactPos.filter(r=>r.checkpointKey==='200m');
@@ -561,10 +605,11 @@ export async function getTrackAnalysisV1(env,trackIdValue,options={}){
   const basisBaselinePos100=basisBaselinePos.filter(r=>r.checkpointKey==='100m'),basisBaselinePos200=basisBaselinePos.filter(r=>r.checkpointKey==='200m');
   const exactStart100Sections=aggregateStartPositions(exactPos100,exactBaselinePos100,startMethod);
   const exactStart200Sections=aggregateStartPositions(exactPos200,exactBaselinePos200,startMethod);
-  const exactScenarios=aggregateScenarios(exactScen,exactBaselineScen);
+  const exactScenarios=aggregateMixedScenarios(exactScen,exactBaselineScen,exactEarly500,exactBaselineEarly500);
+  const exactLaneOutcomes=aggregateLaneOutcomes(exactLaneOutcomeRows);
   const basisStart100Sections=aggregateStartPositions(basisPos100,basisBaselinePos100,resolved.startMethod);
   const basisStart200Sections=aggregateStartPositions(basisPos200,basisBaselinePos200,resolved.startMethod);
-  const basisScenarios=aggregateScenarios(basisScen,basisBaselineScen);
+  const basisScenarios=aggregateMixedScenarios(basisScen,basisBaselineScen,basisEarly500,basisBaselineEarly500);
   const basisRaces=new Set(basisScen.map(r=>r.raceId)).size;
   const basis={start_method:resolved.startMethod,distance_group:resolved.distanceGroup,label:contextLabel(resolved.startMethod,resolved.distanceGroup),backoff_level:resolved.backoffLevel,races:basisRaces,sample_status:sampleStatus(basisRaces)};
   const selectedSample={races:resolved.selectedRaces,sample_status:resolved.selectedStatus};
@@ -572,8 +617,8 @@ export async function getTrackAnalysisV1(env,trackIdValue,options={}){
   const exactWinnerNormal=hasNormalWinnerSample(exactScenarios);
   const useLaneSupport=!exactLaneNormal&&!sameBasis&&hasNormalLaneSample(basisStart200Sections);
   const useScenarioSupport=!exactWinnerNormal&&!sameBasis&&hasNormalWinnerSample(basisScenarios);
-  const summaryLaneSections=useLaneSupport?basisStart200Sections:exactStart200Sections;
-  const summaryScenarioRows=useScenarioSupport?basisScenarios:exactScenarios;
+  const comparisonLaneSections=useLaneSupport?basisStart200Sections:exactStart200Sections;
+  const comparisonScenarioRows=useScenarioSupport?basisScenarios:exactScenarios;
   const result={
     contract_version:TRACK_ANALYSIS_CONTRACT,
     analysis_version:TRACK_ANALYSIS_VERSION,
@@ -586,18 +631,19 @@ export async function getTrackAnalysisV1(env,trackIdValue,options={}){
     track_context:trackContext,
     start_position_100m:{checkpoint_m:100,role:'supporting_start_signal',quality_scope:'complete_field_rank_only',sections:exactStart100Sections},
     start_position_200m:{checkpoint_m:200,role:'primary_early_position',quality_scope:'complete_field_rank_only',sections:exactStart200Sections},
-    trip_scenario_500m_remaining:{decision_distance_remaining_m:500,rows:exactScenarios},
-    coverage:coverage(exactPos100,exactPos200,exactScen,exactEligible),
+    lane_outcomes:{role:'observed_lane_win_rates',result_starts:exactLaneOutcomes.result_starts,rows:exactLaneOutcomes.rows},
+    trip_scenario_500m_remaining:{measurement_policy:'leader_500m_after_start_others_500m_remaining',leader_after_start_m:500,other_positions_distance_remaining_m:500,rows:exactScenarios},
+    coverage:coverage(exactPos100,exactPos200,exactScen,exactEligible,exactEarly500),
     period:sourcePeriod(exactPos,exactScen),
     analysis_support:sameBasis?null:{
       start_position_100m:{checkpoint_m:100,role:'supporting_start_signal',quality_scope:'complete_field_rank_only',sections:basisStart100Sections},
       start_position_200m:{checkpoint_m:200,role:'primary_early_position',quality_scope:'complete_field_rank_only',sections:basisStart200Sections},
-      trip_scenario_500m_remaining:{decision_distance_remaining_m:500,rows:basisScenarios},
-      coverage:coverage(basisPos100,basisPos200,basisScen,basisEligible),
+      trip_scenario_500m_remaining:{measurement_policy:'leader_500m_after_start_others_500m_remaining',leader_after_start_m:500,other_positions_distance_remaining_m:500,rows:basisScenarios},
+      coverage:coverage(basisPos100,basisPos200,basisScen,basisEligible,basisEarly500),
       period:sourcePeriod(basisPos,basisScen)
     }
   };
-  result.short_analysis=buildSummary({selectedSample,basis,laneSections:summaryLaneSections,scenarioRows:summaryScenarioRows,usedLaneSupport:useLaneSupport,usedScenarioSupport:useScenarioSupport});
+  result.short_analysis=buildSummary({laneSections:exactStart200Sections,comparisonLaneSections,laneOutcomes:exactLaneOutcomes,scenarioRows:exactScenarios,comparisonScenarioRows});
   return result;
 }
 
