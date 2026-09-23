@@ -90,3 +90,88 @@ jobs:
           FROM xlabs_position_reconstruction_jobs
           WHERE id='xposjob_xlabs-trip-classification-v1__existing'
           LIMIT 1;"
+
+          echo "=== JOB_FAILURE_DETAIL ==="
+          query "SELECT
+            CASE
+              WHEN last_error IS NULL THEN 'none'
+              WHEN last_error='X-Labs telemetry timestamps must be strictly increasing' THEN 'timestamps_not_strictly_increasing'
+              WHEN last_error='X-Labs telemetry contains no active official starters' THEN 'no_active_official_starters'
+              WHEN last_error='normalized official race entries are required' THEN 'missing_official_entries'
+              WHEN last_error='normalized official race has no active entries' THEN 'no_active_official_entries'
+              WHEN last_error LIKE 'frame % contains duplicate target %' THEN 'duplicate_target'
+              WHEN last_error LIKE 'frame % target number must be a positive integer' THEN 'invalid_target_number'
+              WHEN last_error LIKE 'frame % target % posX must be finite' THEN 'invalid_pos_x'
+              WHEN last_error LIKE 'frame % target % posY must be finite' THEN 'invalid_pos_y'
+              WHEN last_error LIKE 'frame % target % distanceToFinish must be finite' THEN 'invalid_distance_to_finish'
+              WHEN last_error LIKE 'X-Labs telemetry frame % has an unexpected trackId' THEN 'unexpected_track_id'
+              WHEN last_error LIKE 'X-Labs telemetry frame % has an unexpected raceNumber' THEN 'unexpected_race_number'
+              WHEN last_error LIKE 'X-Labs telemetry frame % targets must be an array' THEN 'targets_not_array'
+              WHEN last_error LIKE 'X-Labs telemetry frame % has an invalid timestamp' THEN 'invalid_timestamp'
+              ELSE 'other'
+            END AS failure_detail
+          FROM xlabs_position_reconstruction_jobs
+          WHERE id='xposjob_xlabs-trip-classification-v1__existing'
+          LIMIT 1;"
+
+          echo "=== UI_TRIP_QUERY_PROBE ==="
+          query "WITH target AS (
+            SELECT re.horse_id
+            FROM race_positions rp
+            JOIN race_entries re ON re.id=rp.race_entry_id
+            JOIN races r ON r.id=re.race_id
+            JOIN race_results rr ON rr.race_entry_id=re.id
+            WHERE rp.classification_version='xlabs-trip-classification-v1'
+              AND re.horse_id IS NOT NULL
+              AND re.scratched=0
+              AND r.race_date>='2026-01-01'
+              AND r.race_date<='2026-09-23'
+              AND (
+                r.first_prize_sek>=100000
+                OR EXISTS (SELECT 1 FROM race_scope_evidence rse_scope WHERE rse_scope.race_id=r.id)
+                OR UPPER(COALESCE(r.race_name,'') || ' ' || COALESCE(r.main_class,'') || ' ' || COALESCE(r.class_flags_json,'')) LIKE '% STL %'
+              )
+            GROUP BY re.horse_id
+            ORDER BY COUNT(*) DESC
+            LIMIT 1
+          ), latest_trip AS (
+            SELECT rp.*,
+              ROW_NUMBER() OVER (
+                PARTITION BY rp.race_entry_id
+                ORDER BY julianday(sr.fetched_at) DESC,rp.id DESC
+              ) rn
+            FROM race_positions rp
+            JOIN source_records sr ON sr.id=rp.source_record_id
+            WHERE rp.classification_version='xlabs-trip-classification-v1'
+          ), filtered AS MATERIALIZED (
+            SELECT re.id race_entry_id,rr.placing,
+              CASE
+                WHEN rp.leader=1 THEN 'leader'
+                WHEN rp.pocket=1 THEN 'pocket'
+                WHEN rp.death_seat=1 THEN 'death_seat'
+                WHEN rp.second_over=1 THEN 'second_over'
+                WHEN rp.third_over=1 THEN 'third_over'
+                WHEN json_extract(rp.event_json,'$.scenario_key')='back' THEN 'back'
+                ELSE NULL
+              END scenario
+            FROM race_entries re INDEXED BY idx_entries_horse_race
+            JOIN races r ON r.id=re.race_id
+            JOIN race_results rr ON rr.race_entry_id=re.id
+            JOIN horses h ON h.id=re.horse_id
+            JOIN latest_trip rp ON rp.race_entry_id=re.id AND rp.rn=1
+            WHERE re.scratched=0
+              AND re.horse_id=(SELECT horse_id FROM target)
+              AND r.race_date>='2026-01-01'
+              AND r.race_date<='2026-09-23'
+              AND (
+                r.first_prize_sek>=100000
+                OR EXISTS (SELECT 1 FROM race_scope_evidence rse_scope WHERE rse_scope.race_id=r.id)
+                OR UPPER(COALESCE(r.race_name,'') || ' ' || COALESCE(r.main_class,'') || ' ' || COALESCE(r.class_flags_json,'')) LIKE '% STL %'
+              )
+          ), grouped AS (
+            SELECT scenario,COUNT(*) starts
+            FROM filtered
+            WHERE scenario IS NOT NULL
+            GROUP BY scenario
+          )
+          SELECT COUNT(*) AS scenario_groups,COALESCE(SUM(starts),0) AS starts FROM grouped;"
