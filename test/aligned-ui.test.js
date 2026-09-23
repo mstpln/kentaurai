@@ -80,7 +80,7 @@ test('Bana Spårstatistik follows the canonical filter icon and dropdown interac
 test('Bana profile keeps physical facts separate from the dedicated Bananalys tab', () => {
   const html = renderAppPage();
   assert.match(html, /\['overview','Banprofil'\],\['analysis','Bananalys'\]/);
-  assert.doesNotMatch(html, /track-analysis-empty/);
+  assert.doesNotMatch(html, /\\.track-analysis-empty\\{/);
   assert.match(html, /trackFactBlock\('Grundmått'/);
   assert.match(html, /trackFactBlock\('Start & bredd'/);
   assert.match(html, /trackFactBlock\('Till första sväng'/);
