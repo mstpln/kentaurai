@@ -10,6 +10,7 @@ export const TRACK_ANALYSIS_SAMPLE_POLICY = Object.freeze({
 });
 
 const POSITION_EXACT_FIELD_COVERAGE_MIN = 0.999;
+const POSITION_LONGITUDINAL_CONFIDENCE_MIN = 0.65;
 const LEAD_COMPARISON_MIN_DELTA_PP = 3;
 const TOP3_COMPARISON_MIN_DELTA_PP = 5;
 const WINNER_SHARE_COMPARISON_MIN_DELTA_PP = 2;
@@ -193,12 +194,13 @@ async function loadPositionRows(env, { trackId = null, countryCode = null, exclu
     `rpc.checkpoint_key IN ('100m','200m')`,
     'rpc.position_rank IS NOT NULL',
     'rpc.field_coverage >= ?',
+    'rpc.longitudinal_confidence >= ?',
     're.scratched = 0',
     're.actual_lane BETWEEN 1 AND 8',
     `(${canonicalStartMethodSql()} <> 'volt' OR re.start_tier = 1)`,
     "rr.result_status = 'official'"
   ];
-  const bindings = [XLABS_POSITION_RECONSTRUCTION_VERSION, POSITION_EXACT_FIELD_COVERAGE_MIN];
+  const bindings = [XLABS_POSITION_RECONSTRUCTION_VERSION, POSITION_EXACT_FIELD_COVERAGE_MIN, POSITION_LONGITUDINAL_CONFIDENCE_MIN];
   if (trackId) { conditions.push('r.track_id = ?'); bindings.push(trackId); }
   if (countryCode) { conditions.push('t.country_code = ?'); bindings.push(countryCode); }
   if (excludeTrackId) { conditions.push('r.track_id <> ?'); bindings.push(excludeTrackId); }
