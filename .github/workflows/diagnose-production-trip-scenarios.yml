@@ -203,6 +203,38 @@ jobs:
             AND rr.placing=1
           GROUP BY scenario ORDER BY winner_rows DESC;"
 
+          echo "=== EARLY_CHECKPOINT_AVAILABILITY ==="
+          query "SELECT checkpoint_key,
+            COUNT(*) AS rows,
+            SUM(CASE WHEN position_rank IS NOT NULL THEN 1 ELSE 0 END) AS ranked_rows,
+            ROUND(AVG(field_coverage),3) AS avg_field_coverage,
+            ROUND(AVG(local_target_coverage),3) AS avg_local_target_coverage,
+            ROUND(AVG(longitudinal_confidence),3) AS avg_longitudinal_confidence
+          FROM race_position_checkpoints
+          WHERE reconstruction_version='xlabs-position-reconstruction-v1'
+            AND checkpoint_key IN ('0m','100m','200m')
+          GROUP BY checkpoint_key ORDER BY checkpoint_key;"
+
+          echo "=== START_ALIGNMENT_BINS ==="
+          query "WITH base AS (
+            SELECT ABS(COALESCE(re.actual_start_distance_m,r.distance_m)-rpc.distance_to_finish_m) AS offset_m
+            FROM race_position_checkpoints rpc
+            JOIN race_entries re ON re.id=rpc.race_entry_id
+            JOIN races r ON r.id=re.race_id
+            WHERE rpc.reconstruction_version='xlabs-position-reconstruction-v1'
+              AND rpc.checkpoint_key='0m'
+              AND COALESCE(re.actual_start_distance_m,r.distance_m) IS NOT NULL
+              AND rpc.distance_to_finish_m IS NOT NULL
+          )
+          SELECT
+            SUM(CASE WHEN offset_m<=10 THEN 1 ELSE 0 END) AS within_10m,
+            SUM(CASE WHEN offset_m>10 AND offset_m<=25 THEN 1 ELSE 0 END) AS within_11_25m,
+            SUM(CASE WHEN offset_m>25 AND offset_m<=50 THEN 1 ELSE 0 END) AS within_26_50m,
+            SUM(CASE WHEN offset_m>50 THEN 1 ELSE 0 END) AS over_50m,
+            COUNT(*) AS total,
+            ROUND(AVG(offset_m),1) AS avg_offset_m
+          FROM base;"
+
           echo "=== UI_TRIP_QUERY_PROBE ==="
           query "WITH target AS (
             SELECT re.horse_id
