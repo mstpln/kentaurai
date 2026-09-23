@@ -510,13 +510,13 @@ async function loadHorseTripScenarios(env,entityId,filters){
 
 function definitions(){return{longshotPercentMax:DRIVER_LONGSHOT_PERCENT_MAX,market:DRIVER_MARKET_DEFINITION_VERSION,voltLaneGood:[1,6,7],restDays:REST_DAYS}}
 
-async function loadSpecialties(env,id,filters,config){
+async function loadSpecialties(env,id,filters,config,{includeTripScenarios=true}={}){
   const [favorite,longshot,firstAfterRest,secondAfterRest,tripScenarioResults]=await Promise.all([
     loadMarket(env,id,filters,config,'favorite'),
     loadMarket(env,id,filters,config,'longshot'),
     loadRest(env,id,filters,config,'first'),
     loadRest(env,id,filters,config,'second'),
-    config.resultKey==='horse'?loadHorseTripScenarios(env,id,filters):Promise.resolve(null)
+    includeTripScenarios&&config.resultKey==='horse'?loadHorseTripScenarios(env,id,filters):Promise.resolve(null)
   ]);
   return{favoriteResults:favorite,longshotResults:longshot,firstAfterRest,secondAfterRest,tripScenarioResults};
 }
@@ -549,7 +549,7 @@ export async function getCalendarYearDetailStatistics(env,entityType,entityId,op
 export async function getCalendarYearDetailSpecialties(env,entityType,entityId,options={}){
   const prepared=await prepareDetail(env,entityType,entityId,options);if(!prepared)return null;
   const {config,id,filters}=prepared;
-  return{entityType,filters,...await loadSpecialties(env,id,filters,config),definitions:definitions()};
+  return{entityType,filters,...await loadSpecialties(env,id,filters,config,{includeTripScenarios:options.includeTripScenarios!==false}),definitions:definitions()};
 }
 
 export async function getHorseCalendarYearTripScenarios(env,entityId,options={}){
