@@ -18,8 +18,8 @@ function seedTrackAnalysis(db) {
   db.prepare("INSERT INTO source_records (id,source_type,external_id,fetched_at,quality_status) VALUES ('src-x','xlabs_race_json','synthetic:xlabs','2026-08-31T12:30:00Z','normalized_verified_subset')").run();
 
   db.prepare(`INSERT INTO track_profile_fact_observations
-    (id,track_id,fact_type,numeric_value,evidence_type,source_type,verified_at,layout_effective_from,status)
-    VALUES ('fact-stretch','track-a','home_stretch_m',190,'verified','synthetic','2026-01-01T10:00:00Z','2026-01-01','active')`).run();
+    (id,track_id,fact_type,numeric_value,evidence_type,source_type,source_url,verified_at,layout_effective_from,status)
+    VALUES ('fact-stretch','track-a','home_stretch_m',190,'verified','synthetic','https://example.test/track','2026-01-01T10:00:00Z','2026-01-01','active')`).run();
 
   let horseCounter = 0;
   let raceCounter = 0;
