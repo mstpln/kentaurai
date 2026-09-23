@@ -77,7 +77,9 @@ test('horse trip scenarios load independently and distinguish loading empty and 
   assert.match(script, /Läser löpningsscenario…/);
   assert.match(script, /Ingen löpningsscenariostatistik för valt urval\./);
   assert.match(script, /Kunde inte läsa löpningsscenario\./);
-  assert.doesNotMatch(script, /specialtyContent\([^\n]*tripScenarioResults/);
+  const specialtyStart = script.indexOf('function specialtyContent');
+  const specialtyEnd = script.indexOf('function content', specialtyStart);
+  assert.doesNotMatch(script.slice(specialtyStart, specialtyEnd), /tripScenarioResults/);
   assert.match(script, /tripScenarioPromise=s\.page==='horses'/);
   assert.match(script, /scenarioTable\(result\?\.data\?\.tripScenarioResults,'ready'\)/);
 });
