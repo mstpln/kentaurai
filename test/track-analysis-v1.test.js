@@ -98,6 +98,9 @@ test('track analysis uses 200m lanes and same-country exact-context baseline', a
   assert.equal(data.coverage.trip_scenario.winner_scenario_coverage,1);
   assert.equal(data.analysis_support,null);
   assert.equal(data.track_context.home_stretch_m.value,190);
+  assert.equal(data.track_context.home_stretch_m.evidence_type,'verified');
+  assert.equal(data.track_context.home_stretch_m.source_type,'measurement');
+  assert.equal(data.track_context.home_stretch_m.verified_at,'2026-01-01T10:00:00Z');
   const leader=data.trip_scenario_500m_remaining.rows.find(row=>row.scenario_key==='leader');
   assert.equal(leader.wins,12);
   assert.equal(leader.baseline.wins,undefined);
