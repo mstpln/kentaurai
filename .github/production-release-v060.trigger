@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=225536938867422f6669cd2fd9017b9634815c57
-release_nonce=2026-09-23-trip-scenario-pr245-1
+source_main=b209be0370306a040b7f8277fd4d3ce124bdd461
+release_nonce=2026-09-23-trip-backfill-pr246-1
