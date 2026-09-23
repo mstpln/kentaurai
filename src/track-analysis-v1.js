@@ -130,7 +130,7 @@ async function loadScenarioRows(env, { trackId = null, countryCode = null, exclu
   const conditions = [
     'rp.classification_version = ?',
     're.scratched = 0',
-    'rr.race_entry_id IS NOT NULL'
+    "rr.result_status = 'official'"
   ];
   const bindings = [XLABS_TRIP_CLASSIFICATION_VERSION];
   if (trackId) { conditions.push('r.track_id = ?'); bindings.push(trackId); }
@@ -182,7 +182,7 @@ function scenarioLabelFromRow(row) {
 }
 
 async function loadPositionRows(env, { trackId = null, countryCode = null, excludeTrackId = null, startMethod, distanceGroup, asOf }) {
-  const conditions = ['rpc.reconstruction_version = ?',`rpc.checkpoint_key = '200m'`,'rpc.position_rank IS NOT NULL','re.scratched = 0','re.actual_lane BETWEEN 1 AND 8','rr.race_entry_id IS NOT NULL'];
+  const conditions = ['rpc.reconstruction_version = ?',`rpc.checkpoint_key IN ('100m','200m')`,'rpc.position_rank IS NOT NULL','re.scratched = 0','re.actual_lane BETWEEN 1 AND 8',"rr.result_status = 'official'"];
   const bindings = [XLABS_POSITION_RECONSTRUCTION_VERSION];
   if (trackId) { conditions.push('r.track_id = ?'); bindings.push(trackId); }
   if (countryCode) { conditions.push('t.country_code = ?'); bindings.push(countryCode); }
@@ -191,7 +191,7 @@ async function loadPositionRows(env, { trackId = null, countryCode = null, exclu
   appendAsOfSourceConditions(conditions, bindings, { asOf });
   const { results } = await env.DB.prepare(`
     WITH ranked AS (
-      SELECT rpc.id,rpc.race_entry_id,rpc.position_rank,rpc.field_coverage,rpc.local_target_coverage,rpc.longitudinal_confidence,
+      SELECT rpc.id,rpc.race_entry_id,rpc.checkpoint_key,rpc.position_rank,rpc.field_coverage,rpc.local_target_coverage,rpc.longitudinal_confidence,
         rpc.source_record_id,rpc.reconstruction_version,r.id AS race_id,r.race_date,${canonicalStartMethodSql()} AS start_method,r.distance_m,
         re.actual_lane,sr.fetched_at AS source_selected_at,
         ROW_NUMBER() OVER (PARTITION BY rpc.race_entry_id ORDER BY julianday(sr.fetched_at) DESC,rpc.id DESC) AS row_number
@@ -207,7 +207,7 @@ async function loadPositionRows(env, { trackId = null, countryCode = null, exclu
     SELECT * FROM ranked WHERE row_number=1 ORDER BY race_date,race_id,race_entry_id
   `).bind(...bindings).all();
   return (results || []).map((row)=>({raceEntryId:row.race_entry_id,raceId:row.race_id,raceDate:row.race_date,startMethod:row.start_method,
-    distanceM:finiteOrNull(row.distance_m),actualLane:finiteOrNull(row.actual_lane),positionRank:finiteOrNull(row.position_rank),
+    checkpointKey:row.checkpoint_key,distanceM:finiteOrNull(row.distance_m),actualLane:finiteOrNull(row.actual_lane),positionRank:finiteOrNull(row.position_rank),
     fieldCoverage:finiteOrNull(row.field_coverage),localTargetCoverage:finiteOrNull(row.local_target_coverage),longitudinalConfidence:finiteOrNull(row.longitudinal_confidence),
     sourceRecordId:row.source_record_id,sourceSelectedAt:row.source_selected_at||null}));
 }
@@ -216,7 +216,7 @@ function sampleStatus(races) { return races>=25?'normal':races>=10?'limited':'sp
 function contextLabel(method,distance) { return `${method==='auto'?'Autostart':method==='volt'?'Voltstart':'Alla startmetoder'}, ${distance==='all'?'alla distanser':distance+' m'}`; }
 
 async function countScenarioRaces(env, trackId, { startMethod, distanceGroup, asOf }) {
-  const conditions=['rp.classification_version = ?','r.track_id = ?','re.scratched = 0','rr.race_entry_id IS NOT NULL'];
+  const conditions=['rp.classification_version = ?','r.track_id = ?','re.scratched = 0',"rr.result_status = 'official'"];
   const bindings=[XLABS_TRIP_CLASSIFICATION_VERSION,trackId];
   appendContextConditions(conditions,bindings,{startMethod,distanceGroup,asOf}); appendAsOfSourceConditions(conditions,bindings,{asOf});
   const row=await env.DB.prepare(`WITH ranked AS (
@@ -269,10 +269,10 @@ function aggregateScenarios(rows,baselineRows) {
     occurrence_delta_pp:percentagePointDelta(row.occurrence_rate,b?.occurrence_rate),win_rate_delta_pp:percentagePointDelta(row.win_rate,b?.win_rate),top3_rate_delta_pp:percentagePointDelta(row.top3_rate,b?.top3_rate),winner_share_delta_pp:percentagePointDelta(row.winner_share,b?.winner_share)};});
 }
 
-function coverage(pos,scen){const races=new Set(scen.map(r=>r.raceId)),wins=new Set(scen.filter(r=>r.placing===1).map(r=>r.raceId));return {position_200m:{observations:pos.length,races:new Set(pos.map(r=>r.raceId)).size},trip_scenario:{observations:scen.length,races:races.size,winners_with_scenario:wins.size,winner_scenario_coverage:round(ratio(wins.size,races.size))}};}
+function coverage(pos100,pos200,scen){const races=new Set(scen.map(r=>r.raceId)),wins=new Set(scen.filter(r=>r.placing===1).map(r=>r.raceId));return {position_100m:{observations:pos100.length,races:new Set(pos100.map(r=>r.raceId)).size},position_200m:{observations:pos200.length,races:new Set(pos200.map(r=>r.raceId)).size},trip_scenario:{observations:scen.length,races_with_any_scenario:races.size,winners_with_scenario:wins.size,winner_scenario_share_of_scenario_races:round(ratio(wins.size,races.size))}};}
 function sourcePeriod(a,b){const d=[...a,...b].map(r=>r.raceDate).filter(Boolean).sort();return {first_race_date:d[0]||null,last_race_date:d.at(-1)||null};}
 function strongestObservedLane(sections){return sections.flatMap(s=>s.rows.map(r=>({...r,method:s.start_method}))).filter(r=>r.observations>=10&&r.lead_rate_200m!=null).sort((a,b)=>b.lead_rate_200m-a.lead_rate_200m||b.observations-a.observations||a.lane-b.lane)[0]||null;}
-function buildSummary({selectedSample,basis,startSections,scenarioRows}){const out=[];if(basis.backoff_level!=='exact')out.push(`Den valda kombinationen har ${selectedSample.races} lopp med klassificerat scenario. Analysen är därför breddad till ${basis.label} (${basis.races} lopp).`);else if(basis.sample_status==='limited')out.push(`Underlaget är begränsat till ${basis.races} lopp för den valda kombinationen.`);else if(basis.sample_status==='sparse')out.push(`Underlaget är tunt: ${basis.races} lopp med klassificerat scenario finns tillgängliga.`);const lane=strongestObservedLane(startSections);if(lane){const m=startSections.length>1?` ${lane.method==='auto'?'auto':'volt'}`:'',base=lane.baseline?.lead_rate_200m;out.push(`Högst observerad spetsandel efter 200 m är spår ${lane.lane}${m}: ${Math.round(lane.lead_rate_200m*100)} % av ${lane.observations} observationer${base==null?'':` mot ${Math.round(base*100)} % i baseline`}.`);}const leader=scenarioRows.find(r=>r.scenario_key==='leader');if(leader?.winner_share!=null&&leader.starts>=10){const base=leader.baseline?.winner_share;out.push(`Spets står för ${Math.round(leader.winner_share*100)} % av vinnarna med klassificerat scenario${base==null?'':` mot ${Math.round(base*100)} % i baseline`}.`);}return out.slice(0,3);}
+function buildSummary({selectedSample,basis,start100Sections,start200Sections,scenarioRows}){const out=[];if(basis.backoff_level!=='exact')out.push(`Den valda kombinationen har ${selectedSample.races} lopp med klassificerat scenario. Analysen är därför breddad till ${basis.label} (${basis.races} lopp).`);else if(basis.sample_status==='limited')out.push(`Underlaget är begränsat till ${basis.races} lopp för den valda kombinationen.`);else if(basis.sample_status==='sparse')out.push(`Underlaget är tunt: ${basis.races} lopp med klassificerat scenario finns tillgängliga.`);const lane=strongestObservedLane(start200Sections);if(lane){const m=start200Sections.length>1?` ${lane.method==='auto'?'auto':'volt'}`:'',base=lane.baseline?.lead_rate_200m;const early=start100Sections.find(s=>s.start_method===lane.method)?.rows?.find(r=>r.lane===lane.lane);const earlyText=early?.lead_rate_200m==null?'':` Efter 100 m är motsvarande spetsandel ${Math.round(early.lead_rate_200m*100)} % av ${early.observations} observationer.`;out.push(`Högst observerad spetsandel efter 200 m är spår ${lane.lane}${m}: ${Math.round(lane.lead_rate_200m*100)} % av ${lane.observations} observationer${base==null?'':` mot ${Math.round(base*100)} % i baseline`}.${earlyText}`);}const leader=scenarioRows.find(r=>r.scenario_key==='leader');if(leader?.winner_share!=null&&leader.starts>=10){const base=leader.baseline?.winner_share;out.push(`Spets står för ${Math.round(leader.winner_share*100)} % av vinnarna med klassificerat scenario${base==null?'':` mot ${Math.round(base*100)} % i baseline`}.`);}return out.slice(0,3);}
 
 async function loadTrackContext(env,trackId,{startMethod,distanceGroup,asOf}){
   const cond=["track_id=?","status='active'"],bind=[trackId],date=asOf?String(asOf).slice(0,10):null;
@@ -306,9 +306,15 @@ export async function getTrackAnalysisV1(env,trackIdValue,options={}){
         loadScenarioRows(env,{trackId,...basisContext}),
         track.country_code?loadScenarioRows(env,{countryCode:track.country_code,excludeTrackId:trackId,...basisContext}):[]
       ]);
-  const exactStartSections=aggregateStartPositions(exactPos,exactBaselinePos,startMethod);
+  const exactPos100=exactPos.filter(r=>r.checkpointKey==='100m'),exactPos200=exactPos.filter(r=>r.checkpointKey==='200m');
+  const exactBaselinePos100=exactBaselinePos.filter(r=>r.checkpointKey==='100m'),exactBaselinePos200=exactBaselinePos.filter(r=>r.checkpointKey==='200m');
+  const basisPos100=basisPos.filter(r=>r.checkpointKey==='100m'),basisPos200=basisPos.filter(r=>r.checkpointKey==='200m');
+  const basisBaselinePos100=basisBaselinePos.filter(r=>r.checkpointKey==='100m'),basisBaselinePos200=basisBaselinePos.filter(r=>r.checkpointKey==='200m');
+  const exactStart100Sections=aggregateStartPositions(exactPos100,exactBaselinePos100,startMethod);
+  const exactStart200Sections=aggregateStartPositions(exactPos200,exactBaselinePos200,startMethod);
   const exactScenarios=aggregateScenarios(exactScen,exactBaselineScen);
-  const basisStartSections=aggregateStartPositions(basisPos,basisBaselinePos,resolved.startMethod);
+  const basisStart100Sections=aggregateStartPositions(basisPos100,basisBaselinePos100,resolved.startMethod);
+  const basisStart200Sections=aggregateStartPositions(basisPos200,basisBaselinePos200,resolved.startMethod);
   const basisScenarios=aggregateScenarios(basisScen,basisBaselineScen);
   const basisRaces=new Set(basisScen.map(r=>r.raceId)).size;
   const basis={start_method:resolved.startMethod,distance_group:resolved.distanceGroup,label:contextLabel(resolved.startMethod,resolved.distanceGroup),backoff_level:resolved.backoffLevel,races:basisRaces,sample_status:sampleStatus(basisRaces)};
@@ -323,18 +329,20 @@ export async function getTrackAnalysisV1(env,trackIdValue,options={}){
     selected_sample:selectedSample,
     analysis_basis:basis,
     track_context:trackContext,
-    start_position_200m:{checkpoint_m:200,sections:exactStartSections},
+    start_position_100m:{checkpoint_m:100,role:'supporting_start_signal',sections:exactStart100Sections},
+    start_position_200m:{checkpoint_m:200,role:'primary_early_position',sections:exactStart200Sections},
     trip_scenario_500m_remaining:{decision_distance_remaining_m:500,rows:exactScenarios},
-    coverage:coverage(exactPos,exactScen),
+    coverage:coverage(exactPos100,exactPos200,exactScen),
     period:sourcePeriod(exactPos,exactScen),
     analysis_support:sameBasis?null:{
-      start_position_200m:{checkpoint_m:200,sections:basisStartSections},
+      start_position_100m:{checkpoint_m:100,role:'supporting_start_signal',sections:basisStart100Sections},
+      start_position_200m:{checkpoint_m:200,role:'primary_early_position',sections:basisStart200Sections},
       trip_scenario_500m_remaining:{decision_distance_remaining_m:500,rows:basisScenarios},
-      coverage:coverage(basisPos,basisScen),
+      coverage:coverage(basisPos100,basisPos200,basisScen),
       period:sourcePeriod(basisPos,basisScen)
     }
   };
-  result.short_analysis=buildSummary({selectedSample,basis,startSections:basisStartSections,scenarioRows:basisScenarios});
+  result.short_analysis=buildSummary({selectedSample,basis,start100Sections:basisStart100Sections,start200Sections:basisStart200Sections,scenarioRows:basisScenarios});
   return result;
 }
 
