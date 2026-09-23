@@ -753,10 +753,11 @@ export async function stepXlabsPositionReconstructionJob(env, jobId = null) {
         env.DB.prepare(`
           UPDATE xlabs_position_reconstruction_jobs
           SET cursor_external_id=?,cursor_fetched_at=?,cursor_source_record_id=?,
-              processed_sources=processed_sources+1,quarantined_sources=quarantined_sources+1,
+              processed_sources=processed_sources+1,
+              quarantined_sources=(SELECT COUNT(*) FROM xlabs_position_reconstruction_quarantine WHERE job_id=?),
               consecutive_errors=0,last_error=NULL,last_attempt_source_record_id=?,last_run_at=?,updated_at=CURRENT_TIMESTAMP
           WHERE id=?
-        `).bind(source.external_id,source.fetched_at,source.id,source.id,attemptedAt,job.id)
+        `).bind(source.external_id,source.fetched_at,source.id,job.id,source.id,attemptedAt,job.id)
       ]);
       return {
         jobId: job.id,
