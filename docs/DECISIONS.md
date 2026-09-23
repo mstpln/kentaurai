@@ -253,7 +253,7 @@ A single race must not directly change model weights. Candidate learnings are re
 
 
 ## X-Labs trip reconstruction quarantines only proven deterministic duplicate-target sources
-1. A captured X-Labs race source that deterministically fails reconstruction because one telemetry frame contains the same active target number more than once is preserved unchanged in private raw storage and recorded as quarantined for that reconstruction job.
+1. A captured X-Labs race source that deterministically fails reconstruction because one telemetry frame contains the same target number more than once is preserved unchanged in private raw storage and recorded as quarantined for that reconstruction job.
 2. No position checkpoint, trip label or replacement fact is invented for a quarantined source.
 3. The reconstruction cursor may advance past that source because repeating the same immutable payload cannot succeed without changing source semantics.
 4. Quarantine is intentionally narrow: timestamp ordering, mapping, storage, database and all other unknown/technical failures retain the existing fail-closed retry behavior and stop after three consecutive errors.
