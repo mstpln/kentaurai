@@ -86,10 +86,10 @@ test('track analysis uses 200m lanes and same-country exact-context baseline', a
   assert.equal(data.start_position_200m.sections.length,1);
   const lane1=data.start_position_200m.sections[0].rows.find(row=>row.lane===1);
   assert.equal(lane1.observations,12);
-  assert.equal(lane1.lead_rate_200m,1);
+  assert.equal(lane1.lead_rate,1);
   assert.equal(lane1.baseline.observations,12);
-  assert.equal(lane1.baseline.lead_rate_200m,0);
-  assert.equal(lane1.lead_rate_delta_pp,100);
+  assert.equal(lane1.baseline.lead_rate,0);
+  assert.equal(lane1.lead_delta_pp,100);
   assert.equal(data.analysis_support,null);
   assert.equal(data.track_context.home_stretch_m.value,190);
   const leader=data.trip_scenario_500m_remaining.rows.find(row=>row.scenario_key==='leader');
@@ -111,7 +111,7 @@ test('track analysis retains exact sparse metrics while broadening interpretatio
 
   const exactLane2=data.start_position_200m.sections[0].rows.find(row=>row.lane===2);
   assert.equal(exactLane2.observations,5);
-  assert.equal(exactLane2.lead_rate_200m,1);
+  assert.equal(exactLane2.lead_rate,1);
 
   const supportLane1=data.analysis_support.start_position_200m.sections[0].rows.find(row=>row.lane===1);
   assert.equal(supportLane1.observations,17);
