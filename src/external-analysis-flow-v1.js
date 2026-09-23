@@ -338,7 +338,7 @@ export function getExternalAnalysisStep1Prompt(provider = 'openai') {
     '- track_analysis är deterministisk historisk kontext, inte en färdig hästbedömning. Använd sample, coverage och analysis_basis; små eller breddade underlag ska sänka säkerheten i slutsatsen.',
     '- Baseline i track_analysis jämför motsvarande spår/scenario i samma land och kontext, exklusive dagens bana. Skillnader är empiriska jämförelser, inte bevis på orsak.',
     '- Historiska trip_scenario_500m_remaining beskriver endast klassificerat läge omkring 500 m kvar. Använd det tillsammans med, men dubbelräkna inte, övrig X-Labs/trajectory-data.',
-    '- Banprofilens geometri är kontext. Dra inte en kausal slutsats från upplopp, bredd, open stretch, startvinge eller kurvmått om utfallet inte stöds av den observerade statistiken.'
+    '- Banprofilens geometri är kontext. Dra inte en kausal slutsats från upplopp, bredd, open stretch, startvinge eller kurvmått om utfallet inte stöds av den observerade statistiken.',
     '',
     'OUTPUT I CHATten:',
     '- Per avdelning: kort loppbild, viktigaste scenarierna och en kompakt tabell med Nr, Häst, Chans, Rank, ABCD, Osäkerhet och kort motivering.',
