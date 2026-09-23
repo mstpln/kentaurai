@@ -8,6 +8,8 @@ test('upcoming games UI installs factual Spel navigation and responsive contract
   assert.match(html, /Kommande/);
   assert.match(html, /id="ugBack">← Kommande/);
   assert.match(html, /if\(state\.upcomingRound\)return ugOpenRound\(state\.upcomingRound\)/);
+  assert.match(html, /if\(state\.upcomingRound!==id\)state\.upcomingLeg=1/);
+  assert.match(html, /data-history-replace="true"/);
   assert.match(html, /Historik/);
   assert.match(html, /Översikt/);
   assert.match(html, /Närmaste omgång först/);
