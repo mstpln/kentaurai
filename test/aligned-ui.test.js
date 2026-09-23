@@ -62,7 +62,7 @@ test('Bana Spårstatistik follows the canonical filter icon and dropdown interac
   assert.match(html, /track-stats-filter-count/);
   assert.match(html, /track-stats-period/);
   assert.match(html, /data-track-year/);
-  assert.match(html, /Alla startmetoder/);
+  assert.match(html, /trackFilterField\('Startmetod'/);
   assert.match(html, /Loppnivå/);
   assert.match(html, /\[\['all','All data'\],\['high_prize','Högre prissumma'\],\['weekday','Vardagstrav'\]\]/);
   assert.match(html, /STL-klass/);
