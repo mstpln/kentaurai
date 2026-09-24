@@ -327,3 +327,14 @@ The external-analysis production release was accepted after:
 - The fix batches the round at the shared Step 1 cutoff, pushes target horse IDs inside the X-Labs ranking scope, and shards nationwide population aggregation into bounded calendar-year queries before deterministically merging counts/sums back to the existing aggregate contract.
 - The already-built Step 1 relevant-history map is now reused by performance, equipment and person-context feature builders instead of being rebuilt three additional times.
 - No analysis definition, market-blind boundary, model weight or output contract changes are intended. Population means are reconstructed from exact shard sums/counts rather than averaging shard averages.
+
+
+## Spel outcome statistics candidate
+- Branch: `feat/game-statistics-history-v1`.
+- Step 1 export now freezes horse Form 1–100, the number of starts behind the score, Form version, exact as-of timestamp and relative Form rank for every analysis-eligible starter. The frozen values are append-only per Step 1 pack and do not change after results arrive.
+- Post-race settlement now completes the round with one final official game capture when no stored final game result exists. The same final game source is normalized through the existing official-live path so final betting percentage and market rank for every starter are stored as separate closing-market observations without overwriting pre-race market snapshots.
+- Final game facts preserve official raw money units plus derived SEK values, payout/jackpot/system counts by right level, final turnover, final system count and source provenance. The parser is generic for V85/V86 payout levels; no real provider payload is committed.
+- Existing Spel → Historik leg cards keep their current layout and add Form before start, Form rank, KentaurAI rank, ABCD group, final betting percentage and final market rank where verified data exists.
+- Spel adds a separate Statistik tab. It reports winner win rates by final betting percentage, final market rank, frozen Form, Form rank, KentaurAI rank and ABCD; detailed spike outcomes; and primary-system results against the round's top-right-level final payout. Aggregate system statistics use one canonical primary system per round so alternatives are not double-counted.
+- Analys and the global Statistik workspace are unchanged.
+- Historical gaps stay null unless a real stored snapshot exists or a calculation can be replayed leakage-safely at the historical cutoff. The build does not synthesize missing Form, ranking or market facts.
