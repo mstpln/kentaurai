@@ -1,5 +1,7 @@
 import { createPreMarketAnalysisPackV3 } from './analysis-pack-v3.js';
-import { persistAnalysisFormSnapshots } from './analysis-form-snapshot-v1.js';
+import { persistAnalysisFormSnapshots, persistHistoricalFormSnapshots } from './analysis-form-snapshot-v1.js';
+import { stableId } from './ids.js';
+import { HORSE_FORM_INDEX_VERSION } from './statistics/horse-form-index.js';
 import { repairCapturedOfficialClosingMarket } from './import/official-live.js';
 
 export const STATISTICS_DATA_BACKFILL_VERSION = 'statistics-data-backfill-v1';
@@ -119,6 +121,47 @@ async function step1Lineage(env, roundId, system) {
   };
 }
 
+async function legacyFormLineage(env, roundId, system, preRaceCutoff) {
+  if (!system?.model_version_id || !system?.created_at || !preRaceCutoff) return null;
+  const {results}=await env.DB.prepare(`
+    SELECT gl.leg_number,
+      (SELECT ara.data_snapshot_at
+       FROM ai_race_analyses ara
+       WHERE ara.race_id=gl.race_id
+         AND ara.model_version_id=?
+         AND ara.data_snapshot_at IS NOT NULL
+         AND julianday(ara.data_snapshot_at)<=julianday(?)
+       ORDER BY julianday(ara.data_snapshot_at) DESC,ara.id DESC
+       LIMIT 1) AS data_snapshot_at
+    FROM game_legs gl
+    WHERE gl.game_round_id=?
+    ORDER BY gl.leg_number
+  `).bind(system.model_version_id,system.created_at,roundId).all();
+  if ((results || []).length!==8) return null;
+  const cutoffMs=Date.parse(preRaceCutoff);
+  if (!Number.isFinite(cutoffMs)) return null;
+  const asOfByLeg=new Map();
+  for(const row of results || []){
+    const leg=Number(row.leg_number);
+    const ms=Date.parse(String(row.data_snapshot_at || ''));
+    if(!Number.isInteger(leg) || leg<1 || leg>8 || !Number.isFinite(ms) || ms>cutoffMs) return null;
+    asOfByLeg.set(leg,new Date(ms).toISOString());
+  }
+  if(asOfByLeg.size!==8) return null;
+  const snapshotRef=stableId(
+    'historical-form',
+    HORSE_FORM_INDEX_VERSION,
+    system.id,
+    ...[...asOfByLeg.entries()].flatMap(([leg,asOf])=>[leg,asOf])
+  );
+  return {
+    kind:'legacy_analysis_snapshot',
+    audited:true,
+    snapshotRef,
+    asOfByLeg
+  };
+}
+
 async function scalar(env, sql, bindings = []) {
   const row=await env.DB.prepare(sql).bind(...bindings).first();
   return Number(row?.n || 0);
@@ -130,7 +173,14 @@ export async function auditStatisticsRound(env, roundId) {
   if (!id) throw new Error('round_id is required');
 
   const round=await env.DB.prepare(`
-    SELECT id,game_type,round_date,status
+    SELECT id,game_type,round_date,status,
+      COALESCE(
+        bet_stop_at,
+        scheduled_start_at,
+        (SELECT MIN(r.scheduled_start_at)
+         FROM game_legs gl JOIN races r ON r.id=gl.race_id
+         WHERE gl.game_round_id=game_rounds.id)
+      ) AS pre_race_cutoff
     FROM game_rounds
     WHERE id=? AND game_type IN ('V85','V86')
     LIMIT 1
@@ -140,6 +190,18 @@ export async function auditStatisticsRound(env, roundId) {
   const system=await primarySystem(env,id);
   if (!system) throw new Error('round has no registered system');
   const lineage=await step1Lineage(env,id,system);
+  let formLineage=null;
+  if(lineage?.audited && lineage.packId && lineage.asOf){
+    const normalizedAsOf=new Date(Date.parse(lineage.asOf)).toISOString();
+    formLineage={
+      kind:'step1_pack',
+      audited:true,
+      snapshotRef:lineage.packId,
+      asOfByLeg:new Map(Array.from({length:8},(_,index)=>[index+1,normalizedAsOf]))
+    };
+  } else {
+    formLineage=await legacyFormLineage(env,id,system,round.pre_race_cutoff);
+  }
 
   const activeEntries=await scalar(env,`
     SELECT COUNT(*) n
@@ -180,7 +242,7 @@ export async function auditStatisticsRound(env, roundId) {
       AND bs.market_rank IS NOT NULL
   `,[finalResult.source_record_id,id]) : 0;
 
-  const formSnapshotCount=lineage?.packId ? await scalar(env,`
+  const formSnapshotCount=formLineage?.snapshotRef ? await scalar(env,`
     SELECT COUNT(DISTINCT afs.race_entry_id) n
     FROM analysis_entry_form_snapshots afs
     JOIN race_entries re ON re.id=afs.race_entry_id AND re.scratched=0
@@ -188,7 +250,7 @@ export async function auditStatisticsRound(env, roundId) {
       AND gl.leg_number=afs.leg_number
       AND gl.race_id=re.race_id
     WHERE afs.game_round_id=? AND afs.step1_pack_id=?
-  `,[id,lineage.packId]) : 0;
+  `,[id,formLineage.snapshotRef]) : 0;
 
   const kaiRankCount=system.model_version_id ? await scalar(env,`
     SELECT COUNT(DISTINCT re.id) n
@@ -242,7 +304,7 @@ export async function auditStatisticsRound(env, roundId) {
 
   const formStatus=formSnapshotCount>=activeEntries && activeEntries>0
     ? 'complete'
-    : lineage?.audited
+    : formLineage?.audited
       ? 'pending'
       : 'unavailable';
 
@@ -254,6 +316,7 @@ export async function auditStatisticsRound(env, roundId) {
     primarySystemId:system.id,
     modelVersionId:system.model_version_id || null,
     lineage,
+    formLineage,
     counts:{
       activeEntries,
       winnerLegs,
@@ -295,9 +358,9 @@ async function persistAudit(env, audit, { formStatus = null, lastError = null, a
     INSERT INTO statistics_data_backfill_rounds
       (game_round_id,status,result_status,final_market_status,payout_status,form_status,
        kai_rank_status,abcd_status,spike_status,active_entry_count,closing_market_count,
-       form_snapshot_count,kai_rank_count,abcd_count,spike_count,step1_pack_id,
-       step1_facts_fingerprint,step1_as_of,attempt_count,last_error,last_checked_at,completed_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       form_snapshot_count,kai_rank_count,abcd_count,spike_count,form_lineage_kind,form_snapshot_ref,
+       form_as_of_json,step1_pack_id,step1_facts_fingerprint,step1_as_of,attempt_count,last_error,last_checked_at,completed_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(game_round_id) DO UPDATE SET
       status=excluded.status,
       result_status=excluded.result_status,
@@ -313,6 +376,9 @@ async function persistAudit(env, audit, { formStatus = null, lastError = null, a
       kai_rank_count=excluded.kai_rank_count,
       abcd_count=excluded.abcd_count,
       spike_count=excluded.spike_count,
+      form_lineage_kind=excluded.form_lineage_kind,
+      form_snapshot_ref=excluded.form_snapshot_ref,
+      form_as_of_json=excluded.form_as_of_json,
       step1_pack_id=excluded.step1_pack_id,
       step1_facts_fingerprint=excluded.step1_facts_fingerprint,
       step1_as_of=excluded.step1_as_of,
@@ -326,6 +392,8 @@ async function persistAudit(env, audit, { formStatus = null, lastError = null, a
     audit.status.kaiRank,audit.status.abcd,audit.status.spikes,
     audit.counts.activeEntries,audit.counts.closingMarket,audit.counts.formSnapshots,
     audit.counts.kaiRank,audit.counts.abcd,audit.counts.spikes,
+    audit.formLineage?.kind || null,audit.formLineage?.snapshotRef || null,
+    audit.formLineage?.asOfByLeg ? JSON.stringify(Object.fromEntries(audit.formLineage.asOfByLeg)) : null,
     audit.lineage?.packId || null,audit.lineage?.factsFingerprint || null,audit.lineage?.asOf || null,
     attempted ? 1 : 0,lastError,
     new Date().toISOString(),completedAt,
@@ -367,21 +435,36 @@ async function nextQueuedRound(env) {
 }
 
 async function replayFormSnapshot(env, audit) {
-  const lineage=audit.lineage;
-  if (!lineage?.audited || !lineage.packId || !lineage.factsFingerprint || !lineage.asOf) {
-    return { status:'unavailable', reason:'verified_step1_lineage_missing' };
+  const formLineage=audit.formLineage;
+  if (!formLineage?.audited || !formLineage.snapshotRef) {
+    return { status:'unavailable', reason:'verified_form_lineage_missing' };
   }
-  const pack=await createPreMarketAnalysisPackV3(env,audit.roundId,{asOf:lineage.asOf});
-  if (pack.packId!==lineage.packId || pack.factsFingerprint!==lineage.factsFingerprint || pack.manifest?.as_of!==lineage.asOf) {
-    return {
-      status:'manual_review',
-      reason:'step1_replay_fingerprint_mismatch',
-      replayedPackId:pack.packId,
-      replayedFingerprint:pack.factsFingerprint
-    };
+  if(formLineage.kind==='step1_pack'){
+    const lineage=audit.lineage;
+    if(!lineage?.packId || !lineage.factsFingerprint || !lineage.asOf) {
+      return { status:'unavailable', reason:'verified_step1_lineage_missing' };
+    }
+    const pack=await createPreMarketAnalysisPackV3(env,audit.roundId,{asOf:lineage.asOf});
+    if (pack.packId!==lineage.packId || pack.factsFingerprint!==lineage.factsFingerprint || pack.manifest?.as_of!==lineage.asOf) {
+      return {
+        status:'manual_review',
+        reason:'step1_replay_fingerprint_mismatch',
+        replayedPackId:pack.packId,
+        replayedFingerprint:pack.factsFingerprint
+      };
+    }
+    const persisted=await persistAnalysisFormSnapshots(env,pack);
+    return { status:'complete', persisted };
   }
-  const persisted=await persistAnalysisFormSnapshots(env,pack);
-  return { status:'complete', persisted };
+  if(formLineage.kind==='legacy_analysis_snapshot'){
+    const persisted=await persistHistoricalFormSnapshots(env,{
+      roundId:audit.roundId,
+      snapshotRef:formLineage.snapshotRef,
+      asOfByLeg:formLineage.asOfByLeg
+    });
+    return { status:'complete', persisted };
+  }
+  return { status:'unavailable', reason:'unsupported_form_lineage' };
 }
 
 export async function runNextStatisticsDataBackfill(env, options = {}) {
@@ -433,6 +516,8 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
     metrics:{...audit.status,form:formOverride || audit.status.form},
     counts:audit.counts,
     step1PackId:audit.lineage?.packId || null,
+    formLineageKind:audit.formLineage?.kind || null,
+    formSnapshotRef:audit.formLineage?.snapshotRef || null,
     reason:lastError
   };
 }
