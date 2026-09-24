@@ -114,7 +114,11 @@ async function statisticsRows(env,gameType) {
         (SELECT aer.step1_pack_id FROM analysis_external_runs aer
          WHERE aer.main_system_id=p.system_id ORDER BY aer.created_at DESC,aer.id DESC LIMIT 1),
         (SELECT json_extract(sp2.metrics_json,'$.step1_pack_id')
-         FROM systems sp2 WHERE sp2.id=p.system_id LIMIT 1)
+         FROM systems sp2 WHERE sp2.id=p.system_id LIMIT 1),
+        (SELECT sdb.form_snapshot_ref
+         FROM statistics_data_backfill_rounds sdb
+         WHERE sdb.game_round_id=p.round_id AND sdb.form_status='complete'
+         LIMIT 1)
       )
     ORDER BY p.round_date DESC,p.round_id,gl.leg_number,re.start_number,re.id
   `;
@@ -239,7 +243,11 @@ export async function getWinnerContextsForRound(env,roundId) {
         json_extract(s.metrics_json,'$.step1_pack_id'),
         (SELECT aer.step1_pack_id FROM analysis_external_runs aer
          WHERE aer.game_round_id=s.game_round_id AND aer.model_version_id=s.model_version_id
-         ORDER BY aer.created_at DESC,aer.id DESC LIMIT 1)
+         ORDER BY aer.created_at DESC,aer.id DESC LIMIT 1),
+        (SELECT sdb.form_snapshot_ref
+         FROM statistics_data_backfill_rounds sdb
+         WHERE sdb.game_round_id=s.game_round_id AND sdb.form_status='complete'
+         LIMIT 1)
       )
     WHERE s.game_round_id=?
     ORDER BY s.id,gl.leg_number
