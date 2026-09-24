@@ -40,3 +40,23 @@ jobs:
             FROM historical_backfill_jobs
             WHERE id='backfill_official-se-trot-v2__2020-09-08__2023-09-07';
           "
+
+      - name: Verify the resumed checkpoint advances under the deployed fix
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          sleep 75
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "
+            SELECT status,next_date,next_race_index,consecutive_errors,
+                   CASE WHEN last_error IS NULL THEN 'clear' ELSE 'present' END AS error_state
+            FROM historical_backfill_jobs
+            WHERE id='backfill_official-se-trot-v2__2020-09-08__2023-09-07';
+
+            SELECT COUNT(*) AS structural_source_gaps
+            FROM source_records
+            WHERE source_type='official_provider'
+              AND quality_status='captured_source_gap'
+              AND json_extract(metadata_json,'$.sourceGap.code')='missing_starts_array';
+          "
