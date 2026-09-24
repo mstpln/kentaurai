@@ -174,13 +174,13 @@ export async function auditStatisticsRound(env, roundId) {
 
   const round=await env.DB.prepare(`
     SELECT id,game_type,round_date,status,
-      COALESCE(
-        bet_stop_at,
-        scheduled_start_at,
-        (SELECT MIN(r.scheduled_start_at)
-         FROM game_legs gl JOIN races r ON r.id=gl.race_id
-         WHERE gl.game_round_id=game_rounds.id)
-      ) AS pre_race_cutoff
+      (SELECT MIN(value) FROM (
+        SELECT game_rounds.bet_stop_at AS value
+        UNION ALL SELECT game_rounds.scheduled_start_at
+        UNION ALL SELECT (SELECT MIN(r.scheduled_start_at)
+                          FROM game_legs gl JOIN races r ON r.id=gl.race_id
+                          WHERE gl.game_round_id=game_rounds.id)
+      ) WHERE value IS NOT NULL) AS pre_race_cutoff
     FROM game_rounds
     WHERE id=? AND game_type IN ('V85','V86')
     LIMIT 1
