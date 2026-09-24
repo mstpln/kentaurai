@@ -180,6 +180,8 @@ test('legacy registered systems backfill Form from verified pre-race analysis sn
   assert.equal(result.formLineageKind,'legacy_analysis_snapshot');
   assert.ok(result.formSnapshotRef);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM analysis_entry_form_snapshots WHERE step1_pack_id=?").get(result.formSnapshotRef).n,8);
+  // Give the synthetic no-history fixtures a deterministic score so the read-path fallback can be asserted separately.
+  db.prepare("UPDATE analysis_entry_form_snapshots SET form_score=65,form_rank=1 WHERE step1_pack_id=?").run(result.formSnapshotRef);
 
   const state=db.prepare("SELECT form_lineage_kind,form_snapshot_ref,form_as_of_json FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get();
   assert.equal(state.form_lineage_kind,'legacy_analysis_snapshot');
