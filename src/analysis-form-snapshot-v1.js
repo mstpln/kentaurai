@@ -25,8 +25,7 @@ async function snapshotLeg(env, roundId, packId, asOf, payload) {
   const entries = (payload.entries || []).filter((entry) =>
     entry?.current_facts?.analysis_eligible === true && entry?.race_entry_id && entry?.horse_id
   );
-  const scored = [];
-  for (const entry of entries) {
+  const scored = await Promise.all(entries.map(async (entry) => {
     const form = await getCalendarYearDetailForm(env, 'horses', String(entry.horse_id), {
       asOfDate:asOf.slice(0, 10),
       asOfInstant:asOf,
@@ -35,12 +34,12 @@ async function snapshotLeg(env, roundId, packId, asOf, payload) {
       startMethod:'all',
       distanceGroup:'all'
     });
-    scored.push({
+    return {
       raceEntryId:String(entry.race_entry_id),
       score:finiteScore(form?.formLast?.score),
       usedStarts:Number(form?.formLast?.usedStarts || 0)
-    });
-  }
+    };
+  }));
   return scored.map((row) => ({
     ...row,
     roundId,
