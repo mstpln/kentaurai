@@ -69,6 +69,96 @@ jobs:
             GROUP BY final_market_status,form_status,kai_rank_status,abcd_status,spike_status
             ORDER BY final_market_status,form_status,kai_rank_status,abcd_status,spike_status;
 
+            SELECT 'OFFICIAL_HISTORY_UI_JOBS' AS section,status,
+              COUNT(*) AS count,
+              MAX(consecutive_errors) AS max_consecutive_errors,
+              MIN(last_run_at) AS oldest_last_run,
+              MAX(last_run_at) AS newest_last_run
+            FROM (
+              SELECT status,consecutive_errors,last_run_at,created_at
+              FROM historical_backfill_jobs
+              WHERE start_date<>end_date
+              ORDER BY datetime(created_at) DESC,id DESC
+              LIMIT 6
+            )
+            GROUP BY status
+            ORDER BY status;
+
+            SELECT 'OFFICIAL_HISTORY_FAILED_ERRORS' AS section,
+              CASE
+                WHEN instr(lower(last_error),'unique constraint failed')>0 THEN 'unique_constraint'
+                WHEN instr(lower(last_error),'http 429')>0 OR instr(lower(last_error),'rate')>0 THEN 'rate_limit'
+                WHEN instr(lower(last_error),'http 401')>0 OR instr(lower(last_error),'http 403')>0 OR instr(lower(last_error),'auth')>0 THEN 'auth'
+                WHEN instr(lower(last_error),'timeout')>0 THEN 'timeout'
+                WHEN instr(lower(last_error),'json')>0 THEN 'json'
+                WHEN instr(lower(last_error),'not found')>0 THEN 'not_found'
+                WHEN instr(lower(last_error),'lease')>0 THEN 'lease'
+                WHEN last_error IS NULL THEN 'none'
+                ELSE 'other'
+              END AS error_class,
+              COUNT(*) AS count,
+              MAX(consecutive_errors) AS max_consecutive_errors
+            FROM (
+              SELECT status,consecutive_errors,last_error,created_at
+              FROM historical_backfill_jobs
+              WHERE start_date<>end_date
+              ORDER BY datetime(created_at) DESC,id DESC
+              LIMIT 6
+            )
+            WHERE status='failed'
+            GROUP BY error_class
+            ORDER BY error_class;
+
+            SELECT 'OFFICIAL_HISTORY_FAILED_SANITIZED' AS section,
+              substr(
+                replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(
+                  COALESCE(last_error,''),
+                  '0','#'),'1','#'),'2','#'),'3','#'),'4','#'),'5','#'),'6','#'),'7','#'),'8','#'),'9','#'),
+                1,300
+              ) AS error_sanitized,
+              COUNT(*) AS count
+            FROM (
+              SELECT status,last_error,created_at
+              FROM historical_backfill_jobs
+              WHERE start_date<>end_date
+              ORDER BY datetime(created_at) DESC,id DESC
+              LIMIT 6
+            )
+            WHERE status='failed'
+            GROUP BY error_sanitized
+            ORDER BY count DESC;
+
+            SELECT 'ORCHESTRATOR_RECENT' AS section,status,COUNT(*) AS count
+            FROM (
+              SELECT status
+              FROM import_runs
+              WHERE source_type='scheduled_orchestrator'
+              ORDER BY datetime(started_at) DESC,id DESC
+              LIMIT 12
+            )
+            GROUP BY status
+            ORDER BY status;
+
+            SELECT 'ORCHESTRATOR_FAILURE_PARTS' AS section,
+              CASE
+                WHEN instr(lower(COALESCE(error_json,'')),'post_race_settlement')>0 THEN 'post_race_settlement'
+                WHEN instr(lower(COALESCE(error_json,'')),'historical_backfill')>0 THEN 'historical_backfill'
+                WHEN instr(lower(COALESCE(error_json,'')),'live_normalize')>0 THEN 'live_normalize'
+                WHEN instr(lower(COALESCE(error_json,'')),'statistics_data_backfill')>0 THEN 'statistics_data_backfill'
+                ELSE 'other'
+              END AS failure_part,
+              COUNT(*) AS count
+            FROM (
+              SELECT status,error_json
+              FROM import_runs
+              WHERE source_type='scheduled_orchestrator'
+              ORDER BY datetime(started_at) DESC,id DESC
+              LIMIT 12
+            )
+            WHERE status='failed'
+            GROUP BY failure_part
+            ORDER BY failure_part;
+
             SELECT 'REGISTERED_HISTORY' AS section,
               COUNT(*) AS rounds,
               SUM(CASE WHEN winner_legs=8 THEN 1 ELSE 0 END) AS results_complete,
@@ -96,4 +186,4 @@ jobs:
                 AND datetime(COALESCE(gr.bet_stop_at,gr.scheduled_start_at,gr.round_date || 'T23:59:59Z')) < datetime('now')
             );
           "
-# probe_nonce: verify-post-retry-2026-09-24-1
+# probe_nonce: investigate-official-app-action-required-2026-09-24-1
