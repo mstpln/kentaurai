@@ -241,6 +241,44 @@ test('post-race settlement preserves existing live race-entry identity when ordi
   assert.equal(db.prepare('SELECT COUNT(*) n FROM race_entries WHERE race_id=?').get(raceId).n,1);
 });
 
+
+
+test('final game normalization reuses source-start race entries created by live normalization', async()=>{
+  const {env,db}=createTestEnv();
+  seedUnsettledRound(db,{liveEntryIds:true});
+
+  for(let leg=1;leg<=8;leg++){
+    const raceId=`${DATE}_96_${leg}`;
+    const sourceStartId=`${raceId}_1`;
+    const entryId=stableId('entry','official',raceId,sourceStartId);
+    db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,gallop,disqualified) VALUES (?,1,'official',0,0)")
+      .run(entryId);
+  }
+
+  const result=await runNextPostRaceSettlement(env,{
+    roundId:ROUND_ID,
+    now:'2099-05-11T00:00:00Z',
+    fetchImpl:async(url)=>{
+      assert.match(url,/\/games\//);
+      return response(gamePayload());
+    }
+  });
+
+  assert.equal(result.status,'completed');
+  assert.equal(result.settledLegs,8);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM race_entries re JOIN game_legs gl ON gl.race_id=re.race_id WHERE gl.game_round_id=?").get(ROUND_ID).n,8);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM game_round_final_results WHERE game_round_id=?").get(ROUND_ID).n,1);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM betting_snapshots WHERE game_round_id=?").get(ROUND_ID).n,8);
+  for(let leg=1;leg<=8;leg++){
+    const raceId=`${DATE}_96_${leg}`;
+    const sourceStartId=`${raceId}_1`;
+    const entryId=stableId('entry','official',raceId,sourceStartId);
+    const stored=db.prepare("SELECT id,source_start_id FROM race_entries WHERE race_id=?").get(raceId);
+    assert.equal(stored.id,entryId);
+    assert.equal(stored.source_start_id,sourceStartId);
+  }
+});
+
 test('final official results without exactly one winner fail closed for manual review', async()=>{
   const {env,db}=createTestEnv();
   seedUnsettledRound(db);
