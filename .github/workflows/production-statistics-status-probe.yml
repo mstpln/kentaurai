@@ -429,5 +429,53 @@ jobs:
             JOIN race_entries re ON re.race_id=gl.race_id
             GROUP BY w.case_no
             ORDER BY w.case_no;
+
+
+            WITH waiting AS (
+              SELECT game_round_id,
+                ROW_NUMBER() OVER (ORDER BY datetime(created_at),id) AS case_no
+              FROM post_race_settlement_jobs
+              WHERE status='waiting' AND settled_legs=8
+            ),
+            recent_sources AS (
+              SELECT w.case_no,sr.id AS source_record_id,sr.fetched_at,
+                ROW_NUMBER() OVER (
+                  PARTITION BY w.case_no
+                  ORDER BY datetime(sr.fetched_at) DESC,sr.id DESC
+                ) AS source_rank
+              FROM waiting w
+              JOIN source_records sr
+                ON sr.source_type='official_provider'
+               AND sr.external_id='game:' || w.game_round_id
+            ),
+            recent_runs AS (
+              SELECT rs.case_no,rs.source_rank,ir.source_type,ir.status,
+                json_extract(ir.metadata_json,'$.stage') AS stage,
+                CAST(json_extract(ir.metadata_json,'$.cursor') AS INTEGER) AS cursor,
+                CASE
+                  WHEN instr(lower(COALESCE(ir.error_json,'')),'race_entries.race_id, race_entries.horse_id')>0 THEN 'entry_horse_unique'
+                  WHEN instr(lower(COALESCE(ir.error_json,'')),'identity conflicts with stored race entry')>0 THEN 'entry_identity_conflict'
+                  WHEN instr(lower(COALESCE(ir.error_json,'')),'unique constraint failed')>0 THEN 'other_unique'
+                  WHEN ir.error_json IS NULL THEN 'none'
+                  ELSE 'other'
+                END AS error_class
+              FROM recent_sources rs
+              JOIN import_runs ir
+                ON json_extract(ir.metadata_json,'$.sourceRecordId')=rs.source_record_id
+              WHERE rs.source_rank<=6
+                AND ir.source_type IN ('official_provider_normalize','official_live_normalize_auto')
+            )
+            SELECT 'SETTLEMENT_RECENT_SOURCE_RUNS' AS section,
+              case_no,source_rank,
+              CASE
+                WHEN source_type='official_live_normalize_auto' THEN 'auto_wrapper'
+                WHEN stage='entry' THEN 'chunk_entry'
+                ELSE 'whole_game'
+              END AS path,
+              status,error_class,COUNT(*) AS count,
+              MAX(cursor) AS max_cursor
+            FROM recent_runs
+            GROUP BY case_no,source_rank,path,status,error_class
+            ORDER BY case_no,source_rank,path,status,error_class;
           "
-# probe_nonce: settlement-deep-diagnostic-2026-09-24-1 five-minute-post-pr258-check-2026-09-24-1
+# probe_nonce: settlement-path-proof-2026-09-24-2
