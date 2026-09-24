@@ -38,7 +38,7 @@ function ugWinnerIndexInfo(){
 }
 function ugStatsTable(title,description,firstLabel,rows){
   const body=(rows||[]).map(row=>'<tr><td>'+esc(row.label)+'</td><td class="num">'+num(row.starters)+'</td><td class="num">'+num(row.winners)+'</td><td class="num">'+(row.winRate==null?'—':pct(row.winRate))+'</td><td class="num">'+(row.winnerIndex==null?'—':dec(row.winnerIndex,2))+'</td></tr>').join('');
-  return '<div class="card"><div class="ug-stat-card-head"><h3>'+esc(title)+'</h3><p>'+esc(description)+'</p></div><div class="table-wrap"><table class="table ug-stats-table"><thead><tr><th>'+esc(firstLabel)+'</th><th class="num">Starter</th><th class="num">Vinnare</th><th class="num">Vinst %</th><th class="num"><span class="ug-winner-index-head">Vinnarindex '+ugWinnerIndexInfo()+'</span></th></tr></thead><tbody>'+body+'</tbody></table></div></div>';
+  return '<div class="card"><div class="ug-stat-card-head"><h3>'+esc(title)+'</h3><p>'+esc(description)+'</p></div><div class="table-wrap"><table class="table ug-stats-table"><thead><tr><th>'+esc(firstLabel)+'</th><th class="num">Starter</th><th class="num">Vinnare</th><th class="num">Vinst %</th><th class="num"><div class="ug-winner-index-head">Vinnarindex '+ugWinnerIndexInfo()+'</div></th></tr></thead><tbody>'+body+'</tbody></table></div></div>';
 }
 function ugSpikeStats(data){
   const s=data.spikes||{total:0,winners:0,hitRate:null,items:[]};
