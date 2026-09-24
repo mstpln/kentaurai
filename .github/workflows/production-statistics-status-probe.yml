@@ -99,6 +99,27 @@ jobs:
             )
             WHERE status='failed';
 
+            SELECT 'OFFICIAL_HISTORY_RUNNING_ERROR' AS section,
+              status,consecutive_errors,next_date,next_race_index,
+              CASE
+                WHEN last_error IS NULL THEN 'none'
+                WHEN instr(lower(last_error),'starts must be an array')>0 THEN 'missing_starts_array'
+                WHEN instr(lower(last_error),'source record has unsupported quality status')>0 THEN 'unsupported_quality'
+                WHEN instr(lower(last_error),'http ')>0 THEN 'http_error'
+                WHEN instr(lower(last_error),'raw object')>0 THEN 'raw_object'
+                ELSE 'other'
+              END AS error_class,
+              substr(
+                replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(
+                  COALESCE(last_error,''),
+                  '0','#'),'1','#'),'2','#'),'3','#'),'4','#'),'5','#'),'6','#'),'7','#'),'8','#'),'9','#'),
+                1,300
+              ) AS error_sanitized
+            FROM historical_backfill_jobs
+            WHERE status='running' AND start_date<>end_date
+            ORDER BY datetime(created_at) DESC,id DESC
+            LIMIT 3;
+
             SELECT 'OFFICIAL_HISTORY_FAILED_ERRORS' AS section,
               CASE
                 WHEN instr(lower(last_error),'unique constraint failed')>0 THEN 'unique_constraint'
@@ -201,4 +222,4 @@ jobs:
                 AND datetime(COALESCE(gr.bet_stop_at,gr.scheduled_start_at,gr.round_date || 'T23:59:59Z')) < datetime('now')
             );
           "
-# probe_nonce: verify-app-official-status-after-pr257
+# probe_nonce: inspect-running-official-error-after-pr257
