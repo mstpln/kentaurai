@@ -61,6 +61,20 @@ jobs:
             GROUP BY status,COALESCE(last_error,'none')
             ORDER BY status,reason;
 
+            SELECT 'SETTLEMENT_WAITING_DETAIL' AS section,
+              status,settled_legs,attempt_count,next_check_at,updated_at,
+              CASE WHEN lease_until IS NULL THEN 'none'
+                   WHEN datetime(lease_until)<=datetime('now') THEN 'expired'
+                   ELSE 'future' END AS lease_state,
+              CASE
+                WHEN last_error IS NULL THEN 'none'
+                WHEN instr(lower(last_error),'unique constraint failed')>0 THEN 'unique_constraint'
+                ELSE 'other'
+              END AS error_class
+            FROM post_race_settlement_jobs
+            WHERE status='waiting'
+            ORDER BY updated_at ASC;
+
             SELECT 'SETTLEMENT_DUE' AS section,
               COUNT(*) AS waiting,
               SUM(CASE WHEN next_check_at IS NULL OR datetime(next_check_at)<=datetime('now') THEN 1 ELSE 0 END) AS due_now,
@@ -237,4 +251,4 @@ jobs:
                 AND datetime(COALESCE(gr.bet_stop_at,gr.scheduled_start_at,gr.round_date || 'T23:59:59Z')) < datetime('now')
             );
           "
-# probe_nonce: current-status-2026-09-24-1917-local
+# probe_nonce: investigate-waiting-settlement-jobs-2026-09-24-1
