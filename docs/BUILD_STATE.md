@@ -349,3 +349,5 @@ The external-analysis production release was accepted after:
 - Existing archived final game sources may be repaired from the already archived raw final game source without a new provider fetch.
 - KentaurAI rank, ABCD and spike history are audited from canonical stored analysis/system facts; unavailable historical judgments are not invented.
 - Private admin status/step endpoints expose sanitized coverage state and do not expose raw racing payloads.
+- Retryable closing-market/Form work remains queued as `pending`; deterministic archive/provenance conflicts stop at `manual_review` instead of being retried forever or silently marked unavailable.
+- Legacy Form/KentaurAI historical reads require pre-race snapshot timing plus analysis creation no later than the registered system, and historical Form ignores result sources fetched after the reconstructed as-of.
