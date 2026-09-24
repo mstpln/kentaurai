@@ -222,4 +222,4 @@ jobs:
                 AND datetime(COALESCE(gr.bet_stop_at,gr.scheduled_start_at,gr.round_date || 'T23:59:59Z')) < datetime('now')
             );
           "
-# probe_nonce: inspect-running-official-error-after-pr257
+# probe_nonce: verify-forced-retry-after-pr257
