@@ -41,6 +41,14 @@ jobs:
               SUM(CASE WHEN spike_status='complete' THEN 1 ELSE 0 END) AS spike_complete
             FROM statistics_data_backfill_rounds;
 
+            SELECT 'STATISTICS_ACTIVITY' AS section,
+              MAX(last_checked_at) AS latest_checked_at,
+              SUM(attempt_count) AS total_attempts,
+              SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending_rounds,
+              SUM(CASE WHEN status='manual_review' THEN 1 ELSE 0 END) AS manual_review_rounds,
+              SUM(CASE WHEN status IN ('complete','complete_with_gaps') THEN 1 ELSE 0 END) AS terminal_rounds
+            FROM statistics_data_backfill_rounds;
+
             SELECT 'SETTLEMENT_STATUS' AS section,status,COUNT(*) AS count
             FROM post_race_settlement_jobs
             GROUP BY status
@@ -100,7 +108,7 @@ jobs:
             WHERE status='failed';
 
             SELECT 'OFFICIAL_HISTORY_RUNNING_ERROR' AS section,
-              status,consecutive_errors,next_date,next_race_index,
+              status,consecutive_errors,next_date,next_race_index,last_run_at,
               CASE
                 WHEN last_error IS NULL THEN 'none'
                 WHEN instr(lower(last_error),'starts must be an array')>0 THEN 'missing_starts_array'
@@ -119,6 +127,13 @@ jobs:
             WHERE status='running' AND start_date<>end_date
             ORDER BY datetime(created_at) DESC,id DESC
             LIMIT 3;
+
+            SELECT 'OFFICIAL_HISTORY_GAP_COUNT' AS section,
+              COUNT(*) AS structural_source_gaps
+            FROM source_records
+            WHERE source_type='official_provider'
+              AND quality_status='captured_source_gap'
+              AND json_extract(metadata_json,'$.sourceGap.code')='missing_starts_array';
 
             SELECT 'OFFICIAL_HISTORY_FAILED_ERRORS' AS section,
               CASE
@@ -222,4 +237,4 @@ jobs:
                 AND datetime(COALESCE(gr.bet_stop_at,gr.scheduled_start_at,gr.round_date || 'T23:59:59Z')) < datetime('now')
             );
           "
-# probe_nonce: verify-forced-retry-after-pr257
+# probe_nonce: current-status-2026-09-24-1917-local
