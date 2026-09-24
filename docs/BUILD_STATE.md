@@ -357,3 +357,9 @@ The external-analysis production release was accepted after:
 - Long multi-day official backfill can preserve an identity-verified race response with missing/non-array `starts` as `captured_source_gap` / `missing_starts_array` and advance the checkpoint.
 - No participant/result rows are synthesized from that response, and daily/current plus ordinary/manual race capture remain strict.
 - Existing failed production history can resume from its durable checkpoint after deployment rather than restarting the range.
+
+
+## Post-race final-game identity resilience
+- Final game normalization now resolves race entries by canonical horse identity before source_start_id when the horse identity is present.
+- Existing non-null horse identity on a race entry is preserved rather than rewritten by a later source-start remap.
+- Regression coverage includes a synthetic final payload whose two source-start ids are swapped while canonical horse ids remain stable.
