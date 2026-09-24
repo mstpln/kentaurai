@@ -174,12 +174,12 @@ test('game statistics use closing market, frozen form, stored KentaurAI analysis
   seedRound(db);
   const stats = await getGameStatistics(env, { gameType:'V86' });
 
-  assert.deepEqual(stats.winners.byBetPercent.find(row=>row.label==='50%+'), { label:'50%+', starters:8, winners:8, winRate:1 });
-  assert.deepEqual(stats.winners.byMarketRank.find(row=>row.label==='1'), { label:'1', starters:8, winners:8, winRate:1 });
-  assert.deepEqual(stats.winners.byForm.find(row=>row.label==='70–79'), { label:'70–79', starters:8, winners:8, winRate:1 });
-  assert.deepEqual(stats.winners.byFormRank.find(row=>row.label==='1'), { label:'1', starters:8, winners:8, winRate:1 });
-  assert.deepEqual(stats.kentaurai.byRank.find(row=>row.label==='1'), { label:'1', starters:8, winners:8, winRate:1 });
-  assert.deepEqual(stats.kentaurai.byAbcd.find(row=>row.label==='A'), { label:'A', starters:8, winners:8, winRate:1 });
+  assert.deepEqual(stats.winners.byBetPercent.find(row=>row.label==='50%+'), { label:'50%+', starters:8, winners:8, winRate:1, winnerIndex:2 });
+  assert.deepEqual(stats.winners.byMarketRank.find(row=>row.label==='1'), { label:'1', starters:8, winners:8, winRate:1, winnerIndex:2 });
+  assert.deepEqual(stats.winners.byForm.find(row=>row.label==='70–79'), { label:'70–79', starters:8, winners:8, winRate:1, winnerIndex:2 });
+  assert.deepEqual(stats.winners.byFormRank.find(row=>row.label==='1'), { label:'1', starters:8, winners:8, winRate:1, winnerIndex:2 });
+  assert.deepEqual(stats.kentaurai.byRank.find(row=>row.label==='1'), { label:'1', starters:8, winners:8, winRate:1, winnerIndex:2 });
+  assert.deepEqual(stats.kentaurai.byAbcd.find(row=>row.label==='A'), { label:'A', starters:8, winners:8, winRate:1, winnerIndex:2 });
 
   assert.equal(stats.spikes.total,3);
   assert.equal(stats.spikes.winners,3);
