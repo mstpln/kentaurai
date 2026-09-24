@@ -373,8 +373,11 @@ async function resolveRaceEntryId(env, raceId, start, horseId) {
       .bind(raceId, horseId).first();
   }
   if (!existing) {
-    existing = await env.DB.prepare('SELECT id,source_start_id FROM race_entries WHERE race_id = ? AND source_start_id = ? LIMIT 1')
+    existing = await env.DB.prepare('SELECT id,source_start_id,horse_id FROM race_entries WHERE race_id = ? AND source_start_id = ? LIMIT 1')
       .bind(raceId, sourceStartId).first();
+    if (existing && horseId && existing.horse_id && existing.horse_id !== horseId) {
+      throw new Error('official final start identity conflicts with stored race entry');
+    }
   }
   if (!existing) {
     existing = await env.DB.prepare(`
@@ -389,8 +392,16 @@ async function resolveRaceEntryId(env, raceId, start, horseId) {
     `).bind(raceId, start.number, String(start.horse?.name || '').trim()).first();
   }
   return existing
-    ? { id:existing.id, sourceStartId:existing.source_start_id || sourceStartId }
-    : { id:stableId('entry', EXTERNAL_SOURCE, raceId, sourceStartId), sourceStartId };
+    ? {
+        id:existing.id,
+        sourceStartId:existing.source_start_id || sourceStartId,
+        sourceStartConflict:Boolean(existing.source_start_id && existing.source_start_id !== sourceStartId)
+      }
+    : {
+        id:stableId('entry', EXTERNAL_SOURCE, raceId, sourceStartId),
+        sourceStartId,
+        sourceStartConflict:false
+      };
 }
 
 async function mapRace(env, game, race, legNumber, ctx) {
@@ -460,12 +471,14 @@ async function mapRace(env, game, race, legNumber, ctx) {
       pos.actualDistance, ENTRY_QUALITY
     ).run();
     await recordObservation(env, ctx.counts, 'race_entry', raceEntryId, ctx.sourceRecordId, ctx.observedAt, {
-      externalStartId: start.id, raceExternalId: raceId, horseExternalId: participantExternalId(start.horse?.id),
+      externalStartId: start.id, storedSourceStartId: resolvedEntry.sourceStartId,
+      sourceStartConflict: resolvedEntry.sourceStartConflict,
+      raceExternalId: raceId, horseExternalId: participantExternalId(start.horse?.id),
       driverExternalId: start.driver?.id == null ? null : String(start.driver.id),
       trainerExternalId: start.horse?.trainer?.id == null ? null : String(start.horse.trainer.id),
       startNumber: start.number, postPosition: finiteNumber(start.postPosition), actualStartDistanceM: pos.actualDistance,
       handicapM: pos.handicapM, startTier: pos.tier, scratchSemanticsVerified: false
-    });
+    }, resolvedEntry.sourceStartConflict ? 'source_conflict' : NORMALIZED_QUALITY);
     entryCount += 1;
     equipmentSnapshotCount += await insertEquipment(env, raceEntryId, start.horse, ctx);
 
