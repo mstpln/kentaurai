@@ -236,8 +236,8 @@ export async function auditStatisticsRound(env, roundId) {
     : 'pending';
   if (finalResult && activeEntries===0) finalMarketStatus='unavailable';
 
-  const payoutStatus=finalResult?.payouts_json
-    ? 'complete'
+  const payoutStatus=finalResult
+    ? (finalResult.payouts_json && finalResult.highest_payout_sek != null ? 'complete' : 'unavailable')
     : 'pending';
 
   const formStatus=formSnapshotCount>=activeEntries && activeEntries>0
