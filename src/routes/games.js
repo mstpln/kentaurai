@@ -448,6 +448,7 @@ export async function getGameHistorySummary(env) {
     JOIN systems s ON s.id = prr.system_id
     WHERE prr.error_type IS NOT NULL
       AND s.id = COALESCE(
+        (SELECT aer.main_system_id FROM analysis_external_runs aer WHERE aer.game_round_id = s.game_round_id ORDER BY aer.created_at DESC, aer.id DESC LIMIT 1),
         (SELECT s1.id FROM systems s1 WHERE s1.game_round_id = s.game_round_id AND s1.system_type = 'main' ORDER BY s1.created_at DESC, s1.id ASC LIMIT 1),
         (SELECT s2.id FROM systems s2 WHERE s2.game_round_id = s.game_round_id ORDER BY s2.created_at ASC, s2.id ASC LIMIT 1)
       )
@@ -537,6 +538,7 @@ export async function getGameHistoryDetail(env, roundId) {
     WHERE s.game_round_id = ?
     ORDER BY
       CASE WHEN s.id = COALESCE(
+        (SELECT aer.main_system_id FROM analysis_external_runs aer WHERE aer.game_round_id = s.game_round_id ORDER BY aer.created_at DESC, aer.id DESC LIMIT 1),
         (SELECT s1.id FROM systems s1 WHERE s1.game_round_id = s.game_round_id AND s1.system_type = 'main' ORDER BY s1.created_at DESC, s1.id ASC LIMIT 1),
         (SELECT s2.id FROM systems s2 WHERE s2.game_round_id = s.game_round_id ORDER BY s2.created_at ASC, s2.id ASC LIMIT 1)
       ) THEN 0 ELSE 1 END,
@@ -606,7 +608,24 @@ export async function getGameHistoryDetail(env, roundId) {
     JOIN ai_race_analyses ara ON ara.id = (
       SELECT ara2.id
       FROM ai_race_analyses ara2
-      WHERE ara2.race_id = gl.race_id AND ara2.model_version_id = s.model_version_id
+      JOIN game_rounds gr2 ON gr2.id=s.game_round_id
+      WHERE ara2.race_id = gl.race_id
+        AND ara2.model_version_id = s.model_version_id
+        AND ara2.data_snapshot_at IS NOT NULL
+        AND julianday(ara2.data_snapshot_at)<=julianday(s.created_at)
+        AND julianday(ara2.created_at)<=julianday(s.created_at)
+        AND julianday(ara2.data_snapshot_at)<=julianday((
+          SELECT MIN(value) FROM (
+            SELECT gr2.bet_stop_at AS value
+            UNION ALL SELECT gr2.scheduled_start_at
+            UNION ALL SELECT (
+              SELECT MIN(r0.scheduled_start_at)
+              FROM game_legs gl0
+              JOIN races r0 ON r0.id=gl0.race_id
+              WHERE gl0.game_round_id=gr2.id
+            )
+          ) WHERE value IS NOT NULL
+        ))
       ORDER BY ara2.data_snapshot_at DESC, ara2.created_at DESC, ara2.id ASC
       LIMIT 1
     )
