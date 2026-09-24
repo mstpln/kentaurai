@@ -478,4 +478,4 @@ jobs:
             GROUP BY case_no,source_rank,path,status,error_class
             ORDER BY case_no,source_rank,path,status,error_class;
           "
-# probe_nonce: post-pr259-production-verification-2026-09-24-5
+# probe_nonce: post-pr259-statistics-catchup-2026-09-24-6
