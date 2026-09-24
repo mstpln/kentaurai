@@ -93,7 +93,7 @@ async function renderTrendBuildA(){
   }
 }
 function bindTrendBuildA(){
-  document.querySelectorAll('[data-trend-category]').forEach(button=>button.onclick=()=>{const next=button.dataset.trendCategory;if(next!==state.trendCategory){state.trendCategory=next;state.trendRange=next==='horses'?'3m':'2w';state.trendDetailFilters.minStarts=next==='horses'?'3':'10'}renderTrendBuildA()});
+  document.querySelectorAll('[data-trend-category]').forEach(button=>button.onclick=()=>{const next=button.dataset.trendCategory;if(next!==state.trendCategory){state.trendCategory=next;state.trendRange=next==='horses'?'3m':'2w';state.trendDetailFilters.minStarts=next==='horses'?'3':'10';state.trendSortOpen=false}renderTrendBuildA()});
   const period=document.getElementById('trendPeriodSelect');if(period)period.onchange=()=>{state.trendRange=period.value;renderTrendBuildA()};
   const scope=document.getElementById('trendRaceScopeSelect');if(scope)scope.onchange=()=>{state.trendRaceScope=scope.value;renderTrendBuildA()};
   const toggle=document.getElementById('trendFilterToggle');if(toggle)toggle.onclick=async()=>{state.trendFilterOpen=!state.trendFilterOpen;if(state.trendFilterOpen&&!state.trendFilterOptions)await loadTrendFilterOptions();renderTrendBuildA()};
