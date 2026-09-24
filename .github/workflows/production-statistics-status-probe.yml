@@ -193,6 +193,83 @@ jobs:
             GROUP BY error_sanitized
             ORDER BY count DESC;
 
+            SELECT 'LIVE_CAPTURE_LATEST' AS section,
+              source_type,status,error_count,started_at,finished_at
+            FROM import_runs
+            WHERE source_type='official_live_scheduled_capture'
+            ORDER BY datetime(started_at) DESC,id DESC
+            LIMIT 1;
+
+            SELECT 'LIVE_NORMALIZE_LATEST' AS section,
+              source_type,status,error_count,started_at,finished_at
+            FROM import_runs
+            WHERE source_type='official_live_normalize_auto'
+            ORDER BY datetime(started_at) DESC,id DESC
+            LIMIT 1;
+
+            SELECT 'LIVE_NORMALIZE_PENDING' AS section,
+              COUNT(*) AS pending_sources
+            FROM source_records sr
+            WHERE sr.source_type='official_provider'
+              AND sr.quality_status='captured_unmapped'
+              AND (sr.external_id LIKE 'game:V85\_%' ESCAPE '\' OR sr.external_id LIKE 'game:V86\_%' ESCAPE '\')
+              AND NOT EXISTS (
+                SELECT 1 FROM source_records newer
+                WHERE newer.source_type=sr.source_type
+                  AND newer.external_id=sr.external_id
+                  AND (
+                    newer.fetched_at>sr.fetched_at
+                    OR (newer.fetched_at=sr.fetched_at AND newer.id>sr.id)
+                  )
+              );
+
+            SELECT 'XLABS_BACKFILL_STATUS' AS section,scope,status,
+              COUNT(*) AS count,
+              MAX(consecutive_errors) AS max_consecutive_errors,
+              MAX(last_run_at) AS latest_last_run
+            FROM xlabs_backfill_jobs
+            GROUP BY scope,status
+            ORDER BY scope,status;
+
+            SELECT 'XLABS_LATEST_BY_SCOPE' AS section,scope,status,
+              processed_dates,processed_races,reused_races,unavailable_dates,unavailable_races,
+              consecutive_errors,
+              CASE WHEN last_error IS NULL THEN 'none' ELSE 'present' END AS error_state,
+              last_run_at,retry_after
+            FROM (
+              SELECT *,
+                ROW_NUMBER() OVER (PARTITION BY scope ORDER BY datetime(created_at) DESC,id DESC) AS rn
+              FROM xlabs_backfill_jobs
+            )
+            WHERE rn=1
+            ORDER BY scope;
+
+            SELECT 'XLABS_INTERVAL_STATUS' AS section,status,
+              COUNT(*) AS count,
+              MAX(attempts) AS max_attempts,
+              MAX(updated_at) AS latest_update
+            FROM xlabs_interval_source_state
+            GROUP BY status
+            ORDER BY status;
+
+            SELECT 'POSITION_RECON_STATUS' AS section,status,
+              COUNT(*) AS count,
+              MAX(consecutive_errors) AS max_consecutive_errors,
+              MAX(last_run_at) AS latest_last_run
+            FROM xlabs_position_reconstruction_jobs
+            GROUP BY status
+            ORDER BY status;
+
+            SELECT 'POSITION_RECON_LATEST' AS section,status,
+              processed_sources,inserted_rows,skipped_rows,
+              COALESCE(quarantined_sources,0) AS quarantined_sources,
+              consecutive_errors,
+              CASE WHEN last_error IS NULL THEN 'none' ELSE 'present' END AS error_state,
+              last_run_at
+            FROM xlabs_position_reconstruction_jobs
+            ORDER BY datetime(created_at) DESC,id DESC
+            LIMIT 1;
+
             SELECT 'ORCHESTRATOR_RECENT' AS section,status,COUNT(*) AS count
             FROM (
               SELECT status
@@ -251,4 +328,4 @@ jobs:
                 AND datetime(COALESCE(gr.bet_stop_at,gr.scheduled_start_at,gr.round_date || 'T23:59:59Z')) < datetime('now')
             );
           "
-# probe_nonce: investigate-waiting-settlement-jobs-2026-09-24-1
+# probe_nonce: full-workflow-health-check-2026-09-24-now
