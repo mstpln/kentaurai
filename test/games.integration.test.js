@@ -224,3 +224,21 @@ test('game statistics never borrow Form from an unrelated later Step 1 pack', as
   const detail = await getGameHistoryDetail(env,'round_1');
   assert.equal(detail.legs[0].systems.system_main.winnerContext.formScore,72);
 });
+
+
+test('game statistics exclude analyses created after the registered system', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  db.prepare(`INSERT INTO ai_race_analyses
+    (id,race_id,model_version_id,data_snapshot_at,market_blind,created_at)
+    VALUES ('analysis_late','race_1','model_1','2099-01-02T11:00:00Z',1,'2099-01-02T11:00:00Z')`).run();
+  db.prepare(`INSERT INTO ai_horse_predictions
+    (id,ai_race_analysis_id,race_entry_id,win_probability,raw_rank,abcd_group)
+    VALUES ('pred_late','analysis_late','winner_1',0.01,9,'D')`).run();
+
+  const stats = await getGameStatistics(env, { gameType:'V86' });
+  assert.equal(stats.kentaurai.byRank.find(row=>row.label==='1').winners,8);
+  assert.equal(stats.kentaurai.byRank.find(row=>row.label==='9').winners,0);
+  assert.equal(stats.kentaurai.byAbcd.find(row=>row.label==='A').winners,8);
+  assert.equal(stats.kentaurai.byAbcd.find(row=>row.label==='D').winners,0);
+});
