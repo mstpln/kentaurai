@@ -53,6 +53,15 @@ jobs:
             GROUP BY status,COALESCE(last_error,'none')
             ORDER BY status,reason;
 
+            SELECT 'SETTLEMENT_DUE' AS section,
+              COUNT(*) AS waiting,
+              SUM(CASE WHEN next_check_at IS NULL OR datetime(next_check_at)<=datetime('now') THEN 1 ELSE 0 END) AS due_now,
+              MIN(next_check_at) AS earliest_next_check,
+              MAX(next_check_at) AS latest_next_check,
+              datetime('now') AS db_now
+            FROM post_race_settlement_jobs
+            WHERE status='waiting';
+
             SELECT 'STATISTICS_METRIC_STATUS' AS section,
               final_market_status,form_status,kai_rank_status,abcd_status,spike_status,
               COUNT(*) AS count
@@ -87,4 +96,4 @@ jobs:
                 AND datetime(COALESCE(gr.bet_stop_at,gr.scheduled_start_at,gr.round_date || 'T23:59:59Z')) < datetime('now')
             );
           "
-# probe_nonce: post-fix-deploy-check-2026-09-24-1606Z
+# probe_nonce: post-deploy-due-check-2026-09-24-1607Z
