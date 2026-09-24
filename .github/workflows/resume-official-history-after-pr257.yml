@@ -33,7 +33,13 @@ jobs:
                 lease_until=NULL,
                 updated_at=CURRENT_TIMESTAMP
             WHERE id='backfill_official-se-trot-v2__2020-09-08__2023-09-07'
-              AND status='failed';
+              AND (
+                status='failed'
+                OR (
+                  status='running'
+                  AND last_error='official race payload starts must be an array'
+                )
+              );
 
             SELECT status,next_date,next_race_index,consecutive_errors,
                    CASE WHEN last_error IS NULL THEN 'clear' ELSE 'present' END AS error_state
