@@ -14,10 +14,12 @@ const PRE_RACE_CUTOFF = `(
     SELECT gr.bet_stop_at AS value
     UNION ALL SELECT gr.scheduled_start_at
     UNION ALL SELECT (
-      SELECT MIN(r0.scheduled_start_at)
+      SELECT r0.scheduled_start_at
       FROM game_legs gl0
       JOIN races r0 ON r0.id=gl0.race_id
-      WHERE gl0.game_round_id=gr.id
+      WHERE gl0.game_round_id=gr.id AND r0.scheduled_start_at IS NOT NULL
+      ORDER BY julianday(r0.scheduled_start_at) ASC
+      LIMIT 1
     )
   ) WHERE value IS NOT NULL ORDER BY julianday(value) ASC LIMIT 1
 )`;
