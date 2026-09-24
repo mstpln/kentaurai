@@ -351,3 +351,9 @@ The external-analysis production release was accepted after:
 - Private admin status/step endpoints expose sanitized coverage state and do not expose raw racing payloads.
 - Retryable closing-market/Form work remains queued as `pending`; deterministic archive/provenance conflicts stop at `manual_review` instead of being retried forever or silently marked unavailable.
 - Legacy Form/KentaurAI historical reads require pre-race snapshot timing plus analysis creation no later than the registered system, and historical Form ignores result sources fetched after the reconstructed as-of.
+
+
+## Historical official structural source-gap resilience
+- Long multi-day official backfill can preserve an identity-verified race response with missing/non-array `starts` as `captured_source_gap` / `missing_starts_array` and advance the checkpoint.
+- No participant/result rows are synthesized from that response, and daily/current plus ordinary/manual race capture remain strict.
+- Existing failed production history can resume from its durable checkpoint after deployment rather than restarting the range.
