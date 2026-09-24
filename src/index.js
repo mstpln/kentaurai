@@ -365,8 +365,8 @@ async function handleScheduled(controller, env) {
 
   if (controller.cron === BACKFILL_CRON) {
     parts.push(await runScheduledPart('post_race_settlement', () => runPostRaceSettlementBatch(env)));
-    parts.push(await runScheduledPart('statistics_data_backfill', () => runNextStatisticsDataBackfill(env)));
     parts.push(await runScheduledPart('live_normalize', () => normalizeNextPendingOfficialGame(env)));
+    parts.push(await runScheduledPart('statistics_data_backfill', () => runNextStatisticsDataBackfill(env)));
     parts.push(await runScheduledPart('historical_backfill', () => runHistoricalBackfillBatch(env)));
     parts.push(await runScheduledPart('xlabs_backfill', () => runXlabsBackfillBatch(env)));
     parts.push(await runScheduledPart('xlabs_interval_repair', () => runXlabsIntervalRepairBatch(env)));
