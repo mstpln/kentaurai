@@ -1,6 +1,6 @@
 import { stableId } from './ids.js';
 import { normalizeCapturedOfficialRace, officialRaceHasFinalResults } from './import/official-historical-race.js';
-import { normalizeCapturedOfficialGame } from './import/official-live.js';
+import { repairCapturedOfficialClosingMarket } from './import/official-live.js';
 import { ensureXlabsDailyDateJob } from './import/xlabs-backfill.js';
 import { captureGame, captureRace } from './provider/official.js';
 import { getFinalGameResult, persistFinalGameResult } from './game-final-result-v1.js';
@@ -203,18 +203,38 @@ async function readCapturedJson(env, rawObjectKey, label='post-race') {
 async function finalizeRoundGame(env, roundId, options = {}) {
   const existing = await getFinalGameResult(env, roundId);
   if (existing) return { ready:true, reused:true, finalResult:existing };
-  const captured = await captureGame(env, roundId, { fetchImpl:options.fetchImpl });
+  const captured = await captureGame(env, roundId, {
+    fetchImpl:options.fetchImpl,
+    metadata:{ normalizationOwner:'post_race_settlement_final' }
+  });
   const payload = await readCapturedJson(env, captured.rawObjectKey, 'final game');
   if (String(payload?.status || '').toLowerCase() !== 'results') {
     return { ready:false, reused:false, sourceRecordId:captured.sourceRecordId, status:payload?.status || null };
   }
-  await normalizeCapturedOfficialGame(env, captured.sourceRecordId);
-  const source = await env.DB.prepare('SELECT fetched_at FROM source_records WHERE id=? LIMIT 1').bind(captured.sourceRecordId).first();
+
+  const closingMarket = await repairCapturedOfficialClosingMarket(env, captured.sourceRecordId);
+  if (!closingMarket.complete) {
+    throw new Error('closing_market_manual_review: final game closing market could not be matched completely');
+  }
+
+  const source = await env.DB.prepare('SELECT fetched_at FROM source_records WHERE id=? LIMIT 1')
+    .bind(captured.sourceRecordId).first();
   const finalResult = await persistFinalGameResult(env, payload, {
     sourceRecordId:captured.sourceRecordId,
     capturedAt:source?.fetched_at || new Date().toISOString()
   });
-  return { ready:true, reused:false, sourceRecordId:captured.sourceRecordId, finalResult };
+  await env.DB.prepare(`
+    UPDATE source_records
+    SET quality_status='normalized_verified_subset'
+    WHERE id=? AND source_type='official_provider'
+  `).bind(captured.sourceRecordId).run();
+  return {
+    ready:true,
+    reused:false,
+    sourceRecordId:captured.sourceRecordId,
+    closingMarket,
+    finalResult
+  };
 }
 
 export async function getPostRaceSettlementJob(env, roundId) {
