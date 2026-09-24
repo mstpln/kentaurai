@@ -143,10 +143,12 @@ test('explicit statistics backfill refuses a round that is not yet historically 
 });
 
 
-test('closing-market repair failure does not falsely mark Form for manual review',async()=>{
+test('transient closing-market repair failure stays pending and does not falsely mark Form for manual review',async()=>{
   const {env,db}=createTestEnv();
   seedRound(db);
   await seedRecordedSystem(env,db);
+  db.prepare("UPDATE source_records SET raw_object_key='raw/official_provider/transient.json' WHERE id='stats_official'").run();
+  env.RAW_BUCKET.get=async()=>{ throw new Error('temporary R2 outage'); };
   db.prepare(`INSERT INTO game_round_final_results
     (game_round_id,game_type,source_record_id,captured_at,status,turnover_raw,turnover_sek,
      system_count,payouts_json,highest_payout_level,highest_payout_raw,highest_payout_sek)
@@ -154,10 +156,13 @@ test('closing-market repair failure does not falsely mark Form for manual review
       100000,1000,100,'{"8":{"payoutRaw":2500000,"payoutSek":25000,"systems":1,"jackpot":false}}',8,2500000,25000)`).run();
 
   const result=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
-  assert.equal(result.metrics.finalMarket,'unavailable');
+  assert.equal(result.status,'pending');
+  assert.equal(result.metrics.finalMarket,'pending');
   assert.equal(result.metrics.form,'complete');
   assert.match(result.reason,/closing_market_repair/);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM analysis_entry_form_snapshots").get().n,8);
+  const state=db.prepare("SELECT status,final_market_status,form_status FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get();
+  assert.deepEqual(state,{status:'pending',final_market_status:'pending',form_status:'complete'});
 });
 
 
@@ -165,7 +170,8 @@ test('legacy registered systems backfill Form from verified pre-race analysis sn
   const {env,db}=createTestEnv();
   seedRound(db);
   db.prepare("INSERT INTO model_versions (id,created_at,feature_version) VALUES ('legacy_model','2099-01-02T11:40:00.000Z','analysis-exchange-v1')").run();
-  db.prepare("INSERT INTO systems (id,game_round_id,model_version_id,system_type,budget_sek,row_count,line_price_sek,spike_count,created_at,metrics_json) VALUES ('legacy_system','stats_round','legacy_model','main',200,8,0.25,3,'2099-01-02T11:40:00.000Z','{}')").run();
+  db.prepare("INSERT INTO systems (id,game_round_id,model_version_id,system_type,budget_sek,row_count,line_price_sek,spike_count,created_at,metrics_json) VALUES ('legacy_system','stats_round','legacy_model','main',200,8,0.25,3,'2099-01-02T11:40:00.000Z',?)")
+    .run(JSON.stringify({step1_pack_id:'stale-pack',step1_facts_fingerprint:'sha256:stale'}));
   for(let leg=1;leg<=8;leg+=1){
     db.prepare("INSERT INTO ai_race_analyses (id,race_id,model_version_id,data_snapshot_at,market_blind,created_at) VALUES (?,?,?,'2099-01-02T11:30:00.000Z',1,'2099-01-02T11:40:00.000Z')")
       .run('legacy_analysis_'+leg,'stats_race_'+leg,'legacy_model');
@@ -214,4 +220,66 @@ test('legacy Form fallback refuses analysis snapshots after the earliest pre-rac
   const audit=await auditStatisticsRound(env,'stats_round');
   assert.equal(audit.formLineage,null);
   assert.equal(audit.status.form,'unavailable');
+});
+
+
+test('deterministic closing-market archive gaps require manual review instead of endless retry',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  db.prepare(`INSERT INTO game_round_final_results
+    (game_round_id,game_type,source_record_id,captured_at,status,turnover_raw,turnover_sek,
+     system_count,payouts_json,highest_payout_level,highest_payout_raw,highest_payout_sek)
+    VALUES ('stats_round','V86','stats_official','2099-01-02T22:00:00Z','results',
+      100000,1000,100,'{"8":{"payoutRaw":2500000,"payoutSek":25000,"systems":1,"jackpot":false}}',8,2500000,25000)`).run();
+
+  const result=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(result.status,'manual_review');
+  assert.equal(result.metrics.finalMarket,'manual_review');
+  assert.equal(result.metrics.form,'complete');
+  assert.match(result.reason,/closing_market_manual_review/);
+});
+
+test('legacy Form and historical KAI judgments reject analyses created after the registered system',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  db.prepare("INSERT INTO model_versions (id,created_at,feature_version) VALUES ('late_created_model','2099-01-02T11:00:00.000Z','analysis-exchange-v1')").run();
+  db.prepare("INSERT INTO systems (id,game_round_id,model_version_id,system_type,budget_sek,row_count,line_price_sek,spike_count,created_at,metrics_json) VALUES ('late_created_system','stats_round','late_created_model','main',200,8,0.25,3,'2099-01-02T11:40:00.000Z','{}')").run();
+  for(let leg=1;leg<=8;leg+=1){
+    db.prepare("INSERT INTO ai_race_analyses (id,race_id,model_version_id,data_snapshot_at,market_blind,created_at) VALUES (?,?,?,'2099-01-02T11:30:00.000Z',1,'2099-01-02T11:41:00.000Z')")
+      .run('late_created_analysis_'+leg,'stats_race_'+leg,'late_created_model');
+    db.prepare("INSERT INTO ai_horse_predictions (id,ai_race_analysis_id,race_entry_id,win_probability,raw_rank,abcd_group) VALUES (?,?,?,?,1,'A')")
+      .run('late_created_prediction_'+leg,'late_created_analysis_'+leg,'stats_entry_'+leg,1);
+    db.prepare("INSERT INTO system_selections (system_id,leg_number,race_entry_id,is_spike) VALUES ('late_created_system',?,?,?)")
+      .run(leg,'stats_entry_'+leg,leg<=3?1:0);
+  }
+
+  const audit=await auditStatisticsRound(env,'stats_round');
+  assert.equal(audit.formLineage,null);
+  assert.equal(audit.status.form,'unavailable');
+  assert.equal(audit.counts.kaiRank,0);
+  assert.equal(audit.counts.abcd,0);
+  assert.equal(audit.status.kaiRank,'unavailable');
+  assert.equal(audit.status.abcd,'unavailable');
+});
+
+test('historical KAI judgments reject snapshots after the round pre-race cutoff',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  db.prepare("INSERT INTO model_versions (id,created_at,feature_version) VALUES ('post_cutoff_model','2099-01-02T11:00:00.000Z','analysis-exchange-v1')").run();
+  db.prepare("INSERT INTO systems (id,game_round_id,model_version_id,system_type,budget_sek,row_count,line_price_sek,spike_count,created_at,metrics_json) VALUES ('post_cutoff_system','stats_round','post_cutoff_model','main',200,8,0.25,3,'2099-01-02T12:30:00.000Z','{}')").run();
+  for(let leg=1;leg<=8;leg+=1){
+    db.prepare("INSERT INTO ai_race_analyses (id,race_id,model_version_id,data_snapshot_at,market_blind,created_at) VALUES (?,?,?,'2099-01-02T12:05:00.000Z',1,'2099-01-02T12:20:00.000Z')")
+      .run('post_cutoff_analysis_'+leg,'stats_race_'+leg,'post_cutoff_model');
+    db.prepare("INSERT INTO ai_horse_predictions (id,ai_race_analysis_id,race_entry_id,win_probability,raw_rank,abcd_group) VALUES (?,?,?,?,1,'A')")
+      .run('post_cutoff_prediction_'+leg,'post_cutoff_analysis_'+leg,'stats_entry_'+leg,1);
+    db.prepare("INSERT INTO system_selections (system_id,leg_number,race_entry_id,is_spike) VALUES ('post_cutoff_system',?,?,?)")
+      .run(leg,'stats_entry_'+leg,leg<=3?1:0);
+  }
+
+  const audit=await auditStatisticsRound(env,'stats_round');
+  assert.equal(audit.counts.kaiRank,0);
+  assert.equal(audit.counts.abcd,0);
+  assert.equal(audit.status.kaiRank,'unavailable');
+  assert.equal(audit.status.abcd,'unavailable');
 });
