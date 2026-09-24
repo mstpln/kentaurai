@@ -139,3 +139,21 @@ test('explicit statistics backfill refuses a round that is not yet historically 
   );
   assert.equal(db.prepare('SELECT COUNT(*) n FROM analysis_entry_form_snapshots').get().n,0);
 });
+
+
+test('closing-market repair failure does not falsely mark Form for manual review',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  db.prepare(`INSERT INTO game_round_final_results
+    (game_round_id,game_type,source_record_id,captured_at,status,turnover_raw,turnover_sek,
+     system_count,payouts_json,highest_payout_level,highest_payout_raw,highest_payout_sek)
+    VALUES ('stats_round','V86','stats_official','2099-01-02T22:00:00Z','results',
+      100000,1000,100,'{"8":{"payoutRaw":2500000,"payoutSek":25000,"systems":1,"jackpot":false}}',8,2500000,25000)`).run();
+
+  const result=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(result.metrics.finalMarket,'unavailable');
+  assert.equal(result.metrics.form,'complete');
+  assert.match(result.reason,/closing_market_repair/);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM analysis_entry_form_snapshots").get().n,8);
+});
