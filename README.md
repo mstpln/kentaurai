@@ -128,6 +128,9 @@ Real source data belongs only in the private Cloudflare D1/R2 deployment or is s
 - `POST /v1/import/raw` - Bearer ADMIN_TOKEN
 - `POST /v1/learning/hypotheses` - Bearer ADMIN_TOKEN
 - `POST /v1/post-race/review-next` - Bearer ADMIN_TOKEN; manually advances one eligible deterministic post-race review
+- `GET /v1/game-statistics/coverage` - Bearer ADMIN_TOKEN; read-only per-round completeness audit for Spel outcome statistics
+- `POST /v1/game-statistics/backfill-next` - Bearer ADMIN_TOKEN; advances one bounded leakage-safe historical statistics backfill round
+- `GET /v1/game-statistics/backfill-status?job_id=...` - Bearer ADMIN_TOKEN; reads durable historical statistics backfill progress
 - `POST /v1/historical/backfill/start` - Bearer ADMIN_TOKEN; creates or resumes an official date-range job
 - `POST /v1/historical/backfill/step` - Bearer ADMIN_TOKEN; processes one official checkpointed race
 - `GET /v1/historical/backfill/status?job_id=...` - Bearer ADMIN_TOKEN
@@ -140,6 +143,8 @@ The configured official schedules are `15 5 * * *` and `15 17 * * *` in UTC. The
 Each calendar snapshot is archived privately before game discovery. Discovery accepts only V85/V86 identities for the requested date with exactly eight same-date race ids. Each discovered game is then captured through the same verified official provider path and archived before normalization. A partial date/game capture failure marks the scheduled operation as failed rather than silently reporting success.
 
 Captured game normalization is intentionally bounded to one entry checkpoint per minute. Progress is derived from successful contiguous normalization runs, not merely from partially written entity observations. This means a failed per-entry operation cannot cause the next scheduled invocation to skip unfinished betting, odds or equipment facts.
+
+The minute scheduler also advances at most one saved-round Spel-statistics historical completion step. Official final results, closing market and payout remain owned by the existing post-race settlement flow. Historical Form is written only when the original Step 1 lineage can be replayed safely and its pack id plus facts fingerprint reproduce exactly; otherwise the historical Form fields remain unknown rather than being inferred from later data.
 
 ### Official-provider capture and normalization
 Calendar/day, game-by-id and ordinary race-by-id are wired from observed official browser traffic. Captured responses are archived exactly to private R2 and recorded in D1 before any field mapping occurs.
