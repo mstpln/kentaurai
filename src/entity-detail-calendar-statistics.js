@@ -194,6 +194,9 @@ async function loadHorseForm(env,entityId,filters,config){
         JOIN source_records sr ON sr.id=x.source_record_id
         WHERE x.quality_status='xlabs-telemetry-v1' AND sr.source_type='xlabs_race_json'
           AND julianday(sr.fetched_at)<=julianday(?)
+          AND x.race_entry_id IN (
+            SELECT xre.id FROM race_entries xre WHERE xre.race_id IN (${racePlaceholders})
+          )
       )
       SELECT re.race_id,re.id race_entry_id,re.horse_id,re.actual_start_distance_m,r.distance_m,
         rr.placing,rr.disqualified,rr.km_time,
@@ -204,7 +207,7 @@ async function loadHorseForm(env,entityId,filters,config){
       LEFT JOIN latest_x x ON x.race_entry_id=re.id AND x.rn=1
       WHERE re.scratched=0 AND re.race_id IN (${racePlaceholders})
       ORDER BY re.race_id,re.start_number,re.id
-    `).bind(filters.asOfInstant||filters.asOfDate+'T23:59:59.999Z',...raceIds).all(),
+    `).bind(filters.asOfInstant||filters.asOfDate+'T23:59:59.999Z',...raceIds,...raceIds).all(),
     env.DB.prepare(`
       SELECT re.race_id,re.horse_id,
         (
