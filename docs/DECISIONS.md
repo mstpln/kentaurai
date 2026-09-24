@@ -288,3 +288,13 @@ A single race must not directly change model weights. Candidate learnings are re
 7. Aggregate system statistics use the canonical primary/main registered system for each round so stored alternatives do not double-count one race outcome.
 8. Historical values remain null unless already verified or reproducible with the exact historical cutoff/version without result leakage.
 9. Statistics describe observed outcomes and do not automatically change model weights or promote a single round into a learning rule.
+
+
+## Historical completion of system-outcome statistics
+1. Existing post-race settlement remains authoritative for official winners, final game capture, closing betting percentage/market rank and payout. The statistics backfill must not create a parallel official-data fetch path.
+2. Historical Form may be reconstructed only from an explicitly linked original Step 1 pack. Replay must use the stored Step 1 as-of, pass the canonical as-of safety guard and reproduce both the stored pack id and facts fingerprint exactly before any Form row is written.
+3. A fingerprint mismatch, missing Step 1 lineage or unsafe historical replay is a valid unresolved state. The correct value is null; current data must never be substituted.
+4. Historical KentaurAI rank/ABCD is frozen from the system's own model version using only analyses whose data snapshot predates the registered system. Later reruns are excluded.
+5. The primary/main registered system is the statistics unit. Alternative systems do not create duplicate round-level aggregates.
+6. Coverage auditing is explicit per metric family: results, final game, closing market, payout, system structure, Form and KentaurAI judgment. A round is complete only when every required family is complete.
+7. The catch-up worker is bounded to one saved round per scheduler step and stores durable progress/audit state. It is idempotent and safe to resume.
