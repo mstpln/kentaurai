@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS game_round_final_results (
   system_count INTEGER,
   payouts_json TEXT NOT NULL CHECK (json_valid(payouts_json)),
   highest_payout_level INTEGER,
+  highest_payout_raw INTEGER,
   highest_payout_sek REAL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
