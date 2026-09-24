@@ -2,12 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createTestEnv } from './helpers/d1.js';
 import { getGameHistoryDetail, getGameHistorySummary, listGameHistory } from '../src/routes/games.js';
+import { getGameStatistics } from '../src/routes/game-statistics.js';
 
 function seedRound(db) {
   db.prepare(`INSERT INTO tracks (id, canonical_name, country_code) VALUES ('track_1','Synthetic Park','SE')`).run();
   db.prepare(`INSERT INTO game_rounds (id, game_type, round_date, status) VALUES ('round_1','V86','2099-01-02','finished')`).run();
   db.prepare(`INSERT INTO horses (id, canonical_name) VALUES ('horse_1','Alpha Horse')`).run();
   db.prepare(`INSERT INTO horses (id, canonical_name) VALUES ('horse_2','Beta Horse')`).run();
+  db.prepare(`INSERT INTO model_versions (id,created_at,feature_version) VALUES ('model_1','2099-01-02T08:00:00Z','synthetic-v1')`).run();
+  db.prepare(`INSERT INTO source_records (id,source_type,external_id,fetched_at,quality_status) VALUES ('final_game_src','official_provider','game:round_1','2099-01-02T22:00:00Z','normalized_verified_subset')`).run();
 
   for (let leg = 1; leg <= 8; leg += 1) {
     const raceId = `race_${leg}`;
@@ -18,12 +21,27 @@ function seedRound(db) {
     db.prepare(`INSERT INTO race_entries (id, race_id, horse_id, start_number) VALUES ('${winnerEntryId}', '${raceId}', 'horse_1', 1)`).run();
     db.prepare(`INSERT INTO race_entries (id, race_id, horse_id, start_number) VALUES ('${otherEntryId}', '${raceId}', 'horse_2', 2)`).run();
     db.prepare(`INSERT INTO race_results (race_entry_id, placing, placing_text, km_time, official_odds) VALUES ('${winnerEntryId}', 1, '1', '1.12,0', 3.5)`).run();
+    db.prepare(`INSERT INTO ai_race_analyses (id,race_id,model_version_id,data_snapshot_at,market_blind,created_at) VALUES (?,?,?,?,1,?)`)
+      .run(`analysis_${leg}`,raceId,'model_1','2099-01-02T08:00:00Z','2099-01-02T08:00:00Z');
+    db.prepare(`INSERT INTO ai_horse_predictions (id,ai_race_analysis_id,race_entry_id,win_probability,raw_rank,abcd_group) VALUES (?,?,?,?,?,?)`)
+      .run(`pred_w_${leg}`,`analysis_${leg}`,winnerEntryId,0.6,1,'A');
+    db.prepare(`INSERT INTO ai_horse_predictions (id,ai_race_analysis_id,race_entry_id,win_probability,raw_rank,abcd_group) VALUES (?,?,?,?,?,?)`)
+      .run(`pred_o_${leg}`,`analysis_${leg}`,otherEntryId,0.4,2,'B');
+    db.prepare(`INSERT INTO analysis_entry_form_snapshots (id,game_round_id,step1_pack_id,leg_number,race_entry_id,as_of,form_version,form_score,used_starts,form_rank) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+      .run(`form_w_${leg}`,'round_1','pack_1',leg,winnerEntryId,'2099-01-02T08:00:00Z','horse-form-index-v1',72,5,1);
+    db.prepare(`INSERT INTO analysis_entry_form_snapshots (id,game_round_id,step1_pack_id,leg_number,race_entry_id,as_of,form_version,form_score,used_starts,form_rank) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+      .run(`form_o_${leg}`,'round_1','pack_1',leg,otherEntryId,'2099-01-02T08:00:00Z','horse-form-index-v1',55,5,2);
+    db.prepare(`INSERT INTO betting_snapshots (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id) VALUES (?,?,?,?,?,?,?,?)`)
+      .run(`close_w_${leg}`,'round_1',leg,winnerEntryId,'2099-01-02T22:00:00Z',60,1,'final_game_src');
+    db.prepare(`INSERT INTO betting_snapshots (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id) VALUES (?,?,?,?,?,?,?,?)`)
+      .run(`close_o_${leg}`,'round_1',leg,otherEntryId,'2099-01-02T22:00:00Z',40,2,'final_game_src');
     if (leg === 1) {
       db.prepare(`INSERT INTO race_positions (id, race_entry_id, observed_at_m, position, leader) VALUES ('pos_1', '${winnerEntryId}', 500, 1, 1)`).run();
     }
   }
 
-  db.prepare(`INSERT INTO systems (id, game_round_id, system_type, budget_sek, row_count, spike_count, created_at) VALUES ('system_main','round_1','main',216,144,3,'2099-01-02T10:00:00Z')`).run();
+  db.prepare(`INSERT INTO systems (id, game_round_id, model_version_id, system_type, budget_sek, row_count, spike_count, created_at, metrics_json) VALUES ('system_main','round_1','model_1','main',216,144,3,'2099-01-02T10:00:00Z','{"step1_pack_id":"pack_1"}')`).run();
+  db.prepare(`INSERT INTO game_round_final_results (game_round_id,game_type,source_record_id,captured_at,status,turnover_raw,turnover_sek,system_count,payouts_json,highest_payout_level,highest_payout_raw,highest_payout_sek) VALUES ('round_1','V86','final_game_src','2099-01-02T22:00:00Z','results',1000000,10000,500,'{"8":{"payoutRaw":2500000,"payoutSek":25000,"systems":4,"jackpot":false}}',8,2500000,25000)`).run();
 
   for (let leg = 1; leg <= 8; leg += 1) {
     const selectedEntryId = leg <= 6 ? `winner_${leg}` : `other_${leg}`;
@@ -148,4 +166,43 @@ test('latest main system is used consistently as the primary round system', asyn
   const detail = await getGameHistoryDetail(env, 'round_1');
   assert.equal(detail.systems[0].id, 'system_main_new');
   assert.equal(detail.systems[0].correctLegs, 7);
+});
+
+
+test('game statistics use closing market, frozen form, stored KentaurAI analysis and primary system only', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  const stats = await getGameStatistics(env, { gameType:'V86' });
+
+  assert.deepEqual(stats.winners.byBetPercent.find(row=>row.label==='50%+'), { label:'50%+', starters:8, winners:8, winRate:1 });
+  assert.deepEqual(stats.winners.byMarketRank.find(row=>row.label==='1'), { label:'1', starters:8, winners:8, winRate:1 });
+  assert.deepEqual(stats.winners.byForm.find(row=>row.label==='70–79'), { label:'70–79', starters:8, winners:8, winRate:1 });
+  assert.deepEqual(stats.winners.byFormRank.find(row=>row.label==='1'), { label:'1', starters:8, winners:8, winRate:1 });
+  assert.deepEqual(stats.kentaurai.byRank.find(row=>row.label==='1'), { label:'1', starters:8, winners:8, winRate:1 });
+  assert.deepEqual(stats.kentaurai.byAbcd.find(row=>row.label==='A'), { label:'A', starters:8, winners:8, winRate:1 });
+
+  assert.equal(stats.spikes.total,3);
+  assert.equal(stats.spikes.winners,3);
+  assert.equal(stats.spikes.hitRate,1);
+  assert.equal(stats.spikes.items[0].closingBetPercent,60);
+  assert.equal(stats.spikes.items[0].closingMarketRank,1);
+  assert.equal(stats.spikes.items[0].formScore,72);
+  assert.equal(stats.spikes.items[0].kaiRank,1);
+
+  assert.deepEqual(stats.payoutPerformance.find(row=>row.label==='20 000–99 999 kr'), {
+    label:'20 000–99 999 kr', rounds:1, averageCorrect:6, correct8:0, correct7:0, correct6:1, correct5:0
+  });
+});
+
+test('game history winner cards expose frozen form and final closing market without overwriting prediction context', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  const detail = await getGameHistoryDetail(env,'round_1');
+  const result = detail.legs[0].systems.system_main;
+  assert.equal(result.winnerPrediction.rawRank,1);
+  assert.equal(result.winnerPrediction.abcdGroup,'A');
+  assert.equal(result.winnerContext.formScore,72);
+  assert.equal(result.winnerContext.formRank,1);
+  assert.equal(result.winnerContext.closingBetPercent,60);
+  assert.equal(result.winnerContext.closingMarketRank,1);
 });
