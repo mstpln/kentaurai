@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createTestEnv } from './helpers/d1.js';
 import { normalizeCapturedOfficialGameChunk } from '../src/import/official-live-chunked.js';
+import { stableId } from '../src/ids.js';
 
 const DATE = '2099-02-20';
 const GAME_ID = 'V86_2099-02-20_998_1';
@@ -106,4 +107,78 @@ test('captured game normalization can be completed across bounded Worker invocat
   const retry = await normalizeCapturedOfficialGameChunk(env, SOURCE_ID, 0);
   assert.equal(retry.done, true);
   assert.equal(retry.reused, true);
+});
+
+
+test('chunked final normalization prefers canonical horse identity when source-start ids are remapped', async () => {
+  const { env, db } = createTestEnv();
+  const payload=syntheticGame();
+  const race=payload.races[0];
+  const first=race.starts[0];
+  const second={
+    ...first,
+    id:`${race.id}_2`,
+    number:2,
+    postPosition:2,
+    horse:{ ...first.horse, id:990101, name:'Chunk Horse Remap B' },
+    driver:{ ...first.driver, id:992101, lastName:'DriverRemapB' }
+  };
+  race.starts=[first,second];
+  race.starts[0].pools.V86.betDistribution=5000;
+  race.starts[1].pools.V86.betDistribution=5000;
+
+  db.prepare("INSERT INTO tracks (id,canonical_name,country_code) VALUES ('track_chunk_remap','Synthetic West','SE')").run();
+  db.prepare(`
+    INSERT INTO races (id,track_id,race_date,race_number,distance_m,start_method,status,source_quality)
+    VALUES (?,'track_chunk_remap',?,1,2140,'auto','results','normalized_verified_subset')
+  `).run(race.id,DATE);
+
+  const firstHorse=stableId('horse','official',String(first.horse.id));
+  const secondHorse=stableId('horse','official',String(second.horse.id));
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES (?,?)").run(firstHorse,first.horse.name);
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES (?,?)").run(secondHorse,second.horse.name);
+  db.prepare("INSERT INTO horse_external_ids (horse_id,source_type,external_id) VALUES (?,'official',?)").run(firstHorse,String(first.horse.id));
+  db.prepare("INSERT INTO horse_external_ids (horse_id,source_type,external_id) VALUES (?,'official',?)").run(secondHorse,String(second.horse.id));
+
+  const firstStoredStart=`${race.id}_1`;
+  const secondStoredStart=`${race.id}_2`;
+  const firstEntry=stableId('entry','official',race.id,firstStoredStart);
+  const secondEntry=stableId('entry','official',race.id,secondStoredStart);
+  db.prepare(`
+    INSERT INTO race_entries
+      (id,race_id,horse_id,source_start_id,declared_horse_name,start_number,scratched,data_quality)
+    VALUES (?,?,?,?,?,1,0,'official_declared_start_scratch_unverified')
+  `).run(firstEntry,race.id,firstHorse,firstStoredStart,first.horse.name);
+  db.prepare(`
+    INSERT INTO race_entries
+      (id,race_id,horse_id,source_start_id,declared_horse_name,start_number,scratched,data_quality)
+    VALUES (?,?,?,?,?,2,0,'official_declared_start_scratch_unverified')
+  `).run(secondEntry,race.id,secondHorse,secondStoredStart,second.horse.name);
+
+  race.starts[0].id=secondStoredStart;
+  race.starts[1].id=firstStoredStart;
+  payload.status='results';
+  payload.pools.V86.status='results';
+
+  const sourceId='src_chunked_remap_final';
+  const key='raw/official_provider/2099-02-20/chunked-remap-final.json';
+  await env.RAW_BUCKET.put(key,JSON.stringify(payload),{httpMetadata:{contentType:'application/json'}});
+  db.prepare(`
+    INSERT INTO source_records
+      (id,source_type,external_id,fetched_at,raw_object_key,quality_status)
+    VALUES (?,'official_provider',?,'2099-02-20T23:00:00.000Z',?,'captured_unmapped')
+  `).run(sourceId,`game:${GAME_ID}`,key);
+
+  const one=await normalizeCapturedOfficialGameChunk(env,sourceId,0);
+  assert.equal(one.done,false);
+  const two=await normalizeCapturedOfficialGameChunk(env,sourceId,1);
+  assert.equal(two.done,false);
+
+  const storedA=db.prepare('SELECT id,horse_id,source_start_id FROM race_entries WHERE id=?').get(firstEntry);
+  const storedB=db.prepare('SELECT id,horse_id,source_start_id FROM race_entries WHERE id=?').get(secondEntry);
+  assert.equal(storedA.horse_id,firstHorse);
+  assert.equal(storedA.source_start_id,firstStoredStart);
+  assert.equal(storedB.horse_id,secondHorse);
+  assert.equal(storedB.source_start_id,secondStoredStart);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM race_entries WHERE race_id=?').get(race.id).n,2);
 });

@@ -363,3 +363,14 @@ The external-analysis production release was accepted after:
 - Final game normalization now resolves race entries by canonical horse identity before source_start_id when the horse identity is present.
 - Existing non-null horse identity on a race entry is preserved rather than rewritten by a later source-start remap.
 - Regression coverage includes a synthetic final payload whose two source-start ids are swapped while canonical horse ids remain stable.
+
+
+## Winner index, Trend sort and final-game settlement ownership
+- Spel → Statistik winner-rate tables now also expose a deterministic Vinnarindex: winner share divided by starter share within the same known-value metric population.
+- The UI keeps existing filters/layout and adds the Vinnarindex column with an inline explanation; unknown values remain null.
+- Trend keeps the current default ranking, but trainer/driver win-rate lists can switch between highest and lowest win rate without changing the underlying filters or population.
+- The selected sort only changes ordering/rank; the metric calculations are unchanged.
+- Post-race settlement now owns its final official game snapshot explicitly through generic source metadata.
+- Settlement finalization repairs only the verified closing market required for post-race statistics, persists final payout/result facts, and does not re-run full participant normalization after all eight factual winners are already known.
+- Scheduled live normalization excludes settlement-owned final sources so both pipelines cannot normalize the same source concurrently.
+- Chunked official normalization now uses the same horse-first race-entry identity rules as whole-game normalization and preserves existing stored horse/source-start identity on remaps.

@@ -26,7 +26,7 @@ const trendCss = `
 .trend-reset{min-height:40px;border:0;background:transparent;color:var(--muted);padding:0 4px;font-size:11px;cursor:pointer}.trend-reset:hover{color:var(--text)}
 .trend-panel{overflow:hidden}
 .trend-panel-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;padding:16px 0 10px}
-.trend-panel-head h2{font-size:18px;margin:0;font-weight:650}.trend-panel-kicker{font-size:9px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);font-weight:650;margin-bottom:4px}.trend-panel-period{font-size:10px;color:var(--muted);white-space:nowrap}
+.trend-panel-head h2{font-size:18px;margin:0;font-weight:650}.trend-panel-title-row{display:flex;align-items:center;gap:6px}.trend-sort-wrap{position:relative;display:inline-flex}.trend-sort-trigger{width:25px;height:25px;border:0;background:transparent;color:var(--muted);display:inline-flex;align-items:center;justify-content:center;padding:0;border-radius:6px;cursor:pointer}.trend-sort-trigger:hover,.trend-sort-trigger.active{color:var(--accent-soft);background:#171510}.trend-sort-trigger svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}.trend-sort-menu{position:absolute;left:0;top:30px;z-index:30;width:190px;padding:5px;border:1px solid var(--line);border-radius:9px;background:#11110f;box-shadow:0 12px 30px rgba(0,0,0,.35)}.trend-sort-option{width:100%;border:0;background:transparent;color:var(--muted);text-align:left;padding:9px 10px;border-radius:6px;font-size:11px;cursor:pointer}.trend-sort-option:hover{background:#171510;color:var(--text)}.trend-sort-option.active{color:var(--accent-soft);font-weight:650}.trend-panel-kicker{font-size:9px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);font-weight:650;margin-bottom:4px}.trend-panel-period{font-size:10px;color:var(--muted);white-space:nowrap}
 .trend-results{border-top:1px solid var(--line)}
 .trend-result-row{width:100%;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--text);display:grid;grid-template-columns:92px minmax(0,1fr);gap:15px;padding:16px 4px;text-align:left;cursor:pointer}
 .trend-result-row:last-child{border-bottom:0}.trend-result-row:hover{background:#11110f}.trend-result-row:focus-visible{outline:1px solid var(--accent);outline-offset:-1px}
@@ -51,11 +51,14 @@ const TREND_BREEDS=[['all','Alla'],['warmblood','Varmblod'],['coldblood','Kallbl
 const TREND_METHODS=[['all','Alla'],['auto','Autostart'],['volt','Voltstart']];
 const TREND_MIN_STARTS=[['all','Alla'],['3','Minst 3'],['5','Minst 5'],['10','Minst 10'],['20','Minst 20']];
 const SLIDERS_ICON='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M14 4v6M4 17h2M10 17h10M10 14v6"/></svg>';
+const TREND_SORT_ICON='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5v14M4 8l3-3 3 3"/><path d="M17 19V5M14 16l3 3 3-3"/></svg>';
 state.trendRange=state.trendCategory==='horses'?'3m':'2w';
 state.trendRaceScope=state.trendRaceScope||'high_prize';
 state.trendDetailFilters={trackId:'all',raceType:'all',breedType:'all',startMethod:'all',minStarts:state.trendCategory==='horses'?'3':'10',...(state.trendDetailFilters||{})};
 state.trendFilterOpen=Boolean(state.trendFilterOpen);
 state.trendFilterOptions=state.trendFilterOptions||null;
+state.trendWinSort=state.trendWinSort||'win_rate_desc';
+state.trendSortOpen=Boolean(state.trendSortOpen);
 let trendRequestToken=0;
 function trendLabel(options,value){return (options.find(x=>x[0]===value)||[])[1]||value}
 function trendOptionHtml(options,active){return options.map(([value,label])=>'<option value="'+esc(value)+'" '+(String(value)===String(active)?'selected':'')+'>'+esc(label)+'</option>').join('')}
@@ -65,6 +68,8 @@ function activeFilterCount(){return detailCount()+(state.trendRaceScope&&state.t
 function trackOptions(){const rows=(state.trendFilterOptions&&state.trendFilterOptions.tracks)||[];return [['all','Alla banor'],...rows.map(row=>[String(row.id),row.name])]}
 function detailPanel(){if(!state.trendFilterOpen)return '';const f=state.trendDetailFilters;return '<div class="trend-detail-panel" id="trendDetailPanel"><div class="trend-detail-field"><label>Loppnivå</label><select id="trendRaceScopeSelect" class="'+(state.trendRaceScope!=='all'?'active':'')+'">'+trendOptionHtml(TREND_SCOPES,state.trendRaceScope)+'</select></div><div class="trend-detail-field"><label>Bana</label><select data-trend-detail="trackId" class="'+(f.trackId!=='all'?'active':'')+'">'+trendOptionHtml(trackOptions(),f.trackId)+'</select></div><div class="trend-detail-field"><label>Lopptyp</label><select data-trend-detail="raceType" class="'+(f.raceType!=='all'?'active':'')+'">'+trendOptionHtml(TREND_RACE_TYPES,f.raceType)+'</select></div><div class="trend-detail-field"><label>Rastyp</label><select data-trend-detail="breedType" class="'+(f.breedType!=='all'?'active':'')+'">'+trendOptionHtml(TREND_BREEDS,f.breedType)+'</select></div><div class="trend-detail-field"><label>Startmetod</label><select data-trend-detail="startMethod" class="'+(f.startMethod!=='all'?'active':'')+'">'+trendOptionHtml(TREND_METHODS,f.startMethod)+'</select></div><div class="trend-detail-field"><label>Minsta antal starter</label><select data-trend-detail="minStarts" class="'+(f.minStarts!=='all'?'active':'')+'">'+trendOptionHtml(TREND_MIN_STARTS,f.minStarts)+'</select></div><button type="button" class="trend-reset" id="trendReset">Återställ filter</button></div>'}
 function trendPageControls(){const count=activeFilterCount();return '<div class="trend-top-controls"><div class="filter-block"><div class="filter-label">Kategori</div>'+trendSegment(TREND_CATEGORIES,state.trendCategory,'data-trend-category')+'</div><div class="trend-scope-line"><label class="trend-period-menu"><span class="trend-period-eyebrow">Tidsperiod</span><span class="trend-period-choice"><select class="trend-period-select" id="trendPeriodSelect" aria-label="Tidsperiod">'+trendOptionHtml(TREND_PERIODS,state.trendRange)+'</select><span class="trend-period-chevron" aria-hidden="true">⌄</span></span></label><button type="button" class="trend-detail-trigger '+(count?'active':'')+'" id="trendFilterToggle" aria-label="Detaljfilter" aria-expanded="'+(state.trendFilterOpen?'true':'false')+'">'+SLIDERS_ICON+(count?'<span class="trend-filter-count">'+count+'</span>':'')+'</button></div>'+detailPanel()+'</div>'}
+function trendSortLabel(){return state.trendWinSort==='win_rate_asc'?'Lägst segerprocent':'Högst segerprocent'}
+function trendSortControl(){if(state.trendCategory==='horses')return '';return '<span class="trend-sort-wrap"><button type="button" class="trend-sort-trigger '+(state.trendSortOpen?'active':'')+'" id="trendSortToggle" aria-label="Sortera segerprocent" aria-expanded="'+(state.trendSortOpen?'true':'false')+'">'+TREND_SORT_ICON+'</button>'+(state.trendSortOpen?'<span class="trend-sort-menu"><button type="button" class="trend-sort-option '+(state.trendWinSort==='win_rate_desc'?'active':'')+'" data-trend-sort="win_rate_desc">Högst segerprocent</button><button type="button" class="trend-sort-option '+(state.trendWinSort==='win_rate_asc'?'active':'')+'" data-trend-sort="win_rate_asc">Lägst segerprocent</button></span>':'')+'</span>'}
 function trendPct(value){return value==null?'—':pct(value)}
 function trendMoney(value){return value==null?'—':money(value)}
 function metricPill(label,value){return '<span class="trend-metric-pill"><span>'+esc(label)+'</span><strong>'+esc(value)+'</strong></span>'}
@@ -74,10 +79,10 @@ async function renderTrendBuildA(){
   state.detail=null;state.gameDetail=null;state.gameSystemId=null;state.page='start';setNav('start');
   const token=++trendRequestToken;
   const f=state.trendDetailFilters;
-  app.innerHTML='<div class="start-heading"><h1>Trend</h1><p>Topplistor baserade på verifierade resultat och valda filter.</p></div>'+trendPageControls()+'<section class="trend-panel"><div class="trend-panel-head"><div><div class="trend-panel-kicker">'+esc(trendLabel(TREND_CATEGORIES,state.trendCategory))+'</div><h2>'+(state.trendCategory==='horses'?'Starkast form':'Högst segerprocent')+'</h2></div><div class="trend-panel-period">'+esc(trendLabel(TREND_PERIODS,state.trendRange))+'</div></div><div id="trendResults" class="trend-loading">Läser statistik…</div></section>';
+  app.innerHTML='<div class="start-heading"><h1>Trend</h1><p>Topplistor baserade på verifierade resultat och valda filter.</p></div>'+trendPageControls()+'<section class="trend-panel"><div class="trend-panel-head"><div><div class="trend-panel-kicker">'+esc(trendLabel(TREND_CATEGORIES,state.trendCategory))+'</div><div class="trend-panel-title-row"><h2>'+(state.trendCategory==='horses'?'Starkast form':trendSortLabel())+'</h2>'+trendSortControl()+'</div></div><div class="trend-panel-period">'+esc(trendLabel(TREND_PERIODS,state.trendRange))+'</div></div><div id="trendResults" class="trend-loading">Läser statistik…</div></section>';
   bindTrendBuildA();
   try{
-    const query=new URLSearchParams({category:state.trendCategory,period:state.trendRange,race_scope:state.trendRaceScope,race_type:f.raceType,breed_type:f.breedType,start_method:f.startMethod,min_starts:f.minStarts});
+    const query=new URLSearchParams({category:state.trendCategory,period:state.trendRange,race_scope:state.trendRaceScope,race_type:f.raceType,breed_type:f.breedType,start_method:f.startMethod,min_starts:f.minStarts,sort:state.trendWinSort});
     if(f.trackId&&f.trackId!=='all')query.set('track_id',f.trackId);
     const data=await api('/trend?'+query.toString());
     if(token!==trendRequestToken||state.page!=='start')return;
@@ -88,12 +93,14 @@ async function renderTrendBuildA(){
   }
 }
 function bindTrendBuildA(){
-  document.querySelectorAll('[data-trend-category]').forEach(button=>button.onclick=()=>{const next=button.dataset.trendCategory;if(next!==state.trendCategory){state.trendCategory=next;state.trendRange=next==='horses'?'3m':'2w';state.trendDetailFilters.minStarts=next==='horses'?'3':'10'}renderTrendBuildA()});
+  document.querySelectorAll('[data-trend-category]').forEach(button=>button.onclick=()=>{const next=button.dataset.trendCategory;if(next!==state.trendCategory){state.trendCategory=next;state.trendRange=next==='horses'?'3m':'2w';state.trendDetailFilters.minStarts=next==='horses'?'3':'10';state.trendSortOpen=false}renderTrendBuildA()});
   const period=document.getElementById('trendPeriodSelect');if(period)period.onchange=()=>{state.trendRange=period.value;renderTrendBuildA()};
   const scope=document.getElementById('trendRaceScopeSelect');if(scope)scope.onchange=()=>{state.trendRaceScope=scope.value;renderTrendBuildA()};
   const toggle=document.getElementById('trendFilterToggle');if(toggle)toggle.onclick=async()=>{state.trendFilterOpen=!state.trendFilterOpen;if(state.trendFilterOpen&&!state.trendFilterOptions)await loadTrendFilterOptions();renderTrendBuildA()};
   document.querySelectorAll('[data-trend-detail]').forEach(select=>select.onchange=()=>{state.trendDetailFilters[select.dataset.trendDetail]=select.value;renderTrendBuildA()});
   const reset=document.getElementById('trendReset');if(reset)reset.onclick=()=>{state.trendRaceScope='high_prize';state.trendDetailFilters={trackId:'all',raceType:'all',breedType:'all',startMethod:'all',minStarts:state.trendCategory==='horses'?'3':'10'};renderTrendBuildA()};
+  const sortToggle=document.getElementById('trendSortToggle');if(sortToggle)sortToggle.onclick=(event)=>{event.stopPropagation();state.trendSortOpen=!state.trendSortOpen;renderTrendBuildA()};
+  document.querySelectorAll('[data-trend-sort]').forEach(button=>button.onclick=(event)=>{event.stopPropagation();state.trendWinSort=button.dataset.trendSort;state.trendSortOpen=false;renderTrendBuildA()});
   document.querySelectorAll('[data-trend-id]').forEach(button=>button.onclick=()=>openDetail(state.trendCategory,button.dataset.trendId));
 }
 async function loadTrendFilterOptions(){if(state.trendFilterOptions)return;try{state.trendFilterOptions=await api('/trend/filter-options')}catch{state.trendFilterOptions={tracks:[]}}}

@@ -316,3 +316,14 @@ A single race must not directly change model weights. Candidate learnings are re
 2. source_start_id remains a fallback for payloads where canonical horse identity is unavailable.
 3. Final normalization never overwrites an already known race-entry horse identity merely because a later payload presents a different source_start mapping.
 4. This preserves pre-race/system lineage, avoids UNIQUE(race_id, horse_id) collisions and keeps source-id remapping from rewriting historical participant identity.
+
+
+## Winner index, Trend sort and final settlement source ownership
+1. Vinnarindex is calculated only within a metric's known-value population as (group winners / all winners) / (group starters / all starters). Missing factual metric values are excluded rather than inferred.
+2. Vinnarindex is descriptive outcome statistics only. It does not alter ABCD, probabilities, model weights or value logic.
+3. Trend win-rate sorting defaults to highest-first. Lowest-first uses the exact same filters, rows and calculations and changes only deterministic ordering/rank.
+4. Horse Trend remains Form-ranked; the win-rate sort control applies to the existing trainer/driver win-rate leaderboards.
+5. A post-race settlement final game capture declares post_race_settlement_final as its normalization owner in generic source metadata.
+6. Scheduled live normalization must not claim a source owned by post-race settlement, and settlement-owned sources must not suppress unrelated regular live snapshots when choosing the latest normalizable source.
+7. Once all eight factual winners are stored, settlement reads the final game source only for closing market plus final payout/result facts; it does not rewrite participant identity through a second full-game normalization pass.
+8. Whole-game and chunked official normalization use the same identity precedence: canonical race + horse first, source start id as fallback, and known stored identity is never overwritten by a later remap.

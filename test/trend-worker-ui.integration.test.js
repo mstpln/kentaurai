@@ -40,6 +40,7 @@ test('Trend API is private and is served through the actual Worker entrypoint', 
   assert.equal(data.items.length, 1);
   assert.equal(data.items[0].id, 'horse-trend');
   assert.equal(data.items[0].winRate, 1);
+  assert.equal(data.filters.sort, 'win_rate_desc');
   assert.equal(data.rankingMetric, 'horse_form_index_v1');
   assert.ok(data.items[0].formScore >= 1 && data.items[0].formScore <= 100);
 });
@@ -65,6 +66,11 @@ test('actual Worker app HTML contains the canonical Trend Build A enhancement', 
   assert.match(html, /id="kentaurai-trend-build-a"/);
   assert.match(html, /id="kentaurai-trend-build-a-script"/);
   assert.match(html, /Högst segerprocent/);
+  assert.match(html, /Lägst segerprocent/);
+  assert.match(html, /id="trendSortToggle"/);
+  assert.match(html, /data-trend-sort="win_rate_desc"/);
+  assert.match(html, /data-trend-sort="win_rate_asc"/);
+  assert.match(html, /M7 5v14M4 8l3-3 3 3/);
   assert.match(html, /Topp 3%/);
   assert.match(html, /Galopp%/);
   assert.match(html, /Prispengar/);

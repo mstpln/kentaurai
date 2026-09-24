@@ -267,15 +267,22 @@ export async function upsertHorse(env, horse, trainerId, ctx) {
 
 export async function resolveRaceEntryId(env, raceId, start, horseId) {
   const sourceStartId = String(start.id).trim();
-  let existing = await env.DB.prepare('SELECT id FROM race_entries WHERE race_id = ? AND source_start_id = ? LIMIT 1')
-    .bind(raceId, sourceStartId).first();
-  if (!existing && horseId) {
-    existing = await env.DB.prepare('SELECT id FROM race_entries WHERE race_id = ? AND horse_id = ? LIMIT 1')
+  let existing = null;
+
+  if (horseId) {
+    existing = await env.DB.prepare('SELECT id,source_start_id,horse_id FROM race_entries WHERE race_id = ? AND horse_id = ? LIMIT 1')
       .bind(raceId, horseId).first();
   }
   if (!existing) {
+    existing = await env.DB.prepare('SELECT id,source_start_id,horse_id FROM race_entries WHERE race_id = ? AND source_start_id = ? LIMIT 1')
+      .bind(raceId, sourceStartId).first();
+    if (existing && horseId && existing.horse_id && existing.horse_id !== horseId) {
+      throw new Error('official final start identity conflicts with stored race entry');
+    }
+  }
+  if (!existing) {
     existing = await env.DB.prepare(`
-      SELECT re.id
+      SELECT re.id,re.source_start_id,re.horse_id
       FROM race_entries re
       LEFT JOIN horses h ON h.id = re.horse_id
       WHERE re.race_id = ?
@@ -284,8 +291,21 @@ export async function resolveRaceEntryId(env, raceId, start, horseId) {
         AND COALESCE(re.declared_horse_name, h.canonical_name) = ?
       LIMIT 1
     `).bind(raceId, start.number, String(start.horse?.name || '').trim()).first();
+    if (existing && horseId && existing.horse_id && existing.horse_id !== horseId) {
+      throw new Error('official final fallback identity conflicts with stored race entry');
+    }
   }
-  return existing?.id || stableId('entry', EXTERNAL_SOURCE, raceId, sourceStartId);
+  return existing
+    ? {
+        id:existing.id,
+        sourceStartId:existing.source_start_id || sourceStartId,
+        sourceStartConflict:Boolean(existing.source_start_id && existing.source_start_id !== sourceStartId)
+      }
+    : {
+        id:stableId('entry', EXTERNAL_SOURCE, raceId, sourceStartId),
+        sourceStartId,
+        sourceStartConflict:false
+      };
 }
 
 export function startPosition(race, start) {
@@ -437,7 +457,8 @@ async function mapOneStart(env, game, race, legNumber, start, ctx) {
   const trainerId = await upsertPerson(env, 'trainer', start.horse?.trainer, ctx);
   const driverId = await upsertPerson(env, 'driver', start.driver, ctx);
   const horseId = await upsertHorse(env, start.horse, trainerId, ctx);
-  const raceEntryId = await resolveRaceEntryId(env, race.id, start, horseId);
+  const resolvedEntry = await resolveRaceEntryId(env, race.id, start, horseId);
+  const raceEntryId = resolvedEntry.id;
   const pos = startPosition(race, start);
   const scratched = typeof start.scratched === 'boolean' ? Number(start.scratched) : null;
   const entryQuality = scratched == null ? ENTRY_QUALITY : 'official_declared_start_scratch_source_backed';
@@ -449,10 +470,10 @@ async function mapOneStart(env, game, race, legNumber, start, ctx) {
        handicap_m, actual_start_distance_m, scratched, scratch_reason, data_quality)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
     ON CONFLICT(id) DO UPDATE SET
-      horse_id = COALESCE(excluded.horse_id, race_entries.horse_id),
+      horse_id = COALESCE(race_entries.horse_id, excluded.horse_id),
       driver_id = COALESCE(excluded.driver_id, race_entries.driver_id),
       trainer_id = COALESCE(excluded.trainer_id, race_entries.trainer_id),
-      source_start_id = COALESCE(excluded.source_start_id, race_entries.source_start_id),
+      source_start_id = COALESCE(race_entries.source_start_id, excluded.source_start_id),
       declared_horse_name = COALESCE(excluded.declared_horse_name, race_entries.declared_horse_name),
       declared_driver_name = COALESCE(excluded.declared_driver_name, race_entries.declared_driver_name),
       declared_trainer_name = COALESCE(excluded.declared_trainer_name, race_entries.declared_trainer_name),
@@ -469,12 +490,14 @@ async function mapOneStart(env, game, race, legNumber, start, ctx) {
       END,
       updated_at = CURRENT_TIMESTAMP
   `).bind(
-    raceEntryId, race.id, horseId, driverId, trainerId, start.id, horseName, driverName, trainerName,
+    raceEntryId, race.id, horseId, driverId, trainerId, resolvedEntry.sourceStartId, horseName, driverName, trainerName,
     start.number, pos.lane, pos.tier, pos.handicapM, pos.actualDistance, scratched, entryQuality
   ).run();
 
   await recordObservation(env, ctx.counts, 'race_entry', raceEntryId, ctx.sourceRecordId, ctx.observedAt, {
     externalStartId: start.id,
+    storedSourceStartId: resolvedEntry.sourceStartId,
+    sourceStartConflict: resolvedEntry.sourceStartConflict,
     raceExternalId: race.id,
     horseExternalId: participantExternalId(start.horse?.id),
     horseName,
@@ -489,7 +512,7 @@ async function mapOneStart(env, game, race, legNumber, start, ctx) {
     startTier: pos.tier,
     scratched: scratched == null ? null : Boolean(scratched),
     scratchSemanticsVerified: scratched != null
-  });
+  }, resolvedEntry.sourceStartConflict ? 'source_conflict' : NORMALIZED_QUALITY);
 
   await insertEquipment(env, raceEntryId, start.horse, ctx);
   const distributionRaw = finiteNumber(start.pools?.[ctx.gameType]?.betDistribution);

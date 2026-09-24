@@ -243,7 +243,7 @@ test('post-race settlement preserves existing live race-entry identity when ordi
 
 
 
-test('final game normalization reuses source-start race entries created by live normalization', async()=>{
+test('final settlement market repair reuses source-start race entries without full game normalization', async()=>{
   const {env,db}=createTestEnv();
   seedUnsettledRound(db,{liveEntryIds:true});
 
@@ -269,6 +269,11 @@ test('final game normalization reuses source-start race entries created by live 
   assert.equal(db.prepare("SELECT COUNT(*) n FROM race_entries re JOIN game_legs gl ON gl.race_id=re.race_id WHERE gl.game_round_id=?").get(ROUND_ID).n,8);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM game_round_final_results WHERE game_round_id=?").get(ROUND_ID).n,1);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM betting_snapshots WHERE game_round_id=?").get(ROUND_ID).n,8);
+  const finalSource=db.prepare("SELECT source_record_id FROM game_round_final_results WHERE game_round_id=?").get(ROUND_ID).source_record_id;
+  const source=db.prepare("SELECT quality_status,metadata_json FROM source_records WHERE id=?").get(finalSource);
+  assert.equal(source.quality_status,'normalized_verified_subset');
+  assert.equal(JSON.parse(source.metadata_json).normalizationOwner,'post_race_settlement_final');
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM import_runs WHERE source_type='official_provider_normalize' AND json_extract(metadata_json,'$.sourceRecordId')=?").get(finalSource).n,0);
   for(let leg=1;leg<=8;leg++){
     const raceId=`${DATE}_96_${leg}`;
     const sourceStartId=`${raceId}_1`;
@@ -277,6 +282,39 @@ test('final game normalization reuses source-start race entries created by live 
     assert.equal(stored.id,entryId);
     assert.equal(stored.source_start_id,sourceStartId);
   }
+});
+
+test('settlement closing-market repair tolerates a final source-start remap when canonical horse identity is stable', async()=>{
+  const {env,db}=createTestEnv();
+  seedUnsettledRound(db,{liveEntryIds:true});
+
+  for(let leg=1;leg<=8;leg++){
+    const raceId=`${DATE}_96_${leg}`;
+    const sourceStartId=`${raceId}_1`;
+    const entryId=stableId('entry','official',raceId,sourceStartId);
+    db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,gallop,disqualified) VALUES (?,1,'official',0,0)")
+      .run(entryId);
+  }
+
+  const payload=gamePayload();
+  const raceId=`${DATE}_96_1`;
+  const originalSourceStartId=`${raceId}_1`;
+  payload.races[0].starts[0].id=`${raceId}_final_remap`;
+
+  const result=await runNextPostRaceSettlement(env,{
+    roundId:ROUND_ID,
+    now:'2099-05-11T00:00:00Z',
+    fetchImpl:async()=>response(payload)
+  });
+
+  assert.equal(result.status,'completed');
+  const entryId=stableId('entry','official',raceId,originalSourceStartId);
+  const stored=db.prepare('SELECT id,source_start_id FROM race_entries WHERE race_id=?').get(raceId);
+  assert.equal(stored.id,entryId);
+  assert.equal(stored.source_start_id,originalSourceStartId);
+  const finalSource=db.prepare("SELECT source_record_id FROM game_round_final_results WHERE game_round_id=?").get(ROUND_ID).source_record_id;
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM betting_snapshots WHERE source_record_id=?").get(finalSource).n,8);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM normalized_observations WHERE source_record_id=? AND entity_type='race_entry'").get(finalSource).n,0);
 });
 
 test('final game normalization safely reuses a stored source-start entry when horse identity is absent', async()=>{
@@ -307,8 +345,9 @@ test('final game normalization safely reuses a stored source-start entry when ho
   assert.equal(stored.id,entryId);
   assert.ok(stored.horse_id);
   assert.equal(stored.source_start_id,sourceStartId);
-  const observation=db.prepare("SELECT fields_json FROM normalized_observations WHERE entity_type='race_entry' AND entity_id=? ORDER BY observed_at DESC LIMIT 1").get(entryId);
-  assert.equal(JSON.parse(observation.fields_json).horseExternalId,null);
+  const finalSource=db.prepare("SELECT source_record_id FROM game_round_final_results WHERE game_round_id=?").get(ROUND_ID).source_record_id;
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM normalized_observations WHERE source_record_id=? AND entity_type='race_entry'").get(finalSource).n,0);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM betting_snapshots WHERE source_record_id=?").get(finalSource).n,8);
 });
 
 test('final official results without exactly one winner fail closed for manual review', async()=>{

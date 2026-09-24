@@ -104,6 +104,22 @@ test('pending normalizer ignores calendar-only captures', async () => {
   assert.deepEqual(await normalizeNextPendingOfficialGame(env), { status: 'idle', done: true });
 });
 
+test('pending normalizer ignores final game sources owned by post-race settlement', async () => {
+  const { env, db } = createTestEnv();
+  db.prepare(`
+    INSERT INTO source_records
+      (id, source_type, external_id, fetched_at, quality_status, metadata_json)
+    VALUES
+      ('src_live_regular', 'official_provider', 'game:V85_2099-01-16_998_1', '2099-01-15T17:14:00.000Z', 'captured_unmapped', '{"kind":"game"}'),
+      ('src_settlement_final', 'official_provider', 'game:V86_2099-01-16_999_1', '2099-01-15T17:15:00.000Z', 'captured_unmapped',
+       '{"kind":"game","normalizationOwner":"post_race_settlement_final"}')
+  `).run();
+
+  const selected = await selectPendingOfficialGameSource(env);
+  assert.equal(selected.id, 'src_live_regular');
+  assert.notEqual(selected.id, 'src_settlement_final');
+});
+
 test('pending live normalization uses the newest snapshot and prioritizes a not-yet-created upcoming round', async () => {
   const { env, db } = createTestEnv();
   const existingGame = 'V86_2099-01-15_997_1';

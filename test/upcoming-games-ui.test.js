@@ -21,6 +21,9 @@ test('upcoming games UI installs factual Spel navigation and responsive contract
   assert.match(html, /Vinnare efter Form-rank/);
   assert.match(html, /Vinnare efter KentaurAI-rank/);
   assert.match(html, /Vinnare efter ABCD-grupp/);
+  assert.match(html, /Vinnarindex/);
+  assert.match(html, /Andel av alla vinnare ÷ andel av alla starter/);
+  assert.match(html, /data-trend-sort|ug-winner-index-info/);
   assert.match(html, /Spikstatistik/);
   assert.match(html, /Slutstreck/);
   assert.match(html, /Slutlig marknadsrank/);

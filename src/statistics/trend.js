@@ -27,6 +27,12 @@ const CATEGORY_CONFIG = Object.freeze({
   drivers: { entityTable: 'drivers', relationColumn: 'driver_id' }
 });
 
+function normalizeTrendWinSort(value) {
+  const sort=String(value||'win_rate_desc').trim().toLowerCase();
+  if (sort==='win_rate_desc'||sort==='win_rate_asc') return sort;
+  throw new Error('sort must be win_rate_desc or win_rate_asc');
+}
+
 async function validateTrack(env, trackId) {
   if (!trackId) return;
   const found = await env.DB.prepare('SELECT 1 AS ok FROM tracks WHERE id = ? LIMIT 1').bind(trackId).first();
@@ -41,6 +47,7 @@ export function buildTrendQuery(options = {}) {
   const startMethod = normalizeTrendStartMethod(options.startMethod);
   const minStarts = normalizeTrendMinStarts(options.minStarts);
   const trackId = normalizeTrackId(options.trackId);
+  const sort = normalizeTrendWinSort(options.sort);
   const window = trendDateWindow(options.period, options.asOfDate);
   const config = CATEGORY_CONFIG[category];
   const conditions = [
@@ -70,7 +77,7 @@ export function buildTrendQuery(options = {}) {
     )
     SELECT * FROM trend_stats
     WHERE ${minimumCondition}
-    ORDER BY (wins * 1.0 / starts) DESC, wins DESC, starts DESC, entity_id ASC
+    ORDER BY (wins * 1.0 / starts) ${sort==='win_rate_asc'?'ASC':'DESC'}, wins ${sort==='win_rate_asc'?'ASC':'DESC'}, starts DESC, entity_id ASC
     LIMIT 10
   `;
 
@@ -87,7 +94,8 @@ export function buildTrendQuery(options = {}) {
       raceType,
       breedType,
       startMethod,
-      minStarts
+      minStarts,
+      sort
     }
   };
 }
@@ -337,7 +345,8 @@ export async function getTrendLeaderboard(env, options = {}) {
         raceType: query.normalized.raceType,
         breedType: query.normalized.breedType,
         startMethod: query.normalized.startMethod,
-        minStarts: query.normalized.minStarts
+        minStarts: query.normalized.minStarts,
+        sort: query.normalized.sort
       },
       rankingMetric:'horse_form_index_v1',
       items: await getHorseFormTrendLeaderboard(env, query.normalized)
@@ -355,7 +364,8 @@ export async function getTrendLeaderboard(env, options = {}) {
       raceType: query.normalized.raceType,
       breedType: query.normalized.breedType,
       startMethod: query.normalized.startMethod,
-      minStarts: query.normalized.minStarts
+      minStarts: query.normalized.minStarts,
+      sort: query.normalized.sort
     },
     items: results.map((row, index) => ({
       rank: index + 1,
