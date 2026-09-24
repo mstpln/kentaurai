@@ -362,11 +362,19 @@ async function insertOddsSnapshot(env, raceEntryId, marketType, rawValue, ctx) {
 
 async function resolveRaceEntryId(env, raceId, start, horseId) {
   const sourceStartId = String(start.id).trim();
-  let existing = await env.DB.prepare('SELECT id FROM race_entries WHERE race_id = ? AND source_start_id = ? LIMIT 1')
-    .bind(raceId, sourceStartId).first();
-  if (!existing && horseId) {
+  let existing = null;
+
+  // Canonical horse identity is stronger than a source-start id for a final
+  // game snapshot. The provider may recycle or remap a start id between
+  // pre-race and final payloads; choosing source_start_id first can then
+  // select a different stored horse row and violate UNIQUE(race_id, horse_id).
+  if (horseId) {
     existing = await env.DB.prepare('SELECT id FROM race_entries WHERE race_id = ? AND horse_id = ? LIMIT 1')
       .bind(raceId, horseId).first();
+  }
+  if (!existing) {
+    existing = await env.DB.prepare('SELECT id FROM race_entries WHERE race_id = ? AND source_start_id = ? LIMIT 1')
+      .bind(raceId, sourceStartId).first();
   }
   if (!existing) {
     existing = await env.DB.prepare(`
@@ -431,7 +439,7 @@ async function mapRace(env, game, race, legNumber, ctx) {
          scratched, scratch_reason, data_quality)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)
       ON CONFLICT(id) DO UPDATE SET
-        horse_id = COALESCE(excluded.horse_id, race_entries.horse_id),
+        horse_id = COALESCE(race_entries.horse_id, excluded.horse_id),
         driver_id = excluded.driver_id,
         trainer_id = excluded.trainer_id,
         source_start_id = COALESCE(excluded.source_start_id, race_entries.source_start_id),
