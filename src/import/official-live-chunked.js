@@ -512,7 +512,7 @@ async function mapOneStart(env, game, race, legNumber, start, ctx) {
     startTier: pos.tier,
     scratched: scratched == null ? null : Boolean(scratched),
     scratchSemanticsVerified: scratched != null
-  });
+  }, resolvedEntry.sourceStartConflict ? 'source_conflict' : NORMALIZED_QUALITY);
 
   await insertEquipment(env, raceEntryId, start.horse, ctx);
   const distributionRaw = finiteNumber(start.pools?.[ctx.gameType]?.betDistribution);
