@@ -1,3 +1,5 @@
+import { getWinnerContextsForRound } from './game-statistics.js';
+
 function normalizeGameType(value) {
   const type = String(value || '').toUpperCase();
   return type === 'V85' || type === 'V86' ? type : null;
@@ -645,7 +647,10 @@ export async function getGameHistoryDetail(env, roundId) {
     ORDER BY CASE lh.status WHEN 'confirmed' THEN 0 WHEN 'candidate' THEN 1 ELSE 2 END, lo.created_at ASC, lo.id ASC
   `).bind(id).all();
 
-  const tripMap = tripMapFromRows(await getTripRows(env, id));
+  const [tripMap,winnerContexts] = await Promise.all([
+    getTripRows(env, id).then(tripMapFromRows),
+    getWinnerContextsForRound(env, id)
+  ]);
   const selectionsBySystemLeg = new Map();
   for (const row of selectionRows) {
     const key = `${row.system_id}:${row.leg_number}`;
@@ -696,6 +701,7 @@ export async function getGameHistoryDetail(env, roundId) {
         selectedWinner,
         isSpike: spike,
         winnerPrediction: winnerEntryId ? predictions.get(`${system.id}:${row.leg_number}:${winnerEntryId}`) || null : null,
+        winnerContext: winnerEntryId ? winnerContexts.get(`${system.id}:${row.leg_number}`) || null : null,
         review: reviews.get(`${system.id}:${row.leg_number}`) || null
       };
     }
