@@ -106,6 +106,7 @@ test('minute scheduler prioritizes live normalization and records bounded histor
   const metadata = JSON.parse(row.metadata_json);
   assert.deepEqual(metadata.parts.map((part) => part.name), [
     'post_race_settlement',
+    'game_statistics_backfill',
     'live_normalize',
     'historical_backfill',
     'xlabs_backfill',
