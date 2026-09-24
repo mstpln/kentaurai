@@ -51,6 +51,74 @@ async function snapshotLeg(env, roundId, packId, asOf, payload) {
   }));
 }
 
+
+async function persistSnapshotRows(env, rows) {
+  const inserted = await persistSnapshotRows(env, rows);
+  return inserted;
+}
+
+async function scoreExplicitLeg(env, roundId, snapshotRef, legNumber, asOf, entries) {
+  const scored = await Promise.all(entries.map(async (entry) => {
+    const form = await getCalendarYearDetailForm(env, 'horses', String(entry.horseId), {
+      asOfDate:asOf.slice(0, 10),
+      asOfInstant:asOf,
+      year:Number(asOf.slice(0, 4)),
+      raceScope:'all',
+      startMethod:'all',
+      distanceGroup:'all'
+    });
+    return {
+      raceEntryId:String(entry.raceEntryId),
+      score:finiteScore(form?.formLast?.score),
+      usedStarts:Number(form?.formLast?.usedStarts || 0)
+    };
+  }));
+  return scored.map((row) => ({
+    ...row,
+    roundId,
+    packId:snapshotRef,
+    legNumber,
+    asOf,
+    version:HORSE_FORM_INDEX_VERSION,
+    rank:formRank(scored,row.score)
+  }));
+}
+
+export async function persistHistoricalFormSnapshots(env, { roundId, snapshotRef, asOfByLeg } = {}) {
+  if (!env?.DB || typeof env.DB.batch !== 'function') throw new Error('D1 batch support is required');
+  const id=String(roundId || '').trim();
+  const ref=String(snapshotRef || '').trim();
+  if (!id || !ref) throw new Error('roundId and snapshotRef are required');
+  if (!(asOfByLeg instanceof Map)) throw new Error('asOfByLeg must be a Map');
+
+  const {results}=await env.DB.prepare(`
+    SELECT gl.leg_number,re.id AS race_entry_id,re.horse_id
+    FROM game_legs gl
+    JOIN race_entries re ON re.race_id=gl.race_id
+    WHERE gl.game_round_id=? AND re.scratched=0 AND re.horse_id IS NOT NULL
+    ORDER BY gl.leg_number,re.start_number,re.id
+  `).bind(id).all();
+
+  const rows=[];
+  for(let legNumber=1;legNumber<=8;legNumber+=1){
+    const asOf=String(asOfByLeg.get(legNumber) || '').trim();
+    if(!asOf || !Number.isFinite(Date.parse(asOf))) throw new Error(`verified Form as-of is missing for leg ${legNumber}`);
+    const entries=(results || [])
+      .filter((row)=>Number(row.leg_number)===legNumber)
+      .map((row)=>({raceEntryId:row.race_entry_id,horseId:row.horse_id}));
+    if(!entries.length) throw new Error(`round leg ${legNumber} has no active horse entries`);
+    rows.push(...await scoreExplicitLeg(env,id,ref,legNumber,new Date(Date.parse(asOf)).toISOString(),entries));
+  }
+  const inserted=await persistSnapshotRows(env,rows);
+  return {
+    version:ANALYSIS_FORM_SNAPSHOT_VERSION,
+    roundId:id,
+    packId:ref,
+    entryCount:rows.length,
+    inserted
+  };
+}
+
 export async function persistAnalysisFormSnapshots(env, pack) {
   if (!env?.DB || typeof env.DB.batch !== 'function') throw new Error('D1 batch support is required');
   const roundId = String(pack?.manifest?.round_id || '').trim();
