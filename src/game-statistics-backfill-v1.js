@@ -228,8 +228,8 @@ function metricStatuses({counts,finalCoverage,lineage,formResult}) {
     :(finalCoverage.final?'partial':'pending_post_race_settlement');
   const systemStatus=counts.systemLegs===8&&counts.spikeLegs===3?'complete':'partial';
   let formStatus='unavailable_no_lineage';
-  if (counts.activeEntries>0&&counts.formRows===counts.activeEntries) formStatus='complete';
-  else if (formResult?.status==='backfilled') formStatus='complete_after_backfill';
+  if (formResult?.status==='backfilled'&&counts.activeEntries>0&&counts.formRows===counts.activeEntries) formStatus='complete_after_backfill';
+  else if (counts.activeEntries>0&&counts.formRows===counts.activeEntries) formStatus='complete';
   else if (formResult?.status) formStatus=formResult.status;
   else if (lineage) formStatus='pending_backfill';
   const judgmentStatus=counts.activeEntries>0&&counts.judgmentRows===counts.activeEntries?'complete':'partial';
