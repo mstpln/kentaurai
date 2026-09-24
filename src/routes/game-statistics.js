@@ -83,20 +83,26 @@ async function statisticsRows(env,gameType) {
       re.start_number,h.canonical_name AS horse_name,rr.placing,
       afs.form_score,afs.used_starts,afs.form_rank,
       bs.bet_percent AS closing_bet_percent,bs.market_rank AS closing_market_rank,
-      (SELECT ahp.raw_rank
-       FROM ai_horse_predictions ahp
-       JOIN ai_race_analyses ara ON ara.id=ahp.ai_race_analysis_id
-       JOIN systems sp ON sp.id=p.system_id
-       WHERE ara.race_id=gl.race_id AND ara.model_version_id=sp.model_version_id AND ahp.race_entry_id=re.id
-         AND julianday(ara.data_snapshot_at)<=julianday(sp.created_at)
-       ORDER BY ara.data_snapshot_at DESC,ara.created_at DESC,ara.id ASC LIMIT 1) AS kai_rank,
-      (SELECT ahp.abcd_group
-       FROM ai_horse_predictions ahp
-       JOIN ai_race_analyses ara ON ara.id=ahp.ai_race_analysis_id
-       JOIN systems sp ON sp.id=p.system_id
-       WHERE ara.race_id=gl.race_id AND ara.model_version_id=sp.model_version_id AND ahp.race_entry_id=re.id
-         AND julianday(ara.data_snapshot_at)<=julianday(sp.created_at)
-       ORDER BY ara.data_snapshot_at DESC,ara.created_at DESC,ara.id ASC LIMIT 1) AS abcd_group,
+      COALESCE(
+        sjs.raw_rank,
+        (SELECT ahp.raw_rank
+         FROM ai_horse_predictions ahp
+         JOIN ai_race_analyses ara ON ara.id=ahp.ai_race_analysis_id
+         JOIN systems sp ON sp.id=p.system_id
+         WHERE ara.race_id=gl.race_id AND ara.model_version_id=sp.model_version_id AND ahp.race_entry_id=re.id
+           AND julianday(ara.data_snapshot_at)<=julianday(sp.created_at)
+         ORDER BY ara.data_snapshot_at DESC,ara.created_at DESC,ara.id ASC LIMIT 1)
+      ) AS kai_rank,
+      COALESCE(
+        sjs.abcd_group,
+        (SELECT ahp.abcd_group
+         FROM ai_horse_predictions ahp
+         JOIN ai_race_analyses ara ON ara.id=ahp.ai_race_analysis_id
+         JOIN systems sp ON sp.id=p.system_id
+         WHERE ara.race_id=gl.race_id AND ara.model_version_id=sp.model_version_id AND ahp.race_entry_id=re.id
+           AND julianday(ara.data_snapshot_at)<=julianday(sp.created_at)
+         ORDER BY ara.data_snapshot_at DESC,ara.created_at DESC,ara.id ASC LIMIT 1)
+      ) AS abcd_group,
       CASE WHEN EXISTS(
         SELECT 1 FROM system_selections ss
         WHERE ss.system_id=p.system_id AND ss.race_entry_id=re.id AND ss.leg_number=gl.leg_number AND ss.is_spike=1
@@ -116,6 +122,8 @@ async function statisticsRows(env,gameType) {
         (SELECT json_extract(sp2.metrics_json,'$.step1_pack_id')
          FROM systems sp2 WHERE sp2.id=p.system_id LIMIT 1)
       )
+    LEFT JOIN system_entry_judgment_snapshots sjs
+      ON sjs.system_id=p.system_id AND sjs.race_entry_id=re.id AND sjs.leg_number=gl.leg_number
     ORDER BY p.round_date DESC,p.round_id,gl.leg_number,re.start_number,re.id
   `;
   const {results}=gameType
