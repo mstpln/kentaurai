@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=b46f363e14c605b8c7f03dde3e15a003fb08371c
-release_nonce=2026-09-24-spel-statistics-pr253-1
+source_main=31ca71f1d5e87bac5dc5b4225fbc47bcf1da067c
+release_nonce=2026-09-24-statistics-backfill-pr255-1
