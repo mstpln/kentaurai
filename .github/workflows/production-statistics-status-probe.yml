@@ -1,0 +1,75 @@
+name: Production statistics status probe
+
+on:
+  push:
+    branches:
+      - statistics-status-probe
+    paths:
+      - '.github/workflows/production-statistics-status-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - name: Query aggregate production status
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "
+            SELECT 'STATISTICS_STATUS' AS section,status,COUNT(*) AS count
+            FROM statistics_data_backfill_rounds
+            GROUP BY status
+            ORDER BY status;
+
+            SELECT 'STATISTICS_COVERAGE' AS section,
+              COUNT(*) AS rounds,
+              SUM(CASE WHEN result_status='complete' THEN 1 ELSE 0 END) AS results_complete,
+              SUM(CASE WHEN final_market_status='complete' THEN 1 ELSE 0 END) AS final_market_complete,
+              SUM(CASE WHEN payout_status='complete' THEN 1 ELSE 0 END) AS payout_complete,
+              SUM(CASE WHEN form_status='complete' THEN 1 ELSE 0 END) AS form_complete,
+              SUM(CASE WHEN kai_rank_status='complete' THEN 1 ELSE 0 END) AS kai_rank_complete,
+              SUM(CASE WHEN abcd_status='complete' THEN 1 ELSE 0 END) AS abcd_complete,
+              SUM(CASE WHEN spike_status='complete' THEN 1 ELSE 0 END) AS spike_complete
+            FROM statistics_data_backfill_rounds;
+
+            SELECT 'SETTLEMENT_STATUS' AS section,status,COUNT(*) AS count
+            FROM post_race_settlement_jobs
+            GROUP BY status
+            ORDER BY status;
+
+            SELECT 'REGISTERED_HISTORY' AS section,
+              COUNT(*) AS rounds,
+              SUM(CASE WHEN winner_legs=8 THEN 1 ELSE 0 END) AS results_complete,
+              SUM(CASE WHEN has_final_result=1 THEN 1 ELSE 0 END) AS final_game_complete,
+              SUM(CASE WHEN winner_legs<8 THEN 1 ELSE 0 END) AS missing_results,
+              SUM(CASE WHEN has_final_result=0 THEN 1 ELSE 0 END) AS missing_final_game
+            FROM (
+              SELECT gr.id,
+                (
+                  SELECT COUNT(*)
+                  FROM game_legs gl
+                  WHERE gl.game_round_id=gr.id
+                    AND (SELECT COUNT(*)
+                         FROM race_entries re
+                         JOIN race_results rr ON rr.race_entry_id=re.id AND rr.placing=1
+                         WHERE re.race_id=gl.race_id)=1
+                ) AS winner_legs,
+                CASE WHEN EXISTS (
+                  SELECT 1 FROM game_round_final_results gfr WHERE gfr.game_round_id=gr.id
+                ) THEN 1 ELSE 0 END AS has_final_result
+              FROM game_rounds gr
+              WHERE gr.game_type IN ('V85','V86')
+                AND EXISTS (SELECT 1 FROM systems s WHERE s.game_round_id=gr.id)
+                AND (SELECT COUNT(*) FROM game_legs gl WHERE gl.game_round_id=gr.id)=8
+                AND datetime(COALESCE(gr.bet_stop_at,gr.scheduled_start_at,gr.round_date || 'T23:59:59Z')) < datetime('now')
+            );
+          "
