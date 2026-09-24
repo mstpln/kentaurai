@@ -126,6 +126,8 @@ Real source data belongs only in the private Cloudflare D1/R2 deployment or is s
 - `POST /v1/import/editorial` - Bearer ADMIN_TOKEN
 - `POST /v1/import/reference-round` - Bearer ADMIN_TOKEN
 - `POST /v1/import/raw` - Bearer ADMIN_TOKEN
+- `GET /v1/statistics/backfill/status` - Bearer ADMIN_TOKEN; sanitized coverage status for the statistics-history fill
+- `POST /v1/statistics/backfill/step` - Bearer ADMIN_TOKEN; advances one safe statistics-history checkpoint (optional `round_id`)
 - `POST /v1/learning/hypotheses` - Bearer ADMIN_TOKEN
 - `POST /v1/post-race/review-next` - Bearer ADMIN_TOKEN; manually advances one eligible deterministic post-race review
 - `POST /v1/historical/backfill/start` - Bearer ADMIN_TOKEN; creates or resumes an official date-range job
@@ -193,3 +195,9 @@ The private Spel UI has a pre-analysis `Kommande` surface alongside `Historik` a
 
 Opening a round shows its eight stored legs. Horse rows expose only deterministic facts/features needed for inspection before analysis: existing horse Form, fastest verified first-200 pace from the same start method, fastest verified last-400 pace, market share, and expandable historical context for driver/trainer Form, rolling wins, gallop, current driver/track/start method/distance/lane category and canonical higher-prize/weekday scopes. No AI ranking, probability, scenario, value, spike recommendation, tips or interview/editorial evidence is introduced by this view.
 
+
+
+### Statistics-history data completion
+Spel outcome statistics reuse canonical stored data first. Results, final official market and final payout continue to arrive through post-race settlement. A separate bounded statistics backfill runs after settlement on the minute orchestrator and fills only gaps that are not already covered by normal acquisition.
+
+Historical Form prefers audited Step 1 lineage. KentaurAI rebuilds the pre-market pack at the original `as_of` and writes Form/Form-rank only when both the rebuilt `pack_id` and `facts_fingerprint` exactly match the recorded Step 1 export. For older registered systems that predate Step 1 packs, Form may instead be reconstructed from that system model's own stored `ai_race_analyses.data_snapshot_at` values, but only when all eight leg snapshots are verified before the round's earliest pre-race cutoff; each leg keeps its own cutoff and the snapshot is explicitly tagged `legacy_analysis_snapshot`. Historical KentaurAI rank/ABCD and spike facts are never regenerated from a current model; missing canonical historical judgments remain unavailable. If a stored final game source exists but its closing-market normalization is incomplete, the backfill may run a narrow closing-market repair against that already archived private source without making a new provider request.

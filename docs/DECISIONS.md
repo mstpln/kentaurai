@@ -288,3 +288,16 @@ A single race must not directly change model weights. Candidate learnings are re
 7. Aggregate system statistics use the canonical primary/main registered system for each round so stored alternatives do not double-count one race outcome.
 8. Historical values remain null unless already verified or reproducible with the exact historical cutoff/version without result leakage.
 9. Statistics describe observed outcomes and do not automatically change model weights or promote a single round into a learning rule.
+
+
+## Statistics-history backfill is lineage-gated and non-inventive
+1. Results, final official market and payout remain owned by the existing post-race settlement pipeline; the statistics backfill must not create a second provider-acquisition path.
+2. The statistics backfill may repair closing-market rows from an already archived final official game source to repair normalized closing-market coverage, but must not fetch a duplicate source solely for that repair.
+3. Historical Form/Form-rank prefers audited Step 1 provenance; replay at the original `as_of` must reproduce both the exact recorded `pack_id` and `facts_fingerprint`.
+4. A Step 1 replay mismatch is manual review, never a best-effort write. For systems created before Step 1 pack lineage existed, a separate legacy fallback may calculate Form from that exact system model's stored eight-leg `ai_race_analyses.data_snapshot_at` values only when every timestamp is no later than the round's earliest verified pre-race cutoff. The fallback must be tagged `legacy_analysis_snapshot`, keep the per-leg cutoffs, and use source fetched-at guards so later imports cannot leak backwards.
+5. Historical KentaurAI rank and ABCD come only from the canonical stored pre-race analysis associated with the primary registered system. They are not regenerated with a newer model.
+6. Spike history comes only from the registered primary system and must retain the exact-three-spikes invariant; legacy or incomplete rows are surfaced as unavailable rather than rewritten.
+7. Coverage/backfill state is operational metadata only. Canonical facts remain in their existing racing, analysis, system, market and Form snapshot tables.
+8. The minute orchestrator advances at most one statistics-history round after post-race settlement, preserving bounded Worker load and resumability.
+9. Retryable storage/database repair failures remain `pending` so the scheduler can retry them. Deterministic archive/provenance inconsistencies are `manual_review`; a single transient failure must never permanently convert a recoverable metric into `unavailable`.
+10. Legacy historical analysis evidence is usable only when both its `data_snapshot_at` and the analysis record creation time are compatible with the registered system and verified pre-race cutoff. Historical Form also applies source fetched-at cutoffs to every result row used in field-relative calculations.

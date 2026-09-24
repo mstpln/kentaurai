@@ -107,12 +107,13 @@ test('minute scheduler prioritizes live normalization and records bounded histor
   assert.deepEqual(metadata.parts.map((part) => part.name), [
     'post_race_settlement',
     'live_normalize',
+    'statistics_data_backfill',
     'historical_backfill',
     'xlabs_backfill',
     'xlabs_interval_repair',
     'xlabs_position_reconstruction'
   ]);
   assert.equal(metadata.parts[0].result.maxSteps, 3);
-  assert.equal(metadata.parts[2].result.maxCheckpoints, 3);
   assert.equal(metadata.parts[3].result.maxCheckpoints, 3);
+  assert.equal(metadata.parts[4].result.maxCheckpoints, 3);
 });

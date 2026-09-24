@@ -18,6 +18,7 @@ import { ensureDailyOfficialHistoryJobs, getHistoricalBackfill, runHistoricalBac
 import { ensureDailyXlabsJob, getXlabsBackfill, runXlabsBackfillBatch, runXlabsBackfillStep, startXlabsBackfill } from './import/xlabs-backfill.js';
 import { captureCalendar, captureGame, captureRace } from './provider/official.js';
 import { runPostRaceSettlementBatch } from './post-race-settlement-v1.js';
+import { getStatisticsDataBackfillStatus, runNextStatisticsDataBackfill } from './statistics-data-backfill-v1.js';
 import { captureXlabsDate } from './provider/xlabs.js';
 import { captureXlabsRaceJson } from './provider/xlabs-race.js';
 import { captureReferencedXlabsScript, captureXlabsContextScripts, XLABS_SCRIPT_SELECTOR_VERSION } from './provider/xlabs-script.js';
@@ -334,6 +335,15 @@ async function handleFetch(request, env) {
     });
     return json(result, 201);
   }
+  if (request.method === 'POST' && path === '/v1/statistics/backfill/step') {
+    const body = await readJson(request);
+    return json(await runNextStatisticsDataBackfill(env, {
+      roundId: body.round_id || null
+    }));
+  }
+  if (request.method === 'GET' && path === '/v1/statistics/backfill/status') {
+    return json(await getStatisticsDataBackfillStatus(env));
+  }
   if (request.method === 'POST' && path === '/v1/learning/hypotheses') return json(await createHypothesis(env, await readJson(request)), 201);
   return json({ error: 'not_found' }, 404);
 }
@@ -356,6 +366,7 @@ async function handleScheduled(controller, env) {
   if (controller.cron === BACKFILL_CRON) {
     parts.push(await runScheduledPart('post_race_settlement', () => runPostRaceSettlementBatch(env)));
     parts.push(await runScheduledPart('live_normalize', () => normalizeNextPendingOfficialGame(env)));
+    parts.push(await runScheduledPart('statistics_data_backfill', () => runNextStatisticsDataBackfill(env)));
     parts.push(await runScheduledPart('historical_backfill', () => runHistoricalBackfillBatch(env)));
     parts.push(await runScheduledPart('xlabs_backfill', () => runXlabsBackfillBatch(env)));
     parts.push(await runScheduledPart('xlabs_interval_repair', () => runXlabsIntervalRepairBatch(env)));

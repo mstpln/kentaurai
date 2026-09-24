@@ -6,7 +6,7 @@ import { getGameStatistics } from '../src/routes/game-statistics.js';
 
 function seedRound(db) {
   db.prepare(`INSERT INTO tracks (id, canonical_name, country_code) VALUES ('track_1','Synthetic Park','SE')`).run();
-  db.prepare(`INSERT INTO game_rounds (id, game_type, round_date, status) VALUES ('round_1','V86','2099-01-02','finished')`).run();
+  db.prepare(`INSERT INTO game_rounds (id, game_type, round_date, scheduled_start_at, bet_stop_at, status) VALUES ('round_1','V86','2099-01-02','2099-01-02T10:05:00Z','2099-01-02T10:00:00Z','finished')`).run();
   db.prepare(`INSERT INTO horses (id, canonical_name) VALUES ('horse_1','Alpha Horse')`).run();
   db.prepare(`INSERT INTO horses (id, canonical_name) VALUES ('horse_2','Beta Horse')`).run();
   db.prepare(`INSERT INTO model_versions (id,created_at,feature_version) VALUES ('model_1','2099-01-02T08:00:00Z','synthetic-v1')`).run();

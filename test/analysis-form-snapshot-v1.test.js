@@ -80,3 +80,21 @@ test('historical Form snapshot does not leak a later result from the target race
   assert.equal(replay.form_score,before);
   assert.equal(replay.used_starts,1);
 });
+
+
+test('historical Form ignores opponent results whose source arrived after the snapshot cutoff',async()=>{
+  const {env,db}=createTestEnv();
+  seed(db);
+  db.prepare("INSERT INTO source_records (id,source_type,external_id,fetched_at,quality_status) VALUES ('late-opponent-src','official_provider','race:prior-r1:late','2026-09-25T00:00:00Z','normalized_verified_subset')").run();
+  db.prepare("UPDATE race_results SET source_record_id='late-opponent-src',km_time='1.00,0' WHERE race_entry_id='prior-o1'").run();
+
+  await persistAnalysisFormSnapshots(env,pack('pack-late-opponent'));
+  const withLate=db.prepare("SELECT form_score,used_starts FROM analysis_entry_form_snapshots WHERE step1_pack_id='pack-late-opponent' AND race_entry_id='current-e1'").get();
+
+  db.prepare("DELETE FROM race_results WHERE race_entry_id='prior-o1'").run();
+  await persistAnalysisFormSnapshots(env,pack('pack-no-opponent-result'));
+  const withoutLate=db.prepare("SELECT form_score,used_starts FROM analysis_entry_form_snapshots WHERE step1_pack_id='pack-no-opponent-result' AND race_entry_id='current-e1'").get();
+
+  assert.deepEqual(withLate,withoutLate);
+  assert.equal(withLate.used_starts,1);
+});

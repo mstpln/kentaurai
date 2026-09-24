@@ -184,6 +184,16 @@ async function loadHorseForm(env,entityId,filters,config){
   if(!targets.length)return null;
   const raceIds=[...new Set(targets.map(row=>row.race_id))],racePlaceholders=raceIds.map(()=>'?').join(',');
 
+  const historicalResultJoin=filters.asOfInstant
+    ? `LEFT JOIN race_results rr ON rr.race_entry_id=re.id
+         AND EXISTS (
+           SELECT 1 FROM source_records result_sr
+           WHERE result_sr.id=rr.source_record_id
+             AND julianday(result_sr.fetched_at)<=julianday(?)
+         )`
+    : 'LEFT JOIN race_results rr ON rr.race_entry_id=re.id';
+  const historicalCutoff=filters.asOfInstant||filters.asOfDate+'T23:59:59.999Z';
+
   const [{results:fieldRows},{results:opponentRows}]=await Promise.all([
     env.DB.prepare(`
       WITH latest_x AS (
@@ -204,11 +214,11 @@ async function loadHorseForm(env,entityId,filters,config){
         x.last_400_time,x.extra_distance_m
       FROM race_entries re
       JOIN races r ON r.id=re.race_id
-      LEFT JOIN race_results rr ON rr.race_entry_id=re.id
+      ${historicalResultJoin}
       LEFT JOIN latest_x x ON x.race_entry_id=re.id AND x.rn=1
       WHERE re.scratched=0 AND re.race_id IN (${racePlaceholders})
       ORDER BY re.race_id,re.start_number,re.id
-    `).bind(filters.asOfInstant||filters.asOfDate+'T23:59:59.999Z',...raceIds,...raceIds).all(),
+    `).bind(historicalCutoff,...raceIds,...(filters.asOfInstant?[historicalCutoff]:[]),...raceIds).all(),
     env.DB.prepare(`
       SELECT re.race_id,re.horse_id,
         (

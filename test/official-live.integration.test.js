@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createTestEnv } from './helpers/d1.js';
-import { normalizeCapturedOfficialGame, normalizeOfficialGame, validateOfficialGamePayload } from '../src/import/official-live.js';
+import { normalizeCapturedOfficialGame, normalizeOfficialGame, repairCapturedOfficialClosingMarket, validateOfficialGamePayload } from '../src/import/official-live.js';
 
 const DATE = '2099-01-15';
 const GAME_ID = 'V86_2099-01-15_999_1';
@@ -144,6 +144,50 @@ test('captured normalizer reads the archived R2 object used by the private endpo
   assert.equal(result.gameRoundId, GAME_ID);
   assert.equal(result.sourceRecordId, sourceRecordId);
   assert.equal(result.reused, false);
+});
+
+test('closing-market repair restores missing rows from an already normalized archived final game source', async () => {
+  const { env, db } = createTestEnv();
+  const rawObjectKey = 'raw/official_provider/2099-01-13/final-repair.json';
+  const sourceRecordId = insertSource(db, 'src_final_repair', '2099-01-13T22:00:00.000Z', rawObjectKey);
+  const payload = syntheticGame();
+  payload.status = 'results';
+  payload.pools.V86.status = 'results';
+  await env.RAW_BUCKET.put(rawObjectKey, JSON.stringify(payload), { httpMetadata: { contentType:'application/json' } });
+  await normalizeCapturedOfficialGame(env, sourceRecordId);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM betting_snapshots WHERE source_record_id=?').get(sourceRecordId).n,16);
+  db.prepare(`DELETE FROM betting_snapshots
+    WHERE id=(SELECT id FROM betting_snapshots WHERE source_record_id=? ORDER BY leg_number,race_entry_id LIMIT 1)`).run(sourceRecordId);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM betting_snapshots WHERE source_record_id=?').get(sourceRecordId).n,15);
+
+  const repaired = await repairCapturedOfficialClosingMarket(env, sourceRecordId);
+  assert.equal(repaired.expectedRows,16);
+  assert.equal(repaired.matchedRows,16);
+  assert.equal(repaired.complete,true);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM betting_snapshots WHERE source_record_id=?').get(sourceRecordId).n,16);
+  assert.equal(db.prepare('SELECT quality_status FROM source_records WHERE id=?').get(sourceRecordId).quality_status,'normalized_verified_subset');
+});
+
+test('closing-market repair fails closed instead of overwriting conflicting provenance', async () => {
+  const { env, db } = createTestEnv();
+  const rawObjectKey = 'raw/official_provider/2099-01-13/final-conflict.json';
+  const sourceRecordId = insertSource(db, 'src_final_conflict', '2099-01-13T22:00:00.000Z', rawObjectKey);
+  const payload = syntheticGame();
+  payload.status='results';
+  payload.pools.V86.status='results';
+  await env.RAW_BUCKET.put(rawObjectKey, JSON.stringify(payload), { httpMetadata:{ contentType:'application/json' } });
+  await normalizeCapturedOfficialGame(env,sourceRecordId);
+
+  db.prepare(`INSERT INTO source_records (id,source_type,external_id,fetched_at,quality_status)
+    VALUES ('src_other_market','official_provider',?,'2099-01-13T22:00:00.001Z','normalized_verified_subset')`).run('game:'+GAME_ID);
+  const first=db.prepare('SELECT id FROM betting_snapshots WHERE source_record_id=? ORDER BY leg_number,race_entry_id LIMIT 1').get(sourceRecordId);
+  db.prepare("UPDATE betting_snapshots SET source_record_id='src_other_market' WHERE id=?").run(first.id);
+
+  await assert.rejects(
+    () => repairCapturedOfficialClosingMarket(env,sourceRecordId),
+    /provenance conflict/
+  );
+  assert.equal(db.prepare('SELECT source_record_id FROM betting_snapshots WHERE id=?').get(first.id).source_record_id,'src_other_market');
 });
 
 test('canonical name conflicts preserve the canonical value and flag the new source observation', async () => {
