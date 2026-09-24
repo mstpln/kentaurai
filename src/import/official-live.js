@@ -527,6 +527,84 @@ export async function normalizeOfficialGame(env, payload, { sourceRecordId } = {
   }
 }
 
+export async function repairCapturedOfficialClosingMarket(env, sourceRecordId) {
+  if (!env.DB) throw new Error('DB is not configured');
+  if (!env.RAW_BUCKET?.get) throw new Error('RAW_BUCKET read access is not configured');
+  const id = String(sourceRecordId || '').trim();
+  if (!id) throw new Error('source_record_id is required');
+
+  const source = await env.DB.prepare(`
+    SELECT source_type,external_id,fetched_at,raw_object_key,quality_status
+    FROM source_records
+    WHERE id=? AND source_type=?
+    LIMIT 1
+  `).bind(id,SOURCE_TYPE).first();
+  if (!source?.raw_object_key) throw new Error('captured official game source record was not found');
+
+  const object = await env.RAW_BUCKET.get(source.raw_object_key);
+  if (!object) throw new Error('captured raw object was not found');
+  let payload;
+  try { payload=JSON.parse(await object.text()); }
+  catch (error) { throw new Error(`captured raw object is not valid JSON: ${error.message}`); }
+
+  const validated=validateOfficialGamePayload(payload);
+  if (source.external_id !== `game:${validated.gameId}`) throw new Error('source record does not match the official game payload');
+
+  let expectedRows=0;
+  let matchedRows=0;
+  let changedRows=0;
+  for (let raceIndex=0; raceIndex<validated.races.length; raceIndex+=1) {
+    const race=validated.races[raceIndex];
+    const legNumber=raceIndex+1;
+    const ranks=marketRanks(race.starts,validated.gameType);
+    for (const start of race.starts) {
+      const raw=finiteNumber(start.pools?.[validated.gameType]?.betDistribution);
+      if (raw == null) continue;
+      expectedRows+=1;
+
+      const horseExternal=participantExternalId(start.horse?.id);
+      const horseId=horseExternal
+        ? await resolveExternalMapping(env,'horse_external_ids','horse_id',horseExternal)
+        : null;
+      const raceEntryId=await resolveRaceEntryId(env,race.id,start,horseId);
+      const stored=await env.DB.prepare(`
+        SELECT id FROM race_entries
+        WHERE id=? AND race_id=?
+        LIMIT 1
+      `).bind(raceEntryId,race.id).first();
+      if (!stored) throw new Error(`final market start ${start.number} could not be matched to a stored race entry`);
+      matchedRows+=1;
+
+      const write=await env.DB.prepare(`
+        INSERT INTO betting_snapshots
+          (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id)
+        VALUES (?,?,?,?,?,?,?,?)
+        ON CONFLICT(game_round_id,leg_number,race_entry_id,captured_at) DO UPDATE SET
+          bet_percent=excluded.bet_percent,
+          market_rank=excluded.market_rank,
+          source_record_id=excluded.source_record_id
+      `).bind(
+        stableId('bet',validated.gameId,legNumber,raceEntryId,source.fetched_at),
+        validated.gameId,legNumber,raceEntryId,source.fetched_at,
+        scaledHundredths(raw,`${validated.gameType} betDistribution`,10000),
+        ranks.get(start.id) ?? null,
+        id
+      ).run();
+      changedRows+=Number(write.meta?.changes ?? 0);
+    }
+  }
+
+  return {
+    sourceRecordId:id,
+    gameRoundId:validated.gameId,
+    gameType:validated.gameType,
+    expectedRows,
+    matchedRows,
+    changedRows,
+    complete:expectedRows>0 && matchedRows===expectedRows
+  };
+}
+
 export async function normalizeCapturedOfficialGame(env, sourceRecordId) {
   if (!env.DB) throw new Error('DB is not configured');
   if (!env.RAW_BUCKET?.get) throw new Error('RAW_BUCKET read access is not configured');
