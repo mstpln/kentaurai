@@ -8,6 +8,7 @@ import {
   listUpcomingGames
 } from './routes/upcoming-games.js';
 import { enhanceUpcomingGamesHtml } from './app-upcoming-games-ui.js';
+import { getGameStatistics } from './routes/game-statistics.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -43,6 +44,17 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
+
+    if (request.method === 'GET' && path === '/app/api/games/statistics') {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      try {
+        return json(await getGameStatistics(env, { gameType:url.searchParams.get('type') }));
+      } catch (error) {
+        console.error(error);
+        return json({ error:'request_failed', message:error.message }, 400);
+      }
+    }
 
     if (request.method === 'GET' && path === '/app/api/games/upcoming') {
       const denied = await requireSession(request, env);
