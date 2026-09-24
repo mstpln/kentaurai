@@ -53,7 +53,20 @@ async function snapshotLeg(env, roundId, packId, asOf, payload) {
 
 
 async function persistSnapshotRows(env, rows) {
-  const inserted = await persistSnapshotRows(env, rows);
+  let inserted = 0;
+  for (let offset = 0; offset < rows.length; offset += 50) {
+    const group = rows.slice(offset, offset + 50);
+    const results = await env.DB.batch(group.map((row) => env.DB.prepare(`
+      INSERT OR IGNORE INTO analysis_entry_form_snapshots
+        (id,game_round_id,step1_pack_id,leg_number,race_entry_id,as_of,form_version,form_score,used_starts,form_rank)
+      VALUES (?,?,?,?,?,?,?,?,?,?)
+    `).bind(
+      stableId('analysis-form', row.packId, row.raceEntryId),
+      row.roundId, row.packId, row.legNumber, row.raceEntryId, row.asOf, row.version,
+      row.score, row.usedStarts, row.rank
+    )));
+    inserted += results.reduce((sum, result) => sum + Number(result.meta?.changes ?? 0), 0);
+  }
   return inserted;
 }
 
