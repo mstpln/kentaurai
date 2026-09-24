@@ -206,3 +206,21 @@ test('game history winner cards expose frozen form and final closing market with
   assert.equal(result.winnerContext.closingBetPercent,60);
   assert.equal(result.winnerContext.closingMarketRank,1);
 });
+
+
+test('game statistics never borrow Form from an unrelated later Step 1 pack', async () => {
+  const { env, db } = createTestEnv();
+  seedRound(db);
+  db.prepare(`INSERT INTO analysis_entry_form_snapshots
+    (id,game_round_id,step1_pack_id,leg_number,race_entry_id,as_of,form_version,form_score,used_starts,form_rank)
+    VALUES ('later_wrong','round_1','pack_later',1,'winner_1','2099-01-02T09:00:00Z','horse-form-index-v1',99,5,1)`).run();
+
+  const stats = await getGameStatistics(env, { gameType:'V86' });
+  const expected = stats.winners.byForm.find(row=>row.label==='70–79');
+  const wrong = stats.winners.byForm.find(row=>row.label==='80+');
+  assert.equal(expected.winners,8);
+  assert.equal(wrong.winners,0);
+
+  const detail = await getGameHistoryDetail(env,'round_1');
+  assert.equal(detail.legs[0].systems.system_main.winnerContext.formScore,72);
+});
