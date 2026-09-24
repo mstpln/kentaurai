@@ -148,6 +148,15 @@ jobs:
           grep -q 'idx_game_round_final_results_source' /tmp/game-statistics-schema-check.txt
           grep -q 'idx_game_round_final_results_payout' /tmp/game-statistics-schema-check.txt
 
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT system_id,game_round_id,leg_number,race_entry_id,raw_rank,abcd_group,source_kind,source_id,as_of FROM system_entry_judgment_snapshots LIMIT 0; SELECT id,status,total_rounds,processed_rounds,form_backfilled_rounds,form_rows_inserted,judgment_rows_inserted,complete_rounds,unresolved_rounds FROM game_statistics_backfill_jobs LIMIT 0; SELECT job_id,game_round_id,results_status,final_result_status,closing_market_status,payout_status,system_status,form_status,judgment_status,missing_metrics_json FROM game_statistics_backfill_rounds LIMIT 0; SELECT name FROM d1_migrations WHERE name='0040_game_statistics_backfill_v1.sql'; SELECT name FROM sqlite_master WHERE type='index' AND name IN ('idx_system_judgment_round','idx_game_statistics_backfill_jobs_status','idx_game_statistics_backfill_rounds_round') ORDER BY name;" > /tmp/game-statistics-backfill-schema-check.txt
+          grep -q 'system_entry_judgment_snapshots' /tmp/game-statistics-backfill-schema-check.txt
+          grep -q 'game_statistics_backfill_jobs' /tmp/game-statistics-backfill-schema-check.txt
+          grep -q 'game_statistics_backfill_rounds' /tmp/game-statistics-backfill-schema-check.txt
+          grep -q '0040_game_statistics_backfill_v1.sql' /tmp/game-statistics-backfill-schema-check.txt
+          grep -q 'idx_system_judgment_round' /tmp/game-statistics-backfill-schema-check.txt
+          grep -q 'idx_game_statistics_backfill_jobs_status' /tmp/game-statistics-backfill-schema-check.txt
+          grep -q 'idx_game_statistics_backfill_rounds_round' /tmp/game-statistics-backfill-schema-check.txt
+
           grep -q 'idx_races_track_date' /tmp/migration-check.txt
           grep -q 'idx_odds_entry_time' /tmp/migration-check.txt
           grep -q 'idx_equipment_entry' /tmp/migration-check.txt
@@ -246,6 +255,8 @@ jobs:
             '/app/api/settings/system-import-context?round_id=private-probe' \
             '/app/api/settings/system-import-prompt?provider=openai' \
             '/app/api/games/statistics' \
+            '/v1/game-statistics/coverage' \
+            '/v1/game-statistics/backfill-status' \
             '/v1/analysis-pack/private-probe' \
             '/v1/analysis-step1-lock/private-probe' \
             '/v1/analysis-step1-prompt?provider=openai' \
@@ -265,6 +276,10 @@ jobs:
             grep -q 'unauthorized' /tmp/private-response.json
           done
 
+          status="$(curl --silent --show-error --request POST --header 'content-type: application/json' --data '{}' --output /tmp/private-response.json --write-out '%{http_code}' "$WORKER_URL/v1/game-statistics/backfill-next")"
+          test "$status" = '401' || { echo "Expected /v1/game-statistics/backfill-next to return 401 without authorization, got $status"; cat /tmp/private-response.json; exit 1; }
+          grep -q 'unauthorized' /tmp/private-response.json
+
           status="$(curl --silent --show-error --request POST --header 'content-type: application/json' --data '{}' --output /tmp/private-response.json --write-out '%{http_code}' "$WORKER_URL/app/api/settings/alerts/acknowledge")"
           test "$status" = '401' || { echo "Expected /app/api/settings/alerts/acknowledge to return 401 without authorization, got $status"; cat /tmp/private-response.json; exit 1; }
           grep -q 'unauthorized' /tmp/private-response.json
@@ -280,4 +295,4 @@ jobs:
         run: |
           echo 'KentaurAI v0.6.0 production release completed.'
           echo "Worker: $WORKER_URL"
-          echo 'Required production schema through migration 0039, Settings alert acknowledgement storage, track physical-profile and Bananalys read-index storage, X-Labs interval repair state, external analysis lineage/evidence storage, external F1/F2 evidence integration, worker-v078 runtime, controlled legacy boundary, exact app version, health, login and private route checks passed.'
+          echo 'Required production schema through migration 0040, Settings alert acknowledgement storage, track physical-profile and Bananalys read-index storage, X-Labs interval repair state, external analysis lineage/evidence storage, external F1/F2 evidence integration, worker-v078 runtime, controlled legacy boundary, exact app version, health, login and private route checks passed.'

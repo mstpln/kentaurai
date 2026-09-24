@@ -338,3 +338,13 @@ The external-analysis production release was accepted after:
 - Spel adds a separate Statistik tab. It reports winner win rates by final betting percentage, final market rank, frozen Form, Form rank, KentaurAI rank and ABCD; detailed spike outcomes; and primary-system results against the round's top-right-level final payout. Aggregate system statistics use one canonical primary system per round so alternatives are not double-counted.
 - Analys and the global Statistik workspace are unchanged.
 - Historical gaps stay null unless a real stored snapshot exists or a calculation can be replayed leakage-safely at the historical cutoff. The build does not synthesize missing Form, ranking or market facts.
+
+
+## Spel statistics historical coverage/backfill candidate
+- Branch: `feat/statistics-historical-backfill-v1`.
+- Migration `0040_game_statistics_backfill_v1.sql` adds durable coverage/backfill job state plus immutable system-entry KentaurAI judgment snapshots.
+- The minute scheduler advances at most one statistics-backfill round per run. Existing post-race settlement remains the owner of missing official winners, final game results, closing betting percentage/market rank and payout facts.
+- Historical Form is backfilled only when KentaurAI can identify the exact original Step 1 pack/as-of/fingerprint, replay the market-blind pack at that historical cutoff, pass the replay-safety guard and reproduce both the original pack id and facts fingerprint exactly. Otherwise Form remains explicitly unavailable/null.
+- Stored pre-system AI predictions are copied into immutable per-system rank/ABCD snapshots for historical statistics. Post-system reruns are never promoted into the original decision context.
+- A private coverage audit reports completeness for results, final game, closing market, payout, system structure, Form snapshots and KentaurAI judgment snapshots per saved V85/V86 main system.
+- The backfill never invents facts, never changes model weights and never commits private racing data.
