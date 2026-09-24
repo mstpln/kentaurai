@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS statistics_data_backfill_rounds (
   spike_count INTEGER NOT NULL DEFAULT 0 CHECK(spike_count >= 0),
   form_lineage_kind TEXT CHECK(form_lineage_kind IS NULL OR form_lineage_kind IN ('step1_pack','legacy_analysis_snapshot')),
   form_snapshot_ref TEXT,
-  form_as_of TEXT,
+  form_as_of_json TEXT CHECK(form_as_of_json IS NULL OR json_valid(form_as_of_json)),
   step1_pack_id TEXT,
   step1_facts_fingerprint TEXT,
   step1_as_of TEXT,
