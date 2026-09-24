@@ -169,7 +169,7 @@ async function capture(env, { kind, identity, url, fetchImpl = fetch, validatePa
       payload: rawText,
       qualityStatus: 'captured_unmapped',
       rightsStatus: 'unknown',
-      metadata: { kind, identity, ...(metadata && typeof metadata==='object' && !Array.isArray(metadata) ? metadata : {}) }
+      metadata: { ...(metadata && typeof metadata==='object' && !Array.isArray(metadata) ? metadata : {}), kind, identity }
     });
 
     if (archived.reused) counts.skipped = 1;
