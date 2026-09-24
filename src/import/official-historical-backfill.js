@@ -199,7 +199,7 @@ async function checkpointRace(env, job, leaseToken, { reused = false } = {}) {
   return nextIndex;
 }
 
-async function chooseRaceSource(env, raceId, options, counts) {
+async function chooseRaceSource(env, raceId, options, counts, { allowStructuralSourceGap = false } = {}) {
   const source = await sourceForIdentity(env, `race:${raceId}`);
   if (source?.quality_status === NORMALIZED_QUALITY) return source;
 
@@ -212,7 +212,10 @@ async function chooseRaceSource(env, raceId, options, counts) {
     }
   }
 
-  const captured = await captureRace(env, raceId, { fetchImpl: options.fetchImpl });
+  const captured = await captureRace(env, raceId, {
+    fetchImpl: options.fetchImpl,
+    allowMissingStarts: allowStructuralSourceGap
+  });
   counts.inserted += Number(!captured.reused);
   counts.skipped += Number(captured.reused);
   return {
@@ -261,7 +264,9 @@ export async function runHistoricalBackfillStep(env, jobId = null, options = {})
       const raceId = raceIds[job.next_race_index];
       let raceSource = null;
       try {
-        raceSource = await chooseRaceSource(env, raceId, options, counts);
+        raceSource = await chooseRaceSource(env, raceId, options, counts, {
+          allowStructuralSourceGap: job.start_date !== job.end_date
+        });
         const normalized = await normalizeCapturedOfficialRace(env, raceSource.id);
         const gameTypes = await recordHistoricalGameMembership(env, calendarSource, calendar, raceId, counts);
         if (normalized.reused) counts.skipped += 1;
