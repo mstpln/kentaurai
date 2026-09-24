@@ -160,7 +160,8 @@ export default {
           raceType: url.searchParams.get('race_type'),
           breedType: url.searchParams.get('breed_type'),
           startMethod: url.searchParams.get('start_method'),
-          minStarts: url.searchParams.get('min_starts')
+          minStarts: url.searchParams.get('min_starts'),
+          sort: url.searchParams.get('sort')
         }));
       } catch (error) {
         console.error(error);
