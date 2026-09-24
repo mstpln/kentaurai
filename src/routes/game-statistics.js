@@ -9,6 +9,19 @@ const PRIMARY_SYSTEM_ID = `COALESCE(
   (SELECT s2.id FROM systems s2 WHERE s2.game_round_id=gr.id ORDER BY s2.created_at ASC,s2.id ASC LIMIT 1)
 )`;
 
+const PRE_RACE_CUTOFF = `(
+  SELECT MIN(value) FROM (
+    SELECT gr.bet_stop_at AS value
+    UNION ALL SELECT gr.scheduled_start_at
+    UNION ALL SELECT (
+      SELECT MIN(r0.scheduled_start_at)
+      FROM game_legs gl0
+      JOIN races r0 ON r0.id=gl0.race_id
+      WHERE gl0.game_round_id=gr.id
+    )
+  ) WHERE value IS NOT NULL
+)`;
+
 function rankLabel(value) {
   const rank=Number(value);
   if (!Number.isInteger(rank)||rank<1) return null;
@@ -88,14 +101,20 @@ async function statisticsRows(env,gameType) {
        JOIN ai_race_analyses ara ON ara.id=ahp.ai_race_analysis_id
        JOIN systems sp ON sp.id=p.system_id
        WHERE ara.race_id=gl.race_id AND ara.model_version_id=sp.model_version_id AND ahp.race_entry_id=re.id
+         AND ara.data_snapshot_at IS NOT NULL
          AND julianday(ara.data_snapshot_at)<=julianday(sp.created_at)
+         AND julianday(ara.data_snapshot_at)<=julianday(${PRE_RACE_CUTOFF})
+         AND julianday(ara.created_at)<=julianday(sp.created_at)
        ORDER BY ara.data_snapshot_at DESC,ara.created_at DESC,ara.id ASC LIMIT 1) AS kai_rank,
       (SELECT ahp.abcd_group
        FROM ai_horse_predictions ahp
        JOIN ai_race_analyses ara ON ara.id=ahp.ai_race_analysis_id
        JOIN systems sp ON sp.id=p.system_id
        WHERE ara.race_id=gl.race_id AND ara.model_version_id=sp.model_version_id AND ahp.race_entry_id=re.id
+         AND ara.data_snapshot_at IS NOT NULL
          AND julianday(ara.data_snapshot_at)<=julianday(sp.created_at)
+         AND julianday(ara.data_snapshot_at)<=julianday(${PRE_RACE_CUTOFF})
+         AND julianday(ara.created_at)<=julianday(sp.created_at)
        ORDER BY ara.data_snapshot_at DESC,ara.created_at DESC,ara.id ASC LIMIT 1) AS abcd_group,
       CASE WHEN EXISTS(
         SELECT 1 FROM system_selections ss
@@ -111,14 +130,14 @@ async function statisticsRows(env,gameType) {
     LEFT JOIN betting_snapshots bs ON bs.race_entry_id=re.id AND bs.source_record_id=gfr.source_record_id
     LEFT JOIN analysis_entry_form_snapshots afs ON afs.race_entry_id=re.id
       AND afs.step1_pack_id=COALESCE(
-        (SELECT aer.step1_pack_id FROM analysis_external_runs aer
-         WHERE aer.main_system_id=p.system_id ORDER BY aer.created_at DESC,aer.id DESC LIMIT 1),
-        (SELECT json_extract(sp2.metrics_json,'$.step1_pack_id')
-         FROM systems sp2 WHERE sp2.id=p.system_id LIMIT 1),
         (SELECT sdb.form_snapshot_ref
          FROM statistics_data_backfill_rounds sdb
          WHERE sdb.game_round_id=p.round_id AND sdb.form_status='complete'
-         LIMIT 1)
+         LIMIT 1),
+        (SELECT aer.step1_pack_id FROM analysis_external_runs aer
+         WHERE aer.main_system_id=p.system_id ORDER BY aer.created_at DESC,aer.id DESC LIMIT 1),
+        (SELECT json_extract(sp2.metrics_json,'$.step1_pack_id')
+         FROM systems sp2 WHERE sp2.id=p.system_id LIMIT 1)
       )
     ORDER BY p.round_date DESC,p.round_id,gl.leg_number,re.start_number,re.id
   `;
@@ -240,14 +259,26 @@ export async function getWinnerContextsForRound(env,roundId) {
     LEFT JOIN betting_snapshots bs ON bs.race_entry_id=winner.id AND bs.source_record_id=gfr.source_record_id
     LEFT JOIN analysis_entry_form_snapshots afs ON afs.race_entry_id=winner.id
       AND afs.step1_pack_id=COALESCE(
-        json_extract(s.metrics_json,'$.step1_pack_id'),
-        (SELECT aer.step1_pack_id FROM analysis_external_runs aer
-         WHERE aer.game_round_id=s.game_round_id AND aer.model_version_id=s.model_version_id
-         ORDER BY aer.created_at DESC,aer.id DESC LIMIT 1),
         (SELECT sdb.form_snapshot_ref
          FROM statistics_data_backfill_rounds sdb
-         WHERE sdb.game_round_id=s.game_round_id AND sdb.form_status='complete'
-         LIMIT 1)
+         WHERE sdb.game_round_id=s.game_round_id
+           AND sdb.form_status='complete'
+           AND s.id=COALESCE(
+             (SELECT aer0.main_system_id FROM analysis_external_runs aer0
+              WHERE aer0.game_round_id=s.game_round_id
+              ORDER BY aer0.created_at DESC,aer0.id DESC LIMIT 1),
+             (SELECT s1.id FROM systems s1
+              WHERE s1.game_round_id=s.game_round_id AND s1.system_type='main'
+              ORDER BY s1.created_at DESC,s1.id ASC LIMIT 1),
+             (SELECT s2.id FROM systems s2
+              WHERE s2.game_round_id=s.game_round_id
+              ORDER BY s2.created_at ASC,s2.id ASC LIMIT 1)
+           )
+         LIMIT 1),
+        json_extract(s.metrics_json,'$.step1_pack_id'),
+        (SELECT aer.step1_pack_id FROM analysis_external_runs aer
+         WHERE aer.main_system_id=s.id
+         ORDER BY aer.created_at DESC,aer.id DESC LIMIT 1)
       )
     WHERE s.game_round_id=?
     ORDER BY s.id,gl.leg_number
