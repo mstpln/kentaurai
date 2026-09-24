@@ -276,3 +276,15 @@ A single race must not directly change model weights. Candidate learnings are re
 4. For scenario win rates, `Spets` means leading at the C3 checkpoint 500 m after start. `Rygg ledaren`, `Dödens`, `2:a utvändigt`, `3:e utvändigt` and `Bakifrån` continue to use the existing C4 position around 500 m remaining.
 5. Because the scenario rows use different measurement points by design, every row carries an explicit natural Swedish measurement label and the table must not imply a common checkpoint.
 6. Spårstatistik remains a separate factual tab; this build does not move it under Bananalys.
+
+
+## System outcome statistics use frozen decision context and final official market
+1. Horse Form used for post-race system statistics is frozen with the actual Step 1 pack, including exact as-of time, Form version, used-start count and relative Form rank. Later race results must not alter that snapshot.
+2. KentaurAI rank and ABCD remain the stored pre-race analysis judgment associated with the registered primary system. Current-model reruns must not be presented as historical judgments.
+3. Pre-race betting snapshots remain decision context. A separate final official game capture supplies closing betting percentage and closing market rank for post-race History and Spel statistics; closing market data must never leak back into pre-race analysis.
+4. Closing-market values are accepted for statistics only when they are tied to the same final official game source record that supplies the normalized final round result.
+5. Official payout and turnover integers are preserved in raw source units with provenance. SEK presentation values are derived separately; jackpot states and winning-system counts are retained per right level.
+6. Winner-rate tables use all eligible starters with a known value as their denominator, not only winners. Rank buckets are 1–9 plus 10+; missing facts are excluded from that metric rather than invented.
+7. Aggregate system statistics use the canonical primary/main registered system for each round so stored alternatives do not double-count one race outcome.
+8. Historical values remain null unless already verified or reproducible with the exact historical cutoff/version without result leakage.
+9. Statistics describe observed outcomes and do not automatically change model weights or promote a single round into a learning rule.

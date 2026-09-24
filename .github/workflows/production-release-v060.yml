@@ -139,6 +139,15 @@ jobs:
           grep -q '0038_track_analysis_v1.sql' /tmp/track-analysis-schema-check.txt
           grep -q 'idx_position_checkpoints_track_analysis' /tmp/track-analysis-schema-check.txt
 
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT id,game_round_id,step1_pack_id,leg_number,race_entry_id,as_of,form_version,form_score,used_starts,form_rank FROM analysis_entry_form_snapshots LIMIT 0; SELECT game_round_id,game_type,source_record_id,captured_at,status,turnover_raw,turnover_sek,system_count,payouts_json,highest_payout_level,highest_payout_raw,highest_payout_sek FROM game_round_final_results LIMIT 0; SELECT name FROM sqlite_master WHERE type='table' AND name IN ('analysis_entry_form_snapshots','game_round_final_results') ORDER BY name; SELECT name FROM d1_migrations WHERE name='0039_game_statistics_v1.sql'; SELECT name FROM sqlite_master WHERE type='index' AND name IN ('idx_analysis_form_snapshot_round','idx_analysis_form_snapshot_entry','idx_game_round_final_results_source','idx_game_round_final_results_payout') ORDER BY name;" > /tmp/game-statistics-schema-check.txt
+          grep -q 'analysis_entry_form_snapshots' /tmp/game-statistics-schema-check.txt
+          grep -q 'game_round_final_results' /tmp/game-statistics-schema-check.txt
+          grep -q '0039_game_statistics_v1.sql' /tmp/game-statistics-schema-check.txt
+          grep -q 'idx_analysis_form_snapshot_round' /tmp/game-statistics-schema-check.txt
+          grep -q 'idx_analysis_form_snapshot_entry' /tmp/game-statistics-schema-check.txt
+          grep -q 'idx_game_round_final_results_source' /tmp/game-statistics-schema-check.txt
+          grep -q 'idx_game_round_final_results_payout' /tmp/game-statistics-schema-check.txt
+
           grep -q 'idx_races_track_date' /tmp/migration-check.txt
           grep -q 'idx_odds_entry_time' /tmp/migration-check.txt
           grep -q 'idx_equipment_entry' /tmp/migration-check.txt
@@ -236,6 +245,7 @@ jobs:
             '/app/api/trainers/private-probe/interviews' \
             '/app/api/settings/system-import-context?round_id=private-probe' \
             '/app/api/settings/system-import-prompt?provider=openai' \
+            '/app/api/games/statistics' \
             '/v1/analysis-pack/private-probe' \
             '/v1/analysis-step1-lock/private-probe' \
             '/v1/analysis-step1-prompt?provider=openai' \
@@ -270,4 +280,4 @@ jobs:
         run: |
           echo 'KentaurAI v0.6.0 production release completed.'
           echo "Worker: $WORKER_URL"
-          echo 'Required production schema through migration 0038, Settings alert acknowledgement storage, track physical-profile and Bananalys read-index storage, X-Labs interval repair state, external analysis lineage/evidence storage, external F1/F2 evidence integration, worker-v078 runtime, controlled legacy boundary, exact app version, health, login and private route checks passed.'
+          echo 'Required production schema through migration 0039, Settings alert acknowledgement storage, track physical-profile and Bananalys read-index storage, X-Labs interval repair state, external analysis lineage/evidence storage, external F1/F2 evidence integration, worker-v078 runtime, controlled legacy boundary, exact app version, health, login and private route checks passed.'

@@ -67,8 +67,9 @@ function normalizeHandicap(value){if(value==null||value===''||value==='all')retu
 
 function normalizeFilters(options={}){
   const asOfDate=options.asOfDate||swedenDateKey();
+  const asOfInstant=options.asOfInstant==null||options.asOfInstant===''?null:new Date(options.asOfInstant).toISOString();
   return{
-    asOfDate,year:normalizeYear(options.year,asOfDate),raceScope:normalizeTrendRaceScope(options.raceScope),trackId:normalizeTrackId(options.trackId),
+    asOfDate,asOfInstant,year:normalizeYear(options.year,asOfDate),raceScope:normalizeTrendRaceScope(options.raceScope),trackId:normalizeTrackId(options.trackId),
     raceType:normalizeTrendRaceType(options.raceType),breedType:normalizeTrendBreed(options.breedType),sex:normalizeSex(options.sex),age:normalizeAge(options.age),
     startMethod:normalizeTrendStartMethod(options.startMethod),distanceGroup:normalizeDistance(options.distanceGroup),voltLane:normalizeVoltLane(options.voltLane),handicapM:normalizeHandicap(options.handicapM)
   };
@@ -162,6 +163,11 @@ function stlDifficultyScore(value){
 async function loadHorseForm(env,entityId,filters,config){
   const conditions=['re.scratched=0','re.horse_id=?','(rr.placing IS NOT NULL OR rr.disqualified=1)'],bindings=[entityId];
   addCommonFilters(conditions,bindings,filters,{includeVolt:false});
+  if(filters.asOfInstant){
+    conditions.push("((r.scheduled_start_at IS NOT NULL AND julianday(r.scheduled_start_at)<julianday(?)) OR (r.scheduled_start_at IS NULL AND r.race_date<substr(?,1,10)))");
+    conditions.push("EXISTS (SELECT 1 FROM source_records result_sr WHERE result_sr.id=rr.source_record_id AND julianday(result_sr.fetched_at)<=julianday(?))");
+    bindings.push(filters.asOfInstant,filters.asOfInstant,filters.asOfInstant);
+  }
   const {results:targetRows}=await env.DB.prepare(`
     SELECT re.id race_entry_id,r.id race_id,r.race_date,r.race_number,r.scheduled_start_at,
       r.first_prize_sek,r.distance_m,re.actual_start_distance_m,rr.placing,rr.disqualified,rsc.stl_class
@@ -188,7 +194,10 @@ async function loadHorseForm(env,entityId,filters,config){
         FROM xlabs_data x
         JOIN source_records sr ON sr.id=x.source_record_id
         WHERE x.quality_status='xlabs-telemetry-v1' AND sr.source_type='xlabs_race_json'
-          AND substr(sr.fetched_at,1,10)<=?
+          AND julianday(sr.fetched_at)<=julianday(?)
+          AND x.race_entry_id IN (
+            SELECT xre.id FROM race_entries xre WHERE xre.race_id IN (${racePlaceholders})
+          )
       )
       SELECT re.race_id,re.id race_entry_id,re.horse_id,re.actual_start_distance_m,r.distance_m,
         rr.placing,rr.disqualified,rr.km_time,
@@ -199,7 +208,7 @@ async function loadHorseForm(env,entityId,filters,config){
       LEFT JOIN latest_x x ON x.race_entry_id=re.id AND x.rn=1
       WHERE re.scratched=0 AND re.race_id IN (${racePlaceholders})
       ORDER BY re.race_id,re.start_number,re.id
-    `).bind(filters.asOfDate,...raceIds).all(),
+    `).bind(filters.asOfInstant||filters.asOfDate+'T23:59:59.999Z',...raceIds,...raceIds).all(),
     env.DB.prepare(`
       SELECT re.race_id,re.horse_id,
         (

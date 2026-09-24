@@ -5,6 +5,7 @@ import {
   assertAnalysisPackMarketBlind,
   buildAnalysisPackV3Files,
   createPreMarketAnalysisPackV3,
+  createAnalysisPackV3Response,
   findAnalysisPackMarketLeaks
 } from '../src/analysis-pack-v3.js';
 import { assertAnalysisPackReplaySafe } from '../src/analysis-pack-v3-asof-guard.js';
@@ -151,6 +152,22 @@ function seedAsOfRound(db) {
     db.prepare(`INSERT INTO normalized_observations (id,entity_type,entity_id,source_record_id,observed_at,fields_json,quality_status) VALUES (?, 'race_entry', ?, 'official_before','2099-01-02T11:00:00Z',?,'normalized_verified_subset')`).run(`obs_entry_${leg}`, entry, entryFields);
   }
 }
+
+test('admin Step 1 pack response freezes Form snapshots for the exported pack', async () => {
+  const { env, db } = createTestEnv();
+  seedAsOfRound(db);
+  const response = await createAnalysisPackV3Response(env,'round_d1',{asOf:'2099-01-02T11:30:00Z'});
+  assert.equal(response.status,200);
+  const manifest = await response.json();
+  const rows = db.prepare('SELECT game_round_id,step1_pack_id,as_of,form_version,used_starts FROM analysis_entry_form_snapshots ORDER BY leg_number').all();
+  assert.equal(rows.length,8);
+  assert.equal(new Set(rows.map(row=>row.step1_pack_id)).size,1);
+  assert.equal(rows[0].step1_pack_id,manifest.pack_id);
+  assert.equal(rows[0].game_round_id,'round_d1');
+  assert.equal(rows[0].as_of,manifest.as_of);
+  assert.equal(rows[0].form_version,'horse-form-index-v1');
+  assert.equal(rows[0].used_starts,0);
+});
 
 test('D1 as-of guard passes current target state and rejects later-state leakage into replay', async () => {
   const { env, db } = createTestEnv();

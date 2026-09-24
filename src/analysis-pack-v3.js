@@ -49,6 +49,7 @@ import {
   trackAnalysisDistanceGroup
 } from './track-analysis-v1.js';
 import { getOfficialHorseSnapshotsAsOf } from './import/official-snapshots.js';
+import { persistAnalysisFormSnapshots } from './analysis-form-snapshot-v1.js';
 
 export const ANALYSIS_PACK_V3_CONTRACT = 'kentaurai-analysis-pack-v3';
 export const ANALYSIS_PACK_V3_VERSION = 'analysis-pack-v3-d1';
@@ -853,6 +854,7 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
 
 export async function createAnalysisPackV3Response(env, roundId, { file = null, asOf = null } = {}) {
   const pack = await createPreMarketAnalysisPackV3(env,roundId,{asOf});
+  await persistAnalysisFormSnapshots(env, pack);
   const requested = file == null || file === '' ? 'manifest.json' : requiredText(file,'file',160);
   const content = requested === 'manifest.json' ? pack.manifestContent : pack.files.find((item)=>item.name===requested)?.content;
   if (content == null) return new Response(stableFeatureJson({error:'file_not_found',available_files:['manifest.json',...pack.files.map((item)=>item.name)]}),{status:404,headers:{'content-type':CONTENT_TYPE,'cache-control':'no-store'}});

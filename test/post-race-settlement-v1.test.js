@@ -58,6 +58,33 @@ function racePayload(raceNumber,{final=true,countryCode='NO'}={}) {
   };
 }
 
+
+function gamePayload(){
+  const races=Array.from({length:8},(_,i)=>{
+    const race=racePayload(i+1);
+    race.starts[0].pools={V85:{betDistribution:10000}};
+    return race;
+  });
+  return {
+    id:ROUND_ID,
+    status:'results',
+    pools:{
+      V85:{
+        id:ROUND_ID,status:'results',timestamp:'2099-05-10 22:00:00',
+        turnover:125000000,betType:'V85',systemCount:25000,
+        result:{payouts:{
+          8:{systems:5,payout:2500000},
+          7:{systems:75,payout:125000},
+          6:{systems:900,payout:12500},
+          5:{systems:4200,payout:2500}
+        }}
+      }
+    },
+    races,
+    version:209905100001
+  };
+}
+
 function seedUnsettledRound(db,{countryCode='NO',liveEntryIds=false}={}) {
   db.prepare("INSERT INTO tracks (id,canonical_name,country_code) VALUES ('track_settlement','Synthetic Foreign Park',?)").run(countryCode);
   db.prepare(`INSERT INTO game_rounds
@@ -141,6 +168,7 @@ test('bounded settlement batch settles three legs per invocation and completes i
   const {env,db}=createTestEnv();
   seedUnsettledRound(db);
   const fetchImpl=async(url)=>{
+    if(url.includes('/games/'))return response(gamePayload());
     const raceId=url.split('/').pop();
     return response(racePayload(Number(raceId.split('_').pop())));
   };
@@ -157,6 +185,12 @@ test('bounded settlement batch settles three legs per invocation and completes i
   assert.equal(job.status,'completed');
   assert.equal(job.settled_legs,8);
   assert.equal(db.prepare(`SELECT COUNT(*) n FROM xlabs_backfill_jobs WHERE scope='daily_v85_v86' AND start_date=? AND end_date=?`).get(DATE,DATE).n,1);
+  const finalGame=db.prepare('SELECT highest_payout_raw,highest_payout_sek,source_record_id FROM game_round_final_results WHERE game_round_id=?').get(ROUND_ID);
+  assert.equal(finalGame.highest_payout_raw,2500000);
+  assert.equal(finalGame.highest_payout_sek,25000);
+  assert.ok(finalGame.source_record_id);
+  const closing=db.prepare('SELECT COUNT(*) n FROM betting_snapshots bs WHERE bs.game_round_id=? AND bs.source_record_id=?').get(ROUND_ID,finalGame.source_record_id).n;
+  assert.equal(closing,8);
 
   const again=await runNextPostRaceSettlement(env,{roundId:ROUND_ID,now:'2099-05-11T00:03:00Z',fetchImpl:async()=>{throw new Error('must not refetch');}});
   assert.equal(again.status,'completed');
