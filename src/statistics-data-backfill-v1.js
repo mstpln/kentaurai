@@ -179,9 +179,11 @@ export async function auditStatisticsRound(env, roundId) {
       (SELECT value FROM (
         SELECT game_rounds.bet_stop_at AS value
         UNION ALL SELECT game_rounds.scheduled_start_at
-        UNION ALL SELECT (SELECT MIN(r.scheduled_start_at)
+        UNION ALL SELECT (SELECT r.scheduled_start_at
                           FROM game_legs gl JOIN races r ON r.id=gl.race_id
-                          WHERE gl.game_round_id=game_rounds.id)
+                          WHERE gl.game_round_id=game_rounds.id AND r.scheduled_start_at IS NOT NULL
+                          ORDER BY julianday(r.scheduled_start_at) ASC
+                          LIMIT 1)
       ) WHERE value IS NOT NULL ORDER BY julianday(value) ASC LIMIT 1) AS pre_race_cutoff
     FROM game_rounds
     WHERE id=? AND game_type IN ('V85','V86')
