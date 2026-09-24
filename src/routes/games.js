@@ -615,7 +615,7 @@ export async function getGameHistoryDetail(env, roundId) {
         AND julianday(ara2.data_snapshot_at)<=julianday(s.created_at)
         AND julianday(ara2.created_at)<=julianday(s.created_at)
         AND julianday(ara2.data_snapshot_at)<=julianday((
-          SELECT MIN(value) FROM (
+          SELECT value FROM (
             SELECT gr2.bet_stop_at AS value
             UNION ALL SELECT gr2.scheduled_start_at
             UNION ALL SELECT (
@@ -624,7 +624,7 @@ export async function getGameHistoryDetail(env, roundId) {
               JOIN races r0 ON r0.id=gl0.race_id
               WHERE gl0.game_round_id=gr2.id
             )
-          ) WHERE value IS NOT NULL
+          ) WHERE value IS NOT NULL ORDER BY julianday(value) ASC LIMIT 1
         ))
       ORDER BY ara2.data_snapshot_at DESC, ara2.created_at DESC, ara2.id ASC
       LIMIT 1
