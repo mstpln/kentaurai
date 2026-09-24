@@ -592,7 +592,7 @@ export async function repairCapturedOfficialClosingMarket(env, sourceRecordId) {
       const horseId=horseExternal
         ? await resolveExternalMapping(env,'horse_external_ids','horse_id',horseExternal)
         : null;
-      const raceEntryId=await resolveRaceEntryId(env,race.id,start,horseId);
+      const raceEntryId=(await resolveRaceEntryId(env,race.id,start,horseId)).id;
       const stored=await env.DB.prepare(`
         SELECT id FROM race_entries
         WHERE id=? AND race_id=?
