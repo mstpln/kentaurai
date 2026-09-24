@@ -117,3 +117,25 @@ test('statistics backfill status reports coverage without inventing unavailable 
   assert.equal(status.coverage.abcd,0);
   assert.equal(status.coverage.spikes,1);
 });
+
+
+test('statistics backfill status is read-only before queue creation',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM statistics_data_backfill_rounds').get().n,0);
+  const status=await getStatisticsDataBackfillStatus(env);
+  assert.equal(status.coverage.rounds,0);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM statistics_data_backfill_rounds').get().n,0);
+});
+
+test('explicit statistics backfill refuses a round that is not yet historically eligible',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  await assert.rejects(
+    () => runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2099-01-02T11:45:00Z'}),
+    /not eligible for historical statistics backfill/
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM analysis_entry_form_snapshots').get().n,0);
+});
