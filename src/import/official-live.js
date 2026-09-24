@@ -539,16 +539,18 @@ export async function repairCapturedOfficialClosingMarket(env, sourceRecordId) {
     WHERE id=? AND source_type=?
     LIMIT 1
   `).bind(id,SOURCE_TYPE).first();
-  if (!source?.raw_object_key) throw new Error('captured official game source record was not found');
+  if (!source?.raw_object_key) throw new Error('closing_market_manual_review: captured official game source record was not found');
 
   const object = await env.RAW_BUCKET.get(source.raw_object_key);
-  if (!object) throw new Error('captured raw object was not found');
+  if (!object) throw new Error('closing_market_manual_review: captured raw object was not found');
   let payload;
   try { payload=JSON.parse(await object.text()); }
-  catch (error) { throw new Error(`captured raw object is not valid JSON: ${error.message}`); }
+  catch (error) { throw new Error(`closing_market_manual_review: captured raw object is not valid JSON: ${error.message}`); }
 
-  const validated=validateOfficialGamePayload(payload);
-  if (source.external_id !== `game:${validated.gameId}`) throw new Error('source record does not match the official game payload');
+  let validated;
+  try { validated=validateOfficialGamePayload(payload); }
+  catch (error) { throw new Error(`closing_market_manual_review: archived final game payload failed validation: ${error.message}`); }
+  if (source.external_id !== `game:${validated.gameId}`) throw new Error('closing_market_manual_review: source record does not match the official game payload');
 
   let expectedRows=0;
   let matchedRows=0;
@@ -572,7 +574,7 @@ export async function repairCapturedOfficialClosingMarket(env, sourceRecordId) {
         WHERE id=? AND race_id=?
         LIMIT 1
       `).bind(raceEntryId,race.id).first();
-      if (!stored) throw new Error(`final market start ${start.number} could not be matched to a stored race entry`);
+      if (!stored) throw new Error(`closing_market_manual_review: final market start ${start.number} could not be matched to a stored race entry`);
       matchedRows+=1;
 
       const existing=await env.DB.prepare(`
@@ -582,7 +584,7 @@ export async function repairCapturedOfficialClosingMarket(env, sourceRecordId) {
         LIMIT 1
       `).bind(validated.gameId,legNumber,raceEntryId,source.fetched_at).first();
       if (existing?.source_record_id && existing.source_record_id!==id) {
-        throw new Error(`closing market snapshot provenance conflict for leg ${legNumber} start ${start.number}`);
+        throw new Error(`closing_market_manual_review: closing market snapshot provenance conflict for leg ${legNumber} start ${start.number}`);
       }
       const betPercent=scaledHundredths(raw,`${validated.gameType} betDistribution`,10000);
       const marketRank=ranks.get(start.id) ?? null;
