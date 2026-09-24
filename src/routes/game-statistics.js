@@ -53,17 +53,29 @@ function marketLabel(value) {
 }
 
 function aggregate(rows, labels, selector) {
-  const map=new Map(labels.map(label=>[label,{label,starters:0,winners:0,winRate:null}]));
+  const map=new Map(labels.map(label=>[label,{label,starters:0,winners:0,winRate:null,winnerIndex:null}]));
+  let totalStarters=0;
+  let totalWinners=0;
   for (const row of rows) {
     const label=selector(row);
     if (!label||!map.has(label)) continue;
     const item=map.get(label);
     item.starters+=1;
-    if (Number(row.placing)===1) item.winners+=1;
+    totalStarters+=1;
+    if (Number(row.placing)===1) {
+      item.winners+=1;
+      totalWinners+=1;
+    }
   }
   return labels.map(label=>{
     const item=map.get(label);
-    return {...item,winRate:item.starters?item.winners/item.starters:null};
+    const starterShare=totalStarters?item.starters/totalStarters:null;
+    const winnerShare=totalWinners?item.winners/totalWinners:null;
+    return {
+      ...item,
+      winRate:item.starters?item.winners/item.starters:null,
+      winnerIndex:starterShare&&winnerShare!=null?winnerShare/starterShare:null
+    };
   });
 }
 
