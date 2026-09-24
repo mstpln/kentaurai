@@ -10,7 +10,7 @@ const PRIMARY_SYSTEM_ID = `COALESCE(
 )`;
 
 const PRE_RACE_CUTOFF = `(
-  SELECT MIN(value) FROM (
+  SELECT value FROM (
     SELECT gr.bet_stop_at AS value
     UNION ALL SELECT gr.scheduled_start_at
     UNION ALL SELECT (
@@ -19,7 +19,7 @@ const PRE_RACE_CUTOFF = `(
       JOIN races r0 ON r0.id=gl0.race_id
       WHERE gl0.game_round_id=gr.id
     )
-  ) WHERE value IS NOT NULL
+  ) WHERE value IS NOT NULL ORDER BY julianday(value) ASC LIMIT 1
 )`;
 
 function rankLabel(value) {
