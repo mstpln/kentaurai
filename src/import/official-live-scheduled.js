@@ -173,6 +173,7 @@ async function selectExhaustedKnownSourceGap(env) {
       ) AS last_error_json
     FROM source_records sr
     WHERE sr.source_type = ? AND (sr.quality_status = ? OR (sr.quality_status = 'captured_source_gap' AND json_extract(sr.metadata_json, '$.sourceGap.code') = 'missing_horse_identity'))
+      AND COALESCE(json_extract(sr.metadata_json, '$.normalizationOwner'),'') <> 'post_race_settlement_final'
       AND (sr.external_id LIKE 'game:V85\\_%' ESCAPE '\\' OR sr.external_id LIKE 'game:V86\\_%' ESCAPE '\\')
       AND (
         SELECT COUNT(*)
@@ -201,12 +202,14 @@ export async function selectPendingOfficialGameSource(env) {
     SELECT sr.id, sr.external_id, sr.fetched_at
     FROM source_records sr
     WHERE sr.source_type = ? AND (sr.quality_status = ? OR (sr.quality_status = 'captured_source_gap' AND json_extract(sr.metadata_json, '$.sourceGap.code') = 'missing_horse_identity'))
+      AND COALESCE(json_extract(sr.metadata_json, '$.normalizationOwner'),'') <> 'post_race_settlement_final'
       AND (sr.external_id LIKE 'game:V85\\_%' ESCAPE '\\' OR sr.external_id LIKE 'game:V86\\_%' ESCAPE '\\')
       AND NOT EXISTS (
         SELECT 1
         FROM source_records newer
         WHERE newer.source_type = sr.source_type
           AND newer.external_id = sr.external_id
+          AND COALESCE(json_extract(newer.metadata_json, '$.normalizationOwner'),'') <> 'post_race_settlement_final'
           AND (
             newer.fetched_at > sr.fetched_at
             OR (newer.fetched_at = sr.fetched_at AND newer.id > sr.id)
