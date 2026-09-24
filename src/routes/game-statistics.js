@@ -52,7 +52,7 @@ function marketLabel(value) {
   return '50%+';
 }
 
-function aggregate(rows, labels, selector) {
+export function aggregateWinnerGroups(rows, labels, selector) {
   const map=new Map(labels.map(label=>[label,{label,starters:0,winners:0,winRate:null,winnerIndex:null}]));
   let totalStarters=0;
   let totalWinners=0;
@@ -238,14 +238,14 @@ export async function getGameStatistics(env,options={}) {
   return {
     gameType,
     winners:{
-      byBetPercent:aggregate(rows,marketLabels,row=>marketLabel(row.closing_bet_percent)),
-      byMarketRank:aggregate(rows,rankLabels,row=>rankLabel(row.closing_market_rank)),
-      byForm:aggregate(rows,formLabels,row=>formLabel(row.form_score)),
-      byFormRank:aggregate(rows,rankLabels,row=>rankLabel(row.form_rank))
+      byBetPercent:aggregateWinnerGroups(rows,marketLabels,row=>marketLabel(row.closing_bet_percent)),
+      byMarketRank:aggregateWinnerGroups(rows,rankLabels,row=>rankLabel(row.closing_market_rank)),
+      byForm:aggregateWinnerGroups(rows,formLabels,row=>formLabel(row.form_score)),
+      byFormRank:aggregateWinnerGroups(rows,rankLabels,row=>rankLabel(row.form_rank))
     },
     kentaurai:{
-      byRank:aggregate(rows,rankLabels,row=>rankLabel(row.kai_rank)),
-      byAbcd:aggregate(rows,abcdLabels,row=>row.abcd_group||null)
+      byRank:aggregateWinnerGroups(rows,rankLabels,row=>rankLabel(row.kai_rank)),
+      byAbcd:aggregateWinnerGroups(rows,abcdLabels,row=>row.abcd_group||null)
     },
     spikes:{
       total:spikes.length,
