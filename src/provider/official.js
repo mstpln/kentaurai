@@ -143,7 +143,7 @@ async function fetchJson(url, fetchImpl) {
   }
 }
 
-async function capture(env, { kind, identity, url, fetchImpl = fetch, validatePayload = null }) {
+async function capture(env, { kind, identity, url, fetchImpl = fetch, validatePayload = null, metadata = null }) {
   if (!env.DB) throw new Error('DB is not configured');
 
   const run = await startImportRun(env, 'official_provider_capture', {
@@ -169,7 +169,7 @@ async function capture(env, { kind, identity, url, fetchImpl = fetch, validatePa
       payload: rawText,
       qualityStatus: 'captured_unmapped',
       rightsStatus: 'unknown',
-      metadata: { kind, identity }
+      metadata: { kind, identity, ...(metadata && typeof metadata==='object' && !Array.isArray(metadata) ? metadata : {}) }
     });
 
     if (archived.reused) counts.skipped = 1;
@@ -214,7 +214,8 @@ export async function captureGame(env, gameId, options = {}) {
     kind: 'game',
     identity: normalized,
     url: buildGameUrl(env, normalized),
-    fetchImpl: options.fetchImpl
+    fetchImpl: options.fetchImpl,
+    metadata: options.metadata
   });
 }
 
