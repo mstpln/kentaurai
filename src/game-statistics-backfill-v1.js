@@ -263,11 +263,10 @@ export async function inspectGameStatisticsRoundCoverage(env,roundId,{attemptBac
     };
   }
   const lineage=await lineageForSystem(env,round.id,system);
-  if (attemptBackfill) await persistJudgments(env,round.id,system);
-  let before=await roundCounts(env,round.id,system.id,lineage?.packId||null);
+  const before=await roundCounts(env,round.id,system.id,lineage?.packId||null);
+  const insertedJudgments=attemptBackfill ? await persistJudgments(env,round.id,system) : 0;
   let formResult=null;
   if (attemptBackfill && before.formRows<before.activeEntries) formResult=await backfillForm(env,round.id,lineage);
-  const insertedJudgments=attemptBackfill ? Math.max(0,(await roundCounts(env,round.id,system.id,lineage?.packId||null)).judgmentRows-before.judgmentRows) : 0;
   const counts=await roundCounts(env,round.id,system.id,lineage?.packId||null);
   const final=await finalCoverage(env,round.id);
   const statuses=metricStatuses({counts,finalCoverage:final,lineage,formResult});
