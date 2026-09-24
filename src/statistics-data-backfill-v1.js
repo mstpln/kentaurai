@@ -1,6 +1,6 @@
 import { createPreMarketAnalysisPackV3 } from './analysis-pack-v3.js';
 import { persistAnalysisFormSnapshots } from './analysis-form-snapshot-v1.js';
-import { normalizeCapturedOfficialGame } from './import/official-live.js';
+import { repairCapturedOfficialClosingMarket } from './import/official-live.js';
 
 export const STATISTICS_DATA_BACKFILL_VERSION = 'statistics-data-backfill-v1';
 
@@ -398,7 +398,7 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
   try {
     if (audit.finalGameSourceRecordId && audit.status.finalMarket!=='complete') {
       attempted=true;
-      await normalizeCapturedOfficialGame(env,audit.finalGameSourceRecordId);
+      await repairCapturedOfficialClosingMarket(env,audit.finalGameSourceRecordId);
       audit=await auditStatisticsRound(env,target.game_round_id);
       if (audit.status.finalMarket!=='complete') audit.status.finalMarket='unavailable';
     }
