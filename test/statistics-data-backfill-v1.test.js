@@ -11,7 +11,7 @@ import {
 import { createTestEnv } from './helpers/d1.js';
 
 function seedRound(db) {
-  db.prepare("INSERT INTO game_rounds (id,game_type,round_date,scheduled_start_at,bet_stop_at,status) VALUES ('stats_round','V86','2099-01-02','2099-01-02T12:10:00Z','2099-01-02T12:00:00Z','results')").run();
+  db.prepare("INSERT INTO game_rounds (id,game_type,round_date,scheduled_start_at,bet_stop_at,status) VALUES ('stats_round','V86','2099-01-02','2099-01-02T12:10:00Z','2099-01-02T12:00:00.000Z','results')").run();
   db.prepare("INSERT INTO source_records (id,source_type,external_id,fetched_at,quality_status) VALUES ('stats_official','official_provider','game:stats_round','2099-01-02T11:00:00Z','normalized_verified_subset')").run();
 
   for (let leg=1;leg<=8;leg+=1) {
@@ -52,11 +52,11 @@ async function seedRecordedSystem(env,db) {
     artifactId:pack.packId,
     artifactFingerprint:pack.factsFingerprint,
     asOf:pack.manifest.as_of,
-    generatedAt:'2099-01-02T11:35:00Z',
+    generatedAt:'2099-01-02T11:35:00.000Z',
     artifact:{pack_id:pack.packId,facts_fingerprint:pack.factsFingerprint}
   });
-  db.prepare("INSERT INTO model_versions (id,created_at,feature_version) VALUES ('stats_model','2099-01-02T11:40:00Z','synthetic')").run();
-  db.prepare("INSERT INTO systems (id,game_round_id,model_version_id,system_type,budget_sek,row_count,line_price_sek,spike_count,created_at,metrics_json) VALUES ('stats_system','stats_round','stats_model','main',200,8,0.25,3,'2099-01-02T11:40:00Z',?)")
+  db.prepare("INSERT INTO model_versions (id,created_at,feature_version) VALUES ('stats_model','2099-01-02T11:40:00.000Z','synthetic')").run();
+  db.prepare("INSERT INTO systems (id,game_round_id,model_version_id,system_type,budget_sek,row_count,line_price_sek,spike_count,created_at,metrics_json) VALUES ('stats_system','stats_round','stats_model','main',200,8,0.25,3,'2099-01-02T11:40:00.000Z',?)")
     .run(JSON.stringify({step1_pack_id:pack.packId,step1_facts_fingerprint:pack.factsFingerprint}));
   for(let leg=1;leg<=3;leg+=1){
     db.prepare("INSERT INTO system_selections (system_id,leg_number,race_entry_id,is_spike) VALUES ('stats_system',?,?,1)")
@@ -67,9 +67,9 @@ async function seedRecordedSystem(env,db) {
      step1_pack_id,step1_pack_as_of,step1_generated_at,step1_facts_fingerprint,step2_market_fingerprint,
      step2_market_cutoff,step2_generated_at,analysis_blindness,import_timing,learning_eligibility,payload_digest,created_at)
     VALUES ('stats_run','stats_round','stats_model','stats_system','kentaurai-external-analysis-run-v1','external-analysis-v1',
-      'synthetic','openai','synthetic',?,?,?,?, 'market-fp','2099-01-02T12:00:00Z','2099-01-02T11:50:00Z',
-      'declared_unsealed','pre_race','eligible_by_timing','digest','2099-01-02T11:40:00Z')`)
-    .run(pack.packId,pack.manifest.as_of,'2099-01-02T11:35:00Z',pack.factsFingerprint);
+      'synthetic','openai','synthetic',?,?,?,?, 'market-fp','2099-01-02T12:00:00.000Z','2099-01-02T11:50:00.000Z',
+      'declared_unsealed','pre_race','eligible_by_timing','digest','2099-01-02T11:40:00.000Z')`)
+    .run(pack.packId,pack.manifest.as_of,'2099-01-02T11:35:00.000Z',pack.factsFingerprint);
   return pack;
 }
 
