@@ -309,3 +309,10 @@ A single race must not directly change model weights. Candidate learnings are re
 3. No race entries, participants or results are synthesized from such a response. Unknown remains unknown.
 4. Daily/current historical jobs and ordinary/manual race capture remain strict; the source-gap exception is intentionally limited to the long-history recovery path.
 5. Failed production history jobs are resumed from their persisted checkpoint after an explicitly authorized deployment; they are not restarted from scratch.
+
+
+## Final-game race-entry resolution prefers canonical horse identity
+1. When a final official game snapshot contains a canonical horse identity, KentaurAI resolves an existing race entry by race + horse before considering source_start_id.
+2. source_start_id remains a fallback for payloads where canonical horse identity is unavailable.
+3. Final normalization never overwrites an already known race-entry horse identity merely because a later payload presents a different source_start mapping.
+4. This preserves pre-race/system lineage, avoids UNIQUE(race_id, horse_id) collisions and keeps source-id remapping from rewriting historical participant identity.
