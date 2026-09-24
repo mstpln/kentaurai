@@ -388,7 +388,10 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
   if (!env?.DB) throw new Error('DB is not configured');
   await ensureStatisticsDataBackfillQueue(env,options.now ?? Date.now());
   const requested=options.roundId == null ? null : String(options.roundId).trim();
-  const target=requested ? { game_round_id:requested } : await nextQueuedRound(env);
+  const target=requested
+    ? await env.DB.prepare('SELECT game_round_id FROM statistics_data_backfill_rounds WHERE game_round_id=? LIMIT 1').bind(requested).first()
+    : await nextQueuedRound(env);
+  if (requested && !target) throw new Error('round is not eligible for historical statistics backfill');
   if (!target) return { version:STATISTICS_DATA_BACKFILL_VERSION, status:'idle' };
 
   let audit=await auditStatisticsRound(env,target.game_round_id);
@@ -430,7 +433,6 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
 
 export async function getStatisticsDataBackfillStatus(env) {
   if (!env?.DB) throw new Error('DB is not configured');
-  await ensureStatisticsDataBackfillQueue(env);
   const {results}=await env.DB.prepare(`
     SELECT status,COUNT(*) n
     FROM statistics_data_backfill_rounds
