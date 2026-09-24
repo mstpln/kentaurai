@@ -236,6 +236,29 @@ test('final game normalization keeps horse identity when final start ids are rem
   assert.ok(conflicts.every(row=>JSON.parse(row.fields_json).sourceStartConflict===true));
 });
 
+test('final game normalization fails closed when legacy fallback points at another known horse', async () => {
+  const { env, db } = createTestEnv();
+  const firstSource = insertSource(db, 'src_fallback_initial', '2099-01-13T10:00:00.000Z');
+  const initial = syntheticGame();
+  await normalizeOfficialGame(env, initial, { sourceRecordId:firstSource });
+
+  const raceId = DATE+'_901_1';
+  const firstStart = initial.races[0].starts[0];
+  const stored = db.prepare('SELECT re.id FROM race_entries re JOIN horse_external_ids hei ON hei.horse_id=re.horse_id WHERE re.race_id=? AND hei.source_type=\'official\' AND hei.external_id=?').get(raceId,String(firstStart.horse.id));
+  db.prepare('UPDATE race_entries SET source_start_id=NULL WHERE id=?').run(stored.id);
+
+  const finalPayload = syntheticGame();
+  finalPayload.status = 'results';
+  finalPayload.pools.V86.status = 'results';
+  finalPayload.races[0].starts[0].horse.id = 990099;
+
+  const finalSource = insertSource(db, 'src_fallback_conflict', '2099-01-13T22:00:00.000Z');
+  await assert.rejects(
+    () => normalizeOfficialGame(env, finalPayload, { sourceRecordId:finalSource }),
+    /fallback identity conflicts with stored race entry/
+  );
+});
+
 test('same captured source record normalizes only once', async () => {
   const { env, db } = createTestEnv();
   const sourceRecordId = insertSource(db);
