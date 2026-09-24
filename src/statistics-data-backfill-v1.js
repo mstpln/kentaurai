@@ -445,7 +445,7 @@ async function nextQueuedRound(env) {
 
 function closingMarketRepairFailureStatus(error) {
   const message=String(error?.message || error || '');
-  if (/provenance conflict|not valid JSON|does not match the official game payload|could not be matched to a stored race entry|official V8[56] game must contain exactly eight races/i.test(message)) {
+  if (/closing_market_manual_review:/i.test(message)) {
     return 'manual_review';
   }
   return 'pending';
