@@ -221,6 +221,7 @@ export async function captureGame(env, gameId, options = {}) {
 export async function captureRace(env, raceId, options = {}) {
   const normalized = validateRaceId(raceId);
   const [date, trackId, raceNumber] = normalized.split('_');
+  const allowMissingStarts = options.allowMissingStarts === true;
   return capture(env, {
     kind: 'race',
     identity: normalized,
@@ -231,7 +232,9 @@ export async function captureRace(env, raceId, options = {}) {
           Number(payload.track?.id) !== Number(trackId) || Number(payload.number) !== Number(raceNumber)) {
         throw new Error('official race payload does not match the requested race');
       }
-      if (!Array.isArray(payload.starts)) throw new Error('official race payload starts must be an array');
+      if (!Array.isArray(payload.starts) && !allowMissingStarts) {
+        throw new Error('official race payload starts must be an array');
+      }
     }
   });
 }

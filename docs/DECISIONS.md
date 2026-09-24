@@ -301,3 +301,11 @@ A single race must not directly change model weights. Candidate learnings are re
 8. The minute orchestrator advances at most one statistics-history round after post-race settlement, preserving bounded Worker load and resumability.
 9. Retryable storage/database repair failures remain `pending` so the scheduler can retry them. Deterministic archive/provenance inconsistencies are `manual_review`; a single transient failure must never permanently convert a recoverable metric into `unavailable`.
 10. Legacy historical analysis evidence is usable only when both its `data_snapshot_at` and the analysis record creation time are compatible with the registered system and verified pre-race cutoff. Historical Form also applies source fetched-at cutoffs to every result row used in field-relative calculations.
+
+
+## Historical official structural source gaps do not stop multi-year backfill
+1. Historical official race capture remains identity-strict: requested race id, date, track and race number must still match exactly.
+2. Only the long multi-day historical backfill may archive an identity-verified response whose `starts` collection is absent or non-array as `missing_starts_array`.
+3. No race entries, participants or results are synthesized from such a response. Unknown remains unknown.
+4. Daily/current historical jobs and ordinary/manual race capture remain strict; the source-gap exception is intentionally limited to the long-history recovery path.
+5. Failed production history jobs are resumed from their persisted checkpoint after an explicitly authorized deployment; they are not restarted from scratch.
