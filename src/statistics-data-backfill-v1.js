@@ -397,28 +397,34 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
   let audit=await auditStatisticsRound(env,target.game_round_id);
   let attempted=false;
   let formOverride=null;
-  let lastError=null;
-  try {
-    if (audit.finalGameSourceRecordId && audit.status.finalMarket!=='complete') {
-      attempted=true;
+  const errors=[];
+
+  if (audit.finalGameSourceRecordId && audit.status.finalMarket!=='complete') {
+    attempted=true;
+    try {
       await repairCapturedOfficialClosingMarket(env,audit.finalGameSourceRecordId);
       audit=await auditStatisticsRound(env,target.game_round_id);
       if (audit.status.finalMarket!=='complete') audit.status.finalMarket='unavailable';
+    } catch (error) {
+      audit.status.finalMarket='unavailable';
+      errors.push('closing_market_repair: '+String(error?.message || error));
     }
-
-    if (audit.status.form==='pending') {
-      attempted=true;
-      const replay=await replayFormSnapshot(env,audit);
-      formOverride=replay.status;
-      if (replay.status==='manual_review') lastError=replay.reason;
-      if (replay.status==='complete') audit=await auditStatisticsRound(env,target.game_round_id);
-    }
-  } catch (error) {
-    attempted=true;
-    formOverride=audit.status.form==='pending' ? 'manual_review' : audit.status.form;
-    lastError=String(error?.message || error).slice(0,1000);
   }
 
+  if (audit.status.form==='pending') {
+    attempted=true;
+    try {
+      const replay=await replayFormSnapshot(env,audit);
+      formOverride=replay.status;
+      if (replay.status==='manual_review') errors.push('form_replay: '+replay.reason);
+      if (replay.status==='complete') audit=await auditStatisticsRound(env,target.game_round_id);
+    } catch (error) {
+      formOverride='manual_review';
+      errors.push('form_replay: '+String(error?.message || error));
+    }
+  }
+
+  const lastError=errors.length ? errors.join(' | ').slice(0,1000) : null;
   const overall=await persistAudit(env,audit,{formStatus:formOverride,lastError,attempted});
   return {
     version:STATISTICS_DATA_BACKFILL_VERSION,
