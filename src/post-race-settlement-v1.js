@@ -1,7 +1,9 @@
 import { stableId } from './ids.js';
 import { normalizeCapturedOfficialRace, officialRaceHasFinalResults } from './import/official-historical-race.js';
+import { normalizeCapturedOfficialGame } from './import/official-live.js';
 import { ensureXlabsDailyDateJob } from './import/xlabs-backfill.js';
-import { captureRace } from './provider/official.js';
+import { captureGame, captureRace } from './provider/official.js';
+import { getFinalGameResult, persistFinalGameResult } from './game-final-result-v1.js';
 import { sourceFailureRetryDelayMs } from './provider/source-error.js';
 
 export const POST_RACE_SETTLEMENT_VERSION = 'post-race-settlement-v1';
@@ -36,14 +38,17 @@ async function eligibleRounds(env, nowIso) {
       AND EXISTS (SELECT 1 FROM systems s WHERE s.game_round_id=gr.id)
       AND (SELECT COUNT(*) FROM game_legs gl WHERE gl.game_round_id=gr.id)=8
       AND (
-        SELECT COUNT(*)
-        FROM game_legs gl
-        WHERE gl.game_round_id=gr.id
-          AND (SELECT COUNT(*)
-               FROM race_entries re
-               JOIN race_results rr ON rr.race_entry_id=re.id AND rr.placing=1
-               WHERE re.race_id=gl.race_id)=1
-      )<8
+        (
+          SELECT COUNT(*)
+          FROM game_legs gl
+          WHERE gl.game_round_id=gr.id
+            AND (SELECT COUNT(*)
+                 FROM race_entries re
+                 JOIN race_results rr ON rr.race_entry_id=re.id AND rr.placing=1
+                 WHERE re.race_id=gl.race_id)=1
+        )<8
+        OR NOT EXISTS (SELECT 1 FROM game_round_final_results gfr WHERE gfr.game_round_id=gr.id)
+      )
       AND (
         gr.round_date<?
         OR (
@@ -82,6 +87,12 @@ export async function ensurePostRaceSettlementJobs(env, scheduledTime = Date.now
       VALUES (?,?,'pending',0,?,?)
     `).bind(id,round.id,nowIso,nowIso).run();
     created += Number(write.meta?.changes ?? 0);
+    await env.DB.prepare(`
+      UPDATE post_race_settlement_jobs
+      SET status='pending',next_check_at=?,completed_at=NULL,updated_at=CURRENT_TIMESTAMP
+      WHERE game_round_id=? AND status='completed'
+        AND NOT EXISTS (SELECT 1 FROM game_round_final_results gfr WHERE gfr.game_round_id=post_race_settlement_jobs.game_round_id)
+    `).bind(nowIso,round.id).run();
   }
   return { version:POST_RACE_SETTLEMENT_VERSION, eligible:rounds.length, created };
 }
@@ -180,13 +191,30 @@ async function markCompleted(env, job, token, roundDate, nowIso) {
   return xlabsJob;
 }
 
-async function readCapturedRace(env, rawObjectKey) {
+async function readCapturedJson(env, rawObjectKey, label='post-race') {
   const object = await env.RAW_BUCKET?.get?.(rawObjectKey);
-  if (!object) throw new Error('captured post-race raw object was not found');
+  if (!object) throw new Error(`captured ${label} raw object was not found`);
   let payload;
   try { payload=JSON.parse(await object.text()); }
-  catch { throw new Error('captured post-race raw object is invalid JSON'); }
+  catch { throw new Error(`captured ${label} raw object is invalid JSON`); }
   return payload;
+}
+
+async function finalizeRoundGame(env, roundId, options = {}) {
+  const existing = await getFinalGameResult(env, roundId);
+  if (existing) return { ready:true, reused:true, finalResult:existing };
+  const captured = await captureGame(env, roundId, { fetchImpl:options.fetchImpl });
+  const payload = await readCapturedJson(env, captured.rawObjectKey, 'final game');
+  if (String(payload?.status || '').toLowerCase() !== 'results') {
+    return { ready:false, reused:false, sourceRecordId:captured.sourceRecordId, status:payload?.status || null };
+  }
+  await normalizeCapturedOfficialGame(env, captured.sourceRecordId);
+  const source = await env.DB.prepare('SELECT fetched_at FROM source_records WHERE id=? LIMIT 1').bind(captured.sourceRecordId).first();
+  const finalResult = await persistFinalGameResult(env, payload, {
+    sourceRecordId:captured.sourceRecordId,
+    capturedAt:source?.fetched_at || new Date().toISOString()
+  });
+  return { ready:true, reused:false, sourceRecordId:captured.sourceRecordId, finalResult };
 }
 
 export async function getPostRaceSettlementJob(env, roundId) {
@@ -231,13 +259,18 @@ export async function runNextPostRaceSettlement(env, options = {}) {
 
     let settled=state.filter(leg=>leg.winnerCount===1).length;
     if (settled===8) {
+      const finalGame=await finalizeRoundGame(env,job.game_round_id,options);
+      if (!finalGame.ready) {
+        await releaseWaiting(env,job,token,8,nowIso,POST_RACE_NOT_FINAL_RETRY_MS,'official game results are not final');
+        return { status:'waiting',roundId:job.game_round_id,settledLegs:8,nextCheckAt:addMs(nowIso,POST_RACE_NOT_FINAL_RETRY_MS),reason:'game_results_not_final' };
+      }
       const xlabsJob=await markCompleted(env,job,token,job.round_date,nowIso);
-      return { status:'completed',roundId:job.game_round_id,settledLegs:8,xlabsJobId:xlabsJob.id || null,reused:true };
+      return { status:'completed',roundId:job.game_round_id,settledLegs:8,xlabsJobId:xlabsJob.id || null,reused:finalGame.reused,finalGameSourceRecordId:finalGame.sourceRecordId || finalGame.finalResult?.sourceRecordId || null };
     }
 
     const target=state.find(leg=>leg.winnerCount===0);
     const captured=await captureRace(env,target.raceId,{fetchImpl:options.fetchImpl});
-    const payload=await readCapturedRace(env,captured.rawObjectKey);
+    const payload=await readCapturedJson(env,captured.rawObjectKey,'post-race');
     if (!officialRaceHasFinalResults(payload)) {
       await releaseWaiting(env,job,token,settled,nowIso,POST_RACE_NOT_FINAL_RETRY_MS,'official race results are not final');
       return {
@@ -277,6 +310,11 @@ export async function runNextPostRaceSettlement(env, options = {}) {
       };
     }
     if (settled===8) {
+      const finalGame=await finalizeRoundGame(env,job.game_round_id,options);
+      if (!finalGame.ready) {
+        await releaseWaiting(env,job,token,8,nowIso,POST_RACE_NOT_FINAL_RETRY_MS,'official game results are not final');
+        return { status:'waiting',roundId:job.game_round_id,settledLegs:8,nextCheckAt:addMs(nowIso,POST_RACE_NOT_FINAL_RETRY_MS),reason:'game_results_not_final' };
+      }
       const xlabsJob=await markCompleted(env,job,token,job.round_date,nowIso);
       return {
         status:'completed',
@@ -285,6 +323,7 @@ export async function runNextPostRaceSettlement(env, options = {}) {
         raceId:target.raceId,
         settledLegs:8,
         sourceRecordId:captured.sourceRecordId,
+        finalGameSourceRecordId:finalGame.sourceRecordId || finalGame.finalResult?.sourceRecordId || null,
         xlabsJobId:xlabsJob.id || null
       };
     }
