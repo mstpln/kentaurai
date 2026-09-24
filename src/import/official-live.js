@@ -381,7 +381,7 @@ async function resolveRaceEntryId(env, raceId, start, horseId) {
   }
   if (!existing) {
     existing = await env.DB.prepare(`
-      SELECT re.id,re.source_start_id
+      SELECT re.id,re.source_start_id,re.horse_id
       FROM race_entries re
       LEFT JOIN horses h ON h.id = re.horse_id
       WHERE re.race_id = ?
@@ -390,6 +390,9 @@ async function resolveRaceEntryId(env, raceId, start, horseId) {
         AND COALESCE(re.declared_horse_name, h.canonical_name) = ?
       LIMIT 1
     `).bind(raceId, start.number, String(start.horse?.name || '').trim()).first();
+    if (existing && horseId && existing.horse_id && existing.horse_id !== horseId) {
+      throw new Error('official final fallback identity conflicts with stored race entry');
+    }
   }
   return existing
     ? {
