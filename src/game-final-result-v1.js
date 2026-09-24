@@ -69,6 +69,7 @@ export function parseFinalGameResultPayload(payload) {
     systemCount:systemCountRaw == null ? null : Math.max(0, Math.trunc(systemCountRaw)),
     payouts,
     highestPayoutLevel:highestLevel || null,
+    highestPayoutRaw:highest?.payoutRaw ?? null,
     highestPayoutSek:highest?.payoutSek ?? null
   };
 }
@@ -97,14 +98,14 @@ export async function persistFinalGameResult(env, payload, { sourceRecordId, cap
 
   const payoutsJson = JSON.stringify(Object.fromEntries(parsed.payouts.map((row) => [
     String(row.level),
-    { payoutSek:row.payoutSek, systems:row.systems, jackpot:row.jackpot }
+    { payoutRaw:row.payoutRaw, payoutSek:row.payoutSek, systems:row.systems, jackpot:row.jackpot }
   ])));
 
   await env.DB.prepare(`
     INSERT INTO game_round_final_results
       (game_round_id,game_type,source_record_id,captured_at,status,turnover_raw,turnover_sek,
-       system_count,payouts_json,highest_payout_level,highest_payout_sek)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?)
+       system_count,payouts_json,highest_payout_level,highest_payout_raw,highest_payout_sek)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(game_round_id) DO UPDATE SET
       game_type=excluded.game_type,
       source_record_id=excluded.source_record_id,
@@ -115,12 +116,13 @@ export async function persistFinalGameResult(env, payload, { sourceRecordId, cap
       system_count=excluded.system_count,
       payouts_json=excluded.payouts_json,
       highest_payout_level=excluded.highest_payout_level,
+      highest_payout_raw=excluded.highest_payout_raw,
       highest_payout_sek=excluded.highest_payout_sek,
       updated_at=CURRENT_TIMESTAMP
   `).bind(
     parsed.gameRoundId, parsed.gameType, sourceId, new Date(Date.parse(observedAt)).toISOString(), parsed.status,
     parsed.turnoverRaw, parsed.turnoverSek, parsed.systemCount, payoutsJson,
-    parsed.highestPayoutLevel, parsed.highestPayoutSek
+    parsed.highestPayoutLevel, parsed.highestPayoutRaw, parsed.highestPayoutSek
   ).run();
 
   await env.DB.prepare(`
@@ -141,7 +143,7 @@ export async function getFinalGameResult(env, roundId) {
   if (!id) return null;
   const row = await env.DB.prepare(`
     SELECT game_round_id,game_type,source_record_id,captured_at,status,turnover_raw,turnover_sek,
-           system_count,payouts_json,highest_payout_level,highest_payout_sek
+           system_count,payouts_json,highest_payout_level,highest_payout_raw,highest_payout_sek
     FROM game_round_final_results
     WHERE game_round_id=? LIMIT 1
   `).bind(id).first();
@@ -159,6 +161,7 @@ export async function getFinalGameResult(env, roundId) {
     systemCount:row.system_count == null ? null : Number(row.system_count),
     payouts,
     highestPayoutLevel:row.highest_payout_level == null ? null : Number(row.highest_payout_level),
+    highestPayoutRaw:row.highest_payout_raw == null ? null : Number(row.highest_payout_raw),
     highestPayoutSek:row.highest_payout_sek == null ? null : Number(row.highest_payout_sek)
   };
 }
