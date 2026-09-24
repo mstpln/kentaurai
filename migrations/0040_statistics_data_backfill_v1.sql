@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS statistics_data_backfill_rounds (
   game_round_id TEXT PRIMARY KEY REFERENCES game_rounds(id) ON DELETE CASCADE,
   status TEXT NOT NULL CHECK(status IN ('pending','complete','complete_with_gaps','manual_review')),
   result_status TEXT NOT NULL CHECK(result_status IN ('pending','complete','unavailable')),
-  final_market_status TEXT NOT NULL CHECK(final_market_status IN ('pending','complete','unavailable')),
+  final_market_status TEXT NOT NULL CHECK(final_market_status IN ('pending','complete','unavailable','manual_review')),
   payout_status TEXT NOT NULL CHECK(payout_status IN ('pending','complete','unavailable')),
   form_status TEXT NOT NULL CHECK(form_status IN ('pending','complete','unavailable','manual_review')),
   kai_rank_status TEXT NOT NULL CHECK(kai_rank_status IN ('complete','unavailable')),
