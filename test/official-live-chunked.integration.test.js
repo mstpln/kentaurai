@@ -124,6 +124,8 @@ test('chunked final normalization prefers canonical horse identity when source-s
     driver:{ ...first.driver, id:992101, lastName:'DriverRemapB' }
   };
   race.starts=[first,second];
+  race.starts[0].pools.V86.betDistribution=5000;
+  race.starts[1].pools.V86.betDistribution=5000;
 
   db.prepare("INSERT INTO tracks (id,canonical_name,country_code) VALUES ('track_chunk_remap','Synthetic West','SE')").run();
   db.prepare(`
