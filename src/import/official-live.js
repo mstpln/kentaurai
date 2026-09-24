@@ -449,7 +449,7 @@ async function mapRace(env, game, race, legNumber, ctx) {
       pos.actualDistance, ENTRY_QUALITY
     ).run();
     await recordObservation(env, ctx.counts, 'race_entry', raceEntryId, ctx.sourceRecordId, ctx.observedAt, {
-      externalStartId: start.id, raceExternalId: raceId, horseExternalId: String(start.horse.id),
+      externalStartId: start.id, raceExternalId: raceId, horseExternalId: participantExternalId(start.horse?.id),
       driverExternalId: start.driver?.id == null ? null : String(start.driver.id),
       trainerExternalId: start.horse?.trainer?.id == null ? null : String(start.horse.trainer.id),
       startNumber: start.number, postPosition: finiteNumber(start.postPosition), actualStartDistanceM: pos.actualDistance,
