@@ -1,4 +1,5 @@
 import { createPreMarketAnalysisPackV3 } from './analysis-pack-v3.js';
+import { persistAnalysisFormSnapshots } from './analysis-form-snapshot-v1.js';
 import { requireLatestStep1LockV1 } from './analysis-step1-revision-v1.js';
 import { buildDataCoverageReport } from './data-coverage-v2.js';
 import { recordExternalAnalysisExport } from './external-analysis-flow-v1.js';
@@ -177,6 +178,7 @@ export async function createF3AnalysisPackBundleResponse(env, roundId, { asOf = 
       if (entry?.current_facts?.analysis_eligible === true) target.entry_ids.push(String(entry.race_entry_id));
     }
   }
+  await persistAnalysisFormSnapshots(env, pack);
   await recordExternalAnalysisExport(env, {
     stage: 'step1',
     roundId,
