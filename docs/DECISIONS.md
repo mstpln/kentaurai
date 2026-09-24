@@ -293,8 +293,8 @@ A single race must not directly change model weights. Candidate learnings are re
 ## Statistics-history backfill is lineage-gated and non-inventive
 1. Results, final official market and payout remain owned by the existing post-race settlement pipeline; the statistics backfill must not create a second provider-acquisition path.
 2. The statistics backfill may repair closing-market rows from an already archived final official game source to repair normalized closing-market coverage, but must not fetch a duplicate source solely for that repair.
-3. Historical Form/Form-rank may be written only when the registered system has audited Step 1 provenance and replay at the original `as_of` reproduces both the exact recorded `pack_id` and `facts_fingerprint`.
-4. A Step 1 replay mismatch is manual review, never a best-effort write. Missing Step 1 lineage remains unavailable/null.
+3. Historical Form/Form-rank prefers audited Step 1 provenance; replay at the original `as_of` must reproduce both the exact recorded `pack_id` and `facts_fingerprint`.
+4. A Step 1 replay mismatch is manual review, never a best-effort write. For systems created before Step 1 pack lineage existed, a separate legacy fallback may calculate Form from that exact system model's stored eight-leg `ai_race_analyses.data_snapshot_at` values only when every timestamp is no later than the round's earliest verified pre-race cutoff. The fallback must be tagged `legacy_analysis_snapshot`, keep the per-leg cutoffs, and use source fetched-at guards so later imports cannot leak backwards.
 5. Historical KentaurAI rank and ABCD come only from the canonical stored pre-race analysis associated with the primary registered system. They are not regenerated with a newer model.
 6. Spike history comes only from the registered primary system and must retain the exact-three-spikes invariant; legacy or incomplete rows are surfaced as unavailable rather than rewritten.
 7. Coverage/backfill state is operational metadata only. Canonical facts remain in their existing racing, analysis, system, market and Form snapshot tables.
