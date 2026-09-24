@@ -18,12 +18,14 @@ function seed(envDb){
 
   for(const [suffix,horse,opp,placing] of [['1','h1','o1',1],['2','h2','o2',2]]){
     const race='prior-r'+suffix;
+    db.prepare("INSERT INTO source_records (id,source_type,external_id,fetched_at,quality_status) VALUES (?, 'official_provider', ?, '2026-09-20T13:00:00Z','normalized_verified_subset')")
+      .run('prior-src'+suffix,'race:'+race);
     db.prepare("INSERT INTO races (id,track_id,race_date,race_number,scheduled_start_at,distance_m,start_method,field_size,first_prize_sek,status) VALUES (?,'form-track','2026-09-20',?,'2026-09-20T12:00:00Z',2140,'auto',2,50000,'results')")
       .run(race,10+Number(suffix));
     db.prepare("INSERT INTO race_entries (id,race_id,horse_id,start_number,scratched) VALUES (?,?,?,1,0)").run('prior-e'+suffix,race,horse);
     db.prepare("INSERT INTO race_entries (id,race_id,horse_id,start_number,scratched) VALUES (?,?,?,2,0)").run('prior-o'+suffix,race,opp);
-    db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,gallop,disqualified,km_time) VALUES (?,?,'official',0,0,'1.13,0')").run('prior-e'+suffix,placing);
-    db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,gallop,disqualified,km_time) VALUES (?,?,'official',0,0,'1.14,0')").run('prior-o'+suffix,placing===1?2:1);
+    db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,gallop,disqualified,km_time,source_record_id) VALUES (?,?,'official',0,0,'1.13,0',?)").run('prior-e'+suffix,placing,'prior-src'+suffix);
+    db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,gallop,disqualified,km_time,source_record_id) VALUES (?,?,'official',0,0,'1.14,0',?)").run('prior-o'+suffix,placing===1?2:1,'prior-src'+suffix);
   }
 }
 
