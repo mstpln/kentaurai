@@ -284,6 +284,39 @@ test('final settlement market repair reuses source-start race entries without fu
   }
 });
 
+test('settlement closing-market repair tolerates a final source-start remap when canonical horse identity is stable', async()=>{
+  const {env,db}=createTestEnv();
+  seedUnsettledRound(db,{liveEntryIds:true});
+
+  for(let leg=1;leg<=8;leg++){
+    const raceId=`${DATE}_96_${leg}`;
+    const sourceStartId=`${raceId}_1`;
+    const entryId=stableId('entry','official',raceId,sourceStartId);
+    db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,gallop,disqualified) VALUES (?,1,'official',0,0)")
+      .run(entryId);
+  }
+
+  const payload=gamePayload();
+  const raceId=`${DATE}_96_1`;
+  const originalSourceStartId=`${raceId}_1`;
+  payload.races[0].starts[0].id=`${raceId}_final_remap`;
+
+  const result=await runNextPostRaceSettlement(env,{
+    roundId:ROUND_ID,
+    now:'2099-05-11T00:00:00Z',
+    fetchImpl:async()=>response(payload)
+  });
+
+  assert.equal(result.status,'completed');
+  const entryId=stableId('entry','official',raceId,originalSourceStartId);
+  const stored=db.prepare('SELECT id,source_start_id FROM race_entries WHERE race_id=?').get(raceId);
+  assert.equal(stored.id,entryId);
+  assert.equal(stored.source_start_id,originalSourceStartId);
+  const finalSource=db.prepare("SELECT source_record_id FROM game_round_final_results WHERE game_round_id=?").get(ROUND_ID).source_record_id;
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM betting_snapshots WHERE source_record_id=?").get(finalSource).n,8);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM normalized_observations WHERE source_record_id=? AND entity_type='race_entry'").get(finalSource).n,0);
+});
+
 test('final game normalization safely reuses a stored source-start entry when horse identity is absent', async()=>{
   const {env,db}=createTestEnv();
   seedUnsettledRound(db,{liveEntryIds:true});
