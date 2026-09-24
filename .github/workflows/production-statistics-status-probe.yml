@@ -41,6 +41,36 @@ jobs:
               SUM(CASE WHEN spike_status='complete' THEN 1 ELSE 0 END) AS spike_complete
             FROM statistics_data_backfill_rounds;
 
+            WITH registered AS (
+              SELECT DISTINCT gr.id AS game_round_id
+              FROM game_rounds gr
+              JOIN systems s ON s.game_round_id=gr.id
+              WHERE gr.game_type IN ('V85','V86')
+                AND (SELECT COUNT(*) FROM game_legs gl WHERE gl.game_round_id=gr.id)=8
+            ),
+            coverage AS (
+              SELECT r.game_round_id,
+                (SELECT COUNT(*)
+                 FROM game_legs gl
+                 JOIN race_entries re ON re.race_id=gl.race_id
+                 WHERE gl.game_round_id=r.game_round_id AND re.scratched=0) AS active_entries,
+                (SELECT COUNT(*)
+                 FROM game_round_final_results gfr
+                 WHERE gfr.game_round_id=r.game_round_id) AS final_result_rows,
+                (SELECT COUNT(*)
+                 FROM game_round_final_results gfr
+                 JOIN betting_snapshots bs
+                   ON bs.game_round_id=gfr.game_round_id
+                  AND bs.source_record_id=gfr.source_record_id
+                 WHERE gfr.game_round_id=r.game_round_id) AS final_market_rows
+              FROM registered r
+            )
+            SELECT 'DIRECT_FINAL_FACT_COVERAGE' AS section,
+              COUNT(*) AS rounds,
+              SUM(CASE WHEN final_result_rows=1 THEN 1 ELSE 0 END) AS payout_fact_rounds,
+              SUM(CASE WHEN active_entries>0 AND final_market_rows=active_entries THEN 1 ELSE 0 END) AS final_market_fact_rounds
+            FROM coverage;
+
             SELECT 'STATISTICS_ACTIVITY' AS section,
               MAX(last_checked_at) AS latest_checked_at,
               SUM(attempt_count) AS total_attempts,
@@ -478,4 +508,4 @@ jobs:
             GROUP BY case_no,source_rank,path,status,error_class
             ORDER BY case_no,source_rank,path,status,error_class;
           "
-# probe_nonce: post-pr259-statistics-catchup-2026-09-24-6
+# probe_nonce: post-pr259-direct-final-fact-verification-2026-09-24-7
