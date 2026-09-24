@@ -50,14 +50,14 @@ async function ugRenderStatistics(){
   const q=state.statsType==='all'?'':'?type='+encodeURIComponent(state.statsType);
   const data=await api('/games/statistics'+q);
   app.innerHTML=heading('Spel','Kommande omgångar, historik och övergripande resultat')+ugTabs()+
-    '<div class="ug-subfilters"><div class="ug-filter-group">'+ugFilter(state.statsType,'all')+ugFilter(state.statsType,'V85')+ugFilter(state.statsType,'V86')+'</div><div class="ug-filter-note">Slutmarknad för marknadsmått · fryst Steg 1 för Form och KentaurAI</div></div>'+
+    '<div class="ug-subfilters"><div class="ug-filter-group">'+ugFilter(state.statsType,'all')+ugFilter(state.statsType,'V85')+ugFilter(state.statsType,'V86')+'</div><div class="ug-filter-note">Slutmarknad för marknadsmått · fryst pre-race-data för Form och KentaurAI</div></div>'+
     '<div class="ug-stats-section"><div class="ug-stats-title"><h2>Vinnarna</h2><span>Marknad och Form</span></div><div class="ug-stats-grid">'+
       ugStatsTable('Vinnare efter spelprocent','Slutlig spelprocent efter avslutad omgång.','Spelprocent',data.winners?.byBetPercent)+
       ugStatsTable('Vinnare efter marknadsrank','Slutlig marknadsrank. Rank 10+ samlar resten.','Marknadsrank',data.winners?.byMarketRank)+
       ugStatsTable('Vinnare efter Form 1–100','Formvärdet är fryst med Steg 1 före start.','Form',data.winners?.byForm)+
       ugStatsTable('Vinnare efter Form-rank','Rank 1 är högst fryst Form i avdelningen. Rank 10+ samlar resten.','Form-rank',data.winners?.byFormRank)+
     '</div></div>'+
-    '<div class="ug-stats-section"><div class="ug-stats-title"><h2>KentaurAI:s bedömning</h2><span>Analysen som hör till huvudsystemet</span></div><div class="ug-stats-grid">'+
+    '<div class="ug-stats-section"><div class="ug-stats-title"><h2>KentaurAI:s analys</h2><span>Analysen som hör till huvudsystemet</span></div><div class="ug-stats-grid">'+
       ugStatsTable('Vinnare efter KentaurAI-rank','Rank 10+ samlar resten.','KentaurAI-rank',data.kentaurai?.byRank)+
       ugStatsTable('Vinnare efter ABCD-grupp','ABCD beskriver relativ vinststyrka före start.','ABCD',data.kentaurai?.byAbcd)+
     '</div></div>'+
