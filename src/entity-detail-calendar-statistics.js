@@ -165,7 +165,8 @@ async function loadHorseForm(env,entityId,filters,config){
   addCommonFilters(conditions,bindings,filters,{includeVolt:false});
   if(filters.asOfInstant){
     conditions.push("((r.scheduled_start_at IS NOT NULL AND julianday(r.scheduled_start_at)<julianday(?)) OR (r.scheduled_start_at IS NULL AND r.race_date<substr(?,1,10)))");
-    bindings.push(filters.asOfInstant,filters.asOfInstant);
+    conditions.push("EXISTS (SELECT 1 FROM source_records result_sr WHERE result_sr.id=rr.source_record_id AND julianday(result_sr.fetched_at)<=julianday(?))");
+    bindings.push(filters.asOfInstant,filters.asOfInstant,filters.asOfInstant);
   }
   const {results:targetRows}=await env.DB.prepare(`
     SELECT re.id race_entry_id,r.id race_id,r.race_date,r.race_number,r.scheduled_start_at,
