@@ -575,21 +575,32 @@ export async function repairCapturedOfficialClosingMarket(env, sourceRecordId) {
       if (!stored) throw new Error(`final market start ${start.number} could not be matched to a stored race entry`);
       matchedRows+=1;
 
-      const write=await env.DB.prepare(`
-        INSERT INTO betting_snapshots
-          (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id)
-        VALUES (?,?,?,?,?,?,?,?)
-        ON CONFLICT(game_round_id,leg_number,race_entry_id,captured_at) DO UPDATE SET
-          bet_percent=excluded.bet_percent,
-          market_rank=excluded.market_rank,
-          source_record_id=excluded.source_record_id
-      `).bind(
-        stableId('bet',validated.gameId,legNumber,raceEntryId,source.fetched_at),
-        validated.gameId,legNumber,raceEntryId,source.fetched_at,
-        scaledHundredths(raw,`${validated.gameType} betDistribution`,10000),
-        ranks.get(start.id) ?? null,
-        id
-      ).run();
+      const existing=await env.DB.prepare(`
+        SELECT id,source_record_id
+        FROM betting_snapshots
+        WHERE game_round_id=? AND leg_number=? AND race_entry_id=? AND captured_at=?
+        LIMIT 1
+      `).bind(validated.gameId,legNumber,raceEntryId,source.fetched_at).first();
+      if (existing?.source_record_id && existing.source_record_id!==id) {
+        throw new Error(`closing market snapshot provenance conflict for leg ${legNumber} start ${start.number}`);
+      }
+      const betPercent=scaledHundredths(raw,`${validated.gameType} betDistribution`,10000);
+      const marketRank=ranks.get(start.id) ?? null;
+      const write=existing
+        ? await env.DB.prepare(`
+            UPDATE betting_snapshots
+            SET bet_percent=?,market_rank=?,source_record_id=?
+            WHERE id=?
+          `).bind(betPercent,marketRank,id,existing.id).run()
+        : await env.DB.prepare(`
+            INSERT INTO betting_snapshots
+              (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id)
+            VALUES (?,?,?,?,?,?,?,?)
+          `).bind(
+            stableId('bet',validated.gameId,legNumber,raceEntryId,source.fetched_at),
+            validated.gameId,legNumber,raceEntryId,source.fetched_at,
+            betPercent,marketRank,id
+          ).run();
       changedRows+=Number(write.meta?.changes ?? 0);
     }
   }
