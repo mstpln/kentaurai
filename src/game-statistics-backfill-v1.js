@@ -290,7 +290,7 @@ export async function inspectGameStatisticsRoundCoverage(env,roundId,{attemptBac
     formScoreEntries:counts.formScores,
     judgmentEntries:counts.judgmentRows,
     insertedFormRows:Number(formResult?.inserted||0),
-    insertedJudgmentRows,
+    insertedJudgmentRows:insertedJudgments,
     complete:missing.length===0,
     missingMetrics:missing,
     error:formResult?.error||null
