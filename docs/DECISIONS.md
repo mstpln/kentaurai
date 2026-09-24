@@ -299,3 +299,5 @@ A single race must not directly change model weights. Candidate learnings are re
 6. Spike history comes only from the registered primary system and must retain the exact-three-spikes invariant; legacy or incomplete rows are surfaced as unavailable rather than rewritten.
 7. Coverage/backfill state is operational metadata only. Canonical facts remain in their existing racing, analysis, system, market and Form snapshot tables.
 8. The minute orchestrator advances at most one statistics-history round after post-race settlement, preserving bounded Worker load and resumability.
+9. Retryable storage/database repair failures remain `pending` so the scheduler can retry them. Deterministic archive/provenance inconsistencies are `manual_review`; a single transient failure must never permanently convert a recoverable metric into `unavailable`.
+10. Legacy historical analysis evidence is usable only when both its `data_snapshot_at` and the analysis record creation time are compatible with the registered system and verified pre-race cutoff. Historical Form also applies source fetched-at cutoffs to every result row used in field-relative calculations.
