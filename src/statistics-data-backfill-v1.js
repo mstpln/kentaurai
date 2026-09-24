@@ -131,12 +131,14 @@ async function legacyFormLineage(env, roundId, system, preRaceCutoff) {
          AND ara.model_version_id=?
          AND ara.data_snapshot_at IS NOT NULL
          AND julianday(ara.data_snapshot_at)<=julianday(?)
-       ORDER BY julianday(ara.data_snapshot_at) DESC,ara.id DESC
+         AND julianday(ara.data_snapshot_at)<=julianday(?)
+         AND julianday(ara.created_at)<=julianday(?)
+       ORDER BY julianday(ara.data_snapshot_at) DESC,julianday(ara.created_at) DESC,ara.id DESC
        LIMIT 1) AS data_snapshot_at
     FROM game_legs gl
     WHERE gl.game_round_id=?
     ORDER BY gl.leg_number
-  `).bind(system.model_version_id,system.created_at,roundId).all();
+  `).bind(system.model_version_id,system.created_at,preRaceCutoff,system.created_at,roundId).all();
   if ((results || []).length!==8) return null;
   const cutoffMs=Date.parse(preRaceCutoff);
   if (!Number.isFinite(cutoffMs)) return null;
@@ -265,9 +267,12 @@ export async function auditStatisticsRound(env, roundId) {
           AND ara.model_version_id=?
           AND ahp.race_entry_id=re.id
           AND ahp.raw_rank IS NOT NULL
+          AND ara.data_snapshot_at IS NOT NULL
           AND julianday(ara.data_snapshot_at)<=julianday(?)
+          AND julianday(ara.data_snapshot_at)<=julianday(?)
+          AND julianday(ara.created_at)<=julianday(?)
       )
-  `,[id,system.model_version_id,system.created_at]) : 0;
+  `,[id,system.model_version_id,system.created_at,round.pre_race_cutoff,system.created_at]) : 0;
 
   const abcdCount=system.model_version_id ? await scalar(env,`
     SELECT COUNT(DISTINCT re.id) n
@@ -282,9 +287,12 @@ export async function auditStatisticsRound(env, roundId) {
           AND ara.model_version_id=?
           AND ahp.race_entry_id=re.id
           AND ahp.abcd_group IN ('A','B','C','D')
+          AND ara.data_snapshot_at IS NOT NULL
           AND julianday(ara.data_snapshot_at)<=julianday(?)
+          AND julianday(ara.data_snapshot_at)<=julianday(?)
+          AND julianday(ara.created_at)<=julianday(?)
       )
-  `,[id,system.model_version_id,system.created_at]) : 0;
+  `,[id,system.model_version_id,system.created_at,round.pre_race_cutoff,system.created_at]) : 0;
 
   const spikeCount=await scalar(env,`
     SELECT COUNT(*) n
@@ -341,18 +349,19 @@ export async function auditStatisticsRound(env, roundId) {
   };
 }
 
-function overallStatus(audit, formOverride = null) {
-  const status={...audit.status,form:formOverride || audit.status.form};
-  if (status.form==='manual_review') return 'manual_review';
-  if (['results','finalMarket','payout'].some((key)=>status[key]==='pending')) return 'pending';
+function overallStatus(audit, overrides = {}) {
+  const status={...audit.status,...overrides};
+  if (Object.values(status).includes('manual_review')) return 'manual_review';
+  if (Object.values(status).includes('pending')) return 'pending';
   return Object.values(status).every((value)=>value==='complete')
     ? 'complete'
     : 'complete_with_gaps';
 }
 
-async function persistAudit(env, audit, { formStatus = null, lastError = null, attempted = false } = {}) {
+async function persistAudit(env, audit, { formStatus = null, finalMarketStatus = null, lastError = null, attempted = false } = {}) {
   const normalizedForm=formStatus || audit.status.form;
-  const overall=overallStatus(audit,normalizedForm);
+  const normalizedFinalMarket=finalMarketStatus || audit.status.finalMarket;
+  const overall=overallStatus(audit,{form:normalizedForm,finalMarket:normalizedFinalMarket});
   const completedAt=overall==='pending' ? null : new Date().toISOString();
   await env.DB.prepare(`
     INSERT INTO statistics_data_backfill_rounds
@@ -388,7 +397,7 @@ async function persistAudit(env, audit, { formStatus = null, lastError = null, a
       completed_at=excluded.completed_at,
       updated_at=CURRENT_TIMESTAMP
   `).bind(
-    audit.roundId,overall,audit.status.results,audit.status.finalMarket,audit.status.payout,normalizedForm,
+    audit.roundId,overall,audit.status.results,normalizedFinalMarket,audit.status.payout,normalizedForm,
     audit.status.kaiRank,audit.status.abcd,audit.status.spikes,
     audit.counts.activeEntries,audit.counts.closingMarket,audit.counts.formSnapshots,
     audit.counts.kaiRank,audit.counts.abcd,audit.counts.spikes,
@@ -432,6 +441,14 @@ async function nextQueuedRound(env) {
     ORDER BY last_checked_at ASC,game_round_id ASC
     LIMIT 1
   `).first();
+}
+
+function closingMarketRepairFailureStatus(error) {
+  const message=String(error?.message || error || '');
+  if (/provenance conflict|not valid JSON|does not match the official game payload|could not be matched to a stored race entry|official V8[56] game must contain exactly eight races/i.test(message)) {
+    return 'manual_review';
+  }
+  return 'pending';
 }
 
 async function replayFormSnapshot(env, audit) {
@@ -480,6 +497,7 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
   let audit=await auditStatisticsRound(env,target.game_round_id);
   let attempted=false;
   let formOverride=null;
+  let finalMarketOverride=null;
   const errors=[];
 
   if (audit.finalGameSourceRecordId && audit.status.finalMarket!=='complete') {
@@ -487,9 +505,9 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
     try {
       await repairCapturedOfficialClosingMarket(env,audit.finalGameSourceRecordId);
       audit=await auditStatisticsRound(env,target.game_round_id);
-      if (audit.status.finalMarket!=='complete') audit.status.finalMarket='unavailable';
+      if (audit.status.finalMarket!=='complete') finalMarketOverride='unavailable';
     } catch (error) {
-      audit.status.finalMarket='unavailable';
+      finalMarketOverride=closingMarketRepairFailureStatus(error);
       errors.push('closing_market_repair: '+String(error?.message || error));
     }
   }
@@ -502,18 +520,18 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
       if (replay.status==='manual_review') errors.push('form_replay: '+replay.reason);
       if (replay.status==='complete') audit=await auditStatisticsRound(env,target.game_round_id);
     } catch (error) {
-      formOverride='manual_review';
+      formOverride='pending';
       errors.push('form_replay: '+String(error?.message || error));
     }
   }
 
   const lastError=errors.length ? errors.join(' | ').slice(0,1000) : null;
-  const overall=await persistAudit(env,audit,{formStatus:formOverride,lastError,attempted});
+  const overall=await persistAudit(env,audit,{formStatus:formOverride,finalMarketStatus:finalMarketOverride,lastError,attempted});
   return {
     version:STATISTICS_DATA_BACKFILL_VERSION,
     status:overall,
     roundId:audit.roundId,
-    metrics:{...audit.status,form:formOverride || audit.status.form},
+    metrics:{...audit.status,finalMarket:finalMarketOverride || audit.status.finalMarket,form:formOverride || audit.status.form},
     counts:audit.counts,
     step1PackId:audit.lineage?.packId || null,
     formLineageKind:audit.formLineage?.kind || null,
