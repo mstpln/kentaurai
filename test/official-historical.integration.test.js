@@ -4,6 +4,7 @@ import { createTestEnv } from './helpers/d1.js';
 import worker from '../src/index.js';
 import { normalizeCapturedOfficialRace, officialRaceHasFinalResults, validateOfficialRacePayload } from '../src/import/official-historical-race.js';
 import { runHistoricalBackfillBatch, runHistoricalBackfillStep, startHistoricalBackfill, swedishTrottingRaceIds } from '../src/import/official-historical-backfill.js';
+import { captureRace } from '../src/provider/official.js';
 
 const DATE = '2099-04-10';
 const RACE_ID = `${DATE}_7_5`;
@@ -142,6 +143,76 @@ test('incomplete ordinary race capture fails closed before historical facts are 
   await assert.rejects(() => normalizeCapturedOfficialRace(env, 'src_incomplete'), /results are not final/);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM races').get().n, 0);
   assert.equal(db.prepare(`SELECT quality_status FROM source_records WHERE id = 'src_incomplete'`).get().quality_status, 'captured_unmapped');
+});
+
+test('multi-day historical backfill records missing starts as a source gap and advances the checkpoint', async () => {
+  const { env, db } = createTestEnv();
+  const earlier = '2099-04-09';
+  const malformed = racePayload();
+  delete malformed.starts;
+
+  const fetchImpl = async (url) => {
+    if (url.includes('/calendar/day/')) return jsonResponse(calendarPayload());
+    if (url.includes('/races/')) return jsonResponse(malformed);
+    throw new Error(`unexpected URL ${url}`);
+  };
+
+  const job = await startHistoricalBackfill(env, earlier, DATE);
+  const result = await runHistoricalBackfillStep(env, job.id, { fetchImpl });
+
+  assert.equal(result.status, 'running');
+  assert.equal(result.normalized, null);
+  assert.equal(result.sourceGap.gap.code, 'missing_starts_array');
+  assert.equal(result.checkpoint.nextRaceIndex, 1);
+
+  const state = db.prepare('SELECT status,next_race_index,processed_races,consecutive_errors,last_error FROM historical_backfill_jobs WHERE id=?').get(job.id);
+  assert.deepEqual({ ...state }, {
+    status: 'running',
+    next_race_index: 1,
+    processed_races: 1,
+    consecutive_errors: 0,
+    last_error: null
+  });
+
+  const source = db.prepare("SELECT quality_status,metadata_json FROM source_records WHERE external_id=? ORDER BY fetched_at DESC LIMIT 1").get(`race:${RACE_ID}`);
+  assert.equal(source.quality_status, 'captured_source_gap');
+  assert.equal(JSON.parse(source.metadata_json).sourceGap.code, 'missing_starts_array');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM races').get().n, 0);
+});
+
+test('single-day and ordinary race capture stay strict for missing starts', async () => {
+  const { env } = createTestEnv();
+  const malformed = racePayload();
+  delete malformed.starts;
+
+  const singleDay = await startHistoricalBackfill(env, DATE, DATE);
+  await assert.rejects(
+    () => runHistoricalBackfillStep(env, singleDay.id, {
+      fetchImpl: async (url) => url.includes('/calendar/day/')
+        ? jsonResponse(calendarPayload())
+        : jsonResponse(malformed)
+    }),
+    /starts must be an array/
+  );
+
+  await assert.rejects(
+    () => captureRace(env, RACE_ID, { fetchImpl: async () => jsonResponse(malformed) }),
+    /starts must be an array/
+  );
+});
+
+test('multi-day structural source-gap handling also accepts a non-array starts shape without normalizing it', async () => {
+  const { env, db } = createTestEnv();
+  const malformed = racePayload();
+  malformed.starts = { unavailable: true };
+  const job = await startHistoricalBackfill(env, '2099-04-09', DATE);
+  const result = await runHistoricalBackfillStep(env, job.id, {
+    fetchImpl: async (url) => url.includes('/calendar/day/')
+      ? jsonResponse(calendarPayload())
+      : jsonResponse(malformed)
+  });
+  assert.equal(result.sourceGap.gap.code, 'missing_starts_array');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM races').get().n, 0);
 });
 
 test('backfill checkpoint captures one race per step, resumes and completes without duplicates', async () => {
