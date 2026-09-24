@@ -8,6 +8,8 @@ import {
   getStatisticsDataBackfillStatus,
   runNextStatisticsDataBackfill
 } from '../src/statistics-data-backfill-v1.js';
+import { getGameStatistics } from '../src/routes/game-statistics.js';
+import { getGameHistoryDetail } from '../src/routes/games.js';
 import { createTestEnv } from './helpers/d1.js';
 
 function seedRound(db) {
@@ -156,4 +158,58 @@ test('closing-market repair failure does not falsely mark Form for manual review
   assert.equal(result.metrics.form,'complete');
   assert.match(result.reason,/closing_market_repair/);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM analysis_entry_form_snapshots").get().n,8);
+});
+
+
+test('legacy registered systems backfill Form from verified pre-race analysis snapshots without inventing Step 1 lineage',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  db.prepare("INSERT INTO model_versions (id,created_at,feature_version) VALUES ('legacy_model','2099-01-02T11:40:00.000Z','analysis-exchange-v1')").run();
+  db.prepare("INSERT INTO systems (id,game_round_id,model_version_id,system_type,budget_sek,row_count,line_price_sek,spike_count,created_at,metrics_json) VALUES ('legacy_system','stats_round','legacy_model','main',200,8,0.25,3,'2099-01-02T11:40:00.000Z','{}')").run();
+  for(let leg=1;leg<=8;leg+=1){
+    db.prepare("INSERT INTO ai_race_analyses (id,race_id,model_version_id,data_snapshot_at,market_blind,created_at) VALUES (?,?,?,'2099-01-02T11:30:00.000Z',1,'2099-01-02T11:40:00.000Z')")
+      .run('legacy_analysis_'+leg,'stats_race_'+leg,'legacy_model');
+    db.prepare("INSERT INTO ai_horse_predictions (id,ai_race_analysis_id,race_entry_id,win_probability,raw_rank,abcd_group) VALUES (?,?,?,?,1,'A')")
+      .run('legacy_prediction_'+leg,'legacy_analysis_'+leg,'stats_entry_'+leg,1);
+    db.prepare("INSERT INTO system_selections (system_id,leg_number,race_entry_id,is_spike) VALUES ('legacy_system',?,?,?)")
+      .run(leg,'stats_entry_'+leg,leg<=3?1:0);
+  }
+
+  const result=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(result.metrics.form,'complete');
+  assert.equal(result.formLineageKind,'legacy_analysis_snapshot');
+  assert.ok(result.formSnapshotRef);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM analysis_entry_form_snapshots WHERE step1_pack_id=?").get(result.formSnapshotRef).n,8);
+
+  const state=db.prepare("SELECT form_lineage_kind,form_snapshot_ref,form_as_of_json FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get();
+  assert.equal(state.form_lineage_kind,'legacy_analysis_snapshot');
+  assert.equal(state.form_snapshot_ref,result.formSnapshotRef);
+  assert.equal(Object.keys(JSON.parse(state.form_as_of_json)).length,8);
+
+  const stats=await getGameStatistics(env,{gameType:'V86'});
+  assert.equal(stats.winners.byForm.reduce((sum,row)=>sum+row.starters,0),8);
+
+  // Winner context reads the same verified backfilled Form set once results exist.
+  for(let leg=1;leg<=8;leg+=1){
+    db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,gallop,disqualified) VALUES (?,1,'official',0,0)")
+      .run('stats_entry_'+leg);
+  }
+  const detail=await getGameHistoryDetail(env,'stats_round');
+  assert.ok(detail.legs.every(leg=>leg.systems.legacy_system.winnerContext?.formRank===1));
+});
+
+test('legacy Form fallback refuses analysis snapshots after the earliest pre-race cutoff',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  db.prepare("INSERT INTO model_versions (id,created_at,feature_version) VALUES ('late_model','2099-01-02T12:30:00.000Z','analysis-exchange-v1')").run();
+  db.prepare("INSERT INTO systems (id,game_round_id,model_version_id,system_type,budget_sek,row_count,line_price_sek,spike_count,created_at,metrics_json) VALUES ('late_system','stats_round','late_model','main',200,8,0.25,3,'2099-01-02T12:30:00.000Z','{}')").run();
+  for(let leg=1;leg<=8;leg+=1){
+    db.prepare("INSERT INTO ai_race_analyses (id,race_id,model_version_id,data_snapshot_at,market_blind,created_at) VALUES (?,?,?,'2099-01-02T12:05:00.000Z',1,'2099-01-02T12:30:00.000Z')")
+      .run('late_analysis_'+leg,'stats_race_'+leg,'late_model');
+    db.prepare("INSERT INTO system_selections (system_id,leg_number,race_entry_id,is_spike) VALUES ('late_system',?,?,?)")
+      .run(leg,'stats_entry_'+leg,leg<=3?1:0);
+  }
+  const audit=await auditStatisticsRound(env,'stats_round');
+  assert.equal(audit.formLineage,null);
+  assert.equal(audit.status.form,'unavailable');
 });
