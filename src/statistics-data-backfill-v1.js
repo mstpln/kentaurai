@@ -297,7 +297,7 @@ async function persistAudit(env, audit, { formStatus = null, lastError = null, a
        kai_rank_status,abcd_status,spike_status,active_entry_count,closing_market_count,
        form_snapshot_count,kai_rank_count,abcd_count,spike_count,step1_pack_id,
        step1_facts_fingerprint,step1_as_of,attempt_count,last_error,last_checked_at,completed_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, ?,?,?,?)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(game_round_id) DO UPDATE SET
       status=excluded.status,
       result_status=excluded.result_status,
