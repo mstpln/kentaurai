@@ -171,7 +171,9 @@ function aggregatePayout(rows) {
 
 export async function getGameStatistics(env,options={}) {
   if (!env?.DB) throw new Error('DB is not configured');
-  const gameType=normalizeGameType(options.gameType);
+  const requestedType=String(options.gameType||'').trim();
+  const gameType=normalizeGameType(requestedType);
+  if (requestedType && !gameType) throw new Error('game type must be V85 or V86');
   const [rows,payouts]=await Promise.all([statisticsRows(env,gameType),payoutRows(env,gameType)]);
   const rankLabels=['1','2','3','4','5','6','7','8','9','10+'];
   const formLabels=['<40','40–49','50–59','60–69','70–79','80+'];
