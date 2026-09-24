@@ -88,12 +88,14 @@ async function statisticsRows(env,gameType) {
        JOIN ai_race_analyses ara ON ara.id=ahp.ai_race_analysis_id
        JOIN systems sp ON sp.id=p.system_id
        WHERE ara.race_id=gl.race_id AND ara.model_version_id=sp.model_version_id AND ahp.race_entry_id=re.id
+         AND julianday(ara.data_snapshot_at)<=julianday(sp.created_at)
        ORDER BY ara.data_snapshot_at DESC,ara.created_at DESC,ara.id ASC LIMIT 1) AS kai_rank,
       (SELECT ahp.abcd_group
        FROM ai_horse_predictions ahp
        JOIN ai_race_analyses ara ON ara.id=ahp.ai_race_analysis_id
        JOIN systems sp ON sp.id=p.system_id
        WHERE ara.race_id=gl.race_id AND ara.model_version_id=sp.model_version_id AND ahp.race_entry_id=re.id
+         AND julianday(ara.data_snapshot_at)<=julianday(sp.created_at)
        ORDER BY ara.data_snapshot_at DESC,ara.created_at DESC,ara.id ASC LIMIT 1) AS abcd_group,
       CASE WHEN EXISTS(
         SELECT 1 FROM system_selections ss
