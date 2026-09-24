@@ -184,6 +184,28 @@ test('Trend supports the same deterministic metrics for trainers and drivers', a
   assert.equal(driverA.losses, driverA.starts - driverA.wins);
 });
 
+test('Trend can rank trainer and driver win rates from lowest to highest without changing filters', async () => {
+  const { env } = setupCoreFixture();
+  const high = await getTrendLeaderboard(env, {
+    category:'trainers', period:'2w', asOfDate:'2026-09-11', minStarts:'all', sort:'win_rate_desc'
+  });
+  const low = await getTrendLeaderboard(env, {
+    category:'trainers', period:'2w', asOfDate:'2026-09-11', minStarts:'all', sort:'win_rate_asc'
+  });
+
+  assert.equal(high.filters.sort,'win_rate_desc');
+  assert.equal(low.filters.sort,'win_rate_asc');
+  assert.equal(high.items[0].id,'trainer-b');
+  assert.equal(low.items[0].id,'trainer-a');
+  assert.ok(high.items[0].winRate >= high.items.at(-1).winRate);
+  assert.ok(low.items[0].winRate <= low.items.at(-1).winRate);
+  assert.deepEqual(
+    [...high.items.map(item=>item.id)].sort(),
+    [...low.items.map(item=>item.id)].sort(),
+    'sort changes ordering only, not the filtered population'
+  );
+});
+
 test('Trend and entity statistics share core metric semantics', async () => {
   const { env } = setupCoreFixture();
   const trend = await getTrendLeaderboard(env, { category: 'horses', period: '1y', asOfDate: '2026-09-11' });
@@ -202,6 +224,7 @@ test('Trend rejects unknown enums and track IDs instead of silently ignoring the
   await assert.rejects(() => getTrendLeaderboard(env, { ...base, raceType: 'unknown' }), /race_type must be/);
   await assert.rejects(() => getTrendLeaderboard(env, { ...base, breedType: 'unknown' }), /breed_type must be/);
   await assert.rejects(() => getTrendLeaderboard(env, { ...base, startMethod: 'flying' }), /start_method must be/);
+  await assert.rejects(() => getTrendLeaderboard(env, { ...base, sort: 'random' }), /sort must be/);
   await assert.rejects(() => getTrendLeaderboard(env, { ...base, trackId: 'not-stored' }), /track_id does not identify/);
 });
 
