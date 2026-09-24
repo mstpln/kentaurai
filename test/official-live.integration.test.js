@@ -231,6 +231,9 @@ test('final game normalization keeps horse identity when final start ids are rem
   const after = db.prepare("SELECT hei.external_id,re.id,re.source_start_id FROM race_entries re JOIN horse_external_ids hei ON hei.horse_id=re.horse_id WHERE re.race_id=? AND hei.source_type='official' ORDER BY hei.external_id").all(DATE+'_901_1');
   assert.deepEqual(after,before);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM betting_snapshots WHERE source_record_id=?').get(finalSource).n,16);
+  const conflicts=db.prepare("SELECT quality_status,fields_json FROM normalized_observations WHERE entity_type='race_entry' AND source_record_id=? AND quality_status='source_conflict' ORDER BY entity_id").all(finalSource);
+  assert.equal(conflicts.length,2);
+  assert.ok(conflicts.every(row=>JSON.parse(row.fields_json).sourceStartConflict===true));
 });
 
 test('same captured source record normalizes only once', async () => {
