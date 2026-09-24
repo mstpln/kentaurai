@@ -46,6 +46,20 @@ jobs:
             GROUP BY status
             ORDER BY status;
 
+            SELECT 'SETTLEMENT_REASON' AS section,status,
+              COALESCE(last_error,'none') AS reason,COUNT(*) AS count
+            FROM post_race_settlement_jobs
+            WHERE status<>'completed'
+            GROUP BY status,COALESCE(last_error,'none')
+            ORDER BY status,reason;
+
+            SELECT 'STATISTICS_METRIC_STATUS' AS section,
+              final_market_status,form_status,kai_rank_status,abcd_status,spike_status,
+              COUNT(*) AS count
+            FROM statistics_data_backfill_rounds
+            GROUP BY final_market_status,form_status,kai_rank_status,abcd_status,spike_status
+            ORDER BY final_market_status,form_status,kai_rank_status,abcd_status,spike_status;
+
             SELECT 'REGISTERED_HISTORY' AS section,
               COUNT(*) AS rounds,
               SUM(CASE WHEN winner_legs=8 THEN 1 ELSE 0 END) AS results_complete,
