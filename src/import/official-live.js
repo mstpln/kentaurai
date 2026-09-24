@@ -369,16 +369,16 @@ async function resolveRaceEntryId(env, raceId, start, horseId) {
   // pre-race and final payloads; choosing source_start_id first can then
   // select a different stored horse row and violate UNIQUE(race_id, horse_id).
   if (horseId) {
-    existing = await env.DB.prepare('SELECT id FROM race_entries WHERE race_id = ? AND horse_id = ? LIMIT 1')
+    existing = await env.DB.prepare('SELECT id,source_start_id FROM race_entries WHERE race_id = ? AND horse_id = ? LIMIT 1')
       .bind(raceId, horseId).first();
   }
   if (!existing) {
-    existing = await env.DB.prepare('SELECT id FROM race_entries WHERE race_id = ? AND source_start_id = ? LIMIT 1')
+    existing = await env.DB.prepare('SELECT id,source_start_id FROM race_entries WHERE race_id = ? AND source_start_id = ? LIMIT 1')
       .bind(raceId, sourceStartId).first();
   }
   if (!existing) {
     existing = await env.DB.prepare(`
-      SELECT re.id
+      SELECT re.id,re.source_start_id
       FROM race_entries re
       LEFT JOIN horses h ON h.id = re.horse_id
       WHERE re.race_id = ?
@@ -388,7 +388,9 @@ async function resolveRaceEntryId(env, raceId, start, horseId) {
       LIMIT 1
     `).bind(raceId, start.number, String(start.horse?.name || '').trim()).first();
   }
-  return existing?.id || stableId('entry', EXTERNAL_SOURCE, raceId, sourceStartId);
+  return existing
+    ? { id:existing.id, sourceStartId:existing.source_start_id || sourceStartId }
+    : { id:stableId('entry', EXTERNAL_SOURCE, raceId, sourceStartId), sourceStartId };
 }
 
 async function mapRace(env, game, race, legNumber, ctx) {
@@ -430,7 +432,8 @@ async function mapRace(env, game, race, legNumber, ctx) {
     const trainerId = await upsertPerson(env, 'trainer', start.horse?.trainer, ctx);
     const driverId = await upsertPerson(env, 'driver', start.driver, ctx);
     const horseId = await upsertHorse(env, start.horse, trainerId, ctx);
-    const raceEntryId = await resolveRaceEntryId(env, raceId, start, horseId);
+    const resolvedEntry = await resolveRaceEntryId(env, raceId, start, horseId);
+    const raceEntryId = resolvedEntry.id;
     const pos = startPosition(race, start);
     await env.DB.prepare(`
       INSERT INTO race_entries
@@ -452,7 +455,7 @@ async function mapRace(env, game, race, legNumber, ctx) {
         data_quality = excluded.data_quality,
         updated_at = CURRENT_TIMESTAMP
     `).bind(
-      raceEntryId, raceId, horseId, driverId, trainerId, String(start.id).trim(),
+      raceEntryId, raceId, horseId, driverId, trainerId, resolvedEntry.sourceStartId,
       maybeText(start.horse?.name), start.number, pos.lane, pos.tier, pos.handicapM,
       pos.actualDistance, ENTRY_QUALITY
     ).run();
