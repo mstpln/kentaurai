@@ -290,3 +290,28 @@ test('horse specialties aggregate verified C4 race scenarios with active calenda
   assert.deepEqual({starts:death.starts,wins:death.wins,top3:death.top3},{starts:1,wins:0,top3:1});
   assert.deepEqual({starts:second.starts,wins:second.wins,top3:second.top3},{starts:1,wins:1,top3:1});
 });
+
+test('horse Form exact as-of cutoff excludes later same-day results', async () => {
+  const { createTestEnv } = await import('./helpers/d1.js');
+  const { env, db } = createTestEnv();
+  db.prepare("INSERT INTO tracks (id,canonical_name,country_code) VALUES ('cut-track','Cutoff','SE')").run();
+  for (const [id,name] of [['cut-h','Cutoff Horse'],['cut-o1','Opponent 1'],['cut-o2','Opponent 2']]) {
+    db.prepare('INSERT INTO horses (id,canonical_name) VALUES (?,?)').run(id,name);
+  }
+  for (const [suffix,time,opponent] of [['early','10:00:00','cut-o1'],['late','20:00:00','cut-o2']]) {
+    const raceId='cut-'+suffix;
+    db.prepare("INSERT INTO races (id,track_id,race_date,race_number,scheduled_start_at,distance_m,start_method,first_prize_sek,status) VALUES (?,'cut-track','2026-09-20',?, ?,2140,'auto',50000,'results')")
+      .run(raceId,suffix==='early'?1:2,'2026-09-20T'+time+'Z');
+    db.prepare("INSERT INTO race_entries (id,race_id,horse_id,start_number,scratched) VALUES (?,?, 'cut-h',1,0)").run('cut-e-'+suffix,raceId);
+    db.prepare("INSERT INTO race_entries (id,race_id,horse_id,start_number,scratched) VALUES (?,?, ?,2,0)").run('cut-o-'+suffix,raceId,opponent);
+    db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,gallop,disqualified,km_time) VALUES (?,1,'official',0,0,'1.12,0')").run('cut-e-'+suffix);
+    db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,gallop,disqualified,km_time) VALUES (?,2,'official',0,0,'1.13,0')").run('cut-o-'+suffix);
+  }
+  const form=await getHorseCalendarYearForm(env,'cut-h',{
+    year:2026,
+    asOfDate:'2026-09-20',
+    asOfInstant:'2026-09-20T12:00:00Z'
+  });
+  assert.equal(form.formLast.usedStarts,1);
+  assert.equal(form.formLast.starts[0].raceId,'cut-early');
+});
