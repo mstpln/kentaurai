@@ -18,6 +18,7 @@ import { ensureDailyOfficialHistoryJobs, getHistoricalBackfill, runHistoricalBac
 import { ensureDailyXlabsJob, getXlabsBackfill, runXlabsBackfillBatch, runXlabsBackfillStep, startXlabsBackfill } from './import/xlabs-backfill.js';
 import { captureCalendar, captureGame, captureRace } from './provider/official.js';
 import { runPostRaceSettlementBatch } from './post-race-settlement-v1.js';
+import { getGameStatisticsCoverageAudit, getGameStatisticsBackfillJob, runNextGameStatisticsBackfill } from './game-statistics-backfill-v1.js';
 import { captureXlabsDate } from './provider/xlabs.js';
 import { captureXlabsRaceJson } from './provider/xlabs-race.js';
 import { captureReferencedXlabsScript, captureXlabsContextScripts, XLABS_SCRIPT_SELECTOR_VERSION } from './provider/xlabs-script.js';
@@ -335,6 +336,16 @@ async function handleFetch(request, env) {
     return json(result, 201);
   }
   if (request.method === 'POST' && path === '/v1/learning/hypotheses') return json(await createHypothesis(env, await readJson(request)), 201);
+  if (request.method === 'GET' && path === '/v1/game-statistics/coverage') {
+    return json(await getGameStatisticsCoverageAudit(env));
+  }
+  if (request.method === 'POST' && path === '/v1/game-statistics/backfill-next') {
+    return json(await runNextGameStatisticsBackfill(env));
+  }
+  if (request.method === 'GET' && path === '/v1/game-statistics/backfill-status') {
+    const job = await getGameStatisticsBackfillJob(env, url.searchParams.get('job_id'));
+    return job ? json(job) : json({ error:'not_found' }, 404);
+  }
   return json({ error: 'not_found' }, 404);
 }
 
@@ -355,6 +366,7 @@ async function handleScheduled(controller, env) {
 
   if (controller.cron === BACKFILL_CRON) {
     parts.push(await runScheduledPart('post_race_settlement', () => runPostRaceSettlementBatch(env)));
+    parts.push(await runScheduledPart('game_statistics_backfill', () => runNextGameStatisticsBackfill(env)));
     parts.push(await runScheduledPart('live_normalize', () => normalizeNextPendingOfficialGame(env)));
     parts.push(await runScheduledPart('historical_backfill', () => runHistoricalBackfillBatch(env)));
     parts.push(await runScheduledPart('xlabs_backfill', () => runXlabsBackfillBatch(env)));
