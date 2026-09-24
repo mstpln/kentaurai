@@ -162,7 +162,9 @@ test('transient closing-market repair failure stays pending and does not falsely
   assert.match(result.reason,/closing_market_repair/);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM analysis_entry_form_snapshots").get().n,8);
   const state=db.prepare("SELECT status,final_market_status,form_status FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get();
-  assert.deepEqual(state,{status:'pending',final_market_status:'pending',form_status:'complete'});
+  assert.equal(state.status,'pending');
+  assert.equal(state.final_market_status,'pending');
+  assert.equal(state.form_status,'complete');
 });
 
 
