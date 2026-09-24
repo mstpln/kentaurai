@@ -422,19 +422,32 @@ async function mapRace(env, game, race, legNumber, ctx) {
     const trainerId = await upsertPerson(env, 'trainer', start.horse?.trainer, ctx);
     const driverId = await upsertPerson(env, 'driver', start.driver, ctx);
     const horseId = await upsertHorse(env, start.horse, trainerId, ctx);
-    const raceEntryId = stableId('entry', raceId, horseId);
+    const raceEntryId = await resolveRaceEntryId(env, raceId, start, horseId);
     const pos = startPosition(race, start);
     await env.DB.prepare(`
       INSERT INTO race_entries
-        (id, race_id, horse_id, driver_id, trainer_id, start_number, actual_lane, start_tier,
-         handicap_m, actual_start_distance_m, scratched, scratch_reason, data_quality)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)
+        (id, race_id, horse_id, driver_id, trainer_id, source_start_id, declared_horse_name,
+         start_number, actual_lane, start_tier, handicap_m, actual_start_distance_m,
+         scratched, scratch_reason, data_quality)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)
       ON CONFLICT(id) DO UPDATE SET
-        driver_id = excluded.driver_id, trainer_id = excluded.trainer_id, start_number = excluded.start_number,
-        actual_lane = excluded.actual_lane, start_tier = excluded.start_tier, handicap_m = excluded.handicap_m,
-        actual_start_distance_m = excluded.actual_start_distance_m, data_quality = excluded.data_quality,
+        horse_id = COALESCE(excluded.horse_id, race_entries.horse_id),
+        driver_id = excluded.driver_id,
+        trainer_id = excluded.trainer_id,
+        source_start_id = COALESCE(excluded.source_start_id, race_entries.source_start_id),
+        declared_horse_name = COALESCE(excluded.declared_horse_name, race_entries.declared_horse_name),
+        start_number = excluded.start_number,
+        actual_lane = excluded.actual_lane,
+        start_tier = excluded.start_tier,
+        handicap_m = excluded.handicap_m,
+        actual_start_distance_m = excluded.actual_start_distance_m,
+        data_quality = excluded.data_quality,
         updated_at = CURRENT_TIMESTAMP
-    `).bind(raceEntryId, raceId, horseId, driverId, trainerId, start.number, pos.lane, pos.tier, pos.handicapM, pos.actualDistance, ENTRY_QUALITY).run();
+    `).bind(
+      raceEntryId, raceId, horseId, driverId, trainerId, String(start.id).trim(),
+      maybeText(start.horse?.name), start.number, pos.lane, pos.tier, pos.handicapM,
+      pos.actualDistance, ENTRY_QUALITY
+    ).run();
     await recordObservation(env, ctx.counts, 'race_entry', raceEntryId, ctx.sourceRecordId, ctx.observedAt, {
       externalStartId: start.id, raceExternalId: raceId, horseExternalId: String(start.horse.id),
       driverExternalId: start.driver?.id == null ? null : String(start.driver.id),
