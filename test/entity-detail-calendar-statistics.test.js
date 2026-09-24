@@ -300,7 +300,7 @@ test('horse Form exact as-of cutoff excludes later same-day results', async () =
   }
   db.prepare("INSERT INTO source_records (id,source_type,external_id,fetched_at,quality_status) VALUES ('cut-src-early','official_provider','race:cut-early','2026-09-20T10:30:00Z','normalized_verified_subset')").run();
   db.prepare("INSERT INTO source_records (id,source_type,external_id,fetched_at,quality_status) VALUES ('cut-src-late','official_provider','race:cut-late','2026-09-20T20:30:00Z','normalized_verified_subset')").run();
-  for (const [suffix,time,opponent] of [['early','10:00:00','cut-o1'],['late','20:00:00','cut-o2']]) {
+  for (const [suffix,time,opponent] of [['early','10:00:00','cut-o1'],['late','11:00:00','cut-o2']]) {
     const raceId='cut-'+suffix;
     db.prepare("INSERT INTO races (id,track_id,race_date,race_number,scheduled_start_at,distance_m,start_method,first_prize_sek,status) VALUES (?,'cut-track','2026-09-20',?, ?,2140,'auto',50000,'results')")
       .run(raceId,suffix==='early'?1:2,'2026-09-20T'+time+'Z');
