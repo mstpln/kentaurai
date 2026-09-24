@@ -327,5 +327,107 @@ jobs:
                 AND (SELECT COUNT(*) FROM game_legs gl WHERE gl.game_round_id=gr.id)=8
                 AND datetime(COALESCE(gr.bet_stop_at,gr.scheduled_start_at,gr.round_date || 'T23:59:59Z')) < datetime('now')
             );
+
+
+            WITH waiting AS (
+              SELECT game_round_id,
+                ROW_NUMBER() OVER (ORDER BY datetime(created_at),id) AS case_no
+              FROM post_race_settlement_jobs
+              WHERE status='waiting' AND settled_legs=8
+            ),
+            game_sources AS (
+              SELECT w.case_no,sr.id AS source_record_id,sr.quality_status,sr.fetched_at,
+                ROW_NUMBER() OVER (
+                  PARTITION BY w.case_no
+                  ORDER BY datetime(sr.fetched_at) DESC,sr.id DESC
+                ) AS rn
+              FROM waiting w
+              JOIN source_records sr
+                ON sr.source_type='official_provider'
+               AND sr.external_id='game:' || w.game_round_id
+            )
+            SELECT 'SETTLEMENT_FINAL_SOURCE' AS section,
+              case_no,quality_status,fetched_at,
+              (SELECT COUNT(*)
+               FROM normalized_observations no
+               WHERE no.source_record_id=gs.source_record_id
+                 AND no.entity_type='race_entry') AS entry_observations,
+              (SELECT COUNT(*)
+               FROM normalized_observations no
+               WHERE no.source_record_id=gs.source_record_id
+                 AND no.entity_type='race_entry'
+                 AND no.quality_status='source_conflict') AS conflict_observations
+            FROM game_sources gs
+            WHERE rn=1
+            ORDER BY case_no;
+
+            WITH waiting AS (
+              SELECT game_round_id,
+                ROW_NUMBER() OVER (ORDER BY datetime(created_at),id) AS case_no
+              FROM post_race_settlement_jobs
+              WHERE status='waiting' AND settled_legs=8
+            ),
+            latest_sources AS (
+              SELECT w.case_no,sr.id AS source_record_id,
+                ROW_NUMBER() OVER (
+                  PARTITION BY w.case_no
+                  ORDER BY datetime(sr.fetched_at) DESC,sr.id DESC
+                ) AS rn
+              FROM waiting w
+              JOIN source_records sr
+                ON sr.source_type='official_provider'
+               AND sr.external_id='game:' || w.game_round_id
+            ),
+            runs AS (
+              SELECT ls.case_no,ir.source_type,ir.status,ir.started_at,ir.finished_at,
+                json_extract(ir.metadata_json,'$.stage') AS stage,
+                CAST(json_extract(ir.metadata_json,'$.cursor') AS INTEGER) AS cursor,
+                CASE
+                  WHEN instr(lower(COALESCE(ir.error_json,'')),'race_entries.race_id, race_entries.horse_id')>0 THEN 'entry_horse_unique'
+                  WHEN instr(lower(COALESCE(ir.error_json,'')),'identity conflicts with stored race entry')>0 THEN 'entry_identity_conflict'
+                  WHEN instr(lower(COALESCE(ir.error_json,'')),'unique constraint failed')>0 THEN 'other_unique'
+                  WHEN ir.error_json IS NULL THEN 'none'
+                  ELSE 'other'
+                END AS error_class
+              FROM latest_sources ls
+              JOIN import_runs ir
+                ON json_extract(ir.metadata_json,'$.sourceRecordId')=ls.source_record_id
+              WHERE ls.rn=1
+                AND ir.source_type IN ('official_provider_normalize','official_live_normalize_auto')
+            )
+            SELECT 'SETTLEMENT_FINAL_NORMALIZE_RUNS' AS section,
+              case_no,
+              CASE
+                WHEN source_type='official_live_normalize_auto' THEN 'auto_wrapper'
+                WHEN stage='entry' THEN 'chunk_entry'
+                ELSE 'whole_game'
+              END AS path,
+              status,error_class,COUNT(*) AS count,
+              MAX(cursor) AS max_cursor,
+              MAX(started_at) AS latest_started_at,
+              MAX(finished_at) AS latest_finished_at
+            FROM runs
+            GROUP BY case_no,path,status,error_class
+            ORDER BY case_no,path,status,error_class;
+
+            WITH waiting AS (
+              SELECT game_round_id,
+                ROW_NUMBER() OVER (ORDER BY datetime(created_at),id) AS case_no
+              FROM post_race_settlement_jobs
+              WHERE status='waiting' AND settled_legs=8
+            )
+            SELECT 'SETTLEMENT_ENTRY_SHAPE' AS section,
+              w.case_no,
+              COUNT(*) AS entries,
+              COUNT(DISTINCT gl.race_id) AS races,
+              SUM(CASE WHEN re.horse_id IS NULL THEN 1 ELSE 0 END) AS missing_horse_id,
+              SUM(CASE WHEN re.source_start_id IS NULL THEN 1 ELSE 0 END) AS missing_source_start_id,
+              SUM(CASE WHEN re.id LIKE 'entry_official__%' THEN 1 ELSE 0 END) AS official_style_entry_ids,
+              SUM(CASE WHEN re.data_quality='official_historical_result' THEN 1 ELSE 0 END) AS historical_result_entries
+            FROM waiting w
+            JOIN game_legs gl ON gl.game_round_id=w.game_round_id
+            JOIN race_entries re ON re.race_id=gl.race_id
+            GROUP BY w.case_no
+            ORDER BY w.case_no;
           "
-# probe_nonce: five-minute-post-pr258-check-2026-09-24-1
+# probe_nonce: settlement-deep-diagnostic-2026-09-24-1 five-minute-post-pr258-check-2026-09-24-1
