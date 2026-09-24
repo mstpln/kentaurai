@@ -65,10 +65,12 @@ test('upcoming games UI enhancer is idempotent', () => {
 });
 
 
-test('upcoming game app APIs remain session-private', async () => {
-  const response = await worker.fetch(new Request('https://example.test/app/api/games/upcoming'), { APP_PASSWORD:'synthetic-password' }, {});
-  assert.equal(response.status, 401);
-  assert.deepEqual(await response.json(), { error:'unauthorized' });
+test('upcoming game and game statistics app APIs remain session-private', async () => {
+  for (const path of ['/app/api/games/upcoming','/app/api/games/statistics']) {
+    const response = await worker.fetch(new Request('https://example.test'+path), { APP_PASSWORD:'synthetic-password' }, {});
+    assert.equal(response.status, 401);
+    assert.deepEqual(await response.json(), { error:'unauthorized' });
+  }
 });
 
 test('Spel statistics keeps Analys and global Statistik navigation untouched while enriching existing history cards', () => {
