@@ -84,6 +84,21 @@ jobs:
             GROUP BY status
             ORDER BY status;
 
+            SELECT 'OFFICIAL_HISTORY_FAILED_CHECKPOINT' AS section,
+              start_date,end_date,next_date,next_race_index,status,consecutive_errors,
+              last_run_at,
+              CASE WHEN lease_until IS NULL THEN 'none'
+                   WHEN datetime(lease_until)<=datetime('now') THEN 'expired'
+                   ELSE 'future' END AS lease_state
+            FROM (
+              SELECT start_date,end_date,next_date,next_race_index,status,consecutive_errors,last_run_at,lease_until,created_at
+              FROM historical_backfill_jobs
+              WHERE start_date<>end_date
+              ORDER BY datetime(created_at) DESC,id DESC
+              LIMIT 6
+            )
+            WHERE status='failed';
+
             SELECT 'OFFICIAL_HISTORY_FAILED_ERRORS' AS section,
               CASE
                 WHEN instr(lower(last_error),'unique constraint failed')>0 THEN 'unique_constraint'
@@ -186,4 +201,4 @@ jobs:
                 AND datetime(COALESCE(gr.bet_stop_at,gr.scheduled_start_at,gr.round_date || 'T23:59:59Z')) < datetime('now')
             );
           "
-# probe_nonce: investigate-official-app-action-required-2026-09-24-1
+# probe_nonce: inspect-official-failed-checkpoint-2026-09-24-1
