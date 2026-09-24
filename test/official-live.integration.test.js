@@ -179,7 +179,7 @@ test('closing-market repair fails closed instead of overwriting conflicting prov
   await normalizeCapturedOfficialGame(env,sourceRecordId);
 
   db.prepare(`INSERT INTO source_records (id,source_type,external_id,fetched_at,quality_status)
-    VALUES ('src_other_market','official_provider',?,'2099-01-13T22:00:00.000Z','normalized_verified_subset')`).run('game:'+GAME_ID);
+    VALUES ('src_other_market','official_provider',?,'2099-01-13T22:00:00.001Z','normalized_verified_subset')`).run('game:'+GAME_ID);
   const first=db.prepare('SELECT id FROM betting_snapshots WHERE source_record_id=? ORDER BY leg_number,race_entry_id LIMIT 1').get(sourceRecordId);
   db.prepare("UPDATE betting_snapshots SET source_record_id='src_other_market' WHERE id=?").run(first.id);
 
