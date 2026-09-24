@@ -234,7 +234,10 @@ export async function getWinnerContextsForRound(env,roundId) {
       AND afs.step1_pack_id=COALESCE(
         json_extract(s.metrics_json,'$.step1_pack_id'),
         (SELECT aer.step1_pack_id FROM analysis_external_runs aer
-         WHERE aer.model_version_id=s.model_version_id ORDER BY aer.created_at DESC,aer.id DESC LIMIT 1)
+         WHERE aer.model_version_id=s.model_version_id ORDER BY aer.created_at DESC,aer.id DESC LIMIT 1),
+        (SELECT afs2.step1_pack_id FROM analysis_entry_form_snapshots afs2
+         WHERE afs2.game_round_id=s.game_round_id
+         ORDER BY afs2.as_of DESC,afs2.step1_pack_id DESC LIMIT 1)
       )
     WHERE s.game_round_id=?
     ORDER BY s.id,gl.leg_number
