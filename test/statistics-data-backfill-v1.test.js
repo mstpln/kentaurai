@@ -186,14 +186,14 @@ test('legacy registered systems backfill Form from verified pre-race analysis sn
   assert.equal(state.form_snapshot_ref,result.formSnapshotRef);
   assert.equal(Object.keys(JSON.parse(state.form_as_of_json)).length,8);
 
-  const stats=await getGameStatistics(env,{gameType:'V86'});
-  assert.equal(stats.winners.byForm.reduce((sum,row)=>sum+row.starters,0),8);
-
-  // Winner context reads the same verified backfilled Form set once results exist.
+  // Statistics/history read the same verified backfilled Form set once results exist.
   for(let leg=1;leg<=8;leg+=1){
     db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,gallop,disqualified) VALUES (?,1,'official',0,0)")
       .run('stats_entry_'+leg);
   }
+  const stats=await getGameStatistics(env,{gameType:'V86'});
+  assert.equal(stats.winners.byForm.reduce((sum,row)=>sum+row.starters,0),8);
+
   const detail=await getGameHistoryDetail(env,'stats_round');
   assert.ok(detail.legs.every(leg=>leg.systems.legacy_system.winnerContext?.formRank===1));
 });
