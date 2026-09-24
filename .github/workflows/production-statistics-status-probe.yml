@@ -96,4 +96,4 @@ jobs:
                 AND datetime(COALESCE(gr.bet_stop_at,gr.scheduled_start_at,gr.round_date || 'T23:59:59Z')) < datetime('now')
             );
           "
-# probe_nonce: post-deploy-due-check-2026-09-24-1607Z
+# probe_nonce: verify-post-retry-2026-09-24-1
