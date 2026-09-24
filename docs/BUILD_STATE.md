@@ -346,6 +346,6 @@ The external-analysis production release was accepted after:
 - Existing post-race settlement remains the owner of missing winners, final official market and payout acquisition.
 - The new bounded minute step runs after settlement and handles only remaining statistics-history gaps.
 - Historical Form/Form-rank is reconstructed only from audited Step 1 lineage and only when an exact `pack_id` + `facts_fingerprint` replay succeeds at the original `as_of`.
-- Existing archived final game sources may be re-normalized to repair missing closing-market rows without a new provider fetch.
+- Existing archived final game sources may be repaired from the already archived raw final game source without a new provider fetch.
 - KentaurAI rank, ABCD and spike history are audited from canonical stored analysis/system facts; unavailable historical judgments are not invented.
 - Private admin status/step endpoints expose sanitized coverage state and do not expose raw racing payloads.
