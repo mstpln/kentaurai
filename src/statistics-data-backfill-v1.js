@@ -354,8 +354,7 @@ export async function auditStatisticsRound(env, roundId) {
   const singletonSpikeLegs=Number(spikeIntegrity?.singleton_spike_legs || 0);
   const spikesValid=spikeCount===3 && spikeLegs===3 && singletonSpikeLegs===3;
 
-  const incompleteResultsAfterFinal=Boolean(finalResult) && winnerLegs<8;
-  const resultStatus=(invalidWinnerLegs>0 || incompleteResultsAfterFinal) ? 'unavailable' : winnerLegs===8 ? 'complete' : 'pending';
+  const resultStatus=invalidWinnerLegs>0 ? 'unavailable' : winnerLegs===8 ? 'complete' : 'pending';
   let finalMarketStatus=finalResult
     ? countStatus(closingMarketCount,activeEntries)
     : 'pending';
@@ -404,7 +403,6 @@ export async function auditStatisticsRound(env, roundId) {
     highestPayoutSek:finalResult?.highest_payout_sek == null ? null : Number(finalResult.highest_payout_sek),
     integrityErrors:[
       ...(invalidWinnerLegs>0 ? ['results_multiple_winners'] : []),
-      ...(incompleteResultsAfterFinal ? ['final_game_with_incomplete_results'] : []),
       ...(!spikesValid ? ['registered_system_spike_integrity'] : [])
     ]
   };
