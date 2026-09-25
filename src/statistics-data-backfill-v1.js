@@ -277,6 +277,18 @@ export async function auditStatisticsRound(env, roundId) {
     )
   `,[id]);
 
+  const ambiguousWinnerLegs=await scalar(env,`
+    SELECT COUNT(*) n FROM (
+      SELECT gl.leg_number
+      FROM game_legs gl
+      WHERE gl.game_round_id=?
+        AND (SELECT COUNT(*)
+             FROM race_entries re
+             JOIN race_results rr ON rr.race_entry_id=re.id AND rr.placing=1
+             WHERE re.race_id=gl.race_id)>1
+    )
+  `,[id]);
+
   const finalResult=await env.DB.prepare(`
     SELECT source_record_id,payouts_json,highest_payout_level,highest_payout_sek
     FROM game_round_final_results
@@ -353,7 +365,45 @@ export async function auditStatisticsRound(env, roundId) {
     WHERE system_id=? AND is_spike=1
   `,[system.id]);
 
-  const resultStatus=winnerLegs===8 ? 'complete' : 'pending';
+  const spikeLegs=await scalar(env,`
+    SELECT COUNT(DISTINCT leg_number) n
+    FROM system_selections
+    WHERE system_id=? AND is_spike=1
+  `,[system.id]);
+
+  const singletonSpikeLegs=await scalar(env,`
+    SELECT COUNT(*) n FROM (
+      SELECT leg_number
+      FROM system_selections
+      WHERE system_id=?
+      GROUP BY leg_number
+      HAVING COUNT(*)=1 AND SUM(CASE WHEN is_spike=1 THEN 1 ELSE 0 END)=1
+    )
+  `,[system.id]);
+
+  const selectionLegs=await scalar(env,`
+    SELECT COUNT(DISTINCT leg_number) n
+    FROM system_selections
+    WHERE system_id=?
+  `,[system.id]);
+
+  const invalidSelections=await scalar(env,`
+    SELECT COUNT(*) n
+    FROM system_selections ss
+    LEFT JOIN game_legs gl
+      ON gl.game_round_id=? AND gl.leg_number=ss.leg_number
+    LEFT JOIN race_entries re
+      ON re.id=ss.race_entry_id AND re.race_id=gl.race_id
+    WHERE ss.system_id=? AND re.id IS NULL
+  `,[id,system.id]);
+
+  const integrityReasons=[];
+  if (ambiguousWinnerLegs>0) integrityReasons.push('ambiguous_factual_winners');
+  if (selectionLegs!==8 || spikeCount!==3 || spikeLegs!==3 || singletonSpikeLegs!==3 || invalidSelections>0) {
+    integrityReasons.push('malformed_registered_system');
+  }
+
+  const resultStatus=ambiguousWinnerLegs>0 ? 'unavailable' : winnerLegs===8 ? 'complete' : 'pending';
   let finalMarketStatus=finalResult
     ? countStatus(closingMarketCount,activeEntries)
     : 'pending';
@@ -369,7 +419,7 @@ export async function auditStatisticsRound(env, roundId) {
       ? 'pending'
       : 'unavailable';
 
-  return {
+  const audit={
     version:STATISTICS_DATA_BACKFILL_VERSION,
     roundId:id,
     gameType:round.game_type,
@@ -381,11 +431,16 @@ export async function auditStatisticsRound(env, roundId) {
     counts:{
       activeEntries,
       winnerLegs,
+      ambiguousWinnerLegs,
       closingMarket:closingMarketCount,
       formSnapshots:formSnapshotCount,
       kaiRank:kaiRankCount,
       abcd:abcdCount,
-      spikes:spikeCount
+      spikes:spikeCount,
+      spikeLegs,
+      singletonSpikeLegs,
+      selectionLegs,
+      invalidSelections
     },
     status:{
       results:resultStatus,
@@ -394,12 +449,19 @@ export async function auditStatisticsRound(env, roundId) {
       form:formStatus,
       kaiRank:kaiRankCount>=activeEntries && activeEntries>0 ? 'complete' : 'unavailable',
       abcd:abcdCount>=activeEntries && activeEntries>0 ? 'complete' : 'unavailable',
-      spikes:spikeCount===3 ? 'complete' : 'unavailable'
+      spikes:integrityReasons.includes('malformed_registered_system') ? 'unavailable' : 'complete'
     },
+    integrityReasons,
     finalGameSourceRecordId:finalResult?.source_record_id || null,
     highestPayoutLevel:finalResult?.highest_payout_level == null ? null : Number(finalResult.highest_payout_level),
     highestPayoutSek:finalResult?.highest_payout_sek == null ? null : Number(finalResult.highest_payout_sek)
   };
+  audit.fingerprints={
+    form:formInputFingerprint(audit),
+    finalMarket:finalMarketInputFingerprint(audit)
+  };
+  audit.fingerprints.round=roundInputFingerprint(audit);
+  return audit;
 }
 
 function overallStatus(audit, overrides = {}) {
