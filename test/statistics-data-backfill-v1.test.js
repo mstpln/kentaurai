@@ -632,3 +632,67 @@ test('race-entry identity change reopens a terminal closing-market repair for th
   assert.equal(repairs,1);
   assert.equal(recovered.metrics.finalMarket,'complete');
 });
+
+
+test('closing-market repair is not repeated after canonical coverage becomes complete',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  addStatisticsFinalFacts(db,{market:false,payout:true});
+  let repairs=0;
+  const repair=async()=>{
+    repairs+=1;
+    for(let leg=1;leg<=8;leg+=1){
+      db.prepare("INSERT OR IGNORE INTO betting_snapshots (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id) VALUES (?,'stats_round',?,?, '2099-01-02T22:00:00Z',12.5,1,'stats_final')")
+        .run('stats_idempotent_market_'+leg,leg,'stats_entry_'+leg);
+    }
+  };
+  const first=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z',closingMarketRepairImpl:repair});
+  assert.equal(first.metrics.finalMarket,'complete');
+  assert.equal(repairs,1);
+  const second=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:01:00Z',closingMarketRepairImpl:repair});
+  assert.equal(second.metrics.finalMarket,'complete');
+  assert.equal(repairs,1);
+});
+
+test('malformed historical system is surfaced for review without rewriting selections',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  db.prepare("DELETE FROM system_selections WHERE system_id='stats_system' AND leg_number=8").run();
+  const before=db.prepare("SELECT COUNT(*) n FROM system_selections WHERE system_id='stats_system'").get().n;
+  const result=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(result.status,'manual_review');
+  assert.equal(result.metrics.spikes,'unavailable');
+  assert.match(result.reason,/malformed_registered_system/);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM system_selections WHERE system_id='stats_system'").get().n,before);
+});
+
+test('ambiguous duplicate factual winners fail closed instead of being counted as complete results',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('stats_duplicate_horse','Duplicate Winner')").run();
+  db.prepare("INSERT INTO race_entries (id,race_id,horse_id,start_number,actual_lane,start_tier,handicap_m,actual_start_distance_m,scratched) VALUES ('stats_duplicate_entry','stats_race_1','stats_duplicate_horse',9,9,1,0,2140,0)").run();
+  db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,gallop,disqualified) VALUES ('stats_entry_1',1,'official',0,0)").run();
+  db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,gallop,disqualified) VALUES ('stats_duplicate_entry',1,'official',0,0)").run();
+  const audit=await auditStatisticsRound(env,'stats_round');
+  assert.equal(audit.status.results,'unavailable');
+  assert.equal(audit.counts.ambiguousWinnerLegs,1);
+  assert.ok(audit.integrityReasons.includes('ambiguous_factual_winners'));
+});
+
+test('due waiting work is selected before low-priority terminal maintenance',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  addStatisticsFinalFacts(db);
+  const terminal=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(terminal.status,'complete_with_gaps');
+  db.prepare("UPDATE statistics_data_backfill_rounds SET next_check_at='2100-01-01T00:01:00Z' WHERE game_round_id='stats_round'").run();
+
+  seedSecondStatisticsRound(db);
+  await ensureStatisticsDataBackfillQueue(env,'2100-01-01T00:02:00Z');
+  const next=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:03:00Z'});
+  assert.equal(next.roundId,'stats_round_2');
+});
