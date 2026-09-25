@@ -777,13 +777,22 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
     let finalMarketErrorClass=prior?.final_market_error_class || null;
     const errors=[];
 
+    const legacyTerminalForm=
+      prior?.form_status==='manual_review'
+      && !prior?.form_attempt_fingerprint
+      && /step1_replay_fingerprint_mismatch/i.test(String(prior?.form_terminal_reason || prior?.last_error || ''));
     const formTerminalSameInput=
-      ['manual_review','unavailable'].includes(prior?.form_status)
-      && prior?.form_attempt_fingerprint
-      && prior.form_attempt_fingerprint===fingerprints.form;
+      legacyTerminalForm
+      || (
+        ['manual_review','unavailable'].includes(prior?.form_status)
+        && prior?.form_attempt_fingerprint
+        && prior.form_attempt_fingerprint===fingerprints.form
+      );
     if(formTerminalSameInput){
       formStatus=prior.form_status;
+      formAttemptFingerprint=prior?.form_attempt_fingerprint || fingerprints.form;
       formTerminalReason=prior.form_terminal_reason || prior.last_error || 'terminal_form_state';
+      formErrorClass=prior?.form_error_class || (legacyTerminalForm ? 'deterministic_mismatch' : null);
     } else if(prior?.form_attempt_fingerprint && prior.form_attempt_fingerprint!==fingerprints.form){
       formAttemptFingerprint=null;
       formTerminalReason=null;
@@ -792,13 +801,22 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
       formErrorClass=null;
     }
 
+    const legacyTerminalMarket=
+      prior?.final_market_status==='manual_review'
+      && !prior?.final_market_attempt_fingerprint
+      && /closing_market_manual_review/i.test(String(prior?.final_market_terminal_reason || prior?.last_error || ''));
     const marketTerminalSameInput=
-      ['manual_review','unavailable'].includes(prior?.final_market_status)
-      && prior?.final_market_attempt_fingerprint
-      && prior.final_market_attempt_fingerprint===fingerprints.finalMarket;
+      legacyTerminalMarket
+      || (
+        ['manual_review','unavailable'].includes(prior?.final_market_status)
+        && prior?.final_market_attempt_fingerprint
+        && prior.final_market_attempt_fingerprint===fingerprints.finalMarket
+      );
     if(marketTerminalSameInput){
       finalMarketStatus=prior.final_market_status;
+      finalMarketAttemptFingerprint=prior?.final_market_attempt_fingerprint || fingerprints.finalMarket;
       finalMarketTerminalReason=prior.final_market_terminal_reason || prior.last_error || 'terminal_final_market_state';
+      finalMarketErrorClass=prior?.final_market_error_class || (legacyTerminalMarket ? 'deterministic_gap' : null);
     } else if(prior?.final_market_attempt_fingerprint && prior.final_market_attempt_fingerprint!==fingerprints.finalMarket){
       finalMarketAttemptFingerprint=null;
       finalMarketTerminalReason=null;
