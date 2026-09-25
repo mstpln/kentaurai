@@ -404,10 +404,9 @@ export async function auditStatisticsRound(env, roundId) {
   }
 
   const resultStatus=ambiguousWinnerLegs>0 ? 'unavailable' : winnerLegs===8 ? 'complete' : 'pending';
-  let finalMarketStatus=finalResult
-    ? countStatus(closingMarketCount,activeEntries)
-    : 'pending';
+  let finalMarketStatus='pending';
   if (finalResult && activeEntries===0) finalMarketStatus='unavailable';
+  else if (finalResult && activeEntries>0 && closingMarketCount>=activeEntries) finalMarketStatus='complete';
 
   const payoutStatus=finalResult
     ? (finalResult.payouts_json && finalResult.highest_payout_sek != null ? 'complete' : 'unavailable')
