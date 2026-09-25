@@ -982,7 +982,9 @@ export async function getStatisticsDataBackfillStatus(env) {
   `).first();
   const {results:attention}=await env.DB.prepare(`
     SELECT game_round_id,status,action_state,result_status,final_market_status,payout_status,form_status,
-           kai_rank_status,abcd_status,spike_status,error_class,next_retry_at,last_error,last_checked_at
+           kai_rank_status,abcd_status,spike_status,error_class,next_retry_at,last_error,last_checked_at,
+           form_terminal_reason,form_retry_count,form_next_retry_at,
+           final_market_terminal_reason,final_market_retry_count,final_market_next_retry_at
     FROM statistics_data_backfill_rounds
     WHERE action_state IN ('waiting','retryable','manual_review','complete_with_gaps')
     ORDER BY
