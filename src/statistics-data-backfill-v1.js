@@ -476,6 +476,13 @@ async function backfillState(env, roundId) {
   `).bind(roundId).first();
 }
 
+async function freshAudit(env, roundId) {
+  const state=await backfillState(env,roundId);
+  const audit=await auditStatisticsRound(env,roundId);
+  const fingerprints=await auditFingerprints(audit,state);
+  return { state,audit,fingerprints };
+}
+
 async function structuralEligibility(env, roundId) {
   return env.DB.prepare(`
     SELECT
@@ -760,8 +767,10 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
     if(Number(structure?.leg_count || 0)!==8) {
       return persistStructuralFailure(env,target.game_round_id,leaseToken,now,'invalid_game_leg_count');
     }
-    let audit=await auditStatisticsRound(env,target.game_round_id);
-    let fingerprints=await auditFingerprints(audit,prior);
+    let audited=await freshAudit(env,target.game_round_id);
+    let audit=audited.audit;
+    let auditState=audited.state;
+    let fingerprints=audited.fingerprints;
     let attempted=false;
     let formStatus=audit.status.form;
     let finalMarketStatus=audit.status.finalMarket;
@@ -831,8 +840,10 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
       finalMarketAttemptFingerprint=fingerprints.finalMarket;
       try {
         const repair=await repairCapturedOfficialClosingMarket(env,audit.finalGameSourceRecordId);
-        audit=await auditStatisticsRound(env,target.game_round_id);
-        fingerprints=await auditFingerprints(audit,await backfillState(env,target.game_round_id));
+        audited=await freshAudit(env,target.game_round_id);
+        audit=audited.audit;
+        auditState=audited.state;
+        fingerprints=audited.fingerprints;
         finalMarketStatus=audit.status.finalMarket;
         finalMarketRetryCount=0;
         finalMarketNextRetryAt=null;
@@ -885,8 +896,10 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
         } else if(replay.status==='unavailable') {
           formErrorClass='deterministic_gap';
         } else if (replay.status==='complete') {
-          audit=await auditStatisticsRound(env,target.game_round_id);
-          fingerprints=await auditFingerprints(audit,await backfillState(env,target.game_round_id));
+          audited=await freshAudit(env,target.game_round_id);
+          audit=audited.audit;
+          auditState=audited.state;
+          fingerprints=audited.fingerprints;
           formStatus=audit.status.form;
         }
       } catch (error) {
@@ -929,7 +942,6 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
     ];
     const lastError=combinedErrors.length ? combinedErrors.join(' | ').slice(0,1000) : null;
     const errorClass=integrityErrors[0] || formErrorClass || finalMarketErrorClass || null;
-    const stateBeforePersist=await backfillState(env,target.game_round_id);
     const persisted=await persistAudit(env,audit,{
       formStatus,
       finalMarketStatus,
@@ -952,7 +964,7 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
       actionState,
       nextRetryAt,
       errorClass,
-      auditedRevision:Number(stateBeforePersist?.input_revision || 0),
+      auditedRevision:Number(auditState?.input_revision || 0),
       leaseToken
     });
     return {
