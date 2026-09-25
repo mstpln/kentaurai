@@ -472,6 +472,40 @@ async function backfillState(env, roundId) {
   `).bind(roundId).first();
 }
 
+async function structuralEligibility(env, roundId) {
+  return env.DB.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM systems WHERE game_round_id=?) AS system_count,
+      (SELECT COUNT(*) FROM game_legs WHERE game_round_id=?) AS leg_count
+  `).bind(roundId,roundId).first();
+}
+
+async function persistStructuralFailure(env, roundId, leaseToken, now, errorClass) {
+  const write=await env.DB.prepare(`
+    UPDATE statistics_data_backfill_rounds
+    SET status='manual_review',
+        action_state='manual_review',
+        error_class=?,
+        last_error=?,
+        last_audit_at=?,
+        last_checked_at=?,
+        next_retry_at=NULL,
+        audited_revision=input_revision,
+        lease_token=NULL,
+        lease_until=NULL,
+        updated_at=CURRENT_TIMESTAMP
+    WHERE game_round_id=? AND lease_token=?
+  `).bind(errorClass,errorClass,now,now,roundId,leaseToken).run();
+  if(Number(write.meta?.changes || 0)!==1) throw new Error('statistics backfill lease ownership was lost before structural persist');
+  return {
+    version:STATISTICS_DATA_BACKFILL_VERSION,
+    status:'manual_review',
+    actionState:'manual_review',
+    roundId,
+    reason:errorClass
+  };
+}
+
 function actionStateFor(overall, metrics, { hasRetryable = false } = {}) {
   if (Object.values(metrics).includes('pending')) return hasRetryable ? 'retryable' : 'waiting';
   if (overall==='manual_review') return 'manual_review';
@@ -715,6 +749,13 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
 
   try {
     const prior=await backfillState(env,target.game_round_id);
+    const structure=await structuralEligibility(env,target.game_round_id);
+    if(Number(structure?.system_count || 0)===0) {
+      return persistStructuralFailure(env,target.game_round_id,leaseToken,now,'missing_registered_system');
+    }
+    if(Number(structure?.leg_count || 0)!==8) {
+      return persistStructuralFailure(env,target.game_round_id,leaseToken,now,'invalid_game_leg_count');
+    }
     let audit=await auditStatisticsRound(env,target.game_round_id);
     let fingerprints=await auditFingerprints(audit,prior);
     let attempted=false;
