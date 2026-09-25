@@ -45,7 +45,7 @@ CREATE INDEX IF NOT EXISTS idx_statistics_backfill_revision
 CREATE INDEX IF NOT EXISTS idx_statistics_backfill_lease
   ON statistics_data_backfill_rounds(lease_until, game_round_id);
 
--- Existing rows are deliberately made actionable once. The first v2 audit
+-- Existing rows are deliberately made actionable once. The first state-machine audit
 -- reconciles old cached statuses with current canonical facts without resetting history.
 UPDATE statistics_data_backfill_rounds
 SET audited_revision = -1,
@@ -87,6 +87,11 @@ END;
 
 CREATE TRIGGER IF NOT EXISTS trg_stats_rev_betting_insert
 AFTER INSERT ON betting_snapshots
+WHEN EXISTS (
+  SELECT 1 FROM game_round_final_results gfr
+  WHERE gfr.game_round_id=NEW.game_round_id
+    AND gfr.source_record_id=NEW.source_record_id
+)
 BEGIN
   UPDATE statistics_data_backfill_rounds
   SET input_revision=input_revision+1,
@@ -96,6 +101,11 @@ END;
 
 CREATE TRIGGER IF NOT EXISTS trg_stats_rev_betting_update
 AFTER UPDATE ON betting_snapshots
+WHEN EXISTS (
+  SELECT 1 FROM game_round_final_results gfr
+  WHERE (gfr.game_round_id=OLD.game_round_id AND gfr.source_record_id=OLD.source_record_id)
+     OR (gfr.game_round_id=NEW.game_round_id AND gfr.source_record_id=NEW.source_record_id)
+)
 BEGIN
   UPDATE statistics_data_backfill_rounds
   SET input_revision=input_revision+1,
@@ -105,6 +115,11 @@ END;
 
 CREATE TRIGGER IF NOT EXISTS trg_stats_rev_betting_delete
 AFTER DELETE ON betting_snapshots
+WHEN EXISTS (
+  SELECT 1 FROM game_round_final_results gfr
+  WHERE gfr.game_round_id=OLD.game_round_id
+    AND gfr.source_record_id=OLD.source_record_id
+)
 BEGIN
   UPDATE statistics_data_backfill_rounds
   SET input_revision=input_revision+1,
@@ -219,7 +234,7 @@ BEGIN
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_stats_rev_system_update
-AFTER UPDATE ON systems
+AFTER UPDATE OF model_version_id,system_type,created_at,metrics_json ON systems
 BEGIN
   UPDATE statistics_data_backfill_rounds
   SET input_revision=input_revision+1,
@@ -272,7 +287,7 @@ BEGIN
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_stats_rev_external_run_update
-AFTER UPDATE ON analysis_external_runs
+AFTER UPDATE OF main_system_id,step1_pack_id,step1_pack_as_of,step1_generated_at,step1_facts_fingerprint ON analysis_external_runs
 BEGIN
   UPDATE statistics_data_backfill_rounds
   SET input_revision=input_revision+1,
@@ -282,6 +297,7 @@ END;
 
 CREATE TRIGGER IF NOT EXISTS trg_stats_rev_external_export_insert
 AFTER INSERT ON analysis_external_exports
+WHEN NEW.stage='step1'
 BEGIN
   UPDATE statistics_data_backfill_rounds
   SET input_revision=input_revision+1,
@@ -291,6 +307,7 @@ END;
 
 CREATE TRIGGER IF NOT EXISTS trg_stats_rev_external_export_update
 AFTER UPDATE ON analysis_external_exports
+WHEN OLD.stage='step1' OR NEW.stage='step1'
 BEGIN
   UPDATE statistics_data_backfill_rounds
   SET input_revision=input_revision+1,
@@ -302,8 +319,7 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_ai_analysis_insert
 AFTER INSERT ON ai_race_analyses
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1,
-      form_input_revision=form_input_revision+1
+  SET input_revision=input_revision+1
   WHERE game_round_id IN (SELECT game_round_id FROM game_legs WHERE race_id=NEW.race_id);
 END;
 
@@ -311,8 +327,7 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_ai_analysis_update
 AFTER UPDATE ON ai_race_analyses
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1,
-      form_input_revision=form_input_revision+1
+  SET input_revision=input_revision+1
   WHERE game_round_id IN (
     SELECT game_round_id FROM game_legs WHERE race_id IN (OLD.race_id,NEW.race_id)
   );
