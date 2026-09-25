@@ -97,6 +97,20 @@ jobs:
             GROUP BY normalization_owner,quality_status
             ORDER BY normalization_owner,quality_status;
 
+            SELECT 'STATISTICS_ERROR_SANITIZED' AS section,
+              status,
+              substr(
+                replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(
+                  COALESCE(last_error,''),
+                  '0','#'),'1','#'),'2','#'),'3','#'),'4','#'),'5','#'),'6','#'),'7','#'),'8','#'),'9','#'),
+                1,500
+              ) AS error_sanitized,
+              COUNT(*) AS count
+            FROM statistics_data_backfill_rounds
+            WHERE last_error IS NOT NULL
+            GROUP BY status,error_sanitized
+            ORDER BY status,count DESC;
+
             SELECT 'STATISTICS_ACTIVITY' AS section,
               MAX(last_checked_at) AS latest_checked_at,
               SUM(attempt_count) AS total_attempts,
@@ -534,4 +548,4 @@ jobs:
             GROUP BY case_no,source_rank,path,status,error_class
             ORDER BY case_no,source_rank,path,status,error_class;
           "
-# probe_nonce: 2026-09-25-full-workflow-backfill-audit-2
+# probe_nonce: 2026-09-25-statistics-error-root-cause-1
