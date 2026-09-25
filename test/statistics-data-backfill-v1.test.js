@@ -594,3 +594,34 @@ test('pre-existing structurally invalid queue rows fail closed and can wake afte
   assert.equal(repaired.roundId,'stats_round');
   assert.equal(repaired.metrics.form,'complete');
 });
+
+
+test('legacy manual-review Form row is adopted without replay during first state-machine reconciliation',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  const pack=await seedRecordedSystem(env,db);
+  db.prepare("UPDATE analysis_external_runs SET step1_facts_fingerprint='sha256:wrong' WHERE id='stats_run'").run();
+  db.prepare("UPDATE analysis_external_exports SET artifact_fingerprint='sha256:wrong' WHERE game_round_id='stats_round' AND stage='step1'").run();
+  await ensureStatisticsDataBackfillQueue(env,'2100-01-01T00:00:00Z');
+  db.prepare(`UPDATE statistics_data_backfill_rounds
+    SET status='manual_review',
+        action_state='manual_review',
+        form_status='manual_review',
+        form_attempt_fingerprint=NULL,
+        form_terminal_reason=NULL,
+        form_error_class=NULL,
+        attempt_count=886,
+        last_error='form_replay: step1_replay_fingerprint_mismatch',
+        audited_revision=-1
+    WHERE game_round_id='stats_round'`).run();
+
+  const result=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:01:00Z'});
+  assert.equal(result.roundId,'stats_round');
+  assert.equal(result.metrics.form,'manual_review');
+  const state=db.prepare(`SELECT attempt_count,form_attempt_fingerprint,form_error_class
+    FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'`).get();
+  assert.equal(state.attempt_count,886);
+  assert.ok(state.form_attempt_fingerprint);
+  assert.equal(state.form_error_class,'deterministic_mismatch');
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM analysis_entry_form_snapshots WHERE step1_pack_id=?").get(pack.packId).n,0);
+});
