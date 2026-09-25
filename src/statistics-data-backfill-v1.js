@@ -26,6 +26,12 @@ function lifecycleFingerprint(prefix, ...parts) {
   return stableId(prefix,...parts.map((part)=>part == null ? 'none' : String(part)));
 }
 
+function isoAtOrBefore(value, boundary) {
+  const valueMs=Date.parse(String(value || ''));
+  const boundaryMs=Date.parse(String(boundary || ''));
+  return Number.isFinite(valueMs) && Number.isFinite(boundaryMs) && valueMs<=boundaryMs;
+}
+
 function formInputFingerprint(audit) {
   return lifecycleFingerprint(
     'statistics-form-input-v2',
@@ -242,11 +248,22 @@ export async function auditStatisticsRound(env, roundId) {
   `).bind(id).first();
   if (!round) throw new Error('V85/V86 round was not found');
 
+  const legCount=await scalar(env,'SELECT COUNT(*) n FROM game_legs WHERE game_round_id=?',[id]);
+  if (legCount!==8) throw new Error('round does not have exactly eight legs');
+
   const system=await primarySystem(env,id);
   if (!system) throw new Error('round has no registered system');
   const lineage=await step1Lineage(env,id,system);
   let formLineage=null;
-  if(lineage?.audited && lineage.packId && lineage.asOf){
+  if(
+    lineage?.audited &&
+    lineage.packId &&
+    lineage.asOf &&
+    lineage.generatedAt &&
+    isoAtOrBefore(lineage.asOf,round.pre_race_cutoff) &&
+    isoAtOrBefore(lineage.generatedAt,round.pre_race_cutoff) &&
+    isoAtOrBefore(lineage.generatedAt,system.created_at)
+  ){
     const normalizedAsOf=new Date(Date.parse(lineage.asOf)).toISOString();
     formLineage={
       kind:'step1_pack',
