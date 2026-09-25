@@ -298,9 +298,13 @@ A single race must not directly change model weights. Candidate learnings are re
 5. Historical KentaurAI rank and ABCD come only from the canonical stored pre-race analysis associated with the primary registered system. They are not regenerated with a newer model.
 6. Spike history comes only from the registered primary system and must retain the exact-three-spikes invariant; legacy or incomplete rows are surfaced as unavailable rather than rewritten.
 7. Coverage/backfill state is operational metadata only. Canonical facts remain in their existing racing, analysis, system, market and Form snapshot tables.
-8. The minute orchestrator advances at most one statistics-history round after post-race settlement, preserving bounded Worker load and resumability.
-9. Retryable storage/database repair failures remain `pending` so the scheduler can retry them. Deterministic archive/provenance inconsistencies are `manual_review`; a single transient failure must never permanently convert a recoverable metric into `unavailable`.
-10. Legacy historical analysis evidence is usable only when both its `data_snapshot_at` and the analysis record creation time are compatible with the registered system and verified pre-race cutoff. Historical Form also applies source fetched-at cutoffs to every result row used in field-relative calculations.
+8. The minute orchestrator advances at most one statistics-history round after post-race settlement, preserving bounded Worker load and resumability. A per-round lease prevents overlapping cron/admin invocations from persisting over one another.
+9. Overall status is derived from fresh metric audits. Work state is separate: `waiting` means upstream facts are absent and only a relevant source change wakes the row; `retryable` is reserved for transient technical failures with capped exponential backoff; `manual_review` and `complete_with_gaps` are terminal for unchanged inputs.
+10. A terminal Form decision is metric-local. It never blocks later results, closing market or payout refresh. Metric-specific input revisions re-open only the affected terminal work; for example a new final game wakes factual market/payout auditing without replaying an unchanged Form fingerprint.
+11. Deterministic Step 1 mismatch, unsupported legacy Form reconstruction, archive/provenance conflicts and repeated unchanged non-infrastructure exceptions stop automatically. Transient D1/R2/network failures remain retryable with backoff and do not hot-loop every minute.
+12. Passive audits do not increase `attempt_count`; only an actual Form replay or closing-market repair does. Once inputs stop changing, waiting/terminal rows converge to idle and cannot starve later actionable rounds.
+13. Duplicate winner facts and malformed registered spike selections are data-integrity manual-review conditions. Historical system selections are never rewritten to make them valid.
+14. Legacy historical analysis evidence is usable only when both its `data_snapshot_at` and the analysis record creation time are compatible with the registered system and verified pre-race cutoff. Historical Form also applies source fetched-at cutoffs to every result row used in field-relative calculations.
 
 
 ## Historical official structural source gaps do not stop multi-year backfill
