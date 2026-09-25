@@ -45,6 +45,22 @@ test('0041 wakes only the relevant terminal metric for factual versus Form input
   db.prepare("INSERT INTO statistics_data_backfill_rounds (game_round_id,status,result_status,final_market_status,payout_status,form_status,kai_rank_status,abcd_status,spike_status,last_checked_at) VALUES ('rev_round','manual_review','pending','pending','pending','manual_review','unavailable','unavailable','unavailable','2100-01-01T00:00:00Z')").run();
   db.exec(readFileSync(new URL('../migrations/0041_statistics_backfill_state_machine.sql',import.meta.url),'utf8'));
 
+  const initial=db.prepare("SELECT input_revision,form_input_revision FROM statistics_data_backfill_rounds WHERE game_round_id='rev_round'").get();
+  db.prepare(`INSERT INTO analysis_external_exports
+    (id,game_round_id,stage,artifact_id,artifact_fingerprint,as_of,cutoff_at,artifact_json,generated_at,created_at)
+    VALUES ('step2_irrelevant','rev_round','step2','artifact-step2','sha256:step2','2090-01-01T11:00:00Z',
+      '2090-01-01T11:00:00Z','{}','2090-01-01T11:00:00Z','2090-01-01T11:00:00Z')`).run();
+  const afterStep2=db.prepare("SELECT input_revision,form_input_revision FROM statistics_data_backfill_rounds WHERE game_round_id='rev_round'").get();
+  assert.deepEqual(afterStep2,initial);
+
+  db.prepare(`INSERT INTO analysis_external_exports
+    (id,game_round_id,stage,artifact_id,artifact_fingerprint,as_of,cutoff_at,artifact_json,generated_at,created_at)
+    VALUES ('step1_relevant','rev_round','step1','artifact-step1','sha256:step1','2090-01-01T11:00:00Z',
+      '2090-01-01T11:00:00Z','{}','2090-01-01T11:00:00Z','2090-01-01T11:00:00Z')`).run();
+  const afterStep1=db.prepare("SELECT input_revision,form_input_revision FROM statistics_data_backfill_rounds WHERE game_round_id='rev_round'").get();
+  assert.ok(afterStep1.input_revision>afterStep2.input_revision);
+  assert.ok(afterStep1.form_input_revision>afterStep2.form_input_revision);
+
   db.prepare("INSERT INTO source_records (id,source_type,fetched_at,quality_status) VALUES ('rev_source','official_provider','2090-01-01T22:00:00Z','normalized_verified_subset')").run();
   db.prepare(`INSERT INTO game_round_final_results
     (game_round_id,game_type,source_record_id,captured_at,status,payouts_json)
