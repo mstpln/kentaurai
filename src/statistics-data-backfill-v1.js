@@ -50,23 +50,28 @@ function transientInfrastructureFailure(error) {
 
 async function primarySystem(env, roundId) {
   return env.DB.prepare(`
+    WITH preferred AS (
+      SELECT aer.main_system_id
+      FROM analysis_external_runs aer
+      JOIN systems linked ON linked.id=aer.main_system_id AND linked.game_round_id=aer.game_round_id
+      WHERE aer.game_round_id=?
+      ORDER BY datetime(aer.created_at) DESC,aer.id DESC
+      LIMIT 1
+    )
     SELECT s.id,s.model_version_id,s.created_at,s.metrics_json
     FROM systems s
-    WHERE s.id=COALESCE(
-      (SELECT aer.main_system_id
-       FROM analysis_external_runs aer
-       WHERE aer.game_round_id=?
-       ORDER BY datetime(aer.created_at) DESC,aer.id DESC
-       LIMIT 1),
-      (SELECT s1.id FROM systems s1
-       WHERE s1.game_round_id=? AND s1.system_type='main'
-       ORDER BY datetime(s1.created_at) DESC,s1.id ASC LIMIT 1),
-      (SELECT s2.id FROM systems s2
-       WHERE s2.game_round_id=?
-       ORDER BY datetime(s2.created_at) ASC,s2.id ASC LIMIT 1)
-    )
+    WHERE s.game_round_id=?
+    ORDER BY
+      CASE
+        WHEN s.id=(SELECT main_system_id FROM preferred) THEN 0
+        WHEN s.system_type='main' THEN 1
+        ELSE 2
+      END,
+      CASE WHEN s.system_type='main' THEN datetime(s.created_at) END DESC,
+      CASE WHEN s.system_type<>'main' THEN datetime(s.created_at) END ASC,
+      s.id ASC
     LIMIT 1
-  `).bind(roundId,roundId,roundId).first();
+  `).bind(roundId,roundId).first();
 }
 
 function jsonValue(text, key) {
