@@ -257,25 +257,23 @@ export async function auditStatisticsRound(env, roundId) {
   if (!system) throw new Error('round has no registered system');
   const lineage=await step1Lineage(env,id,system);
   let formLineage=null;
-  if (lineage) {
-    if(
-      lineage.audited &&
-      lineage.packId &&
-      lineage.asOf &&
-      lineage.generatedAt &&
-      isoAtOrBefore(lineage.asOf,round.pre_race_cutoff) &&
-      isoAtOrBefore(lineage.generatedAt,round.pre_race_cutoff) &&
-      isoAtOrBefore(lineage.generatedAt,system.created_at)
-    ){
-      const normalizedAsOf=new Date(Date.parse(lineage.asOf)).toISOString();
-      formLineage={
-        kind:'step1_pack',
-        audited:true,
-        snapshotRef:lineage.packId,
-        asOfByLeg:new Map(Array.from({length:8},(_,index)=>[index+1,normalizedAsOf]))
-      };
-    }
-  } else {
+  if(
+    lineage?.audited &&
+    lineage.packId &&
+    lineage.asOf &&
+    lineage.generatedAt &&
+    isoAtOrBefore(lineage.asOf,round.pre_race_cutoff) &&
+    isoAtOrBefore(lineage.generatedAt,round.pre_race_cutoff) &&
+    isoAtOrBefore(lineage.generatedAt,system.created_at)
+  ){
+    const normalizedAsOf=new Date(Date.parse(lineage.asOf)).toISOString();
+    formLineage={
+      kind:'step1_pack',
+      audited:true,
+      snapshotRef:lineage.packId,
+      asOfByLeg:new Map(Array.from({length:8},(_,index)=>[index+1,normalizedAsOf]))
+    };
+  } else if (!lineage || (lineage.source==='system_metrics' && !lineage.audited)) {
     formLineage=await legacyFormLineage(env,id,system,round.pre_race_cutoff);
   }
 
