@@ -485,10 +485,14 @@ async function freshAudit(env, roundId) {
 
 async function structuralEligibility(env, roundId) {
   return env.DB.prepare(`
-    SELECT
-      (SELECT COUNT(*) FROM systems WHERE game_round_id=?) AS system_count,
-      (SELECT COUNT(*) FROM game_legs WHERE game_round_id=?) AS leg_count
-  `).bind(roundId,roundId).first();
+    SELECT gr.game_type,
+      COALESCE(gr.bet_stop_at,gr.scheduled_start_at,gr.round_date || 'T23:59:59Z') AS historical_cutoff,
+      (SELECT COUNT(*) FROM systems WHERE game_round_id=gr.id) AS system_count,
+      (SELECT COUNT(*) FROM game_legs WHERE game_round_id=gr.id) AS leg_count
+    FROM game_rounds gr
+    WHERE gr.id=?
+    LIMIT 1
+  `).bind(roundId).first();
 }
 
 async function persistStructuralFailure(env, roundId, leaseToken, now, errorClass) {
@@ -663,23 +667,32 @@ export async function ensureStatisticsDataBackfillQueue(env, value = Date.now())
 
 async function nextQueuedRound(env, now) {
   return env.DB.prepare(`
-    SELECT game_round_id
-    FROM statistics_data_backfill_rounds
-    WHERE (lease_until IS NULL OR datetime(lease_until)<=datetime(?))
+    SELECT sdb.game_round_id
+    FROM statistics_data_backfill_rounds sdb
+    JOIN game_rounds gr ON gr.id=sdb.game_round_id
+    WHERE (sdb.lease_until IS NULL OR datetime(sdb.lease_until)<=datetime(?))
       AND (
-        audited_revision<input_revision
+        sdb.audited_revision<sdb.input_revision
         OR (
-          action_state='retryable'
-          AND next_retry_at IS NOT NULL
-          AND datetime(next_retry_at)<=datetime(?)
+          sdb.action_state='retryable'
+          AND sdb.next_retry_at IS NOT NULL
+          AND datetime(sdb.next_retry_at)<=datetime(?)
         )
       )
+      AND (
+        gr.game_type NOT IN ('V85','V86')
+        OR datetime(COALESCE(
+          gr.bet_stop_at,
+          gr.scheduled_start_at,
+          gr.round_date || 'T23:59:59Z'
+        )) < datetime(?)
+      )
     ORDER BY
-      CASE WHEN audited_revision<input_revision THEN 0 ELSE 1 END,
-      datetime(COALESCE(next_retry_at,last_audit_at,last_checked_at)) ASC,
-      game_round_id ASC
+      CASE WHEN sdb.audited_revision<sdb.input_revision THEN 0 ELSE 1 END,
+      datetime(COALESCE(sdb.next_retry_at,sdb.last_audit_at,sdb.last_checked_at)) ASC,
+      sdb.game_round_id ASC
     LIMIT 1
-  `).bind(now,now).first();
+  `).bind(now,now,now).first();
 }
 
 async function claimRound(env, roundId, now) {
@@ -761,10 +774,19 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
   try {
     const prior=await backfillState(env,target.game_round_id);
     const structure=await structuralEligibility(env,target.game_round_id);
-    if(Number(structure?.system_count || 0)===0) {
+    if(!structure) {
+      return persistStructuralFailure(env,target.game_round_id,leaseToken,now,'missing_game_round');
+    }
+    if(!['V85','V86'].includes(structure.game_type)) {
+      return persistStructuralFailure(env,target.game_round_id,leaseToken,now,'ineligible_game_type');
+    }
+    if(!structure.historical_cutoff || Date.parse(structure.historical_cutoff)>=Date.parse(now)) {
+      throw new Error('round is not yet eligible for historical statistics backfill');
+    }
+    if(Number(structure.system_count || 0)===0) {
       return persistStructuralFailure(env,target.game_round_id,leaseToken,now,'missing_registered_system');
     }
-    if(Number(structure?.leg_count || 0)!==8) {
+    if(Number(structure.leg_count || 0)!==8) {
       return persistStructuralFailure(env,target.game_round_id,leaseToken,now,'invalid_game_leg_count');
     }
     let audited=await freshAudit(env,target.game_round_id);
