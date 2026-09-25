@@ -508,4 +508,4 @@ jobs:
             GROUP BY case_no,source_rank,path,status,error_class
             ORDER BY case_no,source_rank,path,status,error_class;
           "
-# probe_nonce: post-pr259-direct-final-fact-verification-2026-09-24-7
+# probe_nonce: 2026-09-25-full-workflow-backfill-audit-1
