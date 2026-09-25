@@ -48,7 +48,7 @@ function formInputFingerprint(audit) {
 }
 
 function finalMarketInputFingerprint(audit) {
-  return lifecycleFingerprint('statistics-final-market-input-v2',audit.finalGameSourceRecordId,audit.counts.activeEntries);
+  return lifecycleFingerprint('statistics-final-market-input-v2',audit.finalGameSourceRecordId,audit.counts.activeEntries,audit.entryIdentityVersion);
 }
 
 function roundInputFingerprint(audit) {
@@ -282,6 +282,14 @@ export async function auditStatisticsRound(env, roundId) {
     WHERE gl.game_round_id=? AND re.scratched=0
   `,[id]);
 
+  const entryIdentityVersionRow=await env.DB.prepare(`
+    SELECT MAX(re.updated_at) value
+    FROM game_legs gl
+    JOIN race_entries re ON re.race_id=gl.race_id
+    WHERE gl.game_round_id=?
+  `).bind(id).first();
+  const entryIdentityVersion=entryIdentityVersionRow?.value || null;
+
   const winnerLegs=await scalar(env,`
     SELECT COUNT(*) n FROM (
       SELECT gl.leg_number
@@ -468,6 +476,7 @@ export async function auditStatisticsRound(env, roundId) {
       spikes:integrityReasons.includes('malformed_registered_system') ? 'unavailable' : 'complete'
     },
     integrityReasons,
+    entryIdentityVersion,
     finalGameSourceRecordId:finalResult?.source_record_id || null,
     highestPayoutLevel:finalResult?.highest_payout_level == null ? null : Number(finalResult.highest_payout_level),
     highestPayoutSek:finalResult?.highest_payout_sek == null ? null : Number(finalResult.highest_payout_sek)
@@ -637,7 +646,7 @@ function controlForForm(state, audit, at) {
   } else if (control.terminalFingerprint===fp) {
     control.effectiveStatus=control.terminalReason?.startsWith('verified_') ? 'unavailable' : 'manual_review';
     control.nextRetryAt=null;
-  } else if (control.retryCount>=STATISTICS_MAX_FORM_RETRIES) {
+  } else if (control.retryCount>=STATISTICS_MAX_FORM_RETRIES && control.errorClass==='form_replay_other') {
     control={...control,effectiveStatus:'manual_review',terminalFingerprint:fp,terminalReason:'form_replay_retry_exhausted',errorClass:'form_replay_retry_exhausted',nextRetryAt:null};
   }
   control.retryBlocked=Boolean(control.nextRetryAt && Date.parse(control.nextRetryAt)>Date.parse(at));
@@ -822,7 +831,7 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
       } catch (error) {
         const classified=classifyFormReplayError(error);
         const retryCount=form.retryCount+1;
-        if (classified.terminal || retryCount>=STATISTICS_MAX_FORM_RETRIES) {
+        if (classified.terminal || (classified.errorClass==='form_replay_other' && retryCount>=STATISTICS_MAX_FORM_RETRIES)) {
           form={...form,effectiveStatus:'manual_review',terminalFingerprint:form.inputFingerprint,
             terminalReason:classified.terminal ? classified.errorClass : 'form_replay_retry_exhausted',
             errorClass:classified.terminal ? classified.errorClass : 'form_replay_retry_exhausted',
