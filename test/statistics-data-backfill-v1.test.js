@@ -287,3 +287,41 @@ test('historical KAI judgments reject snapshots after the round pre-race cutoff'
   assert.equal(audit.status.kaiRank,'unavailable');
   assert.equal(audit.status.abcd,'unavailable');
 });
+
+
+test('manual-review Form does not block later settlement facts from reconciling',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  db.prepare("UPDATE analysis_external_runs SET step1_facts_fingerprint='sha256:wrong' WHERE id='stats_run'").run();
+  db.prepare("UPDATE analysis_external_exports SET artifact_fingerprint='sha256:wrong' WHERE game_round_id='stats_round' AND stage='step1'").run();
+
+  const first=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(first.status,'pending');
+  assert.equal(first.metrics.form,'manual_review');
+  const attemptsAfterForm=db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count;
+
+  for(let leg=1;leg<=8;leg+=1){
+    db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,gallop,disqualified) VALUES (?,1,'official',0,0)")
+      .run('stats_entry_'+leg);
+  }
+  db.prepare(`INSERT INTO game_round_final_results
+    (game_round_id,game_type,source_record_id,captured_at,status,turnover_raw,turnover_sek,
+     system_count,payouts_json,highest_payout_level,highest_payout_raw,highest_payout_sek)
+    VALUES ('stats_round','V86','stats_official','2099-01-02T22:00:00Z','results',
+      100000,1000,100,'{"8":{"payoutRaw":2500000,"payoutSek":25000,"systems":1,"jackpot":false}}',8,2500000,25000)`).run();
+  for(let leg=1;leg<=8;leg+=1){
+    db.prepare(`INSERT INTO betting_snapshots
+      (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id)
+      VALUES (?,?,?,?,?,?,?,?)`)
+      .run('stats_final_bet_'+leg,'stats_round',leg,'stats_entry_'+leg,'2099-01-02T22:00:00Z',50,leg,'stats_official');
+  }
+
+  const second=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:06:00Z'});
+  assert.equal(second.status,'manual_review');
+  assert.equal(second.metrics.results,'complete');
+  assert.equal(second.metrics.finalMarket,'complete');
+  assert.equal(second.metrics.payout,'complete');
+  assert.equal(second.metrics.form,'manual_review');
+  assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,attemptsAfterForm);
+});
