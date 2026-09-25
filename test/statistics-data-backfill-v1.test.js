@@ -555,7 +555,8 @@ test('Step 1 Form lineage after the round pre-race cutoff is rejected fail-close
   db.prepare("UPDATE analysis_external_exports SET as_of='2099-01-02T12:05:00.000Z',generated_at='2099-01-02T12:06:00.000Z' WHERE game_round_id='stats_round' AND stage='step1'").run();
   const audit=await auditStatisticsRound(env,'stats_round');
   assert.equal(audit.formLineage,null);
-  assert.equal(audit.status.form,'unavailable');
+  assert.equal(audit.formLineageIssue,'step1_lineage_timing_invalid');
+  assert.equal(audit.status.form,'manual_review');
 });
 
 test('Step 1 Form lineage generated after the registered system is rejected fail-closed',async()=>{
@@ -566,7 +567,8 @@ test('Step 1 Form lineage generated after the registered system is rejected fail
   db.prepare("UPDATE analysis_external_exports SET generated_at='2099-01-02T11:41:00.000Z' WHERE game_round_id='stats_round' AND stage='step1'").run();
   const audit=await auditStatisticsRound(env,'stats_round');
   assert.equal(audit.formLineage,null);
-  assert.equal(audit.status.form,'unavailable');
+  assert.equal(audit.formLineageIssue,'step1_lineage_timing_invalid');
+  assert.equal(audit.status.form,'manual_review');
 });
 
 test('statistics source audit fails closed if an eligible round later loses its eight-leg shape',async()=>{
@@ -711,7 +713,8 @@ test('invalid Step 1 lineage never falls back to unrelated legacy analysis snaps
   const audit=await auditStatisticsRound(env,'stats_round');
   assert.equal(audit.lineage.audited,false);
   assert.equal(audit.formLineage,null);
-  assert.equal(audit.status.form,'unavailable');
+  assert.equal(audit.formLineageIssue,'step1_lineage_provenance_unverified');
+  assert.equal(audit.status.form,'manual_review');
 });
 
 test('partial closing-market progress changes the input fingerprint and reopens terminal repair',async()=>{
