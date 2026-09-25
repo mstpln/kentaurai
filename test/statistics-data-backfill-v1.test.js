@@ -5,6 +5,7 @@ import { createPreMarketAnalysisPackV3 } from '../src/analysis-pack-v3.js';
 import { recordExternalAnalysisExport } from '../src/external-analysis-flow-v1.js';
 import {
   auditStatisticsRound,
+  ensureStatisticsDataBackfillQueue,
   getStatisticsDataBackfillStatus,
   runNextStatisticsDataBackfill
 } from '../src/statistics-data-backfill-v1.js';
