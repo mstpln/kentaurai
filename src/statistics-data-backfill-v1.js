@@ -570,12 +570,19 @@ async function acquireLease(env, roundId, at) {
 
 function legacyFormTerminal(state, audit) {
   if (!state || state.form_input_fingerprint) return null;
-  const errorText=String(state.last_error || '').toLowerCase();
-  if (state.form_status==='manual_review' && errorText.includes('step1_replay_fingerprint_mismatch')) {
-    return {status:'manual_review',reason:'step1_replay_fingerprint_mismatch',errorClass:'step1_replay_fingerprint_mismatch'};
+  const errorText=[state.last_error,state.last_error_class,state.form_error_class].filter(Boolean).join(' ').toLowerCase();
+  if (state.form_status==='manual_review') {
+    if (errorText.includes('step1_replay_fingerprint_mismatch')) {
+      return {status:'manual_review',reason:'step1_replay_fingerprint_mismatch',errorClass:'step1_replay_fingerprint_mismatch'};
+    }
+    if (errorText.includes('form_replay')) {
+      const classified=classifyFormReplayError(errorText);
+      return {status:'manual_review',reason:classified.errorClass,errorClass:classified.errorClass};
+    }
+    return {status:'manual_review',reason:'legacy_form_manual_review',errorClass:'legacy_form_manual_review'};
   }
   if (state.form_status==='pending' && errorText.includes('form_replay')) {
-    const classified=classifyFormReplayError(state.last_error);
+    const classified=classifyFormReplayError(errorText);
     if (classified.terminal || Number(state.form_retry_count || 0)>=STATISTICS_MAX_FORM_RETRIES) {
       return {
         status:'manual_review',
