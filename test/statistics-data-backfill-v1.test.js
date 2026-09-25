@@ -60,9 +60,9 @@ async function seedRecordedSystem(env,db) {
   db.prepare("INSERT INTO model_versions (id,created_at,feature_version) VALUES ('stats_model','2099-01-02T11:40:00.000Z','synthetic')").run();
   db.prepare("INSERT INTO systems (id,game_round_id,model_version_id,system_type,budget_sek,row_count,line_price_sek,spike_count,created_at,metrics_json) VALUES ('stats_system','stats_round','stats_model','main',200,8,0.25,3,'2099-01-02T11:40:00.000Z',?)")
     .run(JSON.stringify({step1_pack_id:pack.packId,step1_facts_fingerprint:pack.factsFingerprint}));
-  for(let leg=1;leg<=3;leg+=1){
-    db.prepare("INSERT INTO system_selections (system_id,leg_number,race_entry_id,is_spike) VALUES ('stats_system',?,?,1)")
-      .run(leg,'stats_entry_'+leg);
+  for(let leg=1;leg<=8;leg+=1){
+    db.prepare("INSERT INTO system_selections (system_id,leg_number,race_entry_id,is_spike) VALUES ('stats_system',?,?,?)")
+      .run(leg,'stats_entry_'+leg,leg<=3?1:0);
   }
   db.prepare(`INSERT INTO analysis_external_runs
     (id,game_round_id,model_version_id,main_system_id,contract_version,flow_version,prompt_version,provider,model,
