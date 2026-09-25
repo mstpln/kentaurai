@@ -5,6 +5,7 @@ import { createPreMarketAnalysisPackV3 } from '../src/analysis-pack-v3.js';
 import { recordExternalAnalysisExport } from '../src/external-analysis-flow-v1.js';
 import {
   auditStatisticsRound,
+  ensureStatisticsDataBackfillQueue,
   getStatisticsDataBackfillStatus,
   runNextStatisticsDataBackfill
 } from '../src/statistics-data-backfill-v1.js';
@@ -284,4 +285,391 @@ test('historical KAI judgments reject snapshots after the round pre-race cutoff'
   assert.equal(audit.counts.abcd,0);
   assert.equal(audit.status.kaiRank,'unavailable');
   assert.equal(audit.status.abcd,'unavailable');
+});
+
+
+function seedFinalFacts(db,{roundId='stats_round',sourceId='stats_official'}={}){
+  for(let leg=1;leg<=8;leg+=1){
+    const entry=roundId==='stats_round'?'stats_entry_'+leg:roundId+'_entry_'+leg;
+    db.prepare("INSERT OR REPLACE INTO race_results (race_entry_id,placing,result_status,gallop,disqualified,source_record_id) VALUES (?,1,'official',0,0,?)")
+      .run(entry,sourceId);
+    db.prepare("INSERT OR REPLACE INTO betting_snapshots (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id) VALUES (?,?,?,?, '2099-01-02T22:00:00Z',12.5,1,?)")
+      .run(roundId+'_final_bet_'+leg,roundId,leg,entry,sourceId);
+  }
+  db.prepare(`INSERT OR REPLACE INTO game_round_final_results
+    (game_round_id,game_type,source_record_id,captured_at,status,turnover_raw,turnover_sek,
+     system_count,payouts_json,highest_payout_level,highest_payout_raw,highest_payout_sek)
+    VALUES (?, 'V86', ?, '2099-01-02T22:00:00Z','results',
+      100000,1000,100,'{"8":{"payoutRaw":2500000,"payoutSek":25000,"systems":1,"jackpot":false}}',8,2500000,25000)`)
+    .run(roundId,sourceId);
+}
+
+function seedBareRound(db,roundId){
+  const sourceId=roundId+'_source';
+  db.prepare("INSERT INTO game_rounds (id,game_type,round_date,scheduled_start_at,bet_stop_at,status) VALUES (?,'V86','2098-01-02','2098-01-02T12:10:00Z','2098-01-02T12:00:00.000Z','results')")
+    .run(roundId);
+  db.prepare("INSERT INTO source_records (id,source_type,external_id,fetched_at,quality_status) VALUES (?,'official_provider',?,'2098-01-02T11:00:00Z','normalized_verified_subset')")
+    .run(sourceId,'game:'+roundId);
+  db.prepare("INSERT INTO model_versions (id,created_at,feature_version) VALUES (?,'2098-01-02T11:00:00.000Z','synthetic')")
+    .run(roundId+'_model');
+  db.prepare("INSERT INTO systems (id,game_round_id,model_version_id,system_type,budget_sek,row_count,line_price_sek,spike_count,created_at,metrics_json) VALUES (?,?,?,'main',200,8,0.25,3,'2098-01-02T11:40:00.000Z','{}')")
+    .run(roundId+'_system',roundId,roundId+'_model');
+  for(let leg=1;leg<=8;leg+=1){
+    const track=roundId+'_track_'+leg;
+    const race=roundId+'_race_'+leg;
+    const horse=roundId+'_horse_'+leg;
+    const entry=roundId+'_entry_'+leg;
+    db.prepare("INSERT INTO tracks (id,canonical_name,country_code) VALUES (?,?,'SE')").run(track,'Bare Track '+leg);
+    db.prepare("INSERT INTO horses (id,canonical_name) VALUES (?,?)").run(horse,'Bare Horse '+leg);
+    db.prepare("INSERT INTO races (id,track_id,race_date,race_number,scheduled_start_at,distance_m,start_method,status) VALUES (?,?,'2098-01-02',?,?,2140,'auto','results')")
+      .run(race,track,leg,`2098-01-02T12:${String(9+leg).padStart(2,'0')}:00Z`);
+    db.prepare("INSERT INTO game_legs (game_round_id,leg_number,race_id) VALUES (?,?,?)").run(roundId,leg,race);
+    db.prepare("INSERT INTO race_entries (id,race_id,horse_id,start_number,actual_lane,start_tier,handicap_m,actual_start_distance_m,scratched) VALUES (?,?,?,?,?,1,0,2140,0)")
+      .run(entry,race,horse,leg,leg);
+    if(leg<=3) db.prepare("INSERT INTO system_selections (system_id,leg_number,race_entry_id,is_spike) VALUES (?,?,?,1)")
+      .run(roundId+'_system',leg,entry);
+  }
+  return sourceId;
+}
+
+async function seedLegacySystemForStateMachine(env,db,{abcd=true}={}){
+  db.prepare("INSERT INTO model_versions (id,created_at,feature_version) VALUES ('state_legacy_model','2099-01-02T11:00:00.000Z','analysis-exchange-v1')").run();
+  db.prepare("INSERT INTO systems (id,game_round_id,model_version_id,system_type,budget_sek,row_count,line_price_sek,spike_count,created_at,metrics_json) VALUES ('state_legacy_system','stats_round','state_legacy_model','main',200,8,0.25,3,'2099-01-02T11:40:00.000Z','{}')").run();
+  for(let leg=1;leg<=8;leg+=1){
+    db.prepare("INSERT INTO ai_race_analyses (id,race_id,model_version_id,data_snapshot_at,market_blind,created_at) VALUES (?,?,?,'2099-01-02T11:30:00.000Z',1,'2099-01-02T11:35:00.000Z')")
+      .run('state_legacy_analysis_'+leg,'stats_race_'+leg,'state_legacy_model');
+    db.prepare("INSERT INTO ai_horse_predictions (id,ai_race_analysis_id,race_entry_id,win_probability,raw_rank,abcd_group) VALUES (?,?,?,?,1,?)")
+      .run('state_legacy_prediction_'+leg,'state_legacy_analysis_'+leg,'stats_entry_'+leg,1,abcd?'A':null);
+    db.prepare("INSERT INTO system_selections (system_id,leg_number,race_entry_id,is_spike) VALUES ('state_legacy_system',?,?,?)")
+      .run(leg,'stats_entry_'+leg,leg<=3?1:0);
+  }
+}
+
+test('manual-review Form is terminal per input but later factual settlement data still refreshes automatically',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  const pack=await seedRecordedSystem(env,db);
+  db.prepare("UPDATE analysis_external_runs SET step1_facts_fingerprint='sha256:wrong' WHERE id='stats_run'").run();
+  db.prepare("UPDATE analysis_external_exports SET artifact_fingerprint='sha256:wrong' WHERE game_round_id='stats_round' AND stage='step1'").run();
+
+  const first=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(first.metrics.form,'manual_review');
+  const before=db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count;
+  const idle=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:01:00Z'});
+  assert.equal(idle.status,'idle');
+  assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,before);
+
+  seedFinalFacts(db);
+  const refreshed=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:02:00Z'});
+  assert.equal(refreshed.roundId,'stats_round');
+  assert.equal(refreshed.metrics.form,'manual_review');
+  assert.equal(refreshed.metrics.results,'complete');
+  assert.equal(refreshed.metrics.finalMarket,'complete');
+  assert.equal(refreshed.metrics.payout,'complete');
+  assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,before);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM analysis_entry_form_snapshots WHERE step1_pack_id=?").get(pack.packId).n,0);
+});
+
+test('changed verified Step 1 lineage re-enables Form after a prior fingerprint mismatch',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  const pack=await seedRecordedSystem(env,db);
+  db.prepare("UPDATE analysis_external_runs SET step1_facts_fingerprint='sha256:wrong' WHERE id='stats_run'").run();
+  db.prepare("UPDATE analysis_external_exports SET artifact_fingerprint='sha256:wrong' WHERE game_round_id='stats_round' AND stage='step1'").run();
+  const first=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(first.metrics.form,'manual_review');
+
+  db.prepare("UPDATE analysis_external_runs SET step1_facts_fingerprint=? WHERE id='stats_run'").run(pack.factsFingerprint);
+  db.prepare("UPDATE analysis_external_exports SET artifact_fingerprint=? WHERE game_round_id='stats_round' AND stage='step1'").run(pack.factsFingerprint);
+  const second=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:01:00Z'});
+  assert.equal(second.roundId,'stats_round');
+  assert.equal(second.metrics.form,'complete');
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM analysis_entry_form_snapshots WHERE step1_pack_id=?").get(pack.packId).n,8);
+});
+
+test('transient Form failure backs off instead of hot-looping and succeeds after recovery',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedLegacySystemForStateMachine(env,db);
+  const originalPrepare=env.DB.prepare.bind(env.DB);
+  let fail=true;
+  env.DB.prepare=(sql)=>{
+    if(fail && String(sql).includes('SELECT gl.leg_number,re.id AS race_entry_id,re.horse_id')){
+      throw new Error('temporary D1 read failure');
+    }
+    return originalPrepare(sql);
+  };
+
+  const first=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(first.actionState,'retryable');
+  assert.equal(first.metrics.form,'pending');
+  const state1=db.prepare("SELECT attempt_count,form_retry_count,form_next_retry_at FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get();
+  assert.equal(state1.attempt_count,1);
+  assert.equal(state1.form_retry_count,1);
+  assert.ok(state1.form_next_retry_at);
+
+  const tooSoon=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:01:00Z'});
+  assert.equal(tooSoon.status,'idle');
+  assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,1);
+
+  fail=false;
+  const recovered=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:06:00Z'});
+  assert.equal(recovered.metrics.form,'complete');
+  assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,2);
+  env.DB.prepare=originalPrepare;
+});
+
+test('deterministic unsupported legacy Form becomes terminal and unchanged cron ticks stay idle',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedLegacySystemForStateMachine(env,db);
+  db.prepare("UPDATE race_entries SET scratched=1 WHERE id='stats_entry_8'").run();
+
+  const first=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(first.metrics.form,'manual_review');
+  assert.match(first.reason,/no active horse entries/);
+  const state=db.prepare("SELECT action_state,form_error_class,attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get();
+  assert.equal(state.form_error_class,'deterministic_failure');
+  assert.equal(state.attempt_count,1);
+
+  const idle=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:01:00Z'});
+  assert.equal(idle.status,'idle');
+  assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,1);
+});
+
+test('waiting upstream facts consume no repeated attempts and source changes wake the round',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  const first=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(first.actionState,'waiting');
+  assert.equal(first.metrics.form,'complete');
+  const attempts=db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count;
+  assert.equal(attempts,1);
+
+  for(const minute of [1,2,3]){
+    const idle=await runNextStatisticsDataBackfill(env,{now:`2100-01-01T00:0${minute}:00Z`});
+    assert.equal(idle.status,'idle');
+  }
+  assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,attempts);
+
+  seedFinalFacts(db);
+  const completed=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:04:00Z'});
+  assert.equal(completed.metrics.results,'complete');
+  assert.equal(completed.metrics.finalMarket,'complete');
+  assert.equal(completed.metrics.payout,'complete');
+  assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,attempts);
+});
+
+test('complete-with-gaps historical ABCD remains stable and is not retried',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedLegacySystemForStateMachine(env,db,{abcd:false});
+  seedFinalFacts(db);
+  const first=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(first.status,'complete_with_gaps');
+  assert.equal(first.metrics.abcd,'unavailable');
+  assert.equal(first.actionState,'complete_with_gaps');
+  const attempts=db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count;
+
+  const idle=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:01:00Z'});
+  assert.equal(idle.status,'idle');
+  assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,attempts);
+});
+
+test('a retry-delayed bad round does not starve a later actionable round',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  db.prepare("UPDATE source_records SET raw_object_key='raw/official_provider/transient.json' WHERE id='stats_official'").run();
+  db.prepare(`INSERT INTO game_round_final_results
+    (game_round_id,game_type,source_record_id,captured_at,status,turnover_raw,turnover_sek,
+     system_count,payouts_json,highest_payout_level,highest_payout_raw,highest_payout_sek)
+    VALUES ('stats_round','V86','stats_official','2099-01-02T22:00:00Z','results',
+      100000,1000,100,'{"8":{"payoutRaw":2500000,"payoutSek":25000,"systems":1,"jackpot":false}}',8,2500000,25000)`).run();
+  env.RAW_BUCKET.get=async()=>{ throw new Error('temporary R2 outage'); };
+
+  const delayed=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(delayed.actionState,'retryable');
+  seedBareRound(db,'later_round');
+
+  const next=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:01:00Z'});
+  assert.equal(next.roundId,'later_round');
+  assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,1);
+});
+
+test('duplicate winners and malformed spike selections surface as data-integrity manual review',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('extra_horse','Extra Horse')").run();
+  db.prepare("INSERT INTO race_entries (id,race_id,horse_id,start_number,scratched) VALUES ('extra_entry','stats_race_1','extra_horse',99,0)").run();
+  db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,gallop,disqualified,source_record_id) VALUES ('stats_entry_1',1,'official',0,0,'stats_official')").run();
+  db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,gallop,disqualified,source_record_id) VALUES ('extra_entry',1,'official',0,0,'stats_official')").run();
+  db.prepare("UPDATE system_selections SET is_spike=1 WHERE system_id='stats_system' AND leg_number=1").run();
+  db.prepare("INSERT INTO system_selections (system_id,leg_number,race_entry_id,is_spike) VALUES ('stats_system',1,'extra_entry',1)").run();
+
+  const result=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(result.actionState,'manual_review');
+  const state=db.prepare("SELECT result_status,spike_status,error_class,last_error FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get();
+  assert.equal(state.result_status,'unavailable');
+  assert.equal(state.spike_status,'unavailable');
+  assert.match(state.last_error,/results_multiple_winners/);
+});
+
+test('status API distinguishes actionable retry, waiting upstream, manual review and legitimate gaps',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  const status=await getStatisticsDataBackfillStatus(env);
+  assert.equal(status.actionTotals.waiting,1);
+  assert.equal(status.attention[0].action_state,'waiting');
+  assert.equal(status.attention[0].next_retry_at,null);
+});
+
+
+test('multiple registered systems resolve a stable canonical primary system',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  db.prepare("INSERT INTO systems (id,game_round_id,model_version_id,system_type,budget_sek,row_count,line_price_sek,spike_count,created_at,metrics_json) VALUES ('later_main','stats_round','stats_model','main',200,8,0.25,3,'2099-01-02T11:45:00.000Z','{}')").run();
+  for(let leg=1;leg<=3;leg+=1){
+    db.prepare("INSERT INTO system_selections (system_id,leg_number,race_entry_id,is_spike) VALUES ('later_main',?,?,1)")
+      .run(leg,'stats_entry_'+leg);
+  }
+  const audit=await auditStatisticsRound(env,'stats_round');
+  assert.equal(audit.primarySystemId,'stats_system');
+});
+
+
+test('partial frozen Form snapshots are resumed idempotently without duplicating existing rows',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  const original=db.prepare("SELECT id,form_score,form_version,as_of FROM analysis_entry_form_snapshots WHERE leg_number=1").get();
+  assert.ok(original);
+  db.prepare("DELETE FROM analysis_entry_form_snapshots WHERE game_round_id='stats_round' AND leg_number>1").run();
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM analysis_entry_form_snapshots WHERE game_round_id='stats_round'").get().n,1);
+
+  const resumed=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:01:00Z'});
+  assert.equal(resumed.metrics.form,'complete');
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM analysis_entry_form_snapshots WHERE game_round_id='stats_round'").get().n,8);
+  const preserved=db.prepare("SELECT id,form_score,form_version,as_of FROM analysis_entry_form_snapshots WHERE leg_number=1").get();
+  assert.deepEqual(preserved,original);
+});
+
+test('active lease blocks duplicate admin or cron execution until ownership expires',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  await ensureStatisticsDataBackfillQueue(env,'2100-01-01T00:00:00Z');
+  db.prepare("UPDATE statistics_data_backfill_rounds SET lease_token='other-worker',lease_until='2100-01-01T00:10:00Z' WHERE game_round_id='stats_round'").run();
+
+  const blocked=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:01:00Z'});
+  assert.equal(blocked.status,'idle');
+  assert.equal(blocked.reason,'leased');
+  assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,0);
+
+  const recovered=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:11:00Z'});
+  assert.equal(recovered.roundId,'stats_round');
+  assert.equal(recovered.metrics.form,'complete');
+});
+
+test('pre-existing structurally invalid queue rows fail closed and can wake after repair',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  db.prepare(`INSERT INTO statistics_data_backfill_rounds
+    (game_round_id,status,result_status,final_market_status,payout_status,form_status,kai_rank_status,abcd_status,spike_status,last_checked_at)
+    VALUES ('stats_round','pending','pending','pending','pending','pending','unavailable','unavailable','unavailable','2100-01-01T00:00:00Z')`).run();
+
+  const missing=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(missing.status,'manual_review');
+  assert.equal(missing.reason,'missing_registered_system');
+  assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,0);
+
+  await seedRecordedSystem(env,db);
+  const repaired=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:01:00Z'});
+  assert.equal(repaired.roundId,'stats_round');
+  assert.equal(repaired.metrics.form,'complete');
+});
+
+
+test('legacy manual-review Form row is adopted without replay during first state-machine reconciliation',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  const pack=await seedRecordedSystem(env,db);
+  db.prepare("UPDATE analysis_external_runs SET step1_facts_fingerprint='sha256:wrong' WHERE id='stats_run'").run();
+  db.prepare("UPDATE analysis_external_exports SET artifact_fingerprint='sha256:wrong' WHERE game_round_id='stats_round' AND stage='step1'").run();
+  await ensureStatisticsDataBackfillQueue(env,'2100-01-01T00:00:00Z');
+  db.prepare(`UPDATE statistics_data_backfill_rounds
+    SET status='manual_review',
+        action_state='manual_review',
+        form_status='manual_review',
+        form_attempt_fingerprint=NULL,
+        form_terminal_reason=NULL,
+        form_error_class=NULL,
+        attempt_count=886,
+        last_error='form_replay: step1_replay_fingerprint_mismatch',
+        audited_revision=-1
+    WHERE game_round_id='stats_round'`).run();
+
+  const result=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:01:00Z'});
+  assert.equal(result.roundId,'stats_round');
+  assert.equal(result.metrics.form,'manual_review');
+  const state=db.prepare(`SELECT attempt_count,form_attempt_fingerprint,form_error_class
+    FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'`).get();
+  assert.equal(state.attempt_count,886);
+  assert.ok(state.form_attempt_fingerprint);
+  assert.equal(state.form_error_class,'deterministic_mismatch');
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM analysis_entry_form_snapshots WHERE step1_pack_id=?").get(pack.packId).n,0);
+});
+
+
+test('a canonical write racing with audit persistence is not swallowed and is re-audited next tick',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  db.prepare("UPDATE statistics_data_backfill_rounds SET input_revision=input_revision+1 WHERE game_round_id='stats_round'").run();
+
+  const originalPrepare=env.DB.prepare.bind(env.DB);
+  let injected=false;
+  env.DB.prepare=(sql)=>{
+    if(!injected && String(sql).includes('INSERT INTO statistics_data_backfill_rounds')){
+      injected=true;
+      db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,gallop,disqualified,source_record_id) VALUES ('stats_entry_1',1,'official',0,0,'stats_official')").run();
+    }
+    return originalPrepare(sql);
+  };
+
+  const raced=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:01:00Z'});
+  env.DB.prepare=originalPrepare;
+  assert.equal(raced.roundId,'stats_round');
+  const afterRace=db.prepare("SELECT input_revision,audited_revision FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get();
+  assert.ok(afterRace.input_revision>afterRace.audited_revision);
+
+  const reconciled=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:02:00Z'});
+  assert.equal(reconciled.roundId,'stats_round');
+  assert.equal(reconciled.counts.winnerLegs,1);
+  const finalState=db.prepare("SELECT input_revision,audited_revision FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get();
+  assert.equal(finalState.audited_revision,finalState.input_revision);
+});
+
+
+test('a queued round corrected back into the future stays out of cron until its cutoff passes',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  const attempts=db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count;
+
+  db.prepare("UPDATE game_rounds SET bet_stop_at='2101-01-01T00:00:00Z' WHERE id='stats_round'").run();
+  const beforeCutoff=await runNextStatisticsDataBackfill(env,{now:'2100-01-02T00:00:00Z'});
+  assert.equal(beforeCutoff.status,'idle');
+  assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,attempts);
+
+  const afterCutoff=await runNextStatisticsDataBackfill(env,{now:'2101-01-02T00:00:00Z'});
+  assert.equal(afterCutoff.roundId,'stats_round');
 });

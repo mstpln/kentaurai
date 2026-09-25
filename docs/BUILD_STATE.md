@@ -341,16 +341,16 @@ The external-analysis production release was accepted after:
 
 
 ## Statistics data completion backfill
-- Candidate branch: `feat/statistics-data-backfill-v1`.
-- Adds durable per-round coverage state for every registered historical V85/V86 system used by Spel outcome statistics.
-- Existing post-race settlement remains the owner of missing winners, final official market and payout acquisition.
-- The new bounded minute step runs after settlement and handles only remaining statistics-history gaps.
-- Historical Form/Form-rank first uses audited Step 1 lineage with exact `pack_id` + `facts_fingerprint` replay. Older registered systems without Step 1 packs can use their own canonical eight-leg analysis snapshot timestamps only when every timestamp is at or before the round's earliest verified pre-race cutoff; this fallback is stored separately as `legacy_analysis_snapshot`.
-- Existing archived final game sources may be repaired from the already archived raw final game source without a new provider fetch.
-- KentaurAI rank, ABCD and spike history are audited from canonical stored analysis/system facts; unavailable historical judgments are not invented.
-- Private admin status/step endpoints expose sanitized coverage state and do not expose raw racing payloads.
-- Retryable closing-market/Form work remains queued as `pending`; deterministic archive/provenance conflicts stop at `manual_review` instead of being retried forever or silently marked unavailable.
-- Legacy Form/KentaurAI historical reads require pre-race snapshot timing plus analysis creation no later than the registered system, and historical Form ignores result sources fetched after the reconstructed as-of.
+- Original coverage/backfill foundation remains lineage-gated and non-inventive: settlement owns factual acquisition, Form is replayed only at verified pre-race lineage/cutoffs, and historical KAI/ABCD/spikes are never regenerated or rewritten.
+- Candidate branch: `fix/statistics-backfill-state-machine` / PR #261.
+- Migration `0041_statistics_backfill_state_machine.sql` adds work-state, input-revision, retry/backoff and lease metadata only; canonical racing, market, analysis and system facts stay in their existing tables.
+- Fresh source-of-truth audits derive metric status. Work state distinguishes waiting upstream facts, transient retryable failures, manual review, complete and complete-with-legitimate-gaps.
+- Terminal metric state is input-aware and local. An unchanged Form mismatch is not replayed, while later final-game/result/payout changes can refresh factual metrics independently. Form-relevant lineage/round-identity changes re-open Form safely.
+- Waiting rows have no minute polling loop. Canonical upstream writes raise revisions that wake affected rows. Transient infrastructure failures use capped backoff; deterministic or repeatedly unchanged non-infrastructure failures stop.
+- Attempt counters increase only for actual replay/repair work. Leases prevent overlapping cron/admin writers, and delayed/broken rows cannot starve later actionable rounds.
+- Duplicate winners and malformed spike selections are surfaced as data-integrity manual review without rewriting historical facts.
+- Regression coverage includes stale manual-review recovery, input-aware Form re-evaluation, transient recovery/backoff, deterministic terminal Form, stable ABCD gaps, upstream wakeups, fairness, integrity errors and status observability.
+- Production remains unchanged until explicit merge/deploy authorization.
 
 
 ## Historical official structural source-gap resilience

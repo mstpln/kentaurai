@@ -8,12 +8,13 @@ import { createTestEnv } from './helpers/d1.js';
 import { enhanceTrendHtml } from '../src/trend-ui.js';
 
 function seedTrend(db) {
+  const recentRaceDate=new Date(Date.now()-24*60*60*1000).toISOString().slice(0,10);
   db.prepare(`INSERT INTO tracks (id, canonical_name) VALUES ('track-trend','Synthetic Track')`).run();
   db.prepare(`INSERT INTO trainers (id, canonical_name) VALUES ('trainer-trend','Synthetic Trainer')`).run();
   db.prepare(`INSERT INTO drivers (id, canonical_name) VALUES ('driver-trend','Synthetic Driver')`).run();
   db.prepare(`INSERT INTO horses (id, canonical_name, breed) VALUES ('horse-trend','Synthetic Horse','varmblodig travare')`).run();
   db.prepare(`INSERT INTO races (id, track_id, race_date, race_number, distance_m, start_method, first_prize_sek, race_name, status)
-    VALUES ('race-trend','track-trend','2026-09-11',1,2140,'auto',50000,'Synthetic race','results')`).run();
+    VALUES ('race-trend','track-trend',?,1,2140,'auto',50000,'Synthetic race','results')`).run(recentRaceDate);
   db.prepare(`INSERT INTO race_entries (id, race_id, horse_id, driver_id, trainer_id, start_number, scratched)
     VALUES ('entry-trend','race-trend','horse-trend','driver-trend','trainer-trend',1,0)`).run();
   db.prepare(`INSERT INTO race_results (race_entry_id, placing, result_status, gallop, prize_sek)
