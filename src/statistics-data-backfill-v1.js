@@ -50,13 +50,17 @@ function transientInfrastructureFailure(error) {
 
 async function primarySystem(env, roundId) {
   return env.DB.prepare(`
-    WITH preferred AS (
+    WITH latest_run AS (
       SELECT aer.main_system_id
       FROM analysis_external_runs aer
-      JOIN systems linked ON linked.id=aer.main_system_id AND linked.game_round_id=aer.game_round_id
       WHERE aer.game_round_id=?
       ORDER BY datetime(aer.created_at) DESC,aer.id DESC
       LIMIT 1
+    ),
+    preferred AS (
+      SELECT latest_run.main_system_id
+      FROM latest_run
+      JOIN systems linked ON linked.id=latest_run.main_system_id AND linked.game_round_id=?
     )
     SELECT s.id,s.model_version_id,s.created_at,s.metrics_json
     FROM systems s
@@ -71,7 +75,7 @@ async function primarySystem(env, roundId) {
       CASE WHEN s.system_type<>'main' THEN datetime(s.created_at) END ASC,
       s.id ASC
     LIMIT 1
-  `).bind(roundId,roundId).first();
+  `).bind(roundId,roundId,roundId).first();
 }
 
 function jsonValue(text, key) {
