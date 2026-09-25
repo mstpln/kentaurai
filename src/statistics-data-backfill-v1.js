@@ -501,7 +501,7 @@ async function persistAudit(env, audit, {
   const revision=auditedRevision == null
     ? Number((await backfillState(env,audit.roundId))?.input_revision || 0)
     : Number(auditedRevision);
-  await env.DB.prepare(`
+  const write=await env.DB.prepare(`
     INSERT INTO statistics_data_backfill_rounds
       (game_round_id,status,result_status,final_market_status,payout_status,form_status,
        kai_rank_status,abcd_status,spike_status,active_entry_count,closing_market_count,
@@ -577,8 +577,7 @@ async function persistAudit(env, audit, {
     attempted ? 1 : 0,
     leaseToken
   ).run();
-  const owner=await backfillState(env,audit.roundId);
-  if(owner?.lease_token && owner.lease_token!==leaseToken) throw new Error('statistics backfill lease ownership was lost before persist');
+  if(Number(write.meta?.changes || 0)!==1) throw new Error('statistics backfill lease ownership was lost before persist');
   return { overall, actionState:normalizedAction, revision };
 }
 
