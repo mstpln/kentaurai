@@ -102,8 +102,9 @@ test('statistics backfill fails closed on Step 1 fingerprint mismatch',async()=>
   db.prepare("UPDATE analysis_external_exports SET artifact_fingerprint='sha256:wrong' WHERE game_round_id='stats_round' AND stage='step1'").run();
 
   const result=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
-  assert.equal(result.status,'manual_review');
+  assert.equal(result.status,'pending');
   assert.equal(result.metrics.form,'manual_review');
+  assert.equal(result.errorClass,'step1_replay_fingerprint_mismatch');
   assert.equal(db.prepare("SELECT COUNT(*) n FROM analysis_entry_form_snapshots").get().n,0);
 });
 
@@ -236,9 +237,10 @@ test('deterministic closing-market archive gaps require manual review instead of
       100000,1000,100,'{"8":{"payoutRaw":2500000,"payoutSek":25000,"systems":1,"jackpot":false}}',8,2500000,25000)`).run();
 
   const result=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
-  assert.equal(result.status,'manual_review');
+  assert.equal(result.status,'pending');
   assert.equal(result.metrics.finalMarket,'manual_review');
   assert.equal(result.metrics.form,'complete');
+  assert.equal(result.errorClass,'closing_market_manual_review');
   assert.match(result.reason,/closing_market_manual_review/);
 });
 
