@@ -412,12 +412,13 @@ function overallStatus(audit, overrides = {}) {
     : 'complete_with_gaps';
 }
 
-async function auditFingerprints(audit) {
+async function auditFingerprints(audit, state = {}) {
   const form=await sha256({
     roundId:audit.roundId,
     primarySystemId:audit.primarySystemId,
     activeEntries:audit.counts.activeEntries,
     formSnapshots:audit.counts.formSnapshots,
+    formInputRevision:Number(state?.form_input_revision || 0),
     lineage:audit.lineage ? {
       source:audit.lineage.source,
       audited:audit.lineage.audited,
@@ -436,7 +437,8 @@ async function auditFingerprints(audit) {
     roundId:audit.roundId,
     sourceRecordId:audit.finalGameSourceRecordId,
     activeEntries:audit.counts.activeEntries,
-    closingMarket:audit.counts.closingMarket
+    closingMarket:audit.counts.closingMarket,
+    finalMarketInputRevision:Number(state?.final_market_input_revision || 0)
   });
   const input=await sha256({
     roundId:audit.roundId,
@@ -703,7 +705,7 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
   try {
     const prior=await backfillState(env,target.game_round_id);
     let audit=await auditStatisticsRound(env,target.game_round_id);
-    let fingerprints=await auditFingerprints(audit);
+    let fingerprints=await auditFingerprints(audit,prior);
     let attempted=false;
     let formStatus=audit.status.form;
     let finalMarketStatus=audit.status.finalMarket;
@@ -756,7 +758,7 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
       try {
         const repair=await repairCapturedOfficialClosingMarket(env,audit.finalGameSourceRecordId);
         audit=await auditStatisticsRound(env,target.game_round_id);
-        fingerprints=await auditFingerprints(audit);
+        fingerprints=await auditFingerprints(audit,await backfillState(env,target.game_round_id));
         finalMarketStatus=audit.status.finalMarket;
         finalMarketRetryCount=0;
         finalMarketNextRetryAt=null;
@@ -810,7 +812,7 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
           formErrorClass='deterministic_gap';
         } else if (replay.status==='complete') {
           audit=await auditStatisticsRound(env,target.game_round_id);
-          fingerprints=await auditFingerprints(audit);
+          fingerprints=await auditFingerprints(audit,await backfillState(env,target.game_round_id));
           formStatus=audit.status.form;
         }
       } catch (error) {
