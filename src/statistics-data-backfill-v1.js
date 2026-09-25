@@ -314,10 +314,12 @@ export async function auditStatisticsRound(env, roundId) {
   `,[system.id]);
 
   const resultStatus=winnerLegs===8 ? 'complete' : 'pending';
-  let finalMarketStatus=finalResult
-    ? countStatus(closingMarketCount,activeEntries)
-    : 'pending';
-  if (finalResult && activeEntries===0) finalMarketStatus='unavailable';
+  let finalMarketStatus='pending';
+  if (finalResult && activeEntries===0) {
+    finalMarketStatus='unavailable';
+  } else if (finalResult && closingMarketCount>=activeEntries && activeEntries>0) {
+    finalMarketStatus='complete';
+  }
 
   const payoutStatus=finalResult
     ? (finalResult.payouts_json && finalResult.highest_payout_sek != null ? 'complete' : 'unavailable')
@@ -409,7 +411,7 @@ function retryDelayMs(retryCount) {
   return RETRY_DELAYS_MS[index];
 }
 
-function formFailure(error) {
+export function classifyStatisticsFormFailure(error) {
   const message=String(error?.message || error || '');
   if (/round leg \d+ has no active horse entries/i.test(message)) {
     return { status:'manual_review', errorClass:'form_source_incomplete' };
@@ -696,7 +698,7 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
         }
         if (replay.status==='complete') audit=await auditStatisticsRound(env,target.game_round_id);
       } catch (error) {
-        const failure=formFailure(error);
+        const failure=classifyStatisticsFormFailure(error);
         formOverride=failure.status;
         formFailureFingerprint=audit.fingerprints.form;
         const message='form_replay: '+String(error?.message || error);
