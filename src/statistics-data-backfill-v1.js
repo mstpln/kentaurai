@@ -466,6 +466,7 @@ async function loadStoredState(env, roundId) {
 
 function preservedManualReview(existing, metric, fingerprint) {
   if (!existing || existing[metric+'_status']!=='manual_review') return false;
+  if (String(existing.last_error_class || '').endsWith('_retry_exhausted')) return false;
   const storedFingerprint=existing[metric+'_failure_fingerprint'];
   if (storedFingerprint) return storedFingerprint===fingerprint;
   const message=String(existing.last_error || '');
