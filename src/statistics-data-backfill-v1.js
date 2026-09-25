@@ -398,6 +398,7 @@ const RETRY_DELAYS_MS = Object.freeze([
 ]);
 const MAX_UNCHANGED_RETRIES = RETRY_DELAYS_MS.length;
 const UPSTREAM_RECHECK_MS = 5 * 60 * 1000;
+const MANUAL_REVIEW_RECHECK_MS = 24 * 60 * 60 * 1000;
 
 function futureIso(now, delayMs) {
   return new Date(Date.parse(now) + delayMs).toISOString();
@@ -588,6 +589,7 @@ async function nextQueuedRound(env, now) {
     LEFT JOIN statistics_data_backfill_retry_state r ON r.game_round_id=b.game_round_id
     WHERE (
       b.status='pending'
+      OR b.status='manual_review'
       OR b.result_status='pending'
       OR b.final_market_status='pending'
       OR b.payout_status='pending'
@@ -737,8 +739,10 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
     form:formOverride || audit.status.form
   };
   const stillPending=Object.values(metricState).includes('pending');
+  const hasManualReview=Object.values(metricState).includes('manual_review');
   if (stillPending && !nextCheckAt) nextCheckAt=futureIso(now,UPSTREAM_RECHECK_MS);
-  if (!stillPending) nextCheckAt=null;
+  if (!stillPending && hasManualReview) nextCheckAt=futureIso(now,MANUAL_REVIEW_RECHECK_MS);
+  if (!stillPending && !hasManualReview) nextCheckAt=null;
 
   if (!formFailureFingerprint && formOverride==='manual_review') {
     formFailureFingerprint=audit.fingerprints.form;
