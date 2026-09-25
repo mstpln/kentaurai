@@ -112,20 +112,14 @@ BEGIN
   WHERE game_round_id=OLD.game_round_id;
 END;
 
--- Result changes affect both the round containing the race and any queued round
--- containing the same horse because historical Form is horse-history based.
+-- Target-round result changes wake that round. Historical Form remains governed
+-- by its original source-fetched cutoff and explicit Form/lineage input revisions.
 CREATE TRIGGER IF NOT EXISTS trg_stats_rev_result_insert
 AFTER INSERT ON race_results
 BEGIN
   UPDATE statistics_data_backfill_rounds
   SET input_revision=input_revision+1
   WHERE game_round_id IN (
-    SELECT DISTINCT gl.game_round_id
-    FROM race_entries changed
-    JOIN race_entries target ON target.horse_id=changed.horse_id
-    JOIN game_legs gl ON gl.race_id=target.race_id
-    WHERE changed.id=NEW.race_entry_id AND changed.horse_id IS NOT NULL
-    UNION
     SELECT gl.game_round_id
     FROM race_entries changed
     JOIN game_legs gl ON gl.race_id=changed.race_id
@@ -139,12 +133,6 @@ BEGIN
   UPDATE statistics_data_backfill_rounds
   SET input_revision=input_revision+1
   WHERE game_round_id IN (
-    SELECT DISTINCT gl.game_round_id
-    FROM race_entries changed
-    JOIN race_entries target ON target.horse_id=changed.horse_id
-    JOIN game_legs gl ON gl.race_id=target.race_id
-    WHERE changed.id IN (OLD.race_entry_id,NEW.race_entry_id) AND changed.horse_id IS NOT NULL
-    UNION
     SELECT gl.game_round_id
     FROM race_entries changed
     JOIN game_legs gl ON gl.race_id=changed.race_id
@@ -158,12 +146,6 @@ BEGIN
   UPDATE statistics_data_backfill_rounds
   SET input_revision=input_revision+1
   WHERE game_round_id IN (
-    SELECT DISTINCT gl.game_round_id
-    FROM race_entries changed
-    JOIN race_entries target ON target.horse_id=changed.horse_id
-    JOIN game_legs gl ON gl.race_id=target.race_id
-    WHERE changed.id=OLD.race_entry_id AND changed.horse_id IS NOT NULL
-    UNION
     SELECT gl.game_round_id
     FROM race_entries changed
     JOIN game_legs gl ON gl.race_id=changed.race_id
@@ -384,89 +366,6 @@ BEGIN
   UPDATE statistics_data_backfill_rounds
   SET input_revision=input_revision+1
   WHERE game_round_id=OLD.game_round_id;
-END;
-
--- X-Labs and historical opponent facts can change a safe legacy Form replay.
-CREATE TRIGGER IF NOT EXISTS trg_stats_rev_xlabs_insert
-AFTER INSERT ON xlabs_data
-BEGIN
-  UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
-  WHERE game_round_id IN (
-    SELECT DISTINCT gl.game_round_id
-    FROM race_entries changed
-    JOIN race_entries target ON target.horse_id=changed.horse_id
-    JOIN game_legs gl ON gl.race_id=target.race_id
-    WHERE changed.id=NEW.race_entry_id AND changed.horse_id IS NOT NULL
-  );
-END;
-
-CREATE TRIGGER IF NOT EXISTS trg_stats_rev_xlabs_update
-AFTER UPDATE ON xlabs_data
-BEGIN
-  UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
-  WHERE game_round_id IN (
-    SELECT DISTINCT gl.game_round_id
-    FROM race_entries changed
-    JOIN race_entries target ON target.horse_id=changed.horse_id
-    JOIN game_legs gl ON gl.race_id=target.race_id
-    WHERE changed.id IN (OLD.race_entry_id,NEW.race_entry_id) AND changed.horse_id IS NOT NULL
-  );
-END;
-
-CREATE TRIGGER IF NOT EXISTS trg_stats_rev_horse_snapshot_insert
-AFTER INSERT ON horse_stat_snapshots
-BEGIN
-  UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
-  WHERE game_round_id IN (
-    SELECT DISTINCT gl.game_round_id
-    FROM race_entries re
-    JOIN game_legs gl ON gl.race_id=re.race_id
-    WHERE re.horse_id=NEW.horse_id
-  );
-END;
-
-CREATE TRIGGER IF NOT EXISTS trg_stats_rev_horse_snapshot_update
-AFTER UPDATE ON horse_stat_snapshots
-BEGIN
-  UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
-  WHERE game_round_id IN (
-    SELECT DISTINCT gl.game_round_id
-    FROM race_entries re
-    JOIN game_legs gl ON gl.race_id=re.race_id
-    WHERE re.horse_id IN (OLD.horse_id,NEW.horse_id)
-  );
-END;
-
-CREATE TRIGGER IF NOT EXISTS trg_stats_rev_snapshot_sync_insert
-AFTER INSERT ON official_snapshot_source_sync
-BEGIN
-  UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
-  WHERE game_round_id IN (
-    SELECT DISTINCT gl.game_round_id
-    FROM horse_stat_snapshots hss
-    JOIN race_entries re ON re.horse_id=hss.horse_id
-    JOIN game_legs gl ON gl.race_id=re.race_id
-    WHERE hss.source_record_id=NEW.source_record_id
-  );
-END;
-
-CREATE TRIGGER IF NOT EXISTS trg_stats_rev_snapshot_sync_update
-AFTER UPDATE ON official_snapshot_source_sync
-BEGIN
-  UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
-  WHERE game_round_id IN (
-    SELECT DISTINCT gl.game_round_id
-    FROM horse_stat_snapshots hss
-    JOIN race_entries re ON re.horse_id=hss.horse_id
-    JOIN game_legs gl ON gl.race_id=re.race_id
-    WHERE hss.source_record_id IN (OLD.source_record_id,NEW.source_record_id)
-  );
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_stats_rev_source_update
