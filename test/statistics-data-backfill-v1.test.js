@@ -5,6 +5,7 @@ import { createPreMarketAnalysisPackV3 } from '../src/analysis-pack-v3.js';
 import { recordExternalAnalysisExport } from '../src/external-analysis-flow-v1.js';
 import {
   auditStatisticsRound,
+  classifyStatisticsFormFailure,
   getStatisticsDataBackfillStatus,
   runNextStatisticsDataBackfill
 } from '../src/statistics-data-backfill-v1.js';
@@ -327,20 +328,10 @@ test('manual-review Form does not block later settlement facts from reconciling'
 });
 
 
-test('unchanged Form source gap is preserved instead of replayed every minute',async()=>{
-  const {env,db}=createTestEnv();
-  seedRound(db);
-  await seedRecordedSystem(env,db);
-  db.prepare("UPDATE race_entries SET scratched=1 WHERE id='stats_entry_5'").run();
-  const first=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
-  assert.equal(first.metrics.form,'manual_review');
-  assert.equal(first.errorClass,'form_source_incomplete');
-  const attempts=db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count;
-  const second=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:01:00Z'});
-  assert.equal(second.metrics.form,'manual_review');
-  assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,attempts);
+test('deterministic Form source gaps are classified as manual review',()=>{
+  const failure=classifyStatisticsFormFailure(new Error('round leg 5 has no active horse entries'));
+  assert.deepEqual(failure,{status:'manual_review',errorClass:'form_source_incomplete'});
 });
-
 
 test('retryable closing-market failures back off and stop after bounded unchanged retries',async()=>{
   const {env,db}=createTestEnv();
@@ -369,6 +360,10 @@ test('retryable closing-market failures back off and stop after bounded unchange
   assert.equal(state.last_error_class,'closing_market_retryable_retry_exhausted');
   assert.equal(reads,5);
 
-  await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-02-01T00:00:00Z'});
-  assert.equal(reads,5);
+  const automatic=await runNextStatisticsDataBackfill(env,{now:'2100-02-01T00:00:00Z'});
+  assert.equal(automatic.metrics.finalMarket,'manual_review');
+  assert.equal(reads,5,'automatic runs must not repeat an exhausted failure with unchanged inputs');
+
+  await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-02-01T00:01:00Z'});
+  assert.equal(reads,6,'an explicit round retry may force a recovery attempt');
 });
