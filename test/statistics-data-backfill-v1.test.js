@@ -526,3 +526,17 @@ test('status API distinguishes actionable retry, waiting upstream, manual review
   assert.equal(status.attention[0].action_state,'waiting');
   assert.equal(status.attention[0].next_retry_at,null);
 });
+
+
+test('multiple registered systems resolve a stable canonical primary system',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  db.prepare("INSERT INTO systems (id,game_round_id,model_version_id,system_type,budget_sek,row_count,line_price_sek,spike_count,created_at,metrics_json) VALUES ('later_main','stats_round','stats_model','main',200,8,0.25,3,'2099-01-02T11:45:00.000Z','{}')").run();
+  for(let leg=1;leg<=3;leg+=1){
+    db.prepare("INSERT INTO system_selections (system_id,leg_number,race_entry_id,is_spike) VALUES ('later_main',?,?,1)")
+      .run(leg,'stats_entry_'+leg);
+  }
+  const audit=await auditStatisticsRound(env,'stats_round');
+  assert.equal(audit.primarySystemId,'stats_system');
+});
