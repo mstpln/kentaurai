@@ -656,3 +656,20 @@ test('a canonical write racing with audit persistence is not swallowed and is re
   const finalState=db.prepare("SELECT input_revision,audited_revision FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get();
   assert.equal(finalState.audited_revision,finalState.input_revision);
 });
+
+
+test('a queued round corrected back into the future stays out of cron until its cutoff passes',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  const attempts=db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count;
+
+  db.prepare("UPDATE game_rounds SET bet_stop_at='2101-01-01T00:00:00Z' WHERE id='stats_round'").run();
+  const beforeCutoff=await runNextStatisticsDataBackfill(env,{now:'2100-01-02T00:00:00Z'});
+  assert.equal(beforeCutoff.status,'idle');
+  assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,attempts);
+
+  const afterCutoff=await runNextStatisticsDataBackfill(env,{now:'2101-01-02T00:00:00Z'});
+  assert.equal(afterCutoff.roundId,'stats_round');
+});
