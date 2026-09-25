@@ -44,11 +44,7 @@ SET next_check_at=CURRENT_TIMESTAMP,
       WHEN lower(COALESCE(last_error,'')) LIKE '%form_replay:%' THEN 'retryable'
       ELSE 'waiting'
     END,
-    form_retry_count=CASE
-      WHEN form_status='pending' AND lower(COALESCE(last_error,'')) LIKE '%form_replay:%'
-        THEN CASE WHEN attempt_count > 4 THEN 4 ELSE attempt_count END
-      ELSE 0
-    END,
+    form_retry_count=0,
     form_error_class=CASE
       WHEN form_status='pending' AND lower(COALESCE(last_error,'')) LIKE '%form_replay:%'
         THEN 'legacy_form_replay_error'
