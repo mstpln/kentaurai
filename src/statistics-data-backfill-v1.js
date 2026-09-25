@@ -466,9 +466,9 @@ async function loadStoredState(env, roundId) {
   `).bind(roundId).first();
 }
 
-function preservedManualReview(existing, metric, fingerprint) {
+function preservedManualReview(existing, metric, fingerprint, { force = false } = {}) {
   if (!existing || existing[metric+'_status']!=='manual_review') return false;
-  if (String(existing.last_error_class || '').endsWith('_retry_exhausted')) return false;
+  if (force && String(existing.last_error_class || '').endsWith('_retry_exhausted')) return false;
   const storedFingerprint=existing[metric+'_failure_fingerprint'];
   if (storedFingerprint) return storedFingerprint===fingerprint;
   const message=String(existing.last_error || '');
@@ -645,6 +645,7 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
   const now=nowIso(options.now ?? Date.now());
   await ensureStatisticsDataBackfillQueue(env,now);
   const requested=options.roundId == null ? null : String(options.roundId).trim();
+  const forceRetry=Boolean(requested);
   const target=requested
     ? await env.DB.prepare('SELECT game_round_id FROM statistics_data_backfill_rounds WHERE game_round_id=? LIMIT 1').bind(requested).first()
     : await nextQueuedRound(env,now);
@@ -662,7 +663,7 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
   const retryable=[];
 
   if (audit.status.finalMarket==='pending') {
-    if (preservedManualReview(existing,'final_market',audit.fingerprints.finalMarket)) {
+    if (preservedManualReview(existing,'final_market',audit.fingerprints.finalMarket,{force:forceRetry})) {
       finalMarketOverride='manual_review';
       finalMarketFailureFingerprint=audit.fingerprints.finalMarket;
     } else if (audit.finalGameSourceRecordId) {
@@ -683,7 +684,7 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
   }
 
   if (audit.status.form==='pending') {
-    if (preservedManualReview(existing,'form',audit.fingerprints.form)) {
+    if (preservedManualReview(existing,'form',audit.fingerprints.form,{force:forceRetry})) {
       formOverride='manual_review';
       formFailureFingerprint=audit.fingerprints.form;
       if (existing?.last_error) errors.push(String(existing.last_error));
