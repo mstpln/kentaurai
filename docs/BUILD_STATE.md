@@ -341,16 +341,16 @@ The external-analysis production release was accepted after:
 
 
 ## Statistics data completion backfill
-- Candidate branch: `feat/statistics-data-backfill-v1`.
-- Adds durable per-round coverage state for every registered historical V85/V86 system used by Spel outcome statistics.
-- Existing post-race settlement remains the owner of missing winners, final official market and payout acquisition.
-- The new bounded minute step runs after settlement and handles only remaining statistics-history gaps.
-- Historical Form/Form-rank first uses audited Step 1 lineage with exact `pack_id` + `facts_fingerprint` replay. Older registered systems without Step 1 packs can use their own canonical eight-leg analysis snapshot timestamps only when every timestamp is at or before the round's earliest verified pre-race cutoff; this fallback is stored separately as `legacy_analysis_snapshot`.
-- Existing archived final game sources may be repaired from the already archived raw final game source without a new provider fetch.
-- KentaurAI rank, ABCD and spike history are audited from canonical stored analysis/system facts; unavailable historical judgments are not invented.
-- Private admin status/step endpoints expose sanitized coverage state and do not expose raw racing payloads.
-- Retryable closing-market/Form work remains queued as `pending`; deterministic archive/provenance conflicts stop at `manual_review` instead of being retried forever or silently marked unavailable.
-- Legacy Form/KentaurAI historical reads require pre-race snapshot timing plus analysis creation no later than the registered system, and historical Form ignores result sources fetched after the reconstructed as-of.
+- Current hardening branch: `fix/statistics-backfill-state-machine-20260925`.
+- Durable per-round coverage remains the operational cache for registered historical V85/V86 systems; canonical racing, market, analysis, system and Form facts remain in their existing tables.
+- Post-race settlement remains the owner of winners/final-game acquisition. Statistics may only repair closing market from the already archived final official game source.
+- Migration `0041_statistics_data_backfill_state_v2.sql` separates lifecycle work state from metric state, adds due-time scheduling, leases, retry metadata and input fingerprints, and schedules existing rows for one safe source-of-truth re-audit.
+- The minute step selects one due round rather than only globally `pending` rows. Waiting facts are rechecked at a bounded cadence, transient failures back off exponentially, terminal rows are low-frequency re-audited, and one bad round cannot hot-loop/starve the queue.
+- Form and closing-market terminal decisions are metric-level and input-aware. Unchanged deterministic failures are not replayed; changed verified input can reopen that metric. A terminal Form decision does not block later results/final-market/payout refresh.
+- Historical Form/Form-rank still requires exact audited Step 1 pack/fingerprint lineage or the verified legacy eight-leg snapshot fallback. Step 1 `as_of` and generation time must be within the verified pre-race cutoff, and generation/legacy analysis creation may not occur after the registered system.
+- KentaurAI rank, ABCD and spike history are audited only from canonical stored pre-race/system facts. Missing historical AI judgments remain unavailable; malformed historical system invariants are surfaced for review rather than rewritten.
+- Passive audits do not increase `attempt_count`; only actual Form/market repair work does. Aggregate status output separates waiting/retryable/manual-review/legitimate-gap states without exposing private round identities.
+- Existing stale rows recover through the migration + scheduled re-audit path; no destructive reset or manual production SQL rewrite is part of the design.
 
 
 ## Historical official structural source-gap resilience
