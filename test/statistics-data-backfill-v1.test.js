@@ -708,7 +708,6 @@ test('invalid Step 1 lineage never falls back to unrelated legacy analysis snaps
       .run('invalid_step1_legacy_analysis_'+leg,'stats_race_'+leg,'stats_model');
   }
   db.prepare("UPDATE analysis_external_runs SET step1_facts_fingerprint='sha256:wrong' WHERE id='stats_run'").run();
-  db.prepare("UPDATE analysis_external_exports SET artifact_fingerprint='sha256:wrong' WHERE game_round_id='stats_round' AND stage='step1'").run();
   const audit=await auditStatisticsRound(env,'stats_round');
   assert.equal(audit.lineage.audited,false);
   assert.equal(audit.formLineage,null);
