@@ -4,7 +4,58 @@ import { stableId } from './ids.js';
 import { HORSE_FORM_INDEX_VERSION } from './statistics/horse-form-index.js';
 import { repairCapturedOfficialClosingMarket } from './import/official-live.js';
 
-export const STATISTICS_DATA_BACKFILL_VERSION = 'statistics-data-backfill-v1';
+export const STATISTICS_DATA_BACKFILL_VERSION = 'statistics-data-backfill-v2';
+export const STATISTICS_WAIT_RECHECK_MS = 15 * 60_000;
+export const STATISTICS_TERMINAL_REAUDIT_MS = 24 * 60 * 60_000;
+export const STATISTICS_RETRY_BASE_MS = 5 * 60_000;
+export const STATISTICS_RETRY_CAP_MS = 6 * 60 * 60_000;
+export const STATISTICS_MAX_FORM_RETRIES = 4;
+export const STATISTICS_MAX_AUDIT_RETRIES = 4;
+const STATISTICS_LEASE_MS = 4 * 60_000;
+
+function addMs(iso, ms) {
+  return new Date(Date.parse(iso) + ms).toISOString();
+}
+
+function retryDelayMs(retryCount) {
+  const exponent=Math.max(0,Number(retryCount || 1)-1);
+  return Math.min(STATISTICS_RETRY_CAP_MS,STATISTICS_RETRY_BASE_MS * (2 ** exponent));
+}
+
+function lifecycleFingerprint(prefix, ...parts) {
+  return stableId(prefix,...parts.map((part)=>part == null ? 'none' : String(part)));
+}
+
+function formInputFingerprint(audit) {
+  return lifecycleFingerprint(
+    'statistics-form-input-v2',
+    audit.primarySystemId,
+    audit.modelVersionId,
+    audit.formLineage?.kind,
+    audit.formLineage?.snapshotRef,
+    audit.lineage?.packId,
+    audit.lineage?.factsFingerprint,
+    audit.lineage?.asOf,
+    audit.formLineage?.asOfByLeg ? JSON.stringify(Object.fromEntries(audit.formLineage.asOfByLeg)) : null,
+    audit.counts.activeEntries
+  );
+}
+
+function finalMarketInputFingerprint(audit) {
+  return lifecycleFingerprint('statistics-final-market-input-v2',audit.finalGameSourceRecordId,audit.counts.activeEntries);
+}
+
+function roundInputFingerprint(audit) {
+  return lifecycleFingerprint(
+    'statistics-round-input-v2',
+    audit.primarySystemId,audit.modelVersionId,audit.counts.activeEntries,
+    audit.counts.winnerLegs,audit.counts.ambiguousWinnerLegs,audit.finalGameSourceRecordId,
+    audit.counts.closingMarket,audit.highestPayoutLevel,audit.highestPayoutSek,
+    audit.counts.formSnapshots,audit.counts.kaiRank,audit.counts.abcd,audit.counts.spikes,
+    audit.counts.spikeLegs,audit.counts.singletonSpikeLegs,audit.counts.selectionLegs,
+    audit.counts.invalidSelections,formInputFingerprint(audit),finalMarketInputFingerprint(audit)
+  );
+}
 
 function nowIso(value = Date.now()) {
   const date = new Date(value);
