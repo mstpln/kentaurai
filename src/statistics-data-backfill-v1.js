@@ -592,6 +592,13 @@ async function nextQueuedRound(env, at) {
     WHERE next_check_at IS NOT NULL
       AND datetime(next_check_at)<=datetime(?)
       AND (lease_until IS NULL OR datetime(lease_until)<datetime(?))
+      AND EXISTS (
+        SELECT 1
+        FROM game_rounds gr
+        WHERE gr.id=statistics_data_backfill_rounds.game_round_id
+          AND gr.game_type IN ('V85','V86')
+          AND datetime(COALESCE(gr.bet_stop_at,gr.scheduled_start_at,gr.round_date || 'T23:59:59Z')) < datetime(?)
+      )
     ORDER BY CASE work_state
       WHEN 'retryable' THEN 0
       WHEN 'waiting' THEN 1
@@ -599,7 +606,7 @@ async function nextQueuedRound(env, at) {
     END,
     datetime(next_check_at) ASC,datetime(last_checked_at) ASC,game_round_id ASC
     LIMIT 1
-  `).bind(at,at).first();
+  `).bind(at,at,at).first();
 }
 
 async function acquireLease(env, roundId, at) {
@@ -792,7 +799,15 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
   await ensureStatisticsDataBackfillQueue(env,at);
   const requested=options.roundId == null ? null : String(options.roundId).trim();
   const target=requested
-    ? await env.DB.prepare('SELECT game_round_id FROM statistics_data_backfill_rounds WHERE game_round_id=? LIMIT 1').bind(requested).first()
+    ? await env.DB.prepare(`
+        SELECT s.game_round_id
+        FROM statistics_data_backfill_rounds s
+        JOIN game_rounds gr ON gr.id=s.game_round_id
+        WHERE s.game_round_id=?
+          AND gr.game_type IN ('V85','V86')
+          AND datetime(COALESCE(gr.bet_stop_at,gr.scheduled_start_at,gr.round_date || 'T23:59:59Z')) < datetime(?)
+        LIMIT 1
+      `).bind(requested,at).first()
     : await nextQueuedRound(env,at);
   if (requested && !target) throw new Error('round is not eligible for historical statistics backfill');
   if (!target) return {version:STATISTICS_DATA_BACKFILL_VERSION,status:'idle'};
