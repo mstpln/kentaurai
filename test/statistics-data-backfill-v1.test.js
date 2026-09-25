@@ -325,3 +325,18 @@ test('manual-review Form does not block later settlement facts from reconciling'
   assert.equal(second.metrics.form,'manual_review');
   assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,attemptsAfterForm);
 });
+
+
+test('unchanged Form source gap is preserved instead of replayed every minute',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  db.prepare("UPDATE race_entries SET scratched=1 WHERE id='stats_entry_5'").run();
+  const first=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(first.metrics.form,'manual_review');
+  assert.equal(first.errorClass,'form_source_incomplete');
+  const attempts=db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count;
+  const second=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:01:00Z'});
+  assert.equal(second.metrics.form,'manual_review');
+  assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,attempts);
+});
