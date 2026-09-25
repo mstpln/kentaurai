@@ -71,6 +71,32 @@ jobs:
               SUM(CASE WHEN active_entries>0 AND final_market_rows=active_entries THEN 1 ELSE 0 END) AS final_market_fact_rounds
             FROM coverage;
 
+            SELECT 'STATISTICS_ATTENTION_DETAIL' AS section,
+              status,final_market_status,payout_status,form_status,kai_rank_status,abcd_status,spike_status,
+              COUNT(*) AS count,
+              CASE
+                WHEN last_error IS NULL THEN 'none'
+                WHEN instr(lower(last_error),'step1_replay_fingerprint_mismatch')>0 THEN 'step1_replay_fingerprint_mismatch'
+                WHEN instr(lower(last_error),'closing_market_manual_review')>0 THEN 'closing_market_manual_review'
+                WHEN instr(lower(last_error),'closing_market_repair')>0 THEN 'closing_market_repair_other'
+                WHEN instr(lower(last_error),'form_replay')>0 THEN 'form_replay_other'
+                ELSE 'other'
+              END AS error_class
+            FROM statistics_data_backfill_rounds
+            GROUP BY status,final_market_status,payout_status,form_status,kai_rank_status,abcd_status,spike_status,error_class
+            ORDER BY status,error_class;
+
+            SELECT 'LIVE_PENDING_CLASS' AS section,
+              COALESCE(json_extract(metadata_json,'$.normalizationOwner'),'none') AS normalization_owner,
+              quality_status,
+              COUNT(*) AS count
+            FROM source_records
+            WHERE source_type='official_provider'
+              AND quality_status IN ('captured_unmapped','captured_source_gap')
+              AND (external_id LIKE 'game:V85\\_%' ESCAPE '\\' OR external_id LIKE 'game:V86\\_%' ESCAPE '\\')
+            GROUP BY normalization_owner,quality_status
+            ORDER BY normalization_owner,quality_status;
+
             SELECT 'STATISTICS_ACTIVITY' AS section,
               MAX(last_checked_at) AS latest_checked_at,
               SUM(attempt_count) AS total_attempts,
@@ -508,4 +534,4 @@ jobs:
             GROUP BY case_no,source_rank,path,status,error_class
             ORDER BY case_no,source_rank,path,status,error_class;
           "
-# probe_nonce: 2026-09-25-full-workflow-backfill-audit-1
+# probe_nonce: 2026-09-25-full-workflow-backfill-audit-2
