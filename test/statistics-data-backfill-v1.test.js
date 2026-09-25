@@ -132,10 +132,12 @@ test('statistics backfill status is read-only before queue creation',async()=>{
   assert.equal(db.prepare('SELECT COUNT(*) n FROM statistics_data_backfill_rounds').get().n,0);
 });
 
-test('explicit statistics backfill refuses a round that is not yet historically eligible',async()=>{
+test('explicit statistics backfill refuses a round that is not yet historically eligible even with a stale queue row',async()=>{
   const {env,db}=createTestEnv();
   seedRound(db);
   await seedRecordedSystem(env,db);
+  await ensureStatisticsDataBackfillQueue(env,'2100-01-01T00:00:00Z');
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().n,1);
   await assert.rejects(
     () => runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2099-01-02T11:45:00Z'}),
     /not eligible for historical statistics backfill/
