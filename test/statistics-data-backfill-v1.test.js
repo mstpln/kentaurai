@@ -455,3 +455,92 @@ test('attempt counter records actual replay/repair work but not passive audits',
   await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:32:00Z'});
   assert.equal(statisticsBackfillRow(db).attempt_count,attempts);
 });
+
+
+function seedStatisticsPredictions(db,{withAbcd=true}={}) {
+  for(let leg=1;leg<=8;leg+=1){
+    const analysis='stats_complete_analysis_'+leg;
+    db.prepare("INSERT INTO ai_race_analyses (id,race_id,model_version_id,data_snapshot_at,market_blind,created_at) VALUES (?,?,?,'2099-01-02T11:30:00.000Z',1,'2099-01-02T11:39:00.000Z')")
+      .run(analysis,'stats_race_'+leg,'stats_model');
+    db.prepare("INSERT INTO ai_horse_predictions (id,ai_race_analysis_id,race_entry_id,win_probability,raw_rank,abcd_group) VALUES (?,?,?,?,1,?)")
+      .run('stats_complete_prediction_'+leg,analysis,'stats_entry_'+leg,1,withAbcd?'A':null);
+  }
+}
+
+function seedSecondStatisticsRound(db) {
+  db.prepare("INSERT INTO game_rounds (id,game_type,round_date,scheduled_start_at,bet_stop_at,status) VALUES ('stats_round_2','V86','2099-01-02','2099-01-02T12:10:00Z','2099-01-02T12:00:00.000Z','results')").run();
+  for(let leg=1;leg<=8;leg+=1){
+    db.prepare("INSERT INTO game_legs (game_round_id,leg_number,race_id) VALUES ('stats_round_2',?,?)").run(leg,'stats_race_'+leg);
+  }
+  db.prepare("INSERT INTO systems (id,game_round_id,system_type,budget_sek,row_count,line_price_sek,spike_count,created_at,metrics_json) VALUES ('stats_system_2','stats_round_2','main',200,8,0.25,3,'2099-01-02T11:40:00.000Z','{}')").run();
+  for(let leg=1;leg<=8;leg+=1){
+    db.prepare("INSERT INTO system_selections (system_id,leg_number,race_entry_id,is_spike) VALUES ('stats_system_2',?,?,?)")
+      .run(leg,'stats_entry_'+leg,leg<=3?1:0);
+  }
+}
+
+test('complete_with_gaps ABCD unavailability is stable and does not retry every minute',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  seedStatisticsPredictions(db,{withAbcd:false});
+  addStatisticsFinalFacts(db);
+  const first=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(first.status,'complete_with_gaps');
+  assert.equal(first.metrics.kaiRank,'complete');
+  assert.equal(first.metrics.abcd,'unavailable');
+  const attempts=statisticsBackfillRow(db).attempt_count;
+  assert.equal((await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:01:00Z'})).status,'idle');
+  assert.equal(statisticsBackfillRow(db).attempt_count,attempts);
+});
+
+test('one terminally bad round does not starve a later actionable round',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  seedSecondStatisticsRound(db);
+  const bad=await runNextStatisticsDataBackfill(env,{
+    roundId:'stats_round',now:'2100-01-01T00:00:00Z',
+    formReplayImpl:async()=>{ throw new Error('round leg 5 has no active horse entries'); }
+  });
+  assert.equal(bad.metrics.form,'manual_review');
+  const next=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:01:00Z'});
+  assert.equal(next.roundId,'stats_round_2');
+});
+
+test('partial Form snapshots are completed idempotently from the same verified lineage',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  const pack=await seedRecordedSystem(env,db);
+  for(let leg=1;leg<=4;leg+=1){
+    db.prepare(`INSERT INTO analysis_entry_form_snapshots
+      (id,game_round_id,step1_pack_id,leg_number,race_entry_id,as_of,form_version,form_score,used_starts,form_rank)
+      VALUES (?,?,?,?,?,'2099-01-02T11:30:00.000Z','synthetic',NULL,0,NULL)`)
+      .run('stats_partial_form_'+leg,'stats_round',pack.packId,leg,'stats_entry_'+leg);
+  }
+  const result=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(result.metrics.form,'complete');
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM analysis_entry_form_snapshots WHERE game_round_id='stats_round' AND step1_pack_id=?").get(pack.packId).n,8);
+});
+
+test('pre-v2 unfingerprinted Form manual-review state keeps its terminal decision while factual metrics refresh',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  await runNextStatisticsDataBackfill(env,{
+    roundId:'stats_round',now:'2100-01-01T00:00:00Z',
+    formReplayImpl:async()=>{ throw new Error('round leg 5 has no active horse entries'); }
+  });
+  db.prepare(`UPDATE statistics_data_backfill_rounds
+    SET form_input_fingerprint=NULL,form_terminal_fingerprint=NULL,form_terminal_reason=NULL,
+        form_status='manual_review',status='manual_review',last_error='form_replay: round leg # has no active horse entries',
+        last_error_class='form_replay_other',next_check_at='2100-01-01T00:01:00Z'
+    WHERE game_round_id='stats_round'`).run();
+  addStatisticsFinalFacts(db);
+  const recovered=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:02:00Z'});
+  assert.equal(recovered.metrics.form,'manual_review');
+  assert.equal(recovered.metrics.results,'complete');
+  assert.equal(recovered.metrics.finalMarket,'complete');
+  assert.equal(recovered.metrics.payout,'complete');
+  assert.equal(statisticsBackfillRow(db).form_terminal_reason,'form_replay_no_active_entries');
+});
