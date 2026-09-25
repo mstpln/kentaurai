@@ -427,13 +427,38 @@ function closingMarketFailure(error) {
   return { status:'pending', errorClass:'closing_market_retryable' };
 }
 
+const retrySchemaReady=new WeakSet();
+
+async function ensureRetryStateTable(env) {
+  if (retrySchemaReady.has(env.DB)) return;
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS statistics_data_backfill_retry_state (
+      game_round_id TEXT PRIMARY KEY REFERENCES game_rounds(id) ON DELETE CASCADE,
+      last_error_class TEXT,
+      retry_count INTEGER NOT NULL DEFAULT 0 CHECK(retry_count >= 0),
+      next_check_at TEXT,
+      form_failure_fingerprint TEXT,
+      final_market_failure_fingerprint TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  await env.DB.prepare(`
+    CREATE INDEX IF NOT EXISTS idx_statistics_backfill_retry_due
+    ON statistics_data_backfill_retry_state(next_check_at, game_round_id)
+  `).run();
+  retrySchemaReady.add(env.DB);
+}
+
 async function loadStoredState(env, roundId) {
+  await ensureRetryStateTable(env);
   return env.DB.prepare(`
-    SELECT game_round_id,status,result_status,final_market_status,payout_status,form_status,
-      kai_rank_status,abcd_status,spike_status,attempt_count,last_error,last_error_class,
-      retry_count,next_check_at,form_failure_fingerprint,final_market_failure_fingerprint
-    FROM statistics_data_backfill_rounds
-    WHERE game_round_id=?
+    SELECT b.game_round_id,b.status,b.result_status,b.final_market_status,b.payout_status,b.form_status,
+      b.kai_rank_status,b.abcd_status,b.spike_status,b.attempt_count,b.last_error,
+      r.last_error_class,r.retry_count,r.next_check_at,r.form_failure_fingerprint,r.final_market_failure_fingerprint
+    FROM statistics_data_backfill_rounds b
+    LEFT JOIN statistics_data_backfill_retry_state r ON r.game_round_id=b.game_round_id
+    WHERE b.game_round_id=?
     LIMIT 1
   `).bind(roundId).first();
 }
@@ -460,6 +485,7 @@ async function persistAudit(env, audit, {
   formFailureFingerprint = null,
   finalMarketFailureFingerprint = null
 } = {}) {
+  await ensureRetryStateTable(env);
   const normalizedForm=formStatus || audit.status.form;
   const normalizedFinalMarket=finalMarketStatus || audit.status.finalMarket;
   const overall=overallStatus(audit,{form:normalizedForm,finalMarket:normalizedFinalMarket});
@@ -470,9 +496,8 @@ async function persistAudit(env, audit, {
       (game_round_id,status,result_status,final_market_status,payout_status,form_status,
        kai_rank_status,abcd_status,spike_status,active_entry_count,closing_market_count,
        form_snapshot_count,kai_rank_count,abcd_count,spike_count,form_lineage_kind,form_snapshot_ref,
-       form_as_of_json,step1_pack_id,step1_facts_fingerprint,step1_as_of,attempt_count,last_error,last_checked_at,completed_at,
-       last_error_class,retry_count,next_check_at,form_failure_fingerprint,final_market_failure_fingerprint)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       form_as_of_json,step1_pack_id,step1_facts_fingerprint,step1_as_of,attempt_count,last_error,last_checked_at,completed_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     ON CONFLICT(game_round_id) DO UPDATE SET
       status=excluded.status,
       result_status=excluded.result_status,
@@ -498,11 +523,6 @@ async function persistAudit(env, audit, {
       last_error=excluded.last_error,
       last_checked_at=excluded.last_checked_at,
       completed_at=excluded.completed_at,
-      last_error_class=excluded.last_error_class,
-      retry_count=excluded.retry_count,
-      next_check_at=excluded.next_check_at,
-      form_failure_fingerprint=excluded.form_failure_fingerprint,
-      final_market_failure_fingerprint=excluded.final_market_failure_fingerprint,
       updated_at=CURRENT_TIMESTAMP
   `).bind(
     audit.roundId,overall,audit.status.results,normalizedFinalMarket,audit.status.payout,normalizedForm,
@@ -513,21 +533,35 @@ async function persistAudit(env, audit, {
     audit.formLineage?.asOfByLeg ? JSON.stringify(Object.fromEntries(audit.formLineage.asOfByLeg)) : null,
     audit.lineage?.packId || null,audit.lineage?.factsFingerprint || null,audit.lineage?.asOf || null,
     attempted ? 1 : 0,lastError,checkedAt,completedAt,
-    lastErrorClass,retryCount,nextCheckAt,formFailureFingerprint,finalMarketFailureFingerprint,
     attempted ? 1 : 0
+  ).run();
+  await env.DB.prepare(`
+    INSERT INTO statistics_data_backfill_retry_state
+      (game_round_id,last_error_class,retry_count,next_check_at,form_failure_fingerprint,final_market_failure_fingerprint)
+    VALUES (?,?,?,?,?,?)
+    ON CONFLICT(game_round_id) DO UPDATE SET
+      last_error_class=excluded.last_error_class,
+      retry_count=excluded.retry_count,
+      next_check_at=excluded.next_check_at,
+      form_failure_fingerprint=excluded.form_failure_fingerprint,
+      final_market_failure_fingerprint=excluded.final_market_failure_fingerprint,
+      updated_at=CURRENT_TIMESTAMP
+  `).bind(
+    audit.roundId,lastErrorClass,retryCount,nextCheckAt,formFailureFingerprint,finalMarketFailureFingerprint
   ).run();
   return overall;
 }
 
 export async function ensureStatisticsDataBackfillQueue(env, value = Date.now()) {
   if (!env?.DB) throw new Error('DB is not configured');
+  await ensureRetryStateTable(env);
   const at=nowIso(value);
   const result=await env.DB.prepare(`
     INSERT OR IGNORE INTO statistics_data_backfill_rounds
       (game_round_id,status,result_status,final_market_status,payout_status,form_status,
-       kai_rank_status,abcd_status,spike_status,last_checked_at,next_check_at)
+       kai_rank_status,abcd_status,spike_status,last_checked_at)
     SELECT gr.id,'pending','pending','pending','pending','pending',
-           'unavailable','unavailable','unavailable',?,?
+           'unavailable','unavailable','unavailable',?
     FROM game_rounds gr
     WHERE gr.game_type IN ('V85','V86')
       AND EXISTS (SELECT 1 FROM systems s WHERE s.game_round_id=gr.id)
@@ -537,26 +571,33 @@ export async function ensureStatisticsDataBackfillQueue(env, value = Date.now())
         gr.scheduled_start_at,
         gr.round_date || 'T23:59:59Z'
       )) < datetime(?)
-  `).bind(at,at,at).run();
+  `).bind(at,at).run();
+  await env.DB.prepare(`
+    INSERT OR IGNORE INTO statistics_data_backfill_retry_state (game_round_id,next_check_at)
+    SELECT game_round_id,?
+    FROM statistics_data_backfill_rounds
+  `).bind(at).run();
   return { version:STATISTICS_DATA_BACKFILL_VERSION, created:Number(result.meta?.changes || 0) };
 }
 
 async function nextQueuedRound(env, now) {
+  await ensureRetryStateTable(env);
   return env.DB.prepare(`
-    SELECT game_round_id
-    FROM statistics_data_backfill_rounds
+    SELECT b.game_round_id
+    FROM statistics_data_backfill_rounds b
+    LEFT JOIN statistics_data_backfill_retry_state r ON r.game_round_id=b.game_round_id
     WHERE (
-      status='pending'
-      OR result_status='pending'
-      OR final_market_status='pending'
-      OR payout_status='pending'
-      OR form_status='pending'
+      b.status='pending'
+      OR b.result_status='pending'
+      OR b.final_market_status='pending'
+      OR b.payout_status='pending'
+      OR b.form_status='pending'
     )
-      AND (next_check_at IS NULL OR datetime(next_check_at)<=datetime(?))
+      AND (r.next_check_at IS NULL OR datetime(r.next_check_at)<=datetime(?))
     ORDER BY
-      CASE WHEN status='pending' THEN 0 ELSE 1 END,
-      datetime(COALESCE(next_check_at,last_checked_at)) ASC,
-      game_round_id ASC
+      CASE WHEN b.status='pending' THEN 0 ELSE 1 END,
+      datetime(COALESCE(r.next_check_at,b.last_checked_at)) ASC,
+      b.game_round_id ASC
     LIMIT 1
   `).bind(now).first();
 }
@@ -744,6 +785,7 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
 
 export async function getStatisticsDataBackfillStatus(env) {
   if (!env?.DB) throw new Error('DB is not configured');
+  await ensureRetryStateTable(env);
   const {results}=await env.DB.prepare(`
     SELECT status,COUNT(*) n
     FROM statistics_data_backfill_rounds
@@ -764,14 +806,15 @@ export async function getStatisticsDataBackfillStatus(env) {
     FROM statistics_data_backfill_rounds
   `).first();
   const {results:attention}=await env.DB.prepare(`
-    SELECT game_round_id,status,result_status,final_market_status,payout_status,form_status,
-           kai_rank_status,abcd_status,spike_status,last_error,last_error_class,retry_count,
-           next_check_at,last_checked_at
-    FROM statistics_data_backfill_rounds
-    WHERE status IN ('pending','complete_with_gaps','manual_review')
+    SELECT b.game_round_id,b.status,b.result_status,b.final_market_status,b.payout_status,b.form_status,
+           b.kai_rank_status,b.abcd_status,b.spike_status,b.last_error,
+           r.last_error_class,r.retry_count,r.next_check_at,b.last_checked_at
+    FROM statistics_data_backfill_rounds b
+    LEFT JOIN statistics_data_backfill_retry_state r ON r.game_round_id=b.game_round_id
+    WHERE b.status IN ('pending','complete_with_gaps','manual_review')
     ORDER BY
-      CASE status WHEN 'pending' THEN 0 WHEN 'manual_review' THEN 1 ELSE 2 END,
-      game_round_id DESC
+      CASE b.status WHEN 'pending' THEN 0 WHEN 'manual_review' THEN 1 ELSE 2 END,
+      b.game_round_id DESC
     LIMIT 50
   `).all();
   return {
