@@ -544,3 +544,34 @@ test('pre-v2 unfingerprinted Form manual-review state keeps its terminal decisio
   assert.equal(recovered.metrics.payout,'complete');
   assert.equal(statisticsBackfillRow(db).form_terminal_reason,'form_replay_no_active_entries');
 });
+
+
+test('Step 1 Form lineage after the round pre-race cutoff is rejected fail-closed',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  db.prepare("UPDATE analysis_external_runs SET step1_pack_as_of='2099-01-02T12:05:00.000Z',step1_generated_at='2099-01-02T12:06:00.000Z' WHERE id='stats_run'").run();
+  db.prepare("UPDATE analysis_external_exports SET as_of='2099-01-02T12:05:00.000Z',generated_at='2099-01-02T12:06:00.000Z' WHERE game_round_id='stats_round' AND stage='step1'").run();
+  const audit=await auditStatisticsRound(env,'stats_round');
+  assert.equal(audit.formLineage,null);
+  assert.equal(audit.status.form,'unavailable');
+});
+
+test('Step 1 Form lineage generated after the registered system is rejected fail-closed',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  db.prepare("UPDATE analysis_external_runs SET step1_generated_at='2099-01-02T11:41:00.000Z' WHERE id='stats_run'").run();
+  db.prepare("UPDATE analysis_external_exports SET generated_at='2099-01-02T11:41:00.000Z' WHERE game_round_id='stats_round' AND stage='step1'").run();
+  const audit=await auditStatisticsRound(env,'stats_round');
+  assert.equal(audit.formLineage,null);
+  assert.equal(audit.status.form,'unavailable');
+});
+
+test('statistics source audit fails closed if an eligible round later loses its eight-leg shape',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  db.prepare("DELETE FROM game_legs WHERE game_round_id='stats_round' AND leg_number=8").run();
+  await assert.rejects(()=>auditStatisticsRound(env,'stats_round'),/exactly eight legs/);
+});
