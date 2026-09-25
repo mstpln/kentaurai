@@ -5,6 +5,7 @@ import { createPreMarketAnalysisPackV3 } from '../src/analysis-pack-v3.js';
 import { recordExternalAnalysisExport } from '../src/external-analysis-flow-v1.js';
 import {
   auditStatisticsRound,
+  classifyStatisticsFormFailure,
   getStatisticsDataBackfillStatus,
   runNextStatisticsDataBackfill
 } from '../src/statistics-data-backfill-v1.js';
@@ -102,8 +103,9 @@ test('statistics backfill fails closed on Step 1 fingerprint mismatch',async()=>
   db.prepare("UPDATE analysis_external_exports SET artifact_fingerprint='sha256:wrong' WHERE game_round_id='stats_round' AND stage='step1'").run();
 
   const result=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
-  assert.equal(result.status,'manual_review');
+  assert.equal(result.status,'pending');
   assert.equal(result.metrics.form,'manual_review');
+  assert.equal(result.errorClass,'step1_replay_fingerprint_mismatch');
   assert.equal(db.prepare("SELECT COUNT(*) n FROM analysis_entry_form_snapshots").get().n,0);
 });
 
@@ -236,9 +238,10 @@ test('deterministic closing-market archive gaps require manual review instead of
       100000,1000,100,'{"8":{"payoutRaw":2500000,"payoutSek":25000,"systems":1,"jackpot":false}}',8,2500000,25000)`).run();
 
   const result=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
-  assert.equal(result.status,'manual_review');
+  assert.equal(result.status,'pending');
   assert.equal(result.metrics.finalMarket,'manual_review');
   assert.equal(result.metrics.form,'complete');
+  assert.equal(result.errorClass,'closing_market_manual_review');
   assert.match(result.reason,/closing_market_manual_review/);
 });
 
@@ -284,4 +287,83 @@ test('historical KAI judgments reject snapshots after the round pre-race cutoff'
   assert.equal(audit.counts.abcd,0);
   assert.equal(audit.status.kaiRank,'unavailable');
   assert.equal(audit.status.abcd,'unavailable');
+});
+
+
+test('manual-review Form does not block later settlement facts from reconciling',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  db.prepare("UPDATE analysis_external_runs SET step1_facts_fingerprint='sha256:wrong' WHERE id='stats_run'").run();
+  db.prepare("UPDATE analysis_external_exports SET artifact_fingerprint='sha256:wrong' WHERE game_round_id='stats_round' AND stage='step1'").run();
+
+  const first=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(first.status,'pending');
+  assert.equal(first.metrics.form,'manual_review');
+  const attemptsAfterForm=db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count;
+
+  for(let leg=1;leg<=8;leg+=1){
+    db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,gallop,disqualified) VALUES (?,1,'official',0,0)")
+      .run('stats_entry_'+leg);
+  }
+  db.prepare(`INSERT INTO game_round_final_results
+    (game_round_id,game_type,source_record_id,captured_at,status,turnover_raw,turnover_sek,
+     system_count,payouts_json,highest_payout_level,highest_payout_raw,highest_payout_sek)
+    VALUES ('stats_round','V86','stats_official','2099-01-02T22:00:00Z','results',
+      100000,1000,100,'{"8":{"payoutRaw":2500000,"payoutSek":25000,"systems":1,"jackpot":false}}',8,2500000,25000)`).run();
+  for(let leg=1;leg<=8;leg+=1){
+    db.prepare(`INSERT INTO betting_snapshots
+      (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id)
+      VALUES (?,?,?,?,?,?,?,?)`)
+      .run('stats_final_bet_'+leg,'stats_round',leg,'stats_entry_'+leg,'2099-01-02T22:00:00Z',50,leg,'stats_official');
+  }
+
+  const second=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:06:00Z'});
+  assert.equal(second.status,'manual_review');
+  assert.equal(second.metrics.results,'complete');
+  assert.equal(second.metrics.finalMarket,'complete');
+  assert.equal(second.metrics.payout,'complete');
+  assert.equal(second.metrics.form,'manual_review');
+  assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,attemptsAfterForm);
+});
+
+
+test('deterministic Form source gaps are classified as manual review',()=>{
+  const failure=classifyStatisticsFormFailure(new Error('round leg 5 has no active horse entries'));
+  assert.deepEqual(failure,{status:'manual_review',errorClass:'form_source_incomplete'});
+});
+
+test('retryable closing-market failures back off and stop after bounded unchanged retries',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  db.prepare("UPDATE source_records SET raw_object_key='raw/official_provider/retry.json' WHERE id='stats_official'").run();
+  db.prepare(`INSERT INTO game_round_final_results
+    (game_round_id,game_type,source_record_id,captured_at,status,turnover_raw,turnover_sek,system_count,payouts_json,highest_payout_level,highest_payout_raw,highest_payout_sek)
+    VALUES ('stats_round','V86','stats_official','2099-01-02T22:00:00Z','results',100000,1000,100,'{"8":{"payoutRaw":2500000,"payoutSek":25000,"systems":1,"jackpot":false}}',8,2500000,25000)`).run();
+  let reads=0;
+  env.RAW_BUCKET.get=async()=>{reads+=1;throw new Error('temporary archive outage');};
+
+  const first=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(first.retryCount,1);
+  assert.equal(first.nextCheckAt,'2100-01-01T00:05:00.000Z');
+  assert.equal((await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:01:00Z'})).status,'idle');
+
+  for(let attempt=2;attempt<=5;attempt+=1){
+    await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:`2100-01-0${attempt}T00:00:00Z`});
+  }
+  const state=db.prepare(`SELECT b.final_market_status,r.retry_count,r.last_error_class
+    FROM statistics_data_backfill_rounds b JOIN statistics_data_backfill_retry_state r ON r.game_round_id=b.game_round_id
+    WHERE b.game_round_id='stats_round'`).get();
+  assert.equal(state.final_market_status,'manual_review');
+  assert.equal(state.retry_count,5);
+  assert.equal(state.last_error_class,'closing_market_retryable_retry_exhausted');
+  assert.equal(reads,5);
+
+  const automatic=await runNextStatisticsDataBackfill(env,{now:'2100-02-01T00:00:00Z'});
+  assert.equal(automatic.metrics.finalMarket,'manual_review');
+  assert.equal(reads,5,'automatic runs must not repeat an exhausted failure with unchanged inputs');
+
+  await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-02-01T00:01:00Z'});
+  assert.equal(reads,6,'an explicit round retry may force a recovery attempt');
 });

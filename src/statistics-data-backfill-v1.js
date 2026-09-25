@@ -4,7 +4,7 @@ import { stableId } from './ids.js';
 import { HORSE_FORM_INDEX_VERSION } from './statistics/horse-form-index.js';
 import { repairCapturedOfficialClosingMarket } from './import/official-live.js';
 
-export const STATISTICS_DATA_BACKFILL_VERSION = 'statistics-data-backfill-v1';
+export const STATISTICS_DATA_BACKFILL_VERSION = 'statistics-data-backfill-v2';
 
 function nowIso(value = Date.now()) {
   const date = new Date(value);
@@ -214,6 +214,17 @@ export async function auditStatisticsRound(env, roundId) {
     WHERE gl.game_round_id=? AND re.scratched=0
   `,[id]);
 
+  const {results:activeEntryRows}=await env.DB.prepare(`
+    SELECT gl.leg_number,re.id
+    FROM game_legs gl
+    JOIN race_entries re ON re.race_id=gl.race_id
+    WHERE gl.game_round_id=? AND re.scratched=0
+    ORDER BY gl.leg_number,re.id
+  `).bind(id).all();
+  const activeEntryShape=(activeEntryRows || [])
+    .map((row)=>String(row.leg_number)+':'+String(row.id))
+    .join('|');
+
   const winnerLegs=await scalar(env,`
     SELECT COUNT(*) n FROM (
       SELECT gl.leg_number
@@ -303,10 +314,12 @@ export async function auditStatisticsRound(env, roundId) {
   `,[system.id]);
 
   const resultStatus=winnerLegs===8 ? 'complete' : 'pending';
-  let finalMarketStatus=finalResult
-    ? countStatus(closingMarketCount,activeEntries)
-    : 'pending';
-  if (finalResult && activeEntries===0) finalMarketStatus='unavailable';
+  let finalMarketStatus='pending';
+  if (finalResult && activeEntries===0) {
+    finalMarketStatus='unavailable';
+  } else if (finalResult && closingMarketCount>=activeEntries && activeEntries>0) {
+    finalMarketStatus='complete';
+  }
 
   const payoutStatus=finalResult
     ? (finalResult.payouts_json && finalResult.highest_payout_sek != null ? 'complete' : 'unavailable')
@@ -347,24 +360,141 @@ export async function auditStatisticsRound(env, roundId) {
     },
     finalGameSourceRecordId:finalResult?.source_record_id || null,
     highestPayoutLevel:finalResult?.highest_payout_level == null ? null : Number(finalResult.highest_payout_level),
-    highestPayoutSek:finalResult?.highest_payout_sek == null ? null : Number(finalResult.highest_payout_sek)
+    highestPayoutSek:finalResult?.highest_payout_sek == null ? null : Number(finalResult.highest_payout_sek),
+    fingerprints:{
+      form:stableId(
+        'statistics-form-input-v2',
+        id,
+        formLineage?.kind || '',
+        formLineage?.snapshotRef || '',
+        lineage?.factsFingerprint || '',
+        lineage?.asOf || '',
+        activeEntryShape
+      ),
+      finalMarket:stableId(
+        'statistics-final-market-input-v2',
+        id,
+        finalResult?.source_record_id || '',
+        activeEntryShape
+      )
+    }
   };
 }
 
+
 function overallStatus(audit, overrides = {}) {
   const status={...audit.status,...overrides};
-  if (Object.values(status).includes('manual_review')) return 'manual_review';
   if (Object.values(status).includes('pending')) return 'pending';
+  if (Object.values(status).includes('manual_review')) return 'manual_review';
   return Object.values(status).every((value)=>value==='complete')
     ? 'complete'
     : 'complete_with_gaps';
 }
 
-async function persistAudit(env, audit, { formStatus = null, finalMarketStatus = null, lastError = null, attempted = false } = {}) {
+const RETRY_DELAYS_MS = Object.freeze([
+  5 * 60 * 1000,
+  15 * 60 * 1000,
+  60 * 60 * 1000,
+  6 * 60 * 60 * 1000,
+  24 * 60 * 60 * 1000
+]);
+const MAX_UNCHANGED_RETRIES = RETRY_DELAYS_MS.length;
+const UPSTREAM_RECHECK_MS = 5 * 60 * 1000;
+const MANUAL_REVIEW_RECHECK_MS = 24 * 60 * 60 * 1000;
+
+function futureIso(now, delayMs) {
+  return new Date(Date.parse(now) + delayMs).toISOString();
+}
+
+function retryDelayMs(retryCount) {
+  const index=Math.max(0,Math.min(RETRY_DELAYS_MS.length-1,Number(retryCount || 1)-1));
+  return RETRY_DELAYS_MS[index];
+}
+
+export function classifyStatisticsFormFailure(error) {
+  const message=String(error?.message || error || '');
+  if (/round leg \d+ has no active horse entries/i.test(message)) {
+    return { status:'manual_review', errorClass:'form_source_incomplete' };
+  }
+  if (/verified_(?:form|step1)_lineage_missing|unsupported_form_lineage/i.test(message)) {
+    return { status:'manual_review', errorClass:'form_lineage_invalid' };
+  }
+  return { status:'pending', errorClass:'form_replay_retryable' };
+}
+
+function closingMarketFailure(error) {
+  const message=String(error?.message || error || '');
+  if (/closing_market_manual_review:/i.test(message)) {
+    return { status:'manual_review', errorClass:'closing_market_manual_review' };
+  }
+  return { status:'pending', errorClass:'closing_market_retryable' };
+}
+
+const retrySchemaReady=new WeakSet();
+
+async function ensureRetryStateTable(env) {
+  if (retrySchemaReady.has(env.DB)) return;
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS statistics_data_backfill_retry_state (
+      game_round_id TEXT PRIMARY KEY REFERENCES game_rounds(id) ON DELETE CASCADE,
+      last_error_class TEXT,
+      retry_count INTEGER NOT NULL DEFAULT 0 CHECK(retry_count >= 0),
+      next_check_at TEXT,
+      form_failure_fingerprint TEXT,
+      final_market_failure_fingerprint TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  await env.DB.prepare(`
+    CREATE INDEX IF NOT EXISTS idx_statistics_backfill_retry_due
+    ON statistics_data_backfill_retry_state(next_check_at, game_round_id)
+  `).run();
+  retrySchemaReady.add(env.DB);
+}
+
+async function loadStoredState(env, roundId) {
+  await ensureRetryStateTable(env);
+  return env.DB.prepare(`
+    SELECT b.game_round_id,b.status,b.result_status,b.final_market_status,b.payout_status,b.form_status,
+      b.kai_rank_status,b.abcd_status,b.spike_status,b.attempt_count,b.last_error,
+      r.last_error_class,r.retry_count,r.next_check_at,r.form_failure_fingerprint,r.final_market_failure_fingerprint
+    FROM statistics_data_backfill_rounds b
+    LEFT JOIN statistics_data_backfill_retry_state r ON r.game_round_id=b.game_round_id
+    WHERE b.game_round_id=?
+    LIMIT 1
+  `).bind(roundId).first();
+}
+
+function preservedManualReview(existing, metric, fingerprint, { force = false } = {}) {
+  if (!existing || existing[metric+'_status']!=='manual_review') return false;
+  if (force && String(existing.last_error_class || '').endsWith('_retry_exhausted')) return false;
+  const storedFingerprint=existing[metric+'_failure_fingerprint'];
+  if (storedFingerprint) return storedFingerprint===fingerprint;
+  const message=String(existing.last_error || '');
+  if (metric==='form') {
+    return /step1_replay_fingerprint_mismatch|round leg \d+ has no active horse entries/i.test(message);
+  }
+  return /closing_market_manual_review:/i.test(message);
+}
+
+async function persistAudit(env, audit, {
+  formStatus = null,
+  finalMarketStatus = null,
+  lastError = null,
+  lastErrorClass = null,
+  attempted = false,
+  retryCount = 0,
+  nextCheckAt = null,
+  formFailureFingerprint = null,
+  finalMarketFailureFingerprint = null
+} = {}) {
+  await ensureRetryStateTable(env);
   const normalizedForm=formStatus || audit.status.form;
   const normalizedFinalMarket=finalMarketStatus || audit.status.finalMarket;
   const overall=overallStatus(audit,{form:normalizedForm,finalMarket:normalizedFinalMarket});
-  const completedAt=overall==='pending' ? null : new Date().toISOString();
+  const checkedAt=new Date().toISOString();
+  const completedAt=overall==='pending' ? null : checkedAt;
   await env.DB.prepare(`
     INSERT INTO statistics_data_backfill_rounds
       (game_round_id,status,result_status,final_market_status,payout_status,form_status,
@@ -406,15 +536,29 @@ async function persistAudit(env, audit, { formStatus = null, finalMarketStatus =
     audit.formLineage?.kind || null,audit.formLineage?.snapshotRef || null,
     audit.formLineage?.asOfByLeg ? JSON.stringify(Object.fromEntries(audit.formLineage.asOfByLeg)) : null,
     audit.lineage?.packId || null,audit.lineage?.factsFingerprint || null,audit.lineage?.asOf || null,
-    attempted ? 1 : 0,lastError,
-    new Date().toISOString(),completedAt,
+    attempted ? 1 : 0,lastError,checkedAt,completedAt,
     attempted ? 1 : 0
+  ).run();
+  await env.DB.prepare(`
+    INSERT INTO statistics_data_backfill_retry_state
+      (game_round_id,last_error_class,retry_count,next_check_at,form_failure_fingerprint,final_market_failure_fingerprint)
+    VALUES (?,?,?,?,?,?)
+    ON CONFLICT(game_round_id) DO UPDATE SET
+      last_error_class=excluded.last_error_class,
+      retry_count=excluded.retry_count,
+      next_check_at=excluded.next_check_at,
+      form_failure_fingerprint=excluded.form_failure_fingerprint,
+      final_market_failure_fingerprint=excluded.final_market_failure_fingerprint,
+      updated_at=CURRENT_TIMESTAMP
+  `).bind(
+    audit.roundId,lastErrorClass,retryCount,nextCheckAt,formFailureFingerprint,finalMarketFailureFingerprint
   ).run();
   return overall;
 }
 
 export async function ensureStatisticsDataBackfillQueue(env, value = Date.now()) {
   if (!env?.DB) throw new Error('DB is not configured');
+  await ensureRetryStateTable(env);
   const at=nowIso(value);
   const result=await env.DB.prepare(`
     INSERT OR IGNORE INTO statistics_data_backfill_rounds
@@ -432,25 +576,35 @@ export async function ensureStatisticsDataBackfillQueue(env, value = Date.now())
         gr.round_date || 'T23:59:59Z'
       )) < datetime(?)
   `).bind(at,at).run();
+  await env.DB.prepare(`
+    INSERT OR IGNORE INTO statistics_data_backfill_retry_state (game_round_id,next_check_at)
+    SELECT game_round_id,?
+    FROM statistics_data_backfill_rounds
+  `).bind(at).run();
   return { version:STATISTICS_DATA_BACKFILL_VERSION, created:Number(result.meta?.changes || 0) };
 }
 
-async function nextQueuedRound(env) {
+async function nextQueuedRound(env, now) {
+  await ensureRetryStateTable(env);
   return env.DB.prepare(`
-    SELECT game_round_id
-    FROM statistics_data_backfill_rounds
-    WHERE status='pending'
-    ORDER BY last_checked_at ASC,game_round_id ASC
+    SELECT b.game_round_id
+    FROM statistics_data_backfill_rounds b
+    LEFT JOIN statistics_data_backfill_retry_state r ON r.game_round_id=b.game_round_id
+    WHERE (
+      b.status='pending'
+      OR b.status='manual_review'
+      OR b.result_status='pending'
+      OR b.final_market_status='pending'
+      OR b.payout_status='pending'
+      OR b.form_status='pending'
+    )
+      AND (r.next_check_at IS NULL OR datetime(r.next_check_at)<=datetime(?))
+    ORDER BY
+      CASE WHEN b.status='pending' THEN 0 ELSE 1 END,
+      datetime(COALESCE(r.next_check_at,b.last_checked_at)) ASC,
+      b.game_round_id ASC
     LIMIT 1
-  `).first();
-}
-
-function closingMarketRepairFailureStatus(error) {
-  const message=String(error?.message || error || '');
-  if (/closing_market_manual_review:/i.test(message)) {
-    return 'manual_review';
-  }
-  return 'pending';
+  `).bind(now).first();
 }
 
 async function replayFormSnapshot(env, audit) {
@@ -488,62 +642,158 @@ async function replayFormSnapshot(env, audit) {
 
 export async function runNextStatisticsDataBackfill(env, options = {}) {
   if (!env?.DB) throw new Error('DB is not configured');
-  await ensureStatisticsDataBackfillQueue(env,options.now ?? Date.now());
+  const now=nowIso(options.now ?? Date.now());
+  await ensureStatisticsDataBackfillQueue(env,now);
   const requested=options.roundId == null ? null : String(options.roundId).trim();
+  const forceRetry=Boolean(requested);
   const target=requested
     ? await env.DB.prepare('SELECT game_round_id FROM statistics_data_backfill_rounds WHERE game_round_id=? LIMIT 1').bind(requested).first()
-    : await nextQueuedRound(env);
+    : await nextQueuedRound(env,now);
   if (requested && !target) throw new Error('round is not eligible for historical statistics backfill');
   if (!target) return { version:STATISTICS_DATA_BACKFILL_VERSION, status:'idle' };
 
+  const existing=await loadStoredState(env,target.game_round_id);
   let audit=await auditStatisticsRound(env,target.game_round_id);
   let attempted=false;
   let formOverride=null;
   let finalMarketOverride=null;
+  let formFailureFingerprint=null;
+  let finalMarketFailureFingerprint=null;
   const errors=[];
+  const retryable=[];
 
-  if (audit.finalGameSourceRecordId && audit.status.finalMarket!=='complete') {
-    attempted=true;
-    try {
-      await repairCapturedOfficialClosingMarket(env,audit.finalGameSourceRecordId);
-      audit=await auditStatisticsRound(env,target.game_round_id);
-      if (audit.status.finalMarket!=='complete') finalMarketOverride='unavailable';
-    } catch (error) {
-      finalMarketOverride=closingMarketRepairFailureStatus(error);
-      errors.push('closing_market_repair: '+String(error?.message || error));
+  if (audit.status.finalMarket==='pending') {
+    if (preservedManualReview(existing,'final_market',audit.fingerprints.finalMarket,{force:forceRetry})) {
+      finalMarketOverride='manual_review';
+      finalMarketFailureFingerprint=audit.fingerprints.finalMarket;
+    } else if (audit.finalGameSourceRecordId) {
+      attempted=true;
+      try {
+        await repairCapturedOfficialClosingMarket(env,audit.finalGameSourceRecordId);
+        audit=await auditStatisticsRound(env,target.game_round_id);
+        if (audit.status.finalMarket!=='complete') finalMarketOverride='unavailable';
+      } catch (error) {
+        const failure=closingMarketFailure(error);
+        finalMarketOverride=failure.status;
+        finalMarketFailureFingerprint=audit.fingerprints.finalMarket;
+        const message='closing_market_repair: '+String(error?.message || error);
+        errors.push(message);
+        if (failure.status==='pending') retryable.push({ metric:'finalMarket', errorClass:failure.errorClass, fingerprint:audit.fingerprints.finalMarket });
+      }
     }
   }
 
   if (audit.status.form==='pending') {
-    attempted=true;
-    try {
-      const replay=await replayFormSnapshot(env,audit);
-      formOverride=replay.status;
-      if (replay.status==='manual_review') errors.push('form_replay: '+replay.reason);
-      if (replay.status==='complete') audit=await auditStatisticsRound(env,target.game_round_id);
-    } catch (error) {
-      formOverride='pending';
-      errors.push('form_replay: '+String(error?.message || error));
+    if (preservedManualReview(existing,'form',audit.fingerprints.form,{force:forceRetry})) {
+      formOverride='manual_review';
+      formFailureFingerprint=audit.fingerprints.form;
+      if (existing?.last_error) errors.push(String(existing.last_error));
+    } else {
+      attempted=true;
+      try {
+        const replay=await replayFormSnapshot(env,audit);
+        formOverride=replay.status;
+        if (replay.status==='manual_review') {
+          formFailureFingerprint=audit.fingerprints.form;
+          errors.push('form_replay: '+replay.reason);
+        }
+        if (replay.status==='complete') audit=await auditStatisticsRound(env,target.game_round_id);
+      } catch (error) {
+        const failure=classifyStatisticsFormFailure(error);
+        formOverride=failure.status;
+        formFailureFingerprint=audit.fingerprints.form;
+        const message='form_replay: '+String(error?.message || error);
+        errors.push(message);
+        if (failure.status==='pending') retryable.push({ metric:'form', errorClass:failure.errorClass, fingerprint:audit.fingerprints.form });
+      }
     }
   }
 
-  const lastError=errors.length ? errors.join(' | ').slice(0,1000) : null;
-  const overall=await persistAudit(env,audit,{formStatus:formOverride,finalMarketStatus:finalMarketOverride,lastError,attempted});
+  let retryCount=0;
+  let lastErrorClass=null;
+  let nextCheckAt=null;
+
+  if (retryable.length) {
+    const current=retryable[0];
+    const sameClass=existing?.last_error_class===current.errorClass;
+    const sameFingerprint=current.metric==='form'
+      ? existing?.form_failure_fingerprint===current.fingerprint
+      : existing?.final_market_failure_fingerprint===current.fingerprint;
+    retryCount=sameClass && sameFingerprint ? Number(existing?.retry_count || 0)+1 : 1;
+    lastErrorClass=current.errorClass;
+
+    if (retryCount>=MAX_UNCHANGED_RETRIES) {
+      if (current.metric==='form') {
+        formOverride='manual_review';
+        formFailureFingerprint=current.fingerprint;
+      } else {
+        finalMarketOverride='manual_review';
+        finalMarketFailureFingerprint=current.fingerprint;
+      }
+      lastErrorClass=current.errorClass+'_retry_exhausted';
+      retryCount=MAX_UNCHANGED_RETRIES;
+    } else {
+      nextCheckAt=futureIso(now,retryDelayMs(retryCount));
+    }
+  }
+
+  const metricState={
+    ...audit.status,
+    finalMarket:finalMarketOverride || audit.status.finalMarket,
+    form:formOverride || audit.status.form
+  };
+  const stillPending=Object.values(metricState).includes('pending');
+  const hasManualReview=Object.values(metricState).includes('manual_review');
+  if (stillPending && !nextCheckAt) nextCheckAt=futureIso(now,UPSTREAM_RECHECK_MS);
+  if (!stillPending && hasManualReview) nextCheckAt=futureIso(now,MANUAL_REVIEW_RECHECK_MS);
+  if (!stillPending && !hasManualReview) nextCheckAt=null;
+
+  if (!formFailureFingerprint && formOverride==='manual_review') {
+    formFailureFingerprint=audit.fingerprints.form;
+  }
+  if (!finalMarketFailureFingerprint && finalMarketOverride==='manual_review') {
+    finalMarketFailureFingerprint=audit.fingerprints.finalMarket;
+  }
+
+  const lastError=errors.length ? [...new Set(errors)].join(' | ').slice(0,1000) : null;
+  if (!lastErrorClass && lastError) {
+    if (/step1_replay_fingerprint_mismatch/i.test(lastError)) lastErrorClass='step1_replay_fingerprint_mismatch';
+    else if (/round leg \d+ has no active horse entries/i.test(lastError)) lastErrorClass='form_source_incomplete';
+    else if (/closing_market_manual_review:/i.test(lastError)) lastErrorClass='closing_market_manual_review';
+    else lastErrorClass='manual_review';
+  }
+
+  const overall=await persistAudit(env,audit,{
+    formStatus:formOverride,
+    finalMarketStatus:finalMarketOverride,
+    lastError,
+    lastErrorClass,
+    attempted,
+    retryCount,
+    nextCheckAt,
+    formFailureFingerprint,
+    finalMarketFailureFingerprint
+  });
+
   return {
     version:STATISTICS_DATA_BACKFILL_VERSION,
     status:overall,
     roundId:audit.roundId,
-    metrics:{...audit.status,finalMarket:finalMarketOverride || audit.status.finalMarket,form:formOverride || audit.status.form},
+    metrics:metricState,
     counts:audit.counts,
     step1PackId:audit.lineage?.packId || null,
     formLineageKind:audit.formLineage?.kind || null,
     formSnapshotRef:audit.formLineage?.snapshotRef || null,
-    reason:lastError
+    reason:lastError,
+    errorClass:lastErrorClass,
+    retryCount,
+    nextCheckAt
   };
 }
 
 export async function getStatisticsDataBackfillStatus(env) {
   if (!env?.DB) throw new Error('DB is not configured');
+  await ensureRetryStateTable(env);
   const {results}=await env.DB.prepare(`
     SELECT status,COUNT(*) n
     FROM statistics_data_backfill_rounds
@@ -564,11 +814,15 @@ export async function getStatisticsDataBackfillStatus(env) {
     FROM statistics_data_backfill_rounds
   `).first();
   const {results:attention}=await env.DB.prepare(`
-    SELECT game_round_id,status,result_status,final_market_status,payout_status,form_status,
-           kai_rank_status,abcd_status,spike_status,last_error,last_checked_at
-    FROM statistics_data_backfill_rounds
-    WHERE status IN ('complete_with_gaps','manual_review')
-    ORDER BY game_round_id DESC
+    SELECT b.game_round_id,b.status,b.result_status,b.final_market_status,b.payout_status,b.form_status,
+           b.kai_rank_status,b.abcd_status,b.spike_status,b.last_error,
+           r.last_error_class,r.retry_count,r.next_check_at,b.last_checked_at
+    FROM statistics_data_backfill_rounds b
+    LEFT JOIN statistics_data_backfill_retry_state r ON r.game_round_id=b.game_round_id
+    WHERE b.status IN ('pending','complete_with_gaps','manual_review')
+    ORDER BY
+      CASE b.status WHEN 'pending' THEN 0 WHEN 'manual_review' THEN 1 ELSE 2 END,
+      b.game_round_id DESC
     LIMIT 50
   `).all();
   return {
