@@ -20,6 +20,29 @@ function countStatus(value, expected, { pendingWhenZero = false } = {}) {
   return 'unavailable';
 }
 
+async function sha256(value) {
+  const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(value)));
+  return 'sha256:'+Array.from(new Uint8Array(digest),(byte)=>byte.toString(16).padStart(2,'0')).join('');
+}
+
+function futureIso(value, milliseconds) {
+  return new Date(Date.parse(value)+milliseconds).toISOString();
+}
+
+function retryDelayMs(retryCount) {
+  const delays=[5*60*1000,30*60*1000,2*60*60*1000,6*60*60*1000,12*60*60*1000];
+  return delays[Math.min(Math.max(Number(retryCount || 1)-1,0),delays.length-1)];
+}
+
+function retryDue(value, now) {
+  return !value || Date.parse(value)<=Date.parse(now);
+}
+
+function deterministicFormFailure(error) {
+  const message=String(error?.message || error || '');
+  return /has no active horse entries|analysis pack identity is incomplete|as-of is missing|unsupported_form_lineage/i.test(message);
+}
+
 async function primarySystem(env, roundId) {
   return env.DB.prepare(`
     SELECT s.id,s.model_version_id,s.created_at,s.metrics_json
@@ -360,18 +383,105 @@ function overallStatus(audit, overrides = {}) {
     : 'complete_with_gaps';
 }
 
-async function persistAudit(env, audit, { formStatus = null, finalMarketStatus = null, lastError = null, attempted = false } = {}) {
+async function auditFingerprints(audit) {
+  const form=await sha256({
+    roundId:audit.roundId,
+    primarySystemId:audit.primarySystemId,
+    activeEntries:audit.counts.activeEntries,
+    formSnapshots:audit.counts.formSnapshots,
+    lineage:audit.lineage ? {
+      source:audit.lineage.source,
+      audited:audit.lineage.audited,
+      packId:audit.lineage.packId,
+      factsFingerprint:audit.lineage.factsFingerprint,
+      asOf:audit.lineage.asOf,
+      generatedAt:audit.lineage.generatedAt
+    } : null,
+    formLineage:audit.formLineage ? {
+      kind:audit.formLineage.kind,
+      snapshotRef:audit.formLineage.snapshotRef,
+      asOfByLeg:audit.formLineage.asOfByLeg ? Object.fromEntries(audit.formLineage.asOfByLeg) : null
+    } : null
+  });
+  const finalMarket=await sha256({
+    roundId:audit.roundId,
+    sourceRecordId:audit.finalGameSourceRecordId,
+    activeEntries:audit.counts.activeEntries,
+    closingMarket:audit.counts.closingMarket
+  });
+  const input=await sha256({
+    roundId:audit.roundId,
+    primarySystemId:audit.primarySystemId,
+    modelVersionId:audit.modelVersionId,
+    finalGameSourceRecordId:audit.finalGameSourceRecordId,
+    counts:audit.counts,
+    status:audit.status,
+    form,
+    finalMarket
+  });
+  return { input, form, finalMarket };
+}
+
+async function backfillState(env, roundId) {
+  return env.DB.prepare(`
+    SELECT *
+    FROM statistics_data_backfill_rounds
+    WHERE game_round_id=?
+    LIMIT 1
+  `).bind(roundId).first();
+}
+
+function actionStateFor(overall, metrics, { hasRetryable = false } = {}) {
+  if (Object.values(metrics).includes('pending')) return hasRetryable ? 'retryable' : 'waiting';
+  if (overall==='manual_review') return 'manual_review';
+  if (overall==='complete') return 'complete';
+  return 'complete_with_gaps';
+}
+
+async function persistAudit(env, audit, {
+  formStatus = null,
+  finalMarketStatus = null,
+  lastError = null,
+  attempted = false,
+  checkedAt = new Date().toISOString(),
+  inputFingerprint = null,
+  formInputFingerprint = null,
+  formAttemptFingerprint = null,
+  formTerminalReason = null,
+  formRetryCount = 0,
+  formNextRetryAt = null,
+  formErrorClass = null,
+  finalMarketInputFingerprint = null,
+  finalMarketAttemptFingerprint = null,
+  finalMarketTerminalReason = null,
+  finalMarketRetryCount = 0,
+  finalMarketNextRetryAt = null,
+  finalMarketErrorClass = null,
+  actionState = null,
+  nextRetryAt = null,
+  errorClass = null,
+  auditedRevision = null
+} = {}) {
   const normalizedForm=formStatus || audit.status.form;
   const normalizedFinalMarket=finalMarketStatus || audit.status.finalMarket;
+  const metrics={...audit.status,form:normalizedForm,finalMarket:normalizedFinalMarket};
   const overall=overallStatus(audit,{form:normalizedForm,finalMarket:normalizedFinalMarket});
-  const completedAt=overall==='pending' ? null : new Date().toISOString();
+  const normalizedAction=actionState || actionStateFor(overall,metrics);
+  const completedAt=['waiting','retryable'].includes(normalizedAction) ? null : checkedAt;
+  const revision=auditedRevision == null
+    ? Number((await backfillState(env,audit.roundId))?.input_revision || 0)
+    : Number(auditedRevision);
   await env.DB.prepare(`
     INSERT INTO statistics_data_backfill_rounds
       (game_round_id,status,result_status,final_market_status,payout_status,form_status,
        kai_rank_status,abcd_status,spike_status,active_entry_count,closing_market_count,
        form_snapshot_count,kai_rank_count,abcd_count,spike_count,form_lineage_kind,form_snapshot_ref,
-       form_as_of_json,step1_pack_id,step1_facts_fingerprint,step1_as_of,attempt_count,last_error,last_checked_at,completed_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       form_as_of_json,step1_pack_id,step1_facts_fingerprint,step1_as_of,attempt_count,last_error,last_checked_at,completed_at,
+       action_state,audited_revision,input_fingerprint,last_audit_at,last_attempt_at,next_retry_at,error_class,
+       form_input_fingerprint,form_attempt_fingerprint,form_terminal_reason,form_retry_count,form_next_retry_at,form_error_class,
+       final_market_input_fingerprint,final_market_attempt_fingerprint,final_market_terminal_reason,final_market_retry_count,
+       final_market_next_retry_at,final_market_error_class,lease_token,lease_until)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,NULL)
     ON CONFLICT(game_round_id) DO UPDATE SET
       status=excluded.status,
       result_status=excluded.result_status,
@@ -397,6 +507,27 @@ async function persistAudit(env, audit, { formStatus = null, finalMarketStatus =
       last_error=excluded.last_error,
       last_checked_at=excluded.last_checked_at,
       completed_at=excluded.completed_at,
+      action_state=excluded.action_state,
+      audited_revision=excluded.audited_revision,
+      input_fingerprint=excluded.input_fingerprint,
+      last_audit_at=excluded.last_audit_at,
+      last_attempt_at=CASE WHEN ? THEN excluded.last_attempt_at ELSE statistics_data_backfill_rounds.last_attempt_at END,
+      next_retry_at=excluded.next_retry_at,
+      error_class=excluded.error_class,
+      form_input_fingerprint=excluded.form_input_fingerprint,
+      form_attempt_fingerprint=excluded.form_attempt_fingerprint,
+      form_terminal_reason=excluded.form_terminal_reason,
+      form_retry_count=excluded.form_retry_count,
+      form_next_retry_at=excluded.form_next_retry_at,
+      form_error_class=excluded.form_error_class,
+      final_market_input_fingerprint=excluded.final_market_input_fingerprint,
+      final_market_attempt_fingerprint=excluded.final_market_attempt_fingerprint,
+      final_market_terminal_reason=excluded.final_market_terminal_reason,
+      final_market_retry_count=excluded.final_market_retry_count,
+      final_market_next_retry_at=excluded.final_market_next_retry_at,
+      final_market_error_class=excluded.final_market_error_class,
+      lease_token=NULL,
+      lease_until=NULL,
       updated_at=CURRENT_TIMESTAMP
   `).bind(
     audit.roundId,overall,audit.status.results,normalizedFinalMarket,audit.status.payout,normalizedForm,
@@ -406,11 +537,15 @@ async function persistAudit(env, audit, { formStatus = null, finalMarketStatus =
     audit.formLineage?.kind || null,audit.formLineage?.snapshotRef || null,
     audit.formLineage?.asOfByLeg ? JSON.stringify(Object.fromEntries(audit.formLineage.asOfByLeg)) : null,
     audit.lineage?.packId || null,audit.lineage?.factsFingerprint || null,audit.lineage?.asOf || null,
-    attempted ? 1 : 0,lastError,
-    new Date().toISOString(),completedAt,
+    attempted ? 1 : 0,lastError,checkedAt,completedAt,
+    normalizedAction,revision,inputFingerprint,checkedAt,attempted ? checkedAt : null,nextRetryAt,errorClass,
+    formInputFingerprint,formAttemptFingerprint,formTerminalReason,Number(formRetryCount || 0),formNextRetryAt,formErrorClass,
+    finalMarketInputFingerprint,finalMarketAttemptFingerprint,finalMarketTerminalReason,Number(finalMarketRetryCount || 0),
+    finalMarketNextRetryAt,finalMarketErrorClass,
+    attempted ? 1 : 0,
     attempted ? 1 : 0
   ).run();
-  return overall;
+  return { overall, actionState:normalizedAction, revision };
 }
 
 export async function ensureStatisticsDataBackfillQueue(env, value = Date.now()) {
@@ -435,14 +570,45 @@ export async function ensureStatisticsDataBackfillQueue(env, value = Date.now())
   return { version:STATISTICS_DATA_BACKFILL_VERSION, created:Number(result.meta?.changes || 0) };
 }
 
-async function nextQueuedRound(env) {
+async function nextQueuedRound(env, now) {
   return env.DB.prepare(`
     SELECT game_round_id
     FROM statistics_data_backfill_rounds
-    WHERE status='pending'
-    ORDER BY last_checked_at ASC,game_round_id ASC
+    WHERE (lease_until IS NULL OR datetime(lease_until)<=datetime(?))
+      AND (
+        audited_revision<input_revision
+        OR (
+          action_state IN ('waiting','retryable')
+          AND (next_retry_at IS NULL OR datetime(next_retry_at)<=datetime(?))
+        )
+      )
+    ORDER BY
+      CASE WHEN audited_revision<input_revision THEN 0 ELSE 1 END,
+      datetime(COALESCE(next_retry_at,last_audit_at,last_checked_at)) ASC,
+      game_round_id ASC
     LIMIT 1
-  `).first();
+  `).bind(now,now).first();
+}
+
+async function claimRound(env, roundId, now) {
+  const token=`statistics_${crypto.randomUUID()}`;
+  const leaseUntil=futureIso(now,5*60*1000);
+  const result=await env.DB.prepare(`
+    UPDATE statistics_data_backfill_rounds
+    SET lease_token=?,lease_until=?
+    WHERE game_round_id=?
+      AND (lease_until IS NULL OR datetime(lease_until)<=datetime(?))
+  `).bind(token,leaseUntil,roundId,now).run();
+  return Number(result.meta?.changes || 0)===1 ? token : null;
+}
+
+async function releaseRound(env, roundId, token) {
+  if (!token) return;
+  await env.DB.prepare(`
+    UPDATE statistics_data_backfill_rounds
+    SET lease_token=NULL,lease_until=NULL
+    WHERE game_round_id=? AND lease_token=?
+  `).bind(roundId,token).run();
 }
 
 function closingMarketRepairFailureStatus(error) {
@@ -488,58 +654,207 @@ async function replayFormSnapshot(env, audit) {
 
 export async function runNextStatisticsDataBackfill(env, options = {}) {
   if (!env?.DB) throw new Error('DB is not configured');
-  await ensureStatisticsDataBackfillQueue(env,options.now ?? Date.now());
+  const now=nowIso(options.now ?? Date.now());
+  await ensureStatisticsDataBackfillQueue(env,now);
   const requested=options.roundId == null ? null : String(options.roundId).trim();
   const target=requested
     ? await env.DB.prepare('SELECT game_round_id FROM statistics_data_backfill_rounds WHERE game_round_id=? LIMIT 1').bind(requested).first()
-    : await nextQueuedRound(env);
+    : await nextQueuedRound(env,now);
   if (requested && !target) throw new Error('round is not eligible for historical statistics backfill');
   if (!target) return { version:STATISTICS_DATA_BACKFILL_VERSION, status:'idle' };
 
-  let audit=await auditStatisticsRound(env,target.game_round_id);
-  let attempted=false;
-  let formOverride=null;
-  let finalMarketOverride=null;
-  const errors=[];
+  const leaseToken=await claimRound(env,target.game_round_id,now);
+  if(!leaseToken) return { version:STATISTICS_DATA_BACKFILL_VERSION, status:'idle', reason:'leased' };
 
-  if (audit.finalGameSourceRecordId && audit.status.finalMarket!=='complete') {
-    attempted=true;
-    try {
-      await repairCapturedOfficialClosingMarket(env,audit.finalGameSourceRecordId);
-      audit=await auditStatisticsRound(env,target.game_round_id);
-      if (audit.status.finalMarket!=='complete') finalMarketOverride='unavailable';
-    } catch (error) {
-      finalMarketOverride=closingMarketRepairFailureStatus(error);
-      errors.push('closing_market_repair: '+String(error?.message || error));
+  try {
+    const prior=await backfillState(env,target.game_round_id);
+    let audit=await auditStatisticsRound(env,target.game_round_id);
+    let fingerprints=await auditFingerprints(audit);
+    let attempted=false;
+    let formStatus=audit.status.form;
+    let finalMarketStatus=audit.status.finalMarket;
+    let formAttemptFingerprint=prior?.form_attempt_fingerprint || null;
+    let formTerminalReason=prior?.form_terminal_reason || null;
+    let formRetryCount=Number(prior?.form_retry_count || 0);
+    let formNextRetryAt=prior?.form_next_retry_at || null;
+    let formErrorClass=prior?.form_error_class || null;
+    let finalMarketAttemptFingerprint=prior?.final_market_attempt_fingerprint || null;
+    let finalMarketTerminalReason=prior?.final_market_terminal_reason || null;
+    let finalMarketRetryCount=Number(prior?.final_market_retry_count || 0);
+    let finalMarketNextRetryAt=prior?.final_market_next_retry_at || null;
+    let finalMarketErrorClass=prior?.final_market_error_class || null;
+    const errors=[];
+
+    const formTerminalSameInput=
+      ['manual_review','unavailable'].includes(prior?.form_status)
+      && prior?.form_attempt_fingerprint
+      && prior.form_attempt_fingerprint===fingerprints.form;
+    if(formTerminalSameInput){
+      formStatus=prior.form_status;
+      formTerminalReason=prior.form_terminal_reason || prior.last_error || 'terminal_form_state';
+    } else if(prior?.form_attempt_fingerprint && prior.form_attempt_fingerprint!==fingerprints.form){
+      formAttemptFingerprint=null;
+      formTerminalReason=null;
+      formRetryCount=0;
+      formNextRetryAt=null;
+      formErrorClass=null;
     }
-  }
 
-  if (audit.status.form==='pending') {
-    attempted=true;
-    try {
-      const replay=await replayFormSnapshot(env,audit);
-      formOverride=replay.status;
-      if (replay.status==='manual_review') errors.push('form_replay: '+replay.reason);
-      if (replay.status==='complete') audit=await auditStatisticsRound(env,target.game_round_id);
-    } catch (error) {
-      formOverride='pending';
-      errors.push('form_replay: '+String(error?.message || error));
+    const marketTerminalSameInput=
+      ['manual_review','unavailable'].includes(prior?.final_market_status)
+      && prior?.final_market_attempt_fingerprint
+      && prior.final_market_attempt_fingerprint===fingerprints.finalMarket;
+    if(marketTerminalSameInput){
+      finalMarketStatus=prior.final_market_status;
+      finalMarketTerminalReason=prior.final_market_terminal_reason || prior.last_error || 'terminal_final_market_state';
+    } else if(prior?.final_market_attempt_fingerprint && prior.final_market_attempt_fingerprint!==fingerprints.finalMarket){
+      finalMarketAttemptFingerprint=null;
+      finalMarketTerminalReason=null;
+      finalMarketRetryCount=0;
+      finalMarketNextRetryAt=null;
+      finalMarketErrorClass=null;
     }
-  }
 
-  const lastError=errors.length ? errors.join(' | ').slice(0,1000) : null;
-  const overall=await persistAudit(env,audit,{formStatus:formOverride,finalMarketStatus:finalMarketOverride,lastError,attempted});
-  return {
-    version:STATISTICS_DATA_BACKFILL_VERSION,
-    status:overall,
-    roundId:audit.roundId,
-    metrics:{...audit.status,finalMarket:finalMarketOverride || audit.status.finalMarket,form:formOverride || audit.status.form},
-    counts:audit.counts,
-    step1PackId:audit.lineage?.packId || null,
-    formLineageKind:audit.formLineage?.kind || null,
-    formSnapshotRef:audit.formLineage?.snapshotRef || null,
-    reason:lastError
-  };
+    if (audit.finalGameSourceRecordId && audit.status.finalMarket!=='complete' && !marketTerminalSameInput
+        && retryDue(finalMarketNextRetryAt,now)) {
+      attempted=true;
+      finalMarketAttemptFingerprint=fingerprints.finalMarket;
+      try {
+        const repair=await repairCapturedOfficialClosingMarket(env,audit.finalGameSourceRecordId);
+        audit=await auditStatisticsRound(env,target.game_round_id);
+        fingerprints=await auditFingerprints(audit);
+        finalMarketStatus=audit.status.finalMarket;
+        finalMarketRetryCount=0;
+        finalMarketNextRetryAt=null;
+        finalMarketErrorClass=null;
+        finalMarketTerminalReason=null;
+        if (finalMarketStatus!=='complete') {
+          finalMarketStatus='unavailable';
+          finalMarketTerminalReason=repair?.complete===false ? 'closing_market_incomplete_archive' : 'closing_market_unavailable';
+          finalMarketErrorClass='deterministic_gap';
+        }
+      } catch (error) {
+        const failure=closingMarketRepairFailureStatus(error);
+        const message=String(error?.message || error);
+        errors.push('closing_market_repair: '+message);
+        if(failure==='manual_review'){
+          finalMarketStatus='manual_review';
+          finalMarketTerminalReason=message.replace(/^closing_market_manual_review:\s*/i,'').slice(0,500);
+          finalMarketErrorClass='deterministic_gap';
+          finalMarketNextRetryAt=null;
+        } else {
+          const sameFingerprint=prior?.final_market_attempt_fingerprint===finalMarketAttemptFingerprint;
+          finalMarketRetryCount=(sameFingerprint ? Number(prior?.final_market_retry_count || 0) : 0)+1;
+          if(finalMarketRetryCount>=8){
+            finalMarketStatus='manual_review';
+            finalMarketTerminalReason='closing_market_repeated_failure';
+            finalMarketErrorClass='repeated_failure';
+            finalMarketNextRetryAt=null;
+          } else {
+            finalMarketStatus='pending';
+            finalMarketErrorClass='transient_error';
+            finalMarketNextRetryAt=futureIso(now,retryDelayMs(finalMarketRetryCount));
+          }
+        }
+      }
+    }
+
+    if (audit.status.form==='pending' && !formTerminalSameInput && retryDue(formNextRetryAt,now)) {
+      attempted=true;
+      formAttemptFingerprint=fingerprints.form;
+      try {
+        const replay=await replayFormSnapshot(env,audit);
+        formStatus=replay.status;
+        formRetryCount=0;
+        formNextRetryAt=null;
+        formErrorClass=null;
+        formTerminalReason=replay.status==='complete' ? null : replay.reason;
+        if (replay.status==='manual_review') {
+          formErrorClass='deterministic_mismatch';
+          errors.push('form_replay: '+replay.reason);
+        } else if(replay.status==='unavailable') {
+          formErrorClass='deterministic_gap';
+        } else if (replay.status==='complete') {
+          audit=await auditStatisticsRound(env,target.game_round_id);
+          fingerprints=await auditFingerprints(audit);
+          formStatus=audit.status.form;
+        }
+      } catch (error) {
+        const message=String(error?.message || error);
+        errors.push('form_replay: '+message);
+        const sameFingerprint=prior?.form_attempt_fingerprint===formAttemptFingerprint;
+        formRetryCount=(sameFingerprint ? Number(prior?.form_retry_count || 0) : 0)+1;
+        if(deterministicFormFailure(error) || formRetryCount>=3){
+          formStatus='manual_review';
+          formTerminalReason=deterministicFormFailure(error) ? 'form_replay_deterministic_failure' : 'form_replay_repeated_failure';
+          formErrorClass=deterministicFormFailure(error) ? 'deterministic_failure' : 'repeated_failure';
+          formNextRetryAt=null;
+        } else {
+          formStatus='pending';
+          formErrorClass='transient_error';
+          formNextRetryAt=futureIso(now,retryDelayMs(formRetryCount));
+        }
+      }
+    }
+
+    const metrics={...audit.status,finalMarket:finalMarketStatus,form:formStatus};
+    const overall=overallStatus(audit,{form:formStatus,finalMarket:finalMarketStatus});
+    const hasRetryable=
+      (formStatus==='pending' && formErrorClass==='transient_error')
+      || (finalMarketStatus==='pending' && finalMarketErrorClass==='transient_error');
+    const actionState=actionStateFor(overall,metrics,{hasRetryable});
+    let nextRetryAt=null;
+    if(actionState==='retryable'){
+      const retryTimes=[formNextRetryAt,finalMarketNextRetryAt].filter(Boolean).sort();
+      nextRetryAt=retryTimes[0] || futureIso(now,5*60*1000);
+    } else if(actionState==='waiting'){
+      nextRetryAt=futureIso(now,15*60*1000);
+    }
+
+    const lastError=errors.length ? errors.join(' | ').slice(0,1000) : null;
+    const errorClass=formErrorClass || finalMarketErrorClass || null;
+    const stateBeforePersist=await backfillState(env,target.game_round_id);
+    const persisted=await persistAudit(env,audit,{
+      formStatus,
+      finalMarketStatus,
+      lastError,
+      attempted,
+      checkedAt:now,
+      inputFingerprint:fingerprints.input,
+      formInputFingerprint:fingerprints.form,
+      formAttemptFingerprint,
+      formTerminalReason,
+      formRetryCount,
+      formNextRetryAt,
+      formErrorClass,
+      finalMarketInputFingerprint:fingerprints.finalMarket,
+      finalMarketAttemptFingerprint,
+      finalMarketTerminalReason,
+      finalMarketRetryCount,
+      finalMarketNextRetryAt,
+      finalMarketErrorClass,
+      actionState,
+      nextRetryAt,
+      errorClass,
+      auditedRevision:Number(stateBeforePersist?.input_revision || 0)
+    });
+    return {
+      version:STATISTICS_DATA_BACKFILL_VERSION,
+      status:persisted.overall,
+      actionState:persisted.actionState,
+      roundId:audit.roundId,
+      metrics,
+      counts:audit.counts,
+      step1PackId:audit.lineage?.packId || null,
+      formLineageKind:audit.formLineage?.kind || null,
+      formSnapshotRef:audit.formLineage?.snapshotRef || null,
+      reason:lastError,
+      nextRetryAt
+    };
+  } catch(error) {
+    await releaseRound(env,target.game_round_id,leaseToken);
+    throw error;
+  }
 }
 
 export async function getStatisticsDataBackfillStatus(env) {
@@ -551,6 +866,13 @@ export async function getStatisticsDataBackfillStatus(env) {
     ORDER BY status
   `).all();
   const totals=Object.fromEntries((results || []).map((row)=>[row.status,Number(row.n || 0)]));
+  const {results:actions}=await env.DB.prepare(`
+    SELECT action_state,COUNT(*) n
+    FROM statistics_data_backfill_rounds
+    GROUP BY action_state
+    ORDER BY action_state
+  `).all();
+  const actionTotals=Object.fromEntries((actions || []).map((row)=>[row.action_state,Number(row.n || 0)]));
   const coverage=await env.DB.prepare(`
     SELECT
       COUNT(*) rounds,
@@ -564,16 +886,24 @@ export async function getStatisticsDataBackfillStatus(env) {
     FROM statistics_data_backfill_rounds
   `).first();
   const {results:attention}=await env.DB.prepare(`
-    SELECT game_round_id,status,result_status,final_market_status,payout_status,form_status,
-           kai_rank_status,abcd_status,spike_status,last_error,last_checked_at
+    SELECT game_round_id,status,action_state,result_status,final_market_status,payout_status,form_status,
+           kai_rank_status,abcd_status,spike_status,error_class,next_retry_at,last_error,last_checked_at
     FROM statistics_data_backfill_rounds
-    WHERE status IN ('complete_with_gaps','manual_review')
-    ORDER BY game_round_id DESC
+    WHERE action_state IN ('waiting','retryable','manual_review','complete_with_gaps')
+    ORDER BY
+      CASE action_state
+        WHEN 'retryable' THEN 0
+        WHEN 'waiting' THEN 1
+        WHEN 'manual_review' THEN 2
+        ELSE 3
+      END,
+      game_round_id DESC
     LIMIT 50
   `).all();
   return {
     version:STATISTICS_DATA_BACKFILL_VERSION,
     totals,
+    actionTotals,
     coverage:{
       rounds:Number(coverage?.rounds || 0),
       results:Number(coverage?.results_complete || 0),
