@@ -58,6 +58,27 @@ SET audited_revision = -1,
 
 -- Input revisions are raised by canonical upstream writes. This makes terminal
 -- rows re-auditable when facts change while leaving unchanged rows idle.
+-- Corrections to the verified pre-race cutoff are Form/KAI/ABCD inputs.
+CREATE TRIGGER IF NOT EXISTS trg_stats_rev_round_cutoff_update
+AFTER UPDATE OF game_type,round_date,scheduled_start_at,bet_stop_at ON game_rounds
+BEGIN
+  UPDATE statistics_data_backfill_rounds
+  SET input_revision=input_revision+1,
+      form_input_revision=form_input_revision+1
+  WHERE game_round_id=NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_stats_rev_race_cutoff_update
+AFTER UPDATE OF scheduled_start_at ON races
+BEGIN
+  UPDATE statistics_data_backfill_rounds
+  SET input_revision=input_revision+1,
+      form_input_revision=form_input_revision+1
+  WHERE game_round_id IN (
+    SELECT game_round_id FROM game_legs WHERE race_id=NEW.id
+  );
+END;
+
 CREATE TRIGGER IF NOT EXISTS trg_stats_rev_final_result_insert
 AFTER INSERT ON game_round_final_results
 BEGIN
@@ -287,7 +308,7 @@ BEGIN
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_stats_rev_external_run_update
-AFTER UPDATE OF main_system_id,step1_pack_id,step1_pack_as_of,step1_generated_at,step1_facts_fingerprint ON analysis_external_runs
+AFTER UPDATE OF main_system_id,step1_pack_id,step1_pack_as_of,step1_generated_at,step1_facts_fingerprint,created_at ON analysis_external_runs
 BEGIN
   UPDATE statistics_data_backfill_rounds
   SET input_revision=input_revision+1,
