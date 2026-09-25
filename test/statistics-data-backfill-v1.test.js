@@ -575,3 +575,60 @@ test('statistics source audit fails closed if an eligible round later loses its 
   db.prepare("DELETE FROM game_legs WHERE game_round_id='stats_round' AND leg_number=8").run();
   await assert.rejects(()=>auditStatisticsRound(env,'stats_round'),/exactly eight legs/);
 });
+
+
+test('known transient Form failures stay retryable beyond the generic retry cap and can still recover',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  const failing=async()=>{ throw new Error('temporary database timeout'); };
+  for(const at of ['2100-01-01T00:00:00Z','2100-01-01T00:06:00Z','2100-01-01T00:17:00Z','2100-01-01T00:38:00Z','2100-01-01T01:19:00Z']){
+    const result=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:at,formReplayImpl:failing});
+    assert.equal(result.workState,'retryable');
+    assert.equal(result.metrics.form,'pending');
+  }
+  assert.equal(statisticsBackfillRow(db).form_retry_count,5);
+  const recovered=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T02:40:00Z'});
+  assert.equal(recovered.metrics.form,'complete');
+});
+
+test('unchanged generic Form calculation failure becomes terminal after bounded retries',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  const failing=async()=>{ throw new Error('unexpected deterministic calculation failure'); };
+  const times=['2100-01-01T00:00:00Z','2100-01-01T00:06:00Z','2100-01-01T00:17:00Z','2100-01-01T00:38:00Z'];
+  let result=null;
+  for(const at of times) result=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:at,formReplayImpl:failing});
+  assert.equal(result.metrics.form,'manual_review');
+  assert.equal(statisticsBackfillRow(db).form_terminal_reason,'form_replay_retry_exhausted');
+  const attempts=statisticsBackfillRow(db).attempt_count;
+  await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:39:00Z',formReplayImpl:failing});
+  assert.equal(statisticsBackfillRow(db).attempt_count,attempts);
+});
+
+test('race-entry identity change reopens a terminal closing-market repair for the same final source',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  addStatisticsFinalFacts(db,{market:false,payout:true});
+  const first=await runNextStatisticsDataBackfill(env,{
+    roundId:'stats_round',now:'2100-01-01T00:00:00Z',
+    closingMarketRepairImpl:async()=>{ throw new Error('closing_market_manual_review: deterministic identity gap'); }
+  });
+  assert.equal(first.metrics.finalMarket,'manual_review');
+
+  db.prepare("UPDATE race_entries SET updated_at='2100-01-01T12:00:00Z' WHERE id='stats_entry_1'").run();
+  let repairs=0;
+  const source='stats_final';
+  const repair=async()=>{
+    repairs+=1;
+    for(let leg=1;leg<=8;leg+=1){
+      db.prepare("INSERT OR IGNORE INTO betting_snapshots (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id) VALUES (?,'stats_round',?,?, '2099-01-02T22:00:00Z',12.5,1,?)")
+        .run('stats_identity_market_'+leg,leg,'stats_entry_'+leg,source);
+    }
+  };
+  const recovered=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-02T00:01:00Z',closingMarketRepairImpl:repair});
+  assert.equal(repairs,1);
+  assert.equal(recovered.metrics.finalMarket,'complete');
+});
