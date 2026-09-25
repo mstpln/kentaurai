@@ -625,3 +625,34 @@ test('legacy manual-review Form row is adopted without replay during first state
   assert.equal(state.form_error_class,'deterministic_mismatch');
   assert.equal(db.prepare("SELECT COUNT(*) n FROM analysis_entry_form_snapshots WHERE step1_pack_id=?").get(pack.packId).n,0);
 });
+
+
+test('a canonical write racing with audit persistence is not swallowed and is re-audited next tick',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  db.prepare("UPDATE statistics_data_backfill_rounds SET input_revision=input_revision+1 WHERE game_round_id='stats_round'").run();
+
+  const originalPrepare=env.DB.prepare.bind(env.DB);
+  let injected=false;
+  env.DB.prepare=(sql)=>{
+    if(!injected && String(sql).includes('INSERT INTO statistics_data_backfill_rounds')){
+      injected=true;
+      db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status,gallop,disqualified,source_record_id) VALUES ('stats_entry_1',1,'official',0,0,'stats_official')").run();
+    }
+    return originalPrepare(sql);
+  };
+
+  const raced=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:01:00Z'});
+  env.DB.prepare=originalPrepare;
+  assert.equal(raced.roundId,'stats_round');
+  const afterRace=db.prepare("SELECT input_revision,audited_revision FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get();
+  assert.ok(afterRace.input_revision>afterRace.audited_revision);
+
+  const reconciled=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:02:00Z'});
+  assert.equal(reconciled.roundId,'stats_round');
+  assert.equal(reconciled.counts.winnerLegs,1);
+  const finalState=db.prepare("SELECT input_revision,audited_revision FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get();
+  assert.equal(finalState.audited_revision,finalState.input_revision);
+});
