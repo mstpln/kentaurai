@@ -494,7 +494,7 @@ test('a retry-delayed bad round does not starve a later actionable round',async(
 
   const next=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:01:00Z'});
   assert.equal(next.roundId,'later_round');
-  assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,2);
+  assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,1);
 });
 
 test('duplicate winners and malformed spike selections surface as data-integrity manual review',async()=>{
