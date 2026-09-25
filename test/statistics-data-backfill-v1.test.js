@@ -295,11 +295,11 @@ function seedFinalFacts(db,{roundId='stats_round',sourceId='stats_official'}={})
     db.prepare("INSERT OR REPLACE INTO betting_snapshots (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id) VALUES (?,?,?,?, '2099-01-02T22:00:00Z',12.5,1,?)")
       .run(roundId+'_final_bet_'+leg,roundId,leg,entry,sourceId);
   }
-  db.prepare(\`INSERT OR REPLACE INTO game_round_final_results
+  db.prepare(`INSERT OR REPLACE INTO game_round_final_results
     (game_round_id,game_type,source_record_id,captured_at,status,turnover_raw,turnover_sek,
      system_count,payouts_json,highest_payout_level,highest_payout_raw,highest_payout_sek)
     VALUES (?, 'V86', ?, '2099-01-02T22:00:00Z','results',
-      100000,1000,100,'{"8":{"payoutRaw":2500000,"payoutSek":25000,"systems":1,"jackpot":false}}',8,2500000,25000)\`)
+      100000,1000,100,'{"8":{"payoutRaw":2500000,"payoutSek":25000,"systems":1,"jackpot":false}}',8,2500000,25000)`)
     .run(roundId,sourceId);
 }
 
@@ -321,7 +321,7 @@ function seedBareRound(db,roundId){
     db.prepare("INSERT INTO tracks (id,canonical_name,country_code) VALUES (?,?,'SE')").run(track,'Bare Track '+leg);
     db.prepare("INSERT INTO horses (id,canonical_name) VALUES (?,?)").run(horse,'Bare Horse '+leg);
     db.prepare("INSERT INTO races (id,track_id,race_date,race_number,scheduled_start_at,distance_m,start_method,status) VALUES (?,?,'2098-01-02',?,?,2140,'auto','results')")
-      .run(race,track,leg,\`2098-01-02T12:\${String(9+leg).padStart(2,'0')}:00Z\`);
+      .run(race,track,leg,`2098-01-02T12:${String(9+leg).padStart(2,'0')}:00Z`);
     db.prepare("INSERT INTO game_legs (game_round_id,leg_number,race_id) VALUES (?,?,?)").run(roundId,leg,race);
     db.prepare("INSERT INTO race_entries (id,race_id,horse_id,start_number,actual_lane,start_tier,handicap_m,actual_start_distance_m,scratched) VALUES (?,?,?,?,?,1,0,2140,0)")
       .run(entry,race,horse,leg,leg);
@@ -447,7 +447,7 @@ test('waiting upstream facts consume no repeated attempts and source changes wak
   assert.equal(attempts,1);
 
   for(const minute of [1,2,3]){
-    const idle=await runNextStatisticsDataBackfill(env,{now:\`2100-01-01T00:0\${minute}:00Z\`});
+    const idle=await runNextStatisticsDataBackfill(env,{now:`2100-01-01T00:0${minute}:00Z`});
     assert.equal(idle.status,'idle');
   }
   assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,attempts);
@@ -481,11 +481,11 @@ test('a retry-delayed bad round does not starve a later actionable round',async(
   seedRound(db);
   await seedRecordedSystem(env,db);
   db.prepare("UPDATE source_records SET raw_object_key='raw/official_provider/transient.json' WHERE id='stats_official'").run();
-  db.prepare(\`INSERT INTO game_round_final_results
+  db.prepare(`INSERT INTO game_round_final_results
     (game_round_id,game_type,source_record_id,captured_at,status,turnover_raw,turnover_sek,
      system_count,payouts_json,highest_payout_level,highest_payout_raw,highest_payout_sek)
     VALUES ('stats_round','V86','stats_official','2099-01-02T22:00:00Z','results',
-      100000,1000,100,'{"8":{"payoutRaw":2500000,"payoutSek":25000,"systems":1,"jackpot":false}}',8,2500000,25000)\`).run();
+      100000,1000,100,'{"8":{"payoutRaw":2500000,"payoutSek":25000,"systems":1,"jackpot":false}}',8,2500000,25000)`).run();
   env.RAW_BUCKET.get=async()=>{ throw new Error('temporary R2 outage'); };
 
   const delayed=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
