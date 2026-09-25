@@ -354,7 +354,8 @@ export async function auditStatisticsRound(env, roundId) {
   const singletonSpikeLegs=Number(spikeIntegrity?.singleton_spike_legs || 0);
   const spikesValid=spikeCount===3 && spikeLegs===3 && singletonSpikeLegs===3;
 
-  const resultStatus=invalidWinnerLegs>0 ? 'unavailable' : winnerLegs===8 ? 'complete' : 'pending';
+  const incompleteResultsAfterFinal=Boolean(finalResult) && winnerLegs<8;
+  const resultStatus=(invalidWinnerLegs>0 || incompleteResultsAfterFinal) ? 'unavailable' : winnerLegs===8 ? 'complete' : 'pending';
   let finalMarketStatus=finalResult
     ? countStatus(closingMarketCount,activeEntries)
     : 'pending';
@@ -403,6 +404,7 @@ export async function auditStatisticsRound(env, roundId) {
     highestPayoutSek:finalResult?.highest_payout_sek == null ? null : Number(finalResult.highest_payout_sek),
     integrityErrors:[
       ...(invalidWinnerLegs>0 ? ['results_multiple_winners'] : []),
+      ...(incompleteResultsAfterFinal ? ['final_game_with_incomplete_results'] : []),
       ...(!spikesValid ? ['registered_system_spike_integrity'] : [])
     ]
   };
@@ -502,8 +504,9 @@ async function persistAudit(env, audit, {
   const normalizedForm=formStatus || audit.status.form;
   const normalizedFinalMarket=finalMarketStatus || audit.status.finalMarket;
   const metrics={...audit.status,form:normalizedForm,finalMarket:normalizedFinalMarket};
-  const overall=overallStatus(audit,{form:normalizedForm,finalMarket:normalizedFinalMarket});
-  const normalizedAction=actionState || actionStateFor(overall,metrics);
+  const derivedOverall=overallStatus(audit,{form:normalizedForm,finalMarket:normalizedFinalMarket});
+  const normalizedAction=actionState || actionStateFor(derivedOverall,metrics);
+  const overall=normalizedAction==='manual_review' ? 'manual_review' : derivedOverall;
   const completedAt=['waiting','retryable'].includes(normalizedAction) ? null : checkedAt;
   const revision=auditedRevision == null
     ? Number((await backfillState(env,audit.roundId))?.input_revision || 0)
