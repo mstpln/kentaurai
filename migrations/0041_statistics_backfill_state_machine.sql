@@ -8,6 +8,10 @@ ALTER TABLE statistics_data_backfill_rounds
 ALTER TABLE statistics_data_backfill_rounds
   ADD COLUMN input_revision INTEGER NOT NULL DEFAULT 0 CHECK(input_revision >= 0);
 ALTER TABLE statistics_data_backfill_rounds
+  ADD COLUMN form_input_revision INTEGER NOT NULL DEFAULT 0 CHECK(form_input_revision >= 0);
+ALTER TABLE statistics_data_backfill_rounds
+  ADD COLUMN final_market_input_revision INTEGER NOT NULL DEFAULT 0 CHECK(final_market_input_revision >= 0);
+ALTER TABLE statistics_data_backfill_rounds
   ADD COLUMN audited_revision INTEGER NOT NULL DEFAULT -1 CHECK(audited_revision >= -1);
 ALTER TABLE statistics_data_backfill_rounds ADD COLUMN input_fingerprint TEXT;
 ALTER TABLE statistics_data_backfill_rounds ADD COLUMN last_audit_at TEXT;
@@ -58,7 +62,8 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_final_result_insert
 AFTER INSERT ON game_round_final_results
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
+  SET input_revision=input_revision+1,
+      final_market_input_revision=final_market_input_revision+1
   WHERE game_round_id=NEW.game_round_id;
 END;
 
@@ -66,7 +71,8 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_final_result_update
 AFTER UPDATE ON game_round_final_results
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
+  SET input_revision=input_revision+1,
+      final_market_input_revision=final_market_input_revision+1
   WHERE game_round_id=NEW.game_round_id;
 END;
 
@@ -74,7 +80,8 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_final_result_delete
 AFTER DELETE ON game_round_final_results
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
+  SET input_revision=input_revision+1,
+      final_market_input_revision=final_market_input_revision+1
   WHERE game_round_id=OLD.game_round_id;
 END;
 
@@ -82,7 +89,8 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_betting_insert
 AFTER INSERT ON betting_snapshots
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
+  SET input_revision=input_revision+1,
+      final_market_input_revision=final_market_input_revision+1
   WHERE game_round_id=NEW.game_round_id;
 END;
 
@@ -90,7 +98,8 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_betting_update
 AFTER UPDATE ON betting_snapshots
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
+  SET input_revision=input_revision+1,
+      final_market_input_revision=final_market_input_revision+1
   WHERE game_round_id IN (OLD.game_round_id,NEW.game_round_id);
 END;
 
@@ -98,7 +107,8 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_betting_delete
 AFTER DELETE ON betting_snapshots
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
+  SET input_revision=input_revision+1,
+      final_market_input_revision=final_market_input_revision+1
   WHERE game_round_id=OLD.game_round_id;
 END;
 
@@ -165,7 +175,8 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_game_leg_insert
 AFTER INSERT ON game_legs
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
+  SET input_revision=input_revision+1,
+      form_input_revision=form_input_revision+1
   WHERE game_round_id=NEW.game_round_id;
 END;
 
@@ -173,7 +184,8 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_game_leg_update
 AFTER UPDATE ON game_legs
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
+  SET input_revision=input_revision+1,
+      form_input_revision=form_input_revision+1
   WHERE game_round_id IN (OLD.game_round_id,NEW.game_round_id);
 END;
 
@@ -181,7 +193,8 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_game_leg_delete
 AFTER DELETE ON game_legs
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
+  SET input_revision=input_revision+1,
+      form_input_revision=form_input_revision+1
   WHERE game_round_id=OLD.game_round_id;
 END;
 
@@ -189,7 +202,8 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_entry_insert
 AFTER INSERT ON race_entries
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
+  SET input_revision=input_revision+1,
+      form_input_revision=form_input_revision+1
   WHERE game_round_id IN (SELECT game_round_id FROM game_legs WHERE race_id=NEW.race_id);
 END;
 
@@ -197,7 +211,8 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_entry_update
 AFTER UPDATE ON race_entries
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
+  SET input_revision=input_revision+1,
+      form_input_revision=form_input_revision+1
   WHERE game_round_id IN (
     SELECT game_round_id FROM game_legs WHERE race_id IN (OLD.race_id,NEW.race_id)
   );
@@ -207,7 +222,8 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_entry_delete
 AFTER DELETE ON race_entries
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
+  SET input_revision=input_revision+1,
+      form_input_revision=form_input_revision+1
   WHERE game_round_id IN (SELECT game_round_id FROM game_legs WHERE race_id=OLD.race_id);
 END;
 
@@ -215,7 +231,8 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_system_insert
 AFTER INSERT ON systems
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
+  SET input_revision=input_revision+1,
+      form_input_revision=form_input_revision+1
   WHERE game_round_id=NEW.game_round_id;
 END;
 
@@ -223,7 +240,8 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_system_update
 AFTER UPDATE ON systems
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
+  SET input_revision=input_revision+1,
+      form_input_revision=form_input_revision+1
   WHERE game_round_id IN (OLD.game_round_id,NEW.game_round_id);
 END;
 
@@ -257,7 +275,8 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_external_run_insert
 AFTER INSERT ON analysis_external_runs
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
+  SET input_revision=input_revision+1,
+      form_input_revision=form_input_revision+1
   WHERE game_round_id=NEW.game_round_id;
 END;
 
@@ -265,7 +284,8 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_external_run_update
 AFTER UPDATE ON analysis_external_runs
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
+  SET input_revision=input_revision+1,
+      form_input_revision=form_input_revision+1
   WHERE game_round_id IN (OLD.game_round_id,NEW.game_round_id);
 END;
 
@@ -273,7 +293,8 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_external_export_insert
 AFTER INSERT ON analysis_external_exports
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
+  SET input_revision=input_revision+1,
+      form_input_revision=form_input_revision+1
   WHERE game_round_id=NEW.game_round_id;
 END;
 
@@ -281,7 +302,8 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_external_export_update
 AFTER UPDATE ON analysis_external_exports
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
+  SET input_revision=input_revision+1,
+      form_input_revision=form_input_revision+1
   WHERE game_round_id IN (OLD.game_round_id,NEW.game_round_id);
 END;
 
@@ -289,7 +311,8 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_ai_analysis_insert
 AFTER INSERT ON ai_race_analyses
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
+  SET input_revision=input_revision+1,
+      form_input_revision=form_input_revision+1
   WHERE game_round_id IN (SELECT game_round_id FROM game_legs WHERE race_id=NEW.race_id);
 END;
 
@@ -297,7 +320,8 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_ai_analysis_update
 AFTER UPDATE ON ai_race_analyses
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
+  SET input_revision=input_revision+1,
+      form_input_revision=form_input_revision+1
   WHERE game_round_id IN (
     SELECT game_round_id FROM game_legs WHERE race_id IN (OLD.race_id,NEW.race_id)
   );
@@ -440,7 +464,8 @@ CREATE TRIGGER IF NOT EXISTS trg_stats_rev_source_update
 AFTER UPDATE OF raw_object_key,quality_status,fetched_at ON source_records
 BEGIN
   UPDATE statistics_data_backfill_rounds
-  SET input_revision=input_revision+1
+  SET input_revision=input_revision+1,
+      final_market_input_revision=final_market_input_revision+1
   WHERE game_round_id IN (
     SELECT game_round_id FROM game_round_final_results
     WHERE source_record_id IN (OLD.id,NEW.id)
