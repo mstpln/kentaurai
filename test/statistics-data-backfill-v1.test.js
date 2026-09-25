@@ -285,3 +285,173 @@ test('historical KAI judgments reject snapshots after the round pre-race cutoff'
   assert.equal(audit.status.kaiRank,'unavailable');
   assert.equal(audit.status.abcd,'unavailable');
 });
+
+
+function addStatisticsFinalFacts(db,{market=true,payout=true}={}) {
+  db.prepare("INSERT OR IGNORE INTO source_records (id,source_type,external_id,fetched_at,quality_status) VALUES ('stats_final','official_provider','game:stats_round:final','2099-01-02T22:00:00Z','normalized_verified_subset')").run();
+  for(let leg=1;leg<=8;leg+=1){
+    db.prepare("INSERT OR REPLACE INTO race_results (race_entry_id,placing,result_status,gallop,disqualified,source_record_id) VALUES (?,1,'official',0,0,'stats_final')")
+      .run('stats_entry_'+leg);
+    if(market){
+      db.prepare("INSERT OR IGNORE INTO betting_snapshots (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id) VALUES (?,'stats_round',?,?, '2099-01-02T22:00:00Z',12.5,1,'stats_final')")
+        .run('stats_final_market_'+leg,leg,'stats_entry_'+leg);
+    }
+  }
+  const payouts=payout ? '{"8":{"payoutRaw":2500000,"payoutSek":25000,"systems":1,"jackpot":false}}' : '{}';
+  db.prepare(`INSERT OR REPLACE INTO game_round_final_results
+    (game_round_id,game_type,source_record_id,captured_at,status,turnover_raw,turnover_sek,
+     system_count,payouts_json,highest_payout_level,highest_payout_raw,highest_payout_sek)
+    VALUES ('stats_round','V86','stats_final','2099-01-02T22:00:00Z','results',
+      100000,1000,100,?,?,?,?)`)
+    .run(payouts,payout?8:null,payout?2500000:null,payout?25000:null);
+}
+
+function statisticsBackfillRow(db) {
+  return db.prepare("SELECT * FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get();
+}
+
+test('Form manual review does not freeze later factual settlement metrics',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  db.prepare("UPDATE analysis_external_runs SET step1_facts_fingerprint='sha256:wrong' WHERE id='stats_run'").run();
+  db.prepare("UPDATE analysis_external_exports SET artifact_fingerprint='sha256:wrong' WHERE game_round_id='stats_round' AND stage='step1'").run();
+
+  const first=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(first.metrics.form,'manual_review');
+  assert.equal(statisticsBackfillRow(db).attempt_count,1);
+
+  addStatisticsFinalFacts(db);
+  const refreshed=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:16:00Z'});
+  assert.equal(refreshed.metrics.form,'manual_review');
+  assert.equal(refreshed.metrics.results,'complete');
+  assert.equal(refreshed.metrics.finalMarket,'complete');
+  assert.equal(refreshed.metrics.payout,'complete');
+  assert.equal(statisticsBackfillRow(db).attempt_count,1,'passive factual refresh must not replay terminal Form');
+});
+
+test('unchanged deterministic Form mismatch is not retried on later cron ticks',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  db.prepare("UPDATE analysis_external_runs SET step1_facts_fingerprint='sha256:wrong' WHERE id='stats_run'").run();
+  db.prepare("UPDATE analysis_external_exports SET artifact_fingerprint='sha256:wrong' WHERE game_round_id='stats_round' AND stage='step1'").run();
+  await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  const attempts=statisticsBackfillRow(db).attempt_count;
+  assert.equal((await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:01:00Z'})).status,'idle');
+  await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:16:00Z'});
+  assert.equal(statisticsBackfillRow(db).attempt_count,attempts);
+});
+
+test('changed verified Form lineage reopens a terminal metric for safe re-evaluation',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  const pack=await seedRecordedSystem(env,db);
+  db.prepare("UPDATE analysis_external_runs SET step1_facts_fingerprint='sha256:wrong' WHERE id='stats_run'").run();
+  db.prepare("UPDATE analysis_external_exports SET artifact_fingerprint='sha256:wrong' WHERE game_round_id='stats_round' AND stage='step1'").run();
+  await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  db.prepare("UPDATE analysis_external_runs SET step1_facts_fingerprint=? WHERE id='stats_run'").run(pack.factsFingerprint);
+  db.prepare("UPDATE analysis_external_exports SET artifact_fingerprint=? WHERE game_round_id='stats_round' AND stage='step1'").run(pack.factsFingerprint);
+  const recovered=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:16:00Z'});
+  assert.equal(recovered.metrics.form,'complete');
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM analysis_entry_form_snapshots WHERE step1_pack_id=?").get(pack.packId).n,8);
+});
+
+test('transient Form errors back off instead of hot-looping and can recover',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  const failed=await runNextStatisticsDataBackfill(env,{
+    roundId:'stats_round',now:'2100-01-01T00:00:00Z',
+    formReplayImpl:async()=>{ throw new Error('temporary database timeout'); }
+  });
+  assert.equal(failed.workState,'retryable');
+  assert.equal(failed.metrics.form,'pending');
+  assert.equal(statisticsBackfillRow(db).attempt_count,1);
+  assert.equal((await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:01:00Z'})).status,'idle');
+  const recovered=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:06:00Z'});
+  assert.equal(recovered.metrics.form,'complete');
+  assert.equal(statisticsBackfillRow(db).attempt_count,2);
+});
+
+test('deterministic unsupported Form replay becomes terminal and stops consuming attempts',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  const failed=await runNextStatisticsDataBackfill(env,{
+    roundId:'stats_round',now:'2100-01-01T00:00:00Z',
+    formReplayImpl:async()=>{ throw new Error('round leg 5 has no active horse entries'); }
+  });
+  assert.equal(failed.metrics.form,'manual_review');
+  assert.equal(statisticsBackfillRow(db).form_terminal_reason,'form_replay_no_active_entries');
+  const attempts=statisticsBackfillRow(db).attempt_count;
+  await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:16:00Z'});
+  assert.equal(statisticsBackfillRow(db).attempt_count,attempts);
+});
+
+test('waiting for settlement is passive work and later source facts converge automatically',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  const first=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(first.workState,'waiting');
+  const attempts=statisticsBackfillRow(db).attempt_count;
+  const passive=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:16:00Z'});
+  assert.equal(passive.workState,'waiting');
+  assert.equal(statisticsBackfillRow(db).attempt_count,attempts);
+  addStatisticsFinalFacts(db);
+  const settled=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:32:00Z'});
+  assert.equal(settled.metrics.results,'complete');
+  assert.equal(settled.metrics.finalMarket,'complete');
+  assert.equal(settled.metrics.payout,'complete');
+  assert.equal(statisticsBackfillRow(db).attempt_count,attempts);
+});
+
+test('payout correction after an unavailable audit is picked up without inventing payout',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  addStatisticsFinalFacts(db,{market:true,payout:false});
+  const first=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(first.metrics.payout,'unavailable');
+  db.prepare("UPDATE game_round_final_results SET payouts_json=?,highest_payout_level=8,highest_payout_raw=2500000,highest_payout_sek=25000 WHERE game_round_id='stats_round'")
+    .run('{"8":{"payoutSek":25000}}');
+  const refreshed=await runNextStatisticsDataBackfill(env,{now:'2100-01-02T00:01:00Z'});
+  assert.equal(refreshed.metrics.payout,'complete');
+});
+
+test('statistics status separates work-state semantics and remains aggregate/sanitized',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  db.prepare("UPDATE statistics_data_backfill_rounds SET next_check_at='2000-01-01T00:00:00Z' WHERE game_round_id='stats_round'").run();
+  const status=await getStatisticsDataBackfillStatus(env);
+  assert.equal(status.workStates.waiting,1);
+  assert.equal(status.actionable,1);
+  assert.equal(status.attention.length,1);
+  assert.equal(Object.hasOwn(status.attention[0],'game_round_id'),false);
+});
+
+test('lease blocks duplicate statistics execution until it expires',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  db.prepare("UPDATE statistics_data_backfill_rounds SET lease_token='other',lease_until='2100-01-01T00:20:00Z',next_check_at='2100-01-01T00:10:00Z' WHERE game_round_id='stats_round'").run();
+  const busy=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:11:00Z'});
+  assert.equal(busy.status,'busy');
+  const after=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:21:00Z'});
+  assert.notEqual(after.status,'busy');
+});
+
+test('attempt counter records actual replay/repair work but not passive audits',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  const attempts=statisticsBackfillRow(db).attempt_count;
+  await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:16:00Z'});
+  await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:32:00Z'});
+  assert.equal(statisticsBackfillRow(db).attempt_count,attempts);
+});
