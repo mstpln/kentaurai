@@ -295,6 +295,15 @@ BEGIN
   WHERE game_round_id IN (OLD.game_round_id,NEW.game_round_id);
 END;
 
+CREATE TRIGGER IF NOT EXISTS trg_stats_rev_external_run_delete
+AFTER DELETE ON analysis_external_runs
+BEGIN
+  UPDATE statistics_data_backfill_rounds
+  SET input_revision=input_revision+1,
+      form_input_revision=form_input_revision+1
+  WHERE game_round_id=OLD.game_round_id;
+END;
+
 CREATE TRIGGER IF NOT EXISTS trg_stats_rev_external_export_insert
 AFTER INSERT ON analysis_external_exports
 WHEN NEW.stage='step1'
@@ -315,6 +324,16 @@ BEGIN
   WHERE game_round_id IN (OLD.game_round_id,NEW.game_round_id);
 END;
 
+CREATE TRIGGER IF NOT EXISTS trg_stats_rev_external_export_delete
+AFTER DELETE ON analysis_external_exports
+WHEN OLD.stage='step1'
+BEGIN
+  UPDATE statistics_data_backfill_rounds
+  SET input_revision=input_revision+1,
+      form_input_revision=form_input_revision+1
+  WHERE game_round_id=OLD.game_round_id;
+END;
+
 CREATE TRIGGER IF NOT EXISTS trg_stats_rev_ai_analysis_insert
 AFTER INSERT ON ai_race_analyses
 BEGIN
@@ -331,6 +350,14 @@ BEGIN
   WHERE game_round_id IN (
     SELECT game_round_id FROM game_legs WHERE race_id IN (OLD.race_id,NEW.race_id)
   );
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_stats_rev_ai_analysis_delete
+AFTER DELETE ON ai_race_analyses
+BEGIN
+  UPDATE statistics_data_backfill_rounds
+  SET input_revision=input_revision+1
+  WHERE game_round_id IN (SELECT game_round_id FROM game_legs WHERE race_id=OLD.race_id);
 END;
 
 CREATE TRIGGER IF NOT EXISTS trg_stats_rev_ai_prediction_insert
@@ -356,6 +383,19 @@ BEGIN
     FROM ai_race_analyses ara
     JOIN game_legs gl ON gl.race_id=ara.race_id
     WHERE ara.id IN (OLD.ai_race_analysis_id,NEW.ai_race_analysis_id)
+  );
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_stats_rev_ai_prediction_delete
+AFTER DELETE ON ai_horse_predictions
+BEGIN
+  UPDATE statistics_data_backfill_rounds
+  SET input_revision=input_revision+1
+  WHERE game_round_id IN (
+    SELECT gl.game_round_id
+    FROM ai_race_analyses ara
+    JOIN game_legs gl ON gl.race_id=ara.race_id
+    WHERE ara.id=OLD.ai_race_analysis_id
   );
 END;
 
