@@ -257,6 +257,7 @@ export async function auditStatisticsRound(env, roundId) {
   if (!system) throw new Error('round has no registered system');
   const lineage=await step1Lineage(env,id,system);
   let formLineage=null;
+  let formLineageIssue=null;
   if(
     lineage?.audited &&
     lineage.packId &&
@@ -275,6 +276,10 @@ export async function auditStatisticsRound(env, roundId) {
     };
   } else if (!lineage || (lineage.source==='system_metrics' && !lineage.audited)) {
     formLineage=await legacyFormLineage(env,id,system,round.pre_race_cutoff);
+  } else if (!lineage.audited) {
+    formLineageIssue='step1_lineage_provenance_unverified';
+  } else {
+    formLineageIssue='step1_lineage_timing_invalid';
   }
 
   const activeEntries=await scalar(env,`
@@ -441,9 +446,11 @@ export async function auditStatisticsRound(env, roundId) {
 
   const formStatus=formSnapshotCount>=activeEntries && activeEntries>0
     ? 'complete'
-    : formLineage?.audited
-      ? 'pending'
-      : 'unavailable';
+    : formLineageIssue
+      ? 'manual_review'
+      : formLineage?.audited
+        ? 'pending'
+        : 'unavailable';
 
   const audit={
     version:STATISTICS_DATA_BACKFILL_VERSION,
@@ -456,6 +463,7 @@ export async function auditStatisticsRound(env, roundId) {
     modelVersionId:system.model_version_id || null,
     lineage,
     formLineage,
+    formLineageIssue,
     counts:{
       activeEntries,
       winnerLegs,
@@ -649,7 +657,10 @@ function controlForForm(state, audit, at) {
   if (legacy && audit.status.form==='pending') {
     control={...control,effectiveStatus:legacy.status,terminalFingerprint:fp,terminalReason:legacy.reason,errorClass:legacy.errorClass,nextRetryAt:null};
   }
-  if (audit.status.form==='unavailable') {
+  if (audit.status.form==='manual_review') {
+    const reason=audit.formLineageIssue || 'verified_form_lineage_invalid';
+    control={...control,effectiveStatus:'manual_review',terminalFingerprint:fp,terminalReason:reason,errorClass:reason,retryCount:0,nextRetryAt:null};
+  } else if (audit.status.form==='unavailable') {
     control={...control,effectiveStatus:'unavailable',terminalFingerprint:fp,terminalReason:'verified_form_lineage_missing',errorClass:null,retryCount:0,nextRetryAt:null};
   } else if (audit.status.form==='complete') {
     control={...control,effectiveStatus:'complete',terminalFingerprint:null,terminalReason:null,errorClass:null,retryCount:0,nextRetryAt:null};
