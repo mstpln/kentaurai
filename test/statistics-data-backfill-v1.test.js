@@ -5,6 +5,7 @@ import { createPreMarketAnalysisPackV3 } from '../src/analysis-pack-v3.js';
 import { recordExternalAnalysisExport } from '../src/external-analysis-flow-v1.js';
 import {
   auditStatisticsRound,
+  ensureStatisticsDataBackfillQueue,
   getStatisticsDataBackfillStatus,
   runNextStatisticsDataBackfill
 } from '../src/statistics-data-backfill-v1.js';
@@ -539,4 +540,57 @@ test('multiple registered systems resolve a stable canonical primary system',asy
   }
   const audit=await auditStatisticsRound(env,'stats_round');
   assert.equal(audit.primarySystemId,'stats_system');
+});
+
+
+test('partial frozen Form snapshots are resumed idempotently without duplicating existing rows',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  const original=db.prepare("SELECT id,form_score,form_version,as_of FROM analysis_entry_form_snapshots WHERE leg_number=1").get();
+  assert.ok(original);
+  db.prepare("DELETE FROM analysis_entry_form_snapshots WHERE game_round_id='stats_round' AND leg_number>1").run();
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM analysis_entry_form_snapshots WHERE game_round_id='stats_round'").get().n,1);
+
+  const resumed=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:01:00Z'});
+  assert.equal(resumed.metrics.form,'complete');
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM analysis_entry_form_snapshots WHERE game_round_id='stats_round'").get().n,8);
+  const preserved=db.prepare("SELECT id,form_score,form_version,as_of FROM analysis_entry_form_snapshots WHERE leg_number=1").get();
+  assert.deepEqual(preserved,original);
+});
+
+test('active lease blocks duplicate admin or cron execution until ownership expires',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  await ensureStatisticsDataBackfillQueue(env,'2100-01-01T00:00:00Z');
+  db.prepare("UPDATE statistics_data_backfill_rounds SET lease_token='other-worker',lease_until='2100-01-01T00:10:00Z' WHERE game_round_id='stats_round'").run();
+
+  const blocked=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:01:00Z'});
+  assert.equal(blocked.status,'idle');
+  assert.equal(blocked.reason,'leased');
+  assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,0);
+
+  const recovered=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:11:00Z'});
+  assert.equal(recovered.roundId,'stats_round');
+  assert.equal(recovered.metrics.form,'complete');
+});
+
+test('pre-existing structurally invalid queue rows fail closed and can wake after repair',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  db.prepare(`INSERT INTO statistics_data_backfill_rounds
+    (game_round_id,status,result_status,final_market_status,payout_status,form_status,kai_rank_status,abcd_status,spike_status,last_checked_at)
+    VALUES ('stats_round','pending','pending','pending','pending','pending','unavailable','unavailable','unavailable','2100-01-01T00:00:00Z')`).run();
+
+  const missing=await runNextStatisticsDataBackfill(env,{roundId:'stats_round',now:'2100-01-01T00:00:00Z'});
+  assert.equal(missing.status,'manual_review');
+  assert.equal(missing.reason,'missing_registered_system');
+  assert.equal(db.prepare("SELECT attempt_count FROM statistics_data_backfill_rounds WHERE game_round_id='stats_round'").get().attempt_count,0);
+
+  await seedRecordedSystem(env,db);
+  const repaired=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:01:00Z'});
+  assert.equal(repaired.roundId,'stats_round');
+  assert.equal(repaired.metrics.form,'complete');
 });
