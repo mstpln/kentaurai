@@ -697,3 +697,47 @@ test('due waiting work is selected before low-priority terminal maintenance',asy
   const next=await runNextStatisticsDataBackfill(env,{now:'2100-01-01T00:03:00Z'});
   assert.equal(next.roundId,'stats_round_2');
 });
+
+
+test('invalid Step 1 lineage never falls back to unrelated legacy analysis snapshots',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  for(let leg=1;leg<=8;leg+=1){
+    db.prepare("INSERT INTO ai_race_analyses (id,race_id,model_version_id,data_snapshot_at,market_blind,created_at) VALUES (?,?,?,'2099-01-02T11:20:00.000Z',1,'2099-01-02T11:30:00.000Z')")
+      .run('invalid_step1_legacy_analysis_'+leg,'stats_race_'+leg,'stats_model');
+  }
+  db.prepare("UPDATE analysis_external_runs SET step1_facts_fingerprint='sha256:wrong' WHERE id='stats_run'").run();
+  db.prepare("UPDATE analysis_external_exports SET artifact_fingerprint='sha256:wrong' WHERE game_round_id='stats_round' AND stage='step1'").run();
+  const audit=await auditStatisticsRound(env,'stats_round');
+  assert.equal(audit.lineage.audited,false);
+  assert.equal(audit.formLineage,null);
+  assert.equal(audit.status.form,'unavailable');
+});
+
+test('partial closing-market progress changes the input fingerprint and reopens terminal repair',async()=>{
+  const {env,db}=createTestEnv();
+  seedRound(db);
+  await seedRecordedSystem(env,db);
+  addStatisticsFinalFacts(db,{market:false,payout:true});
+  const first=await runNextStatisticsDataBackfill(env,{
+    roundId:'stats_round',now:'2100-01-01T00:00:00Z',
+    closingMarketRepairImpl:async()=>{ throw new Error('closing_market_manual_review: deterministic identity gap'); }
+  });
+  assert.equal(first.metrics.finalMarket,'manual_review');
+
+  db.prepare("INSERT INTO betting_snapshots (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id) VALUES ('stats_partial_market','stats_round',1,'stats_entry_1','2099-01-02T22:00:00Z',12.5,1,'stats_final')").run();
+  let repairs=0;
+  const recovered=await runNextStatisticsDataBackfill(env,{
+    roundId:'stats_round',now:'2100-01-02T00:01:00Z',
+    closingMarketRepairImpl:async()=>{
+      repairs+=1;
+      for(let leg=2;leg<=8;leg+=1){
+        db.prepare("INSERT OR IGNORE INTO betting_snapshots (id,game_round_id,leg_number,race_entry_id,captured_at,bet_percent,market_rank,source_record_id) VALUES (?,'stats_round',?,?, '2099-01-02T22:00:00Z',12.5,1,'stats_final')")
+          .run('stats_partial_market_'+leg,leg,'stats_entry_'+leg);
+      }
+    }
+  });
+  assert.equal(repairs,1);
+  assert.equal(recovered.metrics.finalMarket,'complete');
+});
