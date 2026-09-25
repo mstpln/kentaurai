@@ -45,12 +45,20 @@ function formInputFingerprint(audit) {
     audit.lineage?.factsFingerprint,
     audit.lineage?.asOf,
     audit.formLineage?.asOfByLeg ? JSON.stringify(Object.fromEntries(audit.formLineage.asOfByLeg)) : null,
-    audit.counts.activeEntries
+    audit.counts.activeEntries,
+    audit.counts.formSnapshots
   );
 }
 
 function finalMarketInputFingerprint(audit) {
-  return lifecycleFingerprint('statistics-final-market-input-v2',audit.finalGameSourceRecordId,audit.counts.activeEntries,audit.entryIdentityVersion);
+  return lifecycleFingerprint(
+    'statistics-final-market-input-v2',
+    audit.finalGameSourceRecordId,
+    audit.finalGameCapturedAt,
+    audit.counts.activeEntries,
+    audit.counts.closingMarket,
+    audit.entryIdentityVersion
+  );
 }
 
 function roundInputFingerprint(audit) {
@@ -249,22 +257,24 @@ export async function auditStatisticsRound(env, roundId) {
   if (!system) throw new Error('round has no registered system');
   const lineage=await step1Lineage(env,id,system);
   let formLineage=null;
-  if(
-    lineage?.audited &&
-    lineage.packId &&
-    lineage.asOf &&
-    lineage.generatedAt &&
-    isoAtOrBefore(lineage.asOf,round.pre_race_cutoff) &&
-    isoAtOrBefore(lineage.generatedAt,round.pre_race_cutoff) &&
-    isoAtOrBefore(lineage.generatedAt,system.created_at)
-  ){
-    const normalizedAsOf=new Date(Date.parse(lineage.asOf)).toISOString();
-    formLineage={
-      kind:'step1_pack',
-      audited:true,
-      snapshotRef:lineage.packId,
-      asOfByLeg:new Map(Array.from({length:8},(_,index)=>[index+1,normalizedAsOf]))
-    };
+  if (lineage) {
+    if(
+      lineage.audited &&
+      lineage.packId &&
+      lineage.asOf &&
+      lineage.generatedAt &&
+      isoAtOrBefore(lineage.asOf,round.pre_race_cutoff) &&
+      isoAtOrBefore(lineage.generatedAt,round.pre_race_cutoff) &&
+      isoAtOrBefore(lineage.generatedAt,system.created_at)
+    ){
+      const normalizedAsOf=new Date(Date.parse(lineage.asOf)).toISOString();
+      formLineage={
+        kind:'step1_pack',
+        audited:true,
+        snapshotRef:lineage.packId,
+        asOfByLeg:new Map(Array.from({length:8},(_,index)=>[index+1,normalizedAsOf]))
+      };
+    }
   } else {
     formLineage=await legacyFormLineage(env,id,system,round.pre_race_cutoff);
   }
@@ -309,7 +319,7 @@ export async function auditStatisticsRound(env, roundId) {
   `,[id]);
 
   const finalResult=await env.DB.prepare(`
-    SELECT source_record_id,payouts_json,highest_payout_level,highest_payout_sek
+    SELECT source_record_id,captured_at,payouts_json,highest_payout_level,highest_payout_sek
     FROM game_round_final_results
     WHERE game_round_id=?
     LIMIT 1
@@ -474,6 +484,7 @@ export async function auditStatisticsRound(env, roundId) {
     integrityReasons,
     entryIdentityVersion,
     finalGameSourceRecordId:finalResult?.source_record_id || null,
+    finalGameCapturedAt:finalResult?.captured_at || null,
     highestPayoutLevel:finalResult?.highest_payout_level == null ? null : Number(finalResult.highest_payout_level),
     highestPayoutSek:finalResult?.highest_payout_sek == null ? null : Number(finalResult.highest_payout_sek)
   };
