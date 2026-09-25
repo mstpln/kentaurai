@@ -18,7 +18,7 @@ INSERT OR IGNORE INTO statistics_data_backfill_retry_state
   (game_round_id,next_check_at)
 SELECT game_round_id,CURRENT_TIMESTAMP
 FROM statistics_data_backfill_rounds
-WHERE status='pending'
+WHERE status IN ('pending','manual_review')
    OR result_status='pending'
    OR final_market_status='pending'
    OR payout_status='pending'
