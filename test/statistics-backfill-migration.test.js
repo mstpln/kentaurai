@@ -66,8 +66,8 @@ test('0041 wakes only the relevant terminal metric for factual versus Form input
     (game_round_id,game_type,source_record_id,captured_at,status,payouts_json)
     VALUES ('rev_round','V86','rev_source','2090-01-01T22:00:00Z','results','{}')`).run();
   let row=db.prepare("SELECT input_revision,form_input_revision,final_market_input_revision FROM statistics_data_backfill_rounds WHERE game_round_id='rev_round'").get();
-  assert.ok(row.input_revision>0);
-  assert.equal(row.form_input_revision,0);
+  assert.ok(row.input_revision>afterStep1.input_revision);
+  assert.equal(row.form_input_revision,afterStep1.form_input_revision);
   assert.ok(row.final_market_input_revision>0);
 
   db.prepare("INSERT INTO tracks (id,canonical_name) VALUES ('rev_track','Synthetic')").run();
