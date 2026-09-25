@@ -245,6 +245,15 @@ BEGIN
   WHERE game_round_id IN (OLD.game_round_id,NEW.game_round_id);
 END;
 
+CREATE TRIGGER IF NOT EXISTS trg_stats_rev_system_delete
+AFTER DELETE ON systems
+BEGIN
+  UPDATE statistics_data_backfill_rounds
+  SET input_revision=input_revision+1,
+      form_input_revision=form_input_revision+1
+  WHERE game_round_id=OLD.game_round_id;
+END;
+
 CREATE TRIGGER IF NOT EXISTS trg_stats_rev_selection_insert
 AFTER INSERT ON system_selections
 BEGIN
