@@ -43,6 +43,11 @@ function deterministicFormFailure(error) {
   return /has no active horse entries|analysis pack identity is incomplete|as-of is missing|unsupported_form_lineage/i.test(message);
 }
 
+function transientInfrastructureFailure(error) {
+  const message=String(error?.message || error || '');
+  return /temporary|temporarily|timeout|timed out|network|storage|database.*(?:busy|locked|unavailable)|\bD1\b|\bR2\b/i.test(message);
+}
+
 async function primarySystem(env, roundId) {
   return env.DB.prepare(`
     SELECT s.id,s.model_version_id,s.created_at,s.metrics_json
@@ -781,7 +786,7 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
         } else {
           const sameFingerprint=prior?.final_market_attempt_fingerprint===finalMarketAttemptFingerprint;
           finalMarketRetryCount=(sameFingerprint ? Number(prior?.final_market_retry_count || 0) : 0)+1;
-          if(finalMarketRetryCount>=8){
+          if(!transientInfrastructureFailure(error) && finalMarketRetryCount>=3){
             finalMarketStatus='manual_review';
             finalMarketTerminalReason='closing_market_repeated_failure';
             finalMarketErrorClass='repeated_failure';
@@ -820,10 +825,11 @@ export async function runNextStatisticsDataBackfill(env, options = {}) {
         errors.push('form_replay: '+message);
         const sameFingerprint=prior?.form_attempt_fingerprint===formAttemptFingerprint;
         formRetryCount=(sameFingerprint ? Number(prior?.form_retry_count || 0) : 0)+1;
-        if(deterministicFormFailure(error) || formRetryCount>=8){
+        const deterministic=deterministicFormFailure(error);
+        if(deterministic || (!transientInfrastructureFailure(error) && formRetryCount>=3)){
           formStatus='manual_review';
-          formTerminalReason=deterministicFormFailure(error) ? 'form_replay_deterministic_failure' : 'form_replay_repeated_failure';
-          formErrorClass=deterministicFormFailure(error) ? 'deterministic_failure' : 'repeated_failure';
+          formTerminalReason=deterministic ? 'form_replay_deterministic_failure' : 'form_replay_repeated_failure';
+          formErrorClass=deterministic ? 'deterministic_failure' : 'repeated_failure';
           formNextRetryAt=null;
         } else {
           formStatus='pending';
