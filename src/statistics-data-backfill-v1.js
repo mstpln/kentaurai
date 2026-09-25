@@ -71,14 +71,6 @@ function nowIso(value = Date.now()) {
   return date.toISOString();
 }
 
-function countStatus(value, expected, { pendingWhenZero = false } = {}) {
-  const count = Number(value || 0);
-  if (expected <= 0) return 'unavailable';
-  if (count >= expected) return 'complete';
-  if (pendingWhenZero && count === 0) return 'pending';
-  return 'unavailable';
-}
-
 async function primarySystem(env, roundId) {
   return env.DB.prepare(`
     SELECT s.id,s.model_version_id,s.created_at,s.metrics_json
@@ -583,7 +575,12 @@ async function nextQueuedRound(env, at) {
     WHERE next_check_at IS NOT NULL
       AND datetime(next_check_at)<=datetime(?)
       AND (lease_until IS NULL OR datetime(lease_until)<datetime(?))
-    ORDER BY datetime(next_check_at) ASC,datetime(last_checked_at) ASC,game_round_id ASC
+    ORDER BY CASE work_state
+      WHEN 'retryable' THEN 0
+      WHEN 'waiting' THEN 1
+      ELSE 2
+    END,
+    datetime(next_check_at) ASC,datetime(last_checked_at) ASC,game_round_id ASC
     LIMIT 1
   `).bind(at,at).first();
 }
