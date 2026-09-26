@@ -44,6 +44,87 @@ function chunks(values, size = 80) {
   return out;
 }
 
+const RACE_PRIOR_SHARD_YEARS = 2;
+
+function minIso(...values) {
+  return values.filter(Boolean).sort()[0] || null;
+}
+function maxIso(...values) {
+  return values.filter(Boolean).sort().at(-1) || null;
+}
+
+async function raceDateShards(env, cutoff) {
+  const cutoffDate=String(cutoff).slice(0,10);
+  const row=await env.DB.prepare(`
+    SELECT MIN(race_date) AS min_date
+    FROM races INDEXED BY idx_races_date
+    WHERE race_date < ?
+  `).bind(cutoffDate).first();
+  const minDate=String(row?.min_date || cutoffDate);
+  const minYear=Number(minDate.slice(0,4));
+  const cutoffYear=Number(cutoffDate.slice(0,4));
+  if (!Number.isInteger(minYear) || !Number.isInteger(cutoffYear)) {
+    throw new Error('race prior date bounds are invalid');
+  }
+  const shards=[];
+  for(let year=minYear;year<=cutoffYear;year+=RACE_PRIOR_SHARD_YEARS){
+    shards.push({
+      startDate:`${year}-01-01`,
+      endDate:`${year+RACE_PRIOR_SHARD_YEARS}-01-01`
+    });
+  }
+  return shards;
+}
+
+function mergeAggregateRows(context, shardRows) {
+  const out=new Map();
+  for(const level of context.hierarchy){
+    const parts=shardRows.map((rows)=>rows.get(level)).filter(Boolean);
+    const starts=parts.reduce((sum,row)=>sum+Number(row.starts||0),0);
+    const races=parts.reduce((sum,row)=>sum+Number(row.races||0),0);
+    const wins=parts.reduce((sum,row)=>sum+Number(row.wins||0),0);
+    const top3=parts.reduce((sum,row)=>sum+Number(row.top3||0),0);
+    const gallopKnown=parts.reduce((sum,row)=>sum+Number(row.gallopKnown||0),0);
+    const gallops=parts.reduce((sum,row)=>sum+Number(row.gallops||0),0);
+    const sourceRecords=parts.reduce((sum,row)=>sum+Number(row.sourceRecords||0),0);
+    out.set(level,{
+      level,starts,races,wins,top3,gallopKnown,gallops,sourceRecords,
+      firstSourceObservedAt:minIso(...parts.map((row)=>row.firstSourceObservedAt)),
+      lastSourceObservedAt:maxIso(...parts.map((row)=>row.lastSourceObservedAt)),
+      winRate:starts?wins/starts:null,
+      top3Rate:starts?top3/starts:null,
+      gallopRate:gallopKnown?gallops/gallopKnown:null,
+      gallopCoverage:starts?gallopKnown/starts:null
+    });
+  }
+  return out;
+}
+
+function mergeShapeRows(context, shardRows) {
+  const out=new Map();
+  for(const level of context.hierarchy){
+    const laneCounts=new Map();
+    let starts=0,races=0,sourceRecords=0;
+    let firstSourceObservedAt=null,lastSourceObservedAt=null;
+    for(const rows of shardRows){
+      const row=rows.get(level);
+      if(!row) continue;
+      starts+=Number(row.starts||0);
+      races+=Number(row.races||0);
+      sourceRecords+=Number(row.sourceRecords||0);
+      firstSourceObservedAt=minIso(firstSourceObservedAt,row.firstSourceObservedAt);
+      lastSourceObservedAt=maxIso(lastSourceObservedAt,row.lastSourceObservedAt);
+      for(const [lane,count] of row.laneCounts || []) laneCounts.set(lane,(laneCounts.get(lane)||0)+count);
+    }
+    const counts=[...laneCounts.values()];
+    out.set(level,{
+      level,starts,races,sourceRecords,firstSourceObservedAt,lastSourceObservedAt,
+      hhi:hhi(counts),entropy:normalizedEntropy(counts),laneCounts
+    });
+  }
+  return out;
+}
+
 function instant(value, field = 'asOf') {
   const text = String(value ?? '').trim();
   const ms = Date.parse(text);
@@ -220,7 +301,7 @@ function baseCte() {
   return `WITH race_fields AS MATERIALIZED (
       SELECT r0.id AS race_id, SUM(CASE WHEN re0.scratched = 0 THEN 1 ELSE 0 END) AS active_field_size
       FROM races r0 INDEXED BY idx_races_date
-      JOIN race_entries re0 INDEXED BY idx_entries_race_scratched ON re0.race_id = r0.id
+      JOIN race_entries re0 INDEXED BY idx_entries_race ON re0.race_id = r0.id
       WHERE r0.race_date >= ? AND r0.race_date < ?
       GROUP BY r0.id
     ), eligible AS MATERIALIZED (
@@ -300,8 +381,8 @@ function normalizeAggregate(row) {
   };
 }
 
-async function loadAggregateLevels(env, context) {
-  const query = hierarchyQueryBase(context);
+async function loadAggregateLevelsShard(env, context, shard) {
+  const query = hierarchyQueryBase(context, shard);
   const { results } = await env.DB.prepare(`${query.sql}
     SELECT cl.level,
       COUNT(e.race_id) AS starts,
@@ -341,9 +422,9 @@ function normalizedEntropy(values) {
   return entropy / Math.log(positive.length);
 }
 
-async function loadShapeLevels(env, context) {
-  const laneQuery = hierarchyQueryBase(context);
-  const metaQuery = hierarchyQueryBase(context);
+async function loadShapeLevelsShard(env, context, shard) {
+  const laneQuery = hierarchyQueryBase(context, shard);
+  const metaQuery = hierarchyQueryBase(context, shard);
   const [laneResult, metaResult] = await Promise.all([
     env.DB.prepare(`${laneQuery.sql}
       SELECT cl.level, e.actual_lane, COUNT(*) AS winners
@@ -367,13 +448,17 @@ async function loadShapeLevels(env, context) {
       ORDER BY cl.ordinal
     `).bind(...metaQuery.bindings).all()
   ]);
-  const lanesByLevel = new Map(context.hierarchy.map((level) => [level, []]));
-  for (const row of laneResult.results) lanesByLevel.get(row.level)?.push(Number(row.winners ?? 0));
+  const lanesByLevel = new Map(context.hierarchy.map((level) => [level, new Map()]));
+  for (const row of laneResult.results) {
+    const lane=Number(row.actual_lane);
+    if(Number.isFinite(lane)) lanesByLevel.get(row.level)?.set(lane,Number(row.winners ?? 0));
+  }
   const metaByLevel = new Map(metaResult.results.map((row) => [row.level, row]));
   const out = new Map();
   for (const level of context.hierarchy) {
-    const counts = lanesByLevel.get(level) || [];
+    const laneCounts=lanesByLevel.get(level) || new Map();
     const meta = metaByLevel.get(level) || {};
+    const counts=[...laneCounts.values()];
     out.set(level, {
       level,
       starts: Number(meta.winners ?? 0),
@@ -382,13 +467,14 @@ async function loadShapeLevels(env, context) {
       firstSourceObservedAt: meta.first_source_observed_at || null,
       lastSourceObservedAt: meta.last_source_observed_at || null,
       hhi: hhi(counts),
-      entropy: normalizedEntropy(counts)
+      entropy: normalizedEntropy(counts),
+      laneCounts
     });
   }
   return out;
 }
 
-async function loadSpecificContextRows(env, context) {
+async function loadSpecificContextRowsShard(env, context, shard) {
   const directLevel = context.hierarchy[0];
   const condition = levelCondition(directLevel, context);
   const { results } = await env.DB.prepare(`${baseCte()}
@@ -407,6 +493,7 @@ async function loadSpecificContextRows(env, context) {
     WHERE ${condition.where}
     ORDER BY race_id, actual_lane
   `).bind(
+    shard.startDate, shard.endDate, shard.startDate, shard.endDate,
     context.cutoff, context.cutoff, context.raceId,
     RACE_PROPOSITION_PARSER_VERSION, context.cutoff, context.cutoff,
     RACE_PROPOSITION_PARSER_VERSION, context.cutoff, context.cutoff,
@@ -622,7 +709,8 @@ function buildProvenance(context, targetProposition) {
     sourceRefs: refs,
     inputVersions: {
       raceProposition: RACE_PROPOSITION_PARSER_VERSION,
-      hierarchicalBackoff: ANALYSIS_V3_FOUNDATION_CONTRACTS.hierarchicalBackoff
+      hierarchicalBackoff: ANALYSIS_V3_FOUNDATION_CONTRACTS.hierarchicalBackoff,
+      querySharding: RACE_PRIOR_QUERY_SHARD_VERSION
     },
     parameters: {
       distanceBucket: context.distanceBucket,
@@ -650,11 +738,22 @@ async function buildRaceContext(env, target, requested) {
     propositionSignature: propositionSignature(targetProposition)
   };
   context.hierarchy = availableHierarchy(context);
-  const [levels, specificRows, shapeLevels] = await Promise.all([
-    loadAggregateLevels(env, context),
-    loadSpecificContextRows(env, context),
-    loadShapeLevels(env, context)
-  ]);
+  const shards=await raceDateShards(env,cutoff);
+  const aggregateParts=[];
+  const shapeParts=[];
+  const specificRows=[];
+  for(const shard of shards){
+    const [aggregate,shape,specific]=await Promise.all([
+      loadAggregateLevelsShard(env,context,shard),
+      loadShapeLevelsShard(env,context,shard),
+      loadSpecificContextRowsShard(env,context,shard)
+    ]);
+    aggregateParts.push(aggregate);
+    shapeParts.push(shape);
+    specificRows.push(...specific);
+  }
+  const levels=mergeAggregateRows(context,aggregateParts);
+  const shapeLevels=mergeShapeRows(context,shapeParts);
   return { context, levels, specificRows, shapeLevels, targetProposition };
 }
 
