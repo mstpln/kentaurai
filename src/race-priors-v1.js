@@ -1043,18 +1043,23 @@ function directContextRowsCte(contexts) {
 async function loadSpecificContextRowsBatchShard(env,contexts,shard,cutoff){
   const direct=directContextRowsCte(contexts);
   const {results}=await env.DB.prepare(`${batchBaseCte()},
-    ${direct.sql}
-    SELECT dc.context_key,eligible.*,
-      (SELECT rpf.parse_status FROM race_proposition_facts rpf
-        JOIN source_records rpf_sr ON rpf_sr.id=rpf.source_record_id
-        WHERE rpf.race_id=eligible.race_id AND rpf.parser_version=?
-          AND julianday(rpf.observed_at)<=julianday(?) AND julianday(rpf_sr.fetched_at)<=julianday(?)
-        ORDER BY julianday(rpf.observed_at) DESC,rpf.id DESC LIMIT 1) AS proposition_status,
-      (SELECT rpf.facts_json FROM race_proposition_facts rpf
-        JOIN source_records rpf_sr ON rpf_sr.id=rpf.source_record_id
-        WHERE rpf.race_id=eligible.race_id AND rpf.parser_version=?
-          AND julianday(rpf.observed_at)<=julianday(?) AND julianday(rpf_sr.fetched_at)<=julianday(?)
-        ORDER BY julianday(rpf.observed_at) DESC,rpf.id DESC LIMIT 1) AS proposition_facts_json
+    ${direct.sql},
+    proposition_ranked AS MATERIALIZED (
+      SELECT rpf.race_id,rpf.parse_status,rpf.facts_json,
+        ROW_NUMBER() OVER (
+          PARTITION BY rpf.race_id
+          ORDER BY julianday(rpf.observed_at) DESC,julianday(rpf_sr.fetched_at) DESC,rpf.id DESC
+        ) AS row_number
+      FROM race_proposition_facts rpf
+      JOIN source_records rpf_sr ON rpf_sr.id=rpf.source_record_id
+      JOIN races pr ON pr.id=rpf.race_id
+      WHERE pr.race_date >= ? AND pr.race_date < ?
+        AND rpf.parser_version=?
+        AND julianday(rpf.observed_at)<=julianday(?)
+        AND julianday(rpf_sr.fetched_at)<=julianday(?)
+    )
+    SELECT dc.context_key,eligible.*,prop.parse_status AS proposition_status,
+      prop.facts_json AS proposition_facts_json
     FROM direct_contexts dc
     JOIN eligible ON
       eligible.race_id <> dc.context_key
@@ -1062,12 +1067,13 @@ async function loadSpecificContextRowsBatchShard(env,contexts,shard,cutoff){
       AND (dc.method_key IS NULL OR eligible.method_key=dc.method_key)
       AND (dc.distance_bucket IS NULL OR eligible.distance_bucket=dc.distance_bucket)
       AND (dc.field_bucket IS NULL OR eligible.field_bucket=dc.field_bucket)
+    LEFT JOIN proposition_ranked prop
+      ON prop.race_id=eligible.race_id AND prop.row_number=1
     ORDER BY dc.context_key,eligible.race_id,eligible.actual_lane
   `).bind(
     shard.startDate,shard.endDate,shard.startDate,shard.endDate,cutoff,cutoff,
     ...direct.bindings,
-    RACE_PROPOSITION_PARSER_VERSION,cutoff,cutoff,
-    RACE_PROPOSITION_PARSER_VERSION,cutoff,cutoff
+    shard.startDate,shard.endDate,RACE_PROPOSITION_PARSER_VERSION,cutoff,cutoff
   ).all();
   const out=new Map(contexts.map((context)=>[context.raceId,[]]));
   for(const row of results||[]){
