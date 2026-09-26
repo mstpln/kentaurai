@@ -44,6 +44,7 @@ function chunks(values, size = 80) {
 }
 
 const RACE_PRIOR_SHARD_YEARS = 2;
+const RACE_PRIOR_CONTEXT_BATCH_SIZE = 2;
 
 function minIso(...values) {
   return values.filter(Boolean).sort()[0] || null;
