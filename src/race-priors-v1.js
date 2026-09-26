@@ -9,6 +9,7 @@ import { RACE_PROPOSITION_PARSER_VERSION } from './race-proposition-v1.js';
 
 export const RACE_PRIOR_CONTRACT_VERSION = 'kentaurai-race-priors-v1';
 export const RACE_PRIOR_FEATURE_VERSION = 'race_priors_v1';
+export const RACE_PRIOR_QUERY_SHARD_VERSION = 'race_priors_query_year_shards_v1';
 
 export const RACE_PRIOR_POLICY = Object.freeze({
   distanceBuckets: Object.freeze([
@@ -216,21 +217,24 @@ function levelCondition(level, context, alias = '') {
 }
 
 function baseCte() {
-  return `WITH race_fields AS (
+  return `WITH race_fields AS MATERIALIZED (
       SELECT r0.id AS race_id, SUM(CASE WHEN re0.scratched = 0 THEN 1 ELSE 0 END) AS active_field_size
-      FROM races r0 JOIN race_entries re0 ON re0.race_id = r0.id
+      FROM races r0 INDEXED BY idx_races_date
+      JOIN race_entries re0 INDEXED BY idx_entries_race_scratched ON re0.race_id = r0.id
+      WHERE r0.race_date >= ? AND r0.race_date < ?
       GROUP BY r0.id
-    ), eligible AS (
+    ), eligible AS MATERIALIZED (
       SELECT r.id AS race_id, r.track_id, ${METHOD_SQL} AS method_key, ${DISTANCE_SQL} AS distance_bucket,
              ${FIELD_SQL} AS field_bucket, re.actual_lane, re.start_tier, re.handicap_m,
              rr.placing, rr.gallop, rr.source_record_id, sr.fetched_at AS source_observed_at,
              r.race_name, r.main_class, r.class_flags_json
-      FROM races r
+      FROM races r INDEXED BY idx_races_date
       JOIN race_fields rf ON rf.race_id = r.id
       JOIN race_entries re ON re.race_id = r.id
       JOIN race_results rr ON rr.race_entry_id = re.id
       JOIN source_records sr ON sr.id = rr.source_record_id
-      WHERE re.scratched = 0 AND rr.result_status = 'official'
+      WHERE r.race_date >= ? AND r.race_date < ?
+        AND re.scratched = 0 AND rr.result_status = 'official'
         AND sr.fetched_at <= ?
         AND COALESCE(r.scheduled_start_at, r.race_date || 'T23:59:59.999Z') < ?
         AND r.id <> ?
@@ -265,12 +269,12 @@ const HIERARCHY_MATCH_SQL = `
   AND (cl.field_bucket IS NULL OR e.field_bucket = cl.field_bucket)
 `;
 
-function hierarchyQueryBase(context) {
+function hierarchyQueryBase(context, shard) {
   const levels = hierarchyCte(context);
   return {
     sql: `${baseCte()},
     ${levels.sql}`,
-    bindings: [context.cutoff, context.cutoff, context.raceId, ...levels.bindings]
+    bindings: [shard.startDate, shard.endDate, shard.startDate, shard.endDate, context.cutoff, context.cutoff, context.raceId, ...levels.bindings]
   };
 }
 
