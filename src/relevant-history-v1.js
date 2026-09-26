@@ -249,47 +249,64 @@ async function loadHistory(env, horseIds) {
   return rows;
 }
 
-async function loadEquipmentRows(env, entryIds) {
-  const out = new Map(entryIds.map((id) => [id, []]));
-  for (const group of chunks(entryIds)) {
+async function loadEquipmentRows(env, horseIds) {
+  const out = new Map();
+  for (const group of chunks([...new Set(horseIds.filter(Boolean))])) {
     const { results } = await env.DB.prepare(`
       SELECT e.*, sr.fetched_at
-      FROM equipment e
+      FROM race_entries re INDEXED BY idx_entries_horse_race
+      JOIN equipment e ON e.race_entry_id = re.id
       JOIN source_records sr ON sr.id = e.source_record_id
-      WHERE e.race_entry_id IN (${placeholders(group)})
+      WHERE re.horse_id IN (${placeholders(group)})
       ORDER BY e.race_entry_id, julianday(sr.fetched_at) DESC, e.id DESC
     `).bind(...group).all();
-    for (const row of results) out.get(row.race_entry_id)?.push(row);
+    for (const row of results || []) {
+      if (!out.has(row.race_entry_id)) out.set(row.race_entry_id, []);
+      out.get(row.race_entry_id).push(row);
+    }
   }
   return out;
 }
 
-async function loadXlabsRows(env, entryIds) {
-  const out = new Map(entryIds.map((id) => [id, []]));
-  for (const group of chunks(entryIds)) {
+async function loadXlabsRows(env, horseIds) {
+  const out = new Map();
+  for (const group of chunks([...new Set(horseIds.filter(Boolean))])) {
     const { results } = await env.DB.prepare(`
       SELECT x.*, sr.fetched_at
-      FROM xlabs_data x
+      FROM race_entries re INDEXED BY idx_entries_horse_race
+      JOIN xlabs_data x ON x.race_entry_id = re.id
       JOIN source_records sr ON sr.id = x.source_record_id
-      WHERE x.race_entry_id IN (${placeholders(group)})
+      WHERE re.horse_id IN (${placeholders(group)})
       ORDER BY x.race_entry_id, julianday(sr.fetched_at) DESC, x.id DESC
     `).bind(...group).all();
-    for (const row of results) out.get(row.race_entry_id)?.push(row);
+    for (const row of results || []) {
+      if (!out.has(row.race_entry_id)) out.set(row.race_entry_id, []);
+      out.get(row.race_entry_id).push(row);
+    }
   }
   return out;
 }
 
-async function loadPropositionRows(env, raceIds) {
-  const out = new Map(raceIds.map((id) => [id, []]));
-  for (const group of chunks(raceIds)) {
+async function loadPropositionRows(env, horseIds) {
+  const out = new Map();
+  for (const group of chunks([...new Set(horseIds.filter(Boolean))])) {
     const { results } = await env.DB.prepare(`
+      WITH relevant_races AS MATERIALIZED (
+        SELECT DISTINCT re.race_id
+        FROM race_entries re INDEXED BY idx_entries_horse_race
+        WHERE re.horse_id IN (${placeholders(group)})
+      )
       SELECT rpf.*, sr.fetched_at AS source_fetched_at
-      FROM race_proposition_facts rpf
+      FROM relevant_races rr
+      JOIN race_proposition_facts rpf ON rpf.race_id = rr.race_id
       JOIN source_records sr ON sr.id = rpf.source_record_id
-      WHERE rpf.race_id IN (${placeholders(group)}) AND rpf.parser_version = ?
+      WHERE rpf.parser_version = ?
       ORDER BY rpf.race_id, julianday(rpf.observed_at) DESC, julianday(sr.fetched_at) DESC, rpf.id DESC
     `).bind(...group, RACE_PROPOSITION_PARSER_VERSION).all();
-    for (const row of results) out.get(row.race_id)?.push(row);
+    for (const row of results || []) {
+      if (!out.has(row.race_id)) out.set(row.race_id, []);
+      out.get(row.race_id).push(row);
+    }
   }
   return out;
 }
@@ -507,12 +524,14 @@ export async function buildRelevantHistoryForEntries(env, raceEntryIds, asOf, op
   const historiesByHorse = new Map(horseIds.map((id) => [id, []]));
   for (const row of historyRows) historiesByHorse.get(row.horse_id)?.push(row);
 
-  const allEntryIds = [...new Set([...entryIds, ...historyRows.map((row) => row.race_entry_id)])];
-  const allRaceIds = [...new Set([...targets.map((row) => row.race_id), ...historyRows.map((row) => row.race_id)])];
+  // Enrich complete horse histories through horse-first joins instead of
+  // issuing one query per 80 historical entry/race IDs. This preserves the
+  // exact relevance semantics while making statement count scale with current
+  // horses rather than career length.
   const [equipmentRows, xlabsRows, propositionRows, officialReferences] = await Promise.all([
-    loadEquipmentRows(env, allEntryIds),
-    loadXlabsRows(env, allEntryIds),
-    loadPropositionRows(env, allRaceIds),
+    loadEquipmentRows(env, horseIds),
+    loadXlabsRows(env, horseIds),
+    loadPropositionRows(env, horseIds),
     loadOfficialReferences(env, targets, cutoffByEntry)
   ]);
 
