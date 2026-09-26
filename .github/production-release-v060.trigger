@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=726b41c997e8c1e17d5de200bdd33b7043651f2b
-release_nonce=2026-09-26-pr264-step1-track-analysis-d1-cpu-1
+source_main=bd6124a0a1c15219ab5b67bdf67c009b01a79ad7
+release_nonce=2026-09-26-pr265-step1-prompt-v3-1
