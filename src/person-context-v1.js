@@ -3,11 +3,10 @@ import { buildRelevantHistoryForEntries } from './relevant-history-v1.js';
 import { loadPersonContextTargets } from './person-context-target.js';
 import { loadDriverHistories } from './person-context-driver-history.js';
 import { loadTrainerHistories } from './person-context-trainer-history.js';
-import { loadHorsePersonHistories } from './person-context-horse-history.js';
 import { buildWindows } from './person-context-summary.js';
 import { buildPersonSegments } from './person-context-segments.js';
 import { loadPersonProviderFallbacks,unavailablePersonProvider } from './person-context-provider.js';
-import { buildDriverHorseContext,loadDriverHorseXlabs } from './person-context-combo.js';
+import { buildDriverHorseContext } from './person-context-combo.js';
 import { personContextInstant } from './person-context-time.js';
 
 export const PERSON_CONTEXT_CONTRACT_VERSION='kentaurai-person-context-v1';
@@ -20,6 +19,41 @@ function availability(rows,provider){if(rows.length)return 'own_history';if((pro
 function resultRefs(rows){return rows.map((row)=>({source_record_id:row.result_source_record_id,selected_at:row.result_observed_at,time_basis:'result_observed_at'})).filter((ref)=>ref.source_record_id&&ref.selected_at);}
 function dedupe(refs){const m=new Map();for(const ref of refs.filter(Boolean))m.set(`${ref.source_record_id}|${ref.selected_at}|${ref.time_basis}`,ref);return [...m.values()].sort((a,b)=>`${a.source_record_id}|${a.selected_at}`.localeCompare(`${b.source_record_id}|${b.selected_at}`));}
 
+function relevantHorseHistoryMap(group,relevant,cutoff){
+  const out=new Map();
+  const lower=cutoff.ms-(365*24*60*60*1000);
+  for(const target of group){
+    if(!target?.horse_id)continue;
+    const item=relevant.get(target.race_entry_id);
+    const rows=(item?.internalFullSafeHistory||[]).filter((row)=>{
+      const eventMs=Date.parse(row.scheduled_start_at||`${row.race_date}T23:59:59.999Z`);
+      return Number.isFinite(eventMs)&&eventMs>=lower&&eventMs<cutoff.ms;
+    }).map((row)=>({
+      ...row,
+      event_ms:Date.parse(row.scheduled_start_at||`${row.race_date}T23:59:59.999Z`)
+    }));
+    out.set(target.horse_id,rows);
+  }
+  return out;
+}
+
+function relevantHorseXlabs(rowsByHorse){
+  const out=new Map();
+  for(const rows of rowsByHorse.values()){
+    for(const row of rows){
+      const x=row.xlabs;
+      if(!x||out.has(row.race_entry_id))continue;
+      out.set(row.race_entry_id,{
+        race_entry_id:row.race_entry_id,
+        first_200_time:x.first200Time||null,
+        source_record_id:x.sourceRecordId||null,
+        fetched_at:x.observedAt||null
+      });
+    }
+  }
+  return out;
+}
+
 export async function buildPersonContextV1ForEntries(env,raceEntryIds,asOf,options={}){
   if(!env?.DB)throw new Error('DB is not configured');if(!Array.isArray(raceEntryIds))throw new Error('raceEntryIds must be an array');
   const requested=personContextInstant(asOf),ids=[...new Set(raceEntryIds.map((v)=>String(v??'').trim()).filter(Boolean))];if(!ids.length)return new Map();
@@ -28,11 +62,18 @@ export async function buildPersonContextV1ForEntries(env,raceEntryIds,asOf,optio
   for(const id of ids){const cutoff=personContextInstant(relevant.get(id)?.targetCutoff,`targetCutoff for ${id}`);if(!groups.has(cutoff.iso))groups.set(cutoff.iso,[]);groups.get(cutoff.iso).push(targets.get(id));}
   const cache=new Map();
   for(const [cutoffIso,group] of groups){
-    const [drivers,trainers,horses,driverProviders,trainerProviders]=await Promise.all([
-      loadDriverHistories(env,group.map((x)=>x.driver_id),cutoffIso),loadTrainerHistories(env,group.map((x)=>x.trainer_id),cutoffIso),loadHorsePersonHistories(env,group.map((x)=>x.horse_id),cutoffIso),
-      loadPersonProviderFallbacks(env,'driver',group.map((x)=>x.driver_id),cutoffIso,PERSON_CONTEXT_FEATURE_VERSION),loadPersonProviderFallbacks(env,'trainer',group.map((x)=>x.trainer_id),cutoffIso,PERSON_CONTEXT_FEATURE_VERSION)
+    const cutoff=personContextInstant(cutoffIso);
+    // Reuse the horse history and X-Labs rows already loaded by relevant-history.
+    // Only driver/trainer histories and provider fallbacks still require their
+    // own population reads.
+    const horses=relevantHorseHistoryMap(group,relevant,cutoff);
+    const xlabs=relevantHorseXlabs(horses);
+    const [drivers,trainers,driverProviders,trainerProviders]=await Promise.all([
+      loadDriverHistories(env,group.map((x)=>x.driver_id),cutoffIso),
+      loadTrainerHistories(env,group.map((x)=>x.trainer_id),cutoffIso),
+      loadPersonProviderFallbacks(env,'driver',group.map((x)=>x.driver_id),cutoffIso,PERSON_CONTEXT_FEATURE_VERSION),
+      loadPersonProviderFallbacks(env,'trainer',group.map((x)=>x.trainer_id),cutoffIso,PERSON_CONTEXT_FEATURE_VERSION)
     ]);
-    const allHorseRows=[...horses.values()].flat(),xlabs=await loadDriverHorseXlabs(env,allHorseRows.map((row)=>row.race_entry_id),cutoffIso);
     cache.set(cutoffIso,{drivers,trainers,horses,driverProviders,trainerProviders,xlabs});
   }
   const out=new Map();
