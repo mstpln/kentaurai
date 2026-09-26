@@ -32,24 +32,32 @@ function maxCompoundSelectTerms(sql) {
 }
 
 class StatementAdapter {
-  constructor(db, sql) {
+  constructor(db, sql, metrics) {
     this.db = db;
     this.sql = sql;
+    this.metrics = metrics;
     this.args = [];
+  }
+  markExecution(kind) {
+    if (!this.metrics) return;
+    this.metrics.statements += 1;
+    this.metrics[kind] = (this.metrics[kind] || 0) + 1;
   }
   bind(...args) { if (args.length > D1_MAX_BOUND_PARAMETERS) throw new Error(`D1_ERROR: too many SQL variables (${args.length} > ${D1_MAX_BOUND_PARAMETERS})`); this.args = args; return this; }
   async run() {
+    this.markExecution('runs');
     const result = this.db.prepare(this.sql).run(...this.args);
     return { success: true, meta: { changes: Number(result.changes ?? 0), last_row_id: result.lastInsertRowid == null ? null : Number(result.lastInsertRowid) } };
   }
-  async first() { return this.db.prepare(this.sql).get(...this.args) ?? null; }
-  async all() { return { results: this.db.prepare(this.sql).all(...this.args) }; }
+  async first() { this.markExecution('firsts'); return this.db.prepare(this.sql).get(...this.args) ?? null; }
+  async all() { this.markExecution('alls'); return { results: this.db.prepare(this.sql).all(...this.args) }; }
 }
 
 class D1Adapter {
-  constructor(db) { this.db = db; }
-  prepare(sql) { const terms = maxCompoundSelectTerms(sql); if (terms > D1_MAX_COMPOUND_SELECT_TERMS) throw new Error(`D1_ERROR: too many terms in compound SELECT (${terms} > ${D1_MAX_COMPOUND_SELECT_TERMS})`); return new StatementAdapter(this.db, sql); }
+  constructor(db, metrics) { this.db = db; this.metrics = metrics; }
+  prepare(sql) { const terms = maxCompoundSelectTerms(sql); if (terms > D1_MAX_COMPOUND_SELECT_TERMS) throw new Error(`D1_ERROR: too many terms in compound SELECT (${terms} > ${D1_MAX_COMPOUND_SELECT_TERMS})`); return new StatementAdapter(this.db, sql, this.metrics); }
   async batch(statements) {
+    if (this.metrics) this.metrics.batches += 1;
     this.db.exec('BEGIN');
     try {
       const results = [];
@@ -111,10 +119,12 @@ export function createTestEnv() {
   }
 
   const objects = new Map();
+  const d1Metrics = { statements: 0, runs: 0, firsts: 0, alls: 0, batches: 0 };
   return {
     db,
+    d1Metrics,
     env: {
-      DB: new D1Adapter(db),
+      DB: new D1Adapter(db, d1Metrics),
       V85_LINE_PRICE_SEK: '0.50',
       V86_LINE_PRICE_SEK: '0.25',
       RAW_BUCKET: {
