@@ -9,6 +9,7 @@ import {
 } from './f3-private-ui.js';
 import {
   EXTERNAL_ANALYSIS_FLOW_VERSION,
+  EXTERNAL_ANALYSIS_PROMPT_VERSION,
   buildMarketInput,
   buildRegistrationContext,
   getExternalAnalysisStep1Prompt,
@@ -107,7 +108,7 @@ export default {
       const denied = await requireSession(request, env);
       if (denied) return denied;
       try {
-        return json({ prompt_version: 'external-analysis-prompt-v1', prompt: getExternalAnalysisStep1Prompt(url.searchParams.get('provider') || 'openai') });
+        return json({ prompt_version: EXTERNAL_ANALYSIS_PROMPT_VERSION, prompt: getExternalAnalysisStep1Prompt(url.searchParams.get('provider') || 'openai') });
       } catch (error) {
         return json({ error: 'request_failed', message: error.message }, 400);
       }
@@ -150,7 +151,7 @@ export default {
       const denied = await requireSession(request, env);
       if (denied) return denied;
       try {
-        return json({ prompt_version: 'external-analysis-prompt-v1', prompt: getExternalAnalysisStep2Prompt(url.searchParams.get('provider') || 'openai') });
+        return json({ prompt_version: EXTERNAL_ANALYSIS_PROMPT_VERSION, prompt: getExternalAnalysisStep2Prompt(url.searchParams.get('provider') || 'openai') });
       } catch (error) {
         return json({ error: 'request_failed', message: error.message }, 400);
       }
@@ -280,7 +281,7 @@ export default {
       const denied = await requireSession(request, env);
       if (denied) return denied;
       try {
-        return json({ prompt_version: 'external-analysis-prompt-v1', prompt: getRegistrationPrompt(url.searchParams.get('provider') || 'openai') });
+        return json({ prompt_version: EXTERNAL_ANALYSIS_PROMPT_VERSION, prompt: getRegistrationPrompt(url.searchParams.get('provider') || 'openai') });
       } catch (error) {
         return json({ error: 'request_failed', message: error.message }, 400);
       }
