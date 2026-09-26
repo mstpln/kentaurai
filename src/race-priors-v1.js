@@ -9,7 +9,6 @@ import { RACE_PROPOSITION_PARSER_VERSION } from './race-proposition-v1.js';
 
 export const RACE_PRIOR_CONTRACT_VERSION = 'kentaurai-race-priors-v1';
 export const RACE_PRIOR_FEATURE_VERSION = 'race_priors_v1';
-export const RACE_PRIOR_QUERY_SHARD_VERSION = 'race_priors_query_year_shards_v1';
 
 export const RACE_PRIOR_POLICY = Object.freeze({
   distanceBuckets: Object.freeze([
@@ -709,8 +708,7 @@ function buildProvenance(context, targetProposition) {
     sourceRefs: refs,
     inputVersions: {
       raceProposition: RACE_PROPOSITION_PARSER_VERSION,
-      hierarchicalBackoff: ANALYSIS_V3_FOUNDATION_CONTRACTS.hierarchicalBackoff,
-      querySharding: RACE_PRIOR_QUERY_SHARD_VERSION
+      hierarchicalBackoff: ANALYSIS_V3_FOUNDATION_CONTRACTS.hierarchicalBackoff
     },
     parameters: {
       distanceBucket: context.distanceBucket,
