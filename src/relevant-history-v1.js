@@ -468,6 +468,9 @@ function outputResult(row) {
 }
 
 function outputHistoryRow(row) {
+  const equipment = row.equipment ? Object.fromEntries(
+    Object.entries(row.equipment).filter(([key]) => key !== 'changeFromPreviousJson')
+  ) : null;
   return {
     raceEntryId: row.race_entry_id,
     raceId: row.race_id,
@@ -490,7 +493,7 @@ function outputHistoryRow(row) {
     trainerName: row.trainer_name || null,
     restDaysBeforeStart: row.restDaysBeforeStart,
     result: outputResult(row),
-    equipment: row.equipment || null,
+    equipment,
     xlabs: row.xlabs || null,
     proposition: row.proposition || null,
     inclusionReasons: [...row.inclusionReasons]
