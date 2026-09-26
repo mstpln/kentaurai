@@ -832,10 +832,11 @@ export async function buildXlabsEvidenceProfilesForRaces(env, {
     const horseIds = [...new Set(group.flatMap(({ entries }) => entries
       .filter((entry) => Number(entry.scratched || 0) !== 1 && entry.horse_id != null)
       .map((entry) => String(entry.horse_id))))];
-    const [historyRows,populationAggregates] = await Promise.all([
-      loadHorseHistory(env, cutoff, horseIds),
-      loadPopulationAggregates(env, cutoff)
-    ]);
+    // Both paths can be wide historical reads. D1 is effectively
+    // single-threaded, so run them sequentially instead of making them compete
+    // for the same database CPU budget.
+    const historyRows=await loadHorseHistory(env, cutoff, horseIds);
+    const populationAggregates=await loadPopulationAggregates(env, cutoff);
     for (const target of group) {
       out.set(target.raceId, buildXlabsEvidenceProfiles({
         target: target.race,
