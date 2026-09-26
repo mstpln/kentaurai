@@ -159,7 +159,7 @@ async function loadScenarioRows(env, { trackId = null, countryCode = null, exclu
 
   const { results } = await env.DB.prepare(`
     WITH eligible_entries AS MATERIALIZED (
-      SELECT re.id AS race_entry_id,re.actual_lane,r.id AS race_id,r.race_date,
+      SELECT re.id AS race_entry_id,re.actual_lane,r.id AS race_id,r.track_id,r.race_date,
         ${canonicalStartMethodSql()} AS start_method,r.distance_m,rr.placing
       FROM tracks t
       JOIN races r ON r.track_id=t.id
@@ -171,7 +171,7 @@ async function loadScenarioRows(env, { trackId = null, countryCode = null, exclu
     ranked AS (
       SELECT rp.id,rp.race_entry_id,rp.event_json,rp.leader,rp.pocket,rp.death_seat,rp.second_over,rp.third_over,
         rp.confidence,rp.evidence_type,rp.observed_at_m,rp.classification_version,rp.source_record_id,
-        e.race_id,e.race_date,e.start_method,e.distance_m,e.placing,e.actual_lane,
+        e.race_id,e.track_id,e.race_date,e.start_method,e.distance_m,e.placing,e.actual_lane,
         sr.fetched_at AS source_selected_at,
         ROW_NUMBER() OVER (PARTITION BY rp.race_entry_id ORDER BY julianday(sr.fetched_at) DESC,rp.id DESC) AS row_number
       FROM eligible_entries e
@@ -182,7 +182,7 @@ async function loadScenarioRows(env, { trackId = null, countryCode = null, exclu
     SELECT * FROM ranked WHERE row_number=1 ORDER BY race_date,race_id,race_entry_id
   `).bind(...entryBindings, ...positionBindings).all();
   return (results || []).map((row) => ({
-    raceEntryId: row.race_entry_id,raceId: row.race_id,raceDate: row.race_date,startMethod: row.start_method,
+    raceEntryId: row.race_entry_id,raceId: row.race_id,trackId: row.track_id||null,raceDate: row.race_date,startMethod: row.start_method,
     distanceM: finiteOrNull(row.distance_m),actualLane: finiteOrNull(row.actual_lane),placing: finiteOrNull(row.placing),
     scenarioKey: scenarioKeyFromRow(row),scenarioLabel: scenarioLabelFromRow(row),confidence: finiteOrNull(row.confidence),
     evidenceType: row.evidence_type || null,observedAtM: finiteOrNull(row.observed_at_m),classificationVersion: row.classification_version,
@@ -241,7 +241,7 @@ async function loadPositionRows(env, { trackId = null, countryCode = null, exclu
   const { results } = await env.DB.prepare(`
     WITH eligible_entries AS MATERIALIZED (
       SELECT re.id AS race_entry_id,re.actual_lane,re.start_tier,re.handicap_m,
-        r.id AS race_id,r.race_date,${canonicalStartMethodSql()} AS start_method,r.distance_m
+        r.id AS race_id,r.track_id,r.race_date,${canonicalStartMethodSql()} AS start_method,r.distance_m
       FROM tracks t
       JOIN races r ON r.track_id=t.id
       JOIN race_entries re INDEXED BY idx_entries_race ON re.race_id=r.id
@@ -252,7 +252,7 @@ async function loadPositionRows(env, { trackId = null, countryCode = null, exclu
     ranked AS (
       SELECT rpc.id,rpc.race_entry_id,rpc.checkpoint_key,rpc.position_rank,rpc.field_coverage,rpc.local_target_coverage,rpc.longitudinal_confidence,
         rpc.source_record_id,rpc.reconstruction_version,rpc.leader_progress_m,
-        e.race_id,e.race_date,e.start_method,e.distance_m,e.actual_lane,e.start_tier,e.handicap_m,
+        e.race_id,e.track_id,e.race_date,e.start_method,e.distance_m,e.actual_lane,e.start_tier,e.handicap_m,
         sr.fetched_at AS source_selected_at,
         ROW_NUMBER() OVER (PARTITION BY rpc.race_entry_id,rpc.checkpoint_key ORDER BY julianday(sr.fetched_at) DESC,rpc.id DESC) AS row_number
       FROM eligible_entries e
@@ -263,7 +263,7 @@ async function loadPositionRows(env, { trackId = null, countryCode = null, exclu
     )
     SELECT * FROM ranked WHERE row_number=1 ORDER BY race_date,race_id,race_entry_id
   `).bind(...entryBindings, ...checkpointBindings).all();
-  return (results || []).map((row)=>({raceEntryId:row.race_entry_id,raceId:row.race_id,raceDate:row.race_date,startMethod:row.start_method,
+  return (results || []).map((row)=>({raceEntryId:row.race_entry_id,raceId:row.race_id,trackId:row.track_id||null,raceDate:row.race_date,startMethod:row.start_method,
     checkpointKey:row.checkpoint_key,distanceM:finiteOrNull(row.distance_m),actualLane:finiteOrNull(row.actual_lane),startTier:finiteOrNull(row.start_tier),handicapM:finiteOrNull(row.handicap_m),positionRank:finiteOrNull(row.position_rank),
     leaderProgressM:finiteOrNull(row.leader_progress_m),fieldCoverage:finiteOrNull(row.field_coverage),localTargetCoverage:finiteOrNull(row.local_target_coverage),longitudinalConfidence:finiteOrNull(row.longitudinal_confidence),
     sourceRecordId:row.source_record_id,sourceSelectedAt:row.source_selected_at||null}));
@@ -314,7 +314,7 @@ async function loadEarly500Rows(env, { trackId = null, countryCode = null, exclu
     : 'idx_position_checkpoints_track_analysis';
   const { results } = await env.DB.prepare(`
     WITH eligible_entries AS MATERIALIZED (
-      SELECT re.id AS race_entry_id,r.id AS race_id,r.race_date,
+      SELECT re.id AS race_entry_id,r.id AS race_id,r.track_id,r.race_date,
         ${canonicalStartMethodSql()} AS start_method,r.distance_m,rr.placing
       FROM tracks t
       JOIN races r ON r.track_id=t.id
@@ -326,7 +326,7 @@ async function loadEarly500Rows(env, { trackId = null, countryCode = null, exclu
     ranked AS (
       SELECT rpc.id,rpc.race_entry_id,rpc.position_rank,rpc.meters_behind_leader,
         rpc.field_coverage,rpc.longitudinal_confidence,rpc.source_record_id,
-        e.race_id,e.race_date,e.start_method,e.distance_m,e.placing,
+        e.race_id,e.track_id,e.race_date,e.start_method,e.distance_m,e.placing,
         sr.fetched_at AS source_selected_at,
         ROW_NUMBER() OVER (
           PARTITION BY rpc.race_entry_id,rpc.checkpoint_key
@@ -341,7 +341,7 @@ async function loadEarly500Rows(env, { trackId = null, countryCode = null, exclu
     SELECT * FROM ranked WHERE row_number=1 ORDER BY race_date,race_id,race_entry_id
   `).bind(...entryBindings, ...checkpointBindings).all();
   return (results || []).map((row)=>({
-    raceEntryId:row.race_entry_id,raceId:row.race_id,raceDate:row.race_date,startMethod:row.start_method,
+    raceEntryId:row.race_entry_id,raceId:row.race_id,trackId:row.track_id||null,raceDate:row.race_date,startMethod:row.start_method,
     distanceM:finiteOrNull(row.distance_m),placing:finiteOrNull(row.placing),positionRank:finiteOrNull(row.position_rank),
     metersBehindLeader:finiteOrNull(row.meters_behind_leader),fieldCoverage:finiteOrNull(row.field_coverage),
     longitudinalConfidence:finiteOrNull(row.longitudinal_confidence),sourceRecordId:row.source_record_id,
@@ -670,28 +670,47 @@ export async function getTrackAnalysisV1(env,trackIdValue,options={}){
   const selectedContext={startMethod,distanceGroup,asOf};
   const basisContext={startMethod:resolved.startMethod,distanceGroup:resolved.distanceGroup,asOf};
   const sameBasis=resolved.backoffLevel==='exact';
-  const [exactPos,exactBaselinePos,exactScen,exactBaselineScen,exactEarly500,exactBaselineEarly500,exactLaneOutcomeRows,exactEligible,trackContext]=await Promise.all([
-    loadPositionRows(env,{trackId,...selectedContext}),
-    track.country_code?loadPositionRows(env,{countryCode:track.country_code,excludeTrackId:trackId,...selectedContext}):[],
-    loadScenarioRows(env,{trackId,...selectedContext}),
-    track.country_code?loadScenarioRows(env,{countryCode:track.country_code,excludeTrackId:trackId,...selectedContext}):[],
-    loadEarly500Rows(env,{trackId,...selectedContext}),
-    track.country_code?loadEarly500Rows(env,{countryCode:track.country_code,excludeTrackId:trackId,...selectedContext}):[],
+  async function positionFamilies(context){
+    // A country-baseline read already covers almost the whole country. Include
+    // the current track in that one read and split exact/baseline in memory,
+    // eliminating a second broad family of D1 queries.
+    if(track.country_code){
+      const allPos=await loadPositionRows(env,{countryCode:track.country_code,...context});
+      const allScen=await loadScenarioRows(env,{countryCode:track.country_code,...context});
+      const allEarly=await loadEarly500Rows(env,{countryCode:track.country_code,...context});
+      return {
+        exactPos:allPos.filter((row)=>row.trackId===trackId),
+        baselinePos:allPos.filter((row)=>row.trackId!==trackId),
+        exactScen:allScen.filter((row)=>row.trackId===trackId),
+        baselineScen:allScen.filter((row)=>row.trackId!==trackId),
+        exactEarly:allEarly.filter((row)=>row.trackId===trackId),
+        baselineEarly:allEarly.filter((row)=>row.trackId!==trackId)
+      };
+    }
+    return {
+      exactPos:await loadPositionRows(env,{trackId,...context}),baselinePos:[],
+      exactScen:await loadScenarioRows(env,{trackId,...context}),baselineScen:[],
+      exactEarly:await loadEarly500Rows(env,{trackId,...context}),baselineEarly:[]
+    };
+  }
+  const exactFamilies=await positionFamilies(selectedContext);
+  const [exactLaneOutcomeRows,exactEligible,trackContext]=await Promise.all([
     loadLaneOutcomeRows(env,trackId,selectedContext),
     loadEligibleCoverageCounts(env,trackId,selectedContext),
     loadTrackContext(env,trackId,selectedContext)
   ]);
-  const [basisPos,basisBaselinePos,basisScen,basisBaselineScen,basisEarly500,basisBaselineEarly500,basisEligible]=sameBasis
-    ? [exactPos,exactBaselinePos,exactScen,exactBaselineScen,exactEarly500,exactBaselineEarly500,exactEligible]
-    : await Promise.all([
-        loadPositionRows(env,{trackId,...basisContext}),
-        track.country_code?loadPositionRows(env,{countryCode:track.country_code,excludeTrackId:trackId,...basisContext}):[],
-        loadScenarioRows(env,{trackId,...basisContext}),
-        track.country_code?loadScenarioRows(env,{countryCode:track.country_code,excludeTrackId:trackId,...basisContext}):[],
-        loadEarly500Rows(env,{trackId,...basisContext}),
-        track.country_code?loadEarly500Rows(env,{countryCode:track.country_code,excludeTrackId:trackId,...basisContext}):[],
-        loadEligibleCoverageCounts(env,trackId,basisContext)
-      ]);
+  const exactPos=exactFamilies.exactPos,exactBaselinePos=exactFamilies.baselinePos,
+    exactScen=exactFamilies.exactScen,exactBaselineScen=exactFamilies.baselineScen,
+    exactEarly500=exactFamilies.exactEarly,exactBaselineEarly500=exactFamilies.baselineEarly;
+  let basisPos=exactPos,basisBaselinePos=exactBaselinePos,basisScen=exactScen,basisBaselineScen=exactBaselineScen,
+    basisEarly500=exactEarly500,basisBaselineEarly500=exactBaselineEarly500,basisEligible=exactEligible;
+  if(!sameBasis){
+    const basisFamilies=await positionFamilies(basisContext);
+    basisPos=basisFamilies.exactPos;basisBaselinePos=basisFamilies.baselinePos;
+    basisScen=basisFamilies.exactScen;basisBaselineScen=basisFamilies.baselineScen;
+    basisEarly500=basisFamilies.exactEarly;basisBaselineEarly500=basisFamilies.baselineEarly;
+    basisEligible=await loadEligibleCoverageCounts(env,trackId,basisContext);
+  }
   const exactPos100=exactPos.filter(r=>r.checkpointKey==='100m'),exactPos200=exactPos.filter(r=>r.checkpointKey==='200m');
   const exactBaselinePos100=exactBaselinePos.filter(r=>r.checkpointKey==='100m'),exactBaselinePos200=exactBaselinePos.filter(r=>r.checkpointKey==='200m');
   const basisPos100=basisPos.filter(r=>r.checkpointKey==='100m'),basisPos200=basisPos.filter(r=>r.checkpointKey==='200m');
