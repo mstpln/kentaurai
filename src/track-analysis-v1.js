@@ -256,7 +256,7 @@ async function loadPositionRows(env, { trackId = null, countryCode = null, exclu
         sr.fetched_at AS source_selected_at,
         ROW_NUMBER() OVER (PARTITION BY rpc.race_entry_id,rpc.checkpoint_key ORDER BY julianday(sr.fetched_at) DESC,rpc.id DESC) AS row_number
       FROM eligible_entries e
-      JOIN race_position_checkpoints rpc INDEXED BY idx_position_checkpoints_track_analysis
+      JOIN race_position_checkpoints rpc INDEXED BY idx_position_checkpoints_entry_source
         ON rpc.race_entry_id=e.race_entry_id
       JOIN source_records sr ON sr.id=rpc.source_record_id
       WHERE ${checkpointConditions.join(' AND ')}
