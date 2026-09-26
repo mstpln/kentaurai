@@ -718,27 +718,34 @@ function populationAggregateSelect(dimension,bucketSql,{group=true}={}){
 
 async function loadPopulationAggregateShard(env, cutoff, startDate, endDate) {
   const scopeSql = 'r.race_date >= ? AND r.race_date < ?';
-  // Avoid the previous N x 9 CROSS JOIN dimensional expansion. feature_rows is
-  // materialized once and each compact aggregation scans that projection
-  // directly, which cuts sort/materialization pressure on production D1.
-  const selects=[
-    populationAggregateSelect('overall',"'all'",{group:false}),
-    populationAggregateSelect('year',"COALESCE(NULLIF(SUBSTR(fr.race_date,1,4),''),'unknown')"),
-    populationAggregateSelect('track',"COALESCE(CAST(fr.track_id AS TEXT),'unknown')"),
-    populationAggregateSelect('method',methodSql('fr')),
-    populationAggregateSelect('distance',distanceSql('fr')),
-    populationAggregateSelect('method_distance',`${methodSql('fr')} || '|' || ${distanceSql('fr')}`),
-    populationAggregateSelect('class',"COALESCE(NULLIF(fr.stl_class,''),NULLIF(fr.main_class,''),'unclassified')"),
-    populationAggregateSelect('race_type',"COALESCE(NULLIF(fr.race_types,''),'unclassified')"),
-    populationAggregateSelect('field_size',fieldSql('fr'))
+  // Avoid the previous N x 9 CROSS JOIN dimensional expansion. D1 permits at
+  // most five terms in one compound SELECT, so split the nine dimensions into
+  // two bounded statements. Each materializes only the annual feature rows and
+  // aggregates them directly.
+  const dimensions=[
+    ['overall',"'all'",false],
+    ['year',"COALESCE(NULLIF(SUBSTR(fr.race_date,1,4),''),'unknown')",true],
+    ['track',"COALESCE(CAST(fr.track_id AS TEXT),'unknown')",true],
+    ['method',methodSql('fr'),true],
+    ['distance',distanceSql('fr'),true],
+    ['method_distance',`${methodSql('fr')} || '|' || ${distanceSql('fr')}`,true],
+    ['class',"COALESCE(NULLIF(fr.stl_class,''),NULLIF(fr.main_class,''),'unclassified')",true],
+    ['race_type',"COALESCE(NULLIF(fr.race_types,''),'unclassified')",true],
+    ['field_size',fieldSql('fr'),true]
   ];
-  const sql = `${featureRowsCte(scopeSql)}
-    ${selects.join('\nUNION ALL\n')}
-    ORDER BY dimension,bucket
-  `;
-  const { results } = await env.DB.prepare(sql)
-    .bind(...featureRowsBindings(cutoff, [startDate, endDate])).all();
-  return results || [];
+  const rows=[];
+  for(let offset=0;offset<dimensions.length;offset+=5){
+    const group=dimensions.slice(offset,offset+5);
+    const selects=group.map(([dimension,bucket,grouped])=>populationAggregateSelect(dimension,bucket,{group:grouped}));
+    const sql=`${featureRowsCte(scopeSql)}
+      ${selects.join('\nUNION ALL\n')}
+      ORDER BY dimension,bucket
+    `;
+    const {results}=await env.DB.prepare(sql)
+      .bind(...featureRowsBindings(cutoff,[startDate,endDate])).all();
+    rows.push(...(results||[]));
+  }
+  return rows.sort((a,b)=>String(a.dimension).localeCompare(String(b.dimension))||String(a.bucket).localeCompare(String(b.bucket)));
 }
 
 function mergePopulationAggregateShards(shards) {
