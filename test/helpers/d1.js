@@ -104,7 +104,8 @@ export function createTestEnv() {
     '../../migrations/0037_xlabs_position_reconstruction_quarantine.sql',
     '../../migrations/0038_track_analysis_v1.sql',
     '../../migrations/0039_game_statistics_v1.sql',
-    '../../migrations/0040_statistics_data_backfill_v1.sql'
+    '../../migrations/0040_statistics_data_backfill_v1.sql',
+    '../../migrations/0041_statistics_data_backfill_state_v2.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }

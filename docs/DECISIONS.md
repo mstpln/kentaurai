@@ -298,9 +298,11 @@ A single race must not directly change model weights. Candidate learnings are re
 5. Historical KentaurAI rank and ABCD come only from the canonical stored pre-race analysis associated with the primary registered system. They are not regenerated with a newer model.
 6. Spike history comes only from the registered primary system and must retain the exact-three-spikes invariant; legacy or incomplete rows are surfaced as unavailable rather than rewritten.
 7. Coverage/backfill state is operational metadata only. Canonical facts remain in their existing racing, analysis, system, market and Form snapshot tables.
-8. The minute orchestrator advances at most one statistics-history round after post-race settlement, preserving bounded Worker load and resumability.
-9. Retryable storage/database repair failures remain `pending` so the scheduler can retry them. Deterministic archive/provenance inconsistencies are `manual_review`; a single transient failure must never permanently convert a recoverable metric into `unavailable`.
-10. Legacy historical analysis evidence is usable only when both its `data_snapshot_at` and the analysis record creation time are compatible with the registered system and verified pre-race cutoff. Historical Form also applies source fetched-at cutoffs to every result row used in field-relative calculations.
+8. The minute orchestrator advances at most one due statistics-history round after post-race settlement, preserving bounded Worker load, fairness and resumability. Cron/admin overlap is protected by a short per-round lease.
+9. Round work state is distinct from metric state: `waiting`, `retryable`, `manual_review`, `complete` and `complete_with_gaps` describe scheduling/lifecycle semantics, while factual/Form/KAI/ABCD/spike metrics retain their own completion states.
+10. Terminal Form and closing-market decisions are tied to deterministic input fingerprints. Unchanged terminal input is not replayed; materially changed verified input reopens only the affected metric. A Form manual-review decision must never freeze later results, closing-market or payout refresh.
+11. Retryable storage/database repair failures use delayed exponential retry rather than minute hot-looping. Deterministic replay/archive/provenance failures become terminal for the unchanged input, and passive source-of-truth audits do not increment attempt counters.
+12. Legacy historical analysis evidence is usable only when both its `data_snapshot_at` and the analysis record creation time are compatible with the registered system and verified pre-race cutoff. Audited Step 1 lineage must likewise have both `as_of` and generation time no later than the verified pre-race cutoff and must have been generated no later than the registered system. Historical Form also applies source fetched-at cutoffs to every result row used in field-relative calculations.
 
 
 ## Historical official structural source gaps do not stop multi-year backfill
