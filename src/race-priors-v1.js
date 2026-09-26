@@ -922,9 +922,15 @@ async function loadAggregateAndShapeLevelsBatchShard(env, contexts, shard, cutof
     shard.startDate,shard.endDate,shard.startDate,shard.endDate,cutoff,cutoff,
     ...levels.bindings
   ];
-  const {results}=await env.DB.prepare(`${batchBaseCte()},
+
+  // D1 enforces a CPU ceiling per statement. Keep aggregate, lane-shape and
+  // shape-metadata work in separate statements so no single query pays for
+  // three grouped scans of the same historical population. The quarterly
+  // population and context are identical for all three, and the results are
+  // merged below with unchanged race-prior semantics.
+  const {results:aggregateRows}=await env.DB.prepare(`${batchBaseCte()},
     ${levels.sql}
-    SELECT 'aggregate' AS row_kind,cl.context_key,cl.ordinal,cl.level,NULL AS actual_lane,
+    SELECT cl.context_key,cl.ordinal,cl.level,
       COUNT(e.race_id) AS starts,
       COUNT(DISTINCT e.race_id) AS races,
       SUM(CASE WHEN e.placing=1 THEN 1 ELSE 0 END) AS wins,
@@ -938,24 +944,25 @@ async function loadAggregateAndShapeLevelsBatchShard(env, contexts, shard, cutof
     LEFT JOIN eligible e ON ${HIERARCHY_MATCH_SQL}
       AND e.race_id <> cl.context_key
     GROUP BY cl.context_key,cl.ordinal,cl.level
+    ORDER BY cl.context_key,cl.ordinal
+  `).bind(...bindings).all();
 
-    UNION ALL
-
-    SELECT 'shape_lane',cl.context_key,cl.ordinal,cl.level,e.actual_lane,
-      COUNT(*) AS starts,NULL AS races,NULL AS wins,NULL AS top3,NULL AS gallop_known,NULL AS gallops,
-      NULL AS source_records,NULL AS first_source_observed_at,NULL AS last_source_observed_at
+  const {results:laneRows}=await env.DB.prepare(`${batchBaseCte()},
+    ${levels.sql}
+    SELECT cl.context_key,cl.ordinal,cl.level,e.actual_lane,COUNT(*) AS starts
     FROM context_levels cl
     JOIN eligible e ON ${HIERARCHY_MATCH_SQL}
       AND e.race_id <> cl.context_key
       AND e.placing=1 AND e.actual_lane IS NOT NULL
     GROUP BY cl.context_key,cl.ordinal,cl.level,e.actual_lane
+    ORDER BY cl.context_key,cl.ordinal,e.actual_lane
+  `).bind(...bindings).all();
 
-    UNION ALL
-
-    SELECT 'shape_meta',cl.context_key,cl.ordinal,cl.level,NULL AS actual_lane,
+  const {results:metaRows}=await env.DB.prepare(`${batchBaseCte()},
+    ${levels.sql}
+    SELECT cl.context_key,cl.ordinal,cl.level,
       COUNT(e.race_id) AS starts,
       COUNT(DISTINCT e.race_id) AS races,
-      NULL AS wins,NULL AS top3,NULL AS gallop_known,NULL AS gallops,
       COUNT(DISTINCT e.source_record_id) AS source_records,
       MIN(e.source_observed_at) AS first_source_observed_at,
       MAX(e.source_observed_at) AS last_source_observed_at
@@ -964,8 +971,7 @@ async function loadAggregateAndShapeLevelsBatchShard(env, contexts, shard, cutof
       AND e.race_id <> cl.context_key
       AND e.placing=1 AND e.actual_lane IS NOT NULL
     GROUP BY cl.context_key,cl.ordinal,cl.level
-
-    ORDER BY context_key,ordinal,row_kind,actual_lane
+    ORDER BY cl.context_key,cl.ordinal
   `).bind(...bindings).all();
 
   const byContext=new Map(contexts.map((context)=>[context.raceId,{
@@ -973,14 +979,15 @@ async function loadAggregateAndShapeLevelsBatchShard(env, contexts, shard, cutof
     laneCounts:new Map(context.hierarchy.map((level)=>[level,new Map()])),
     shapeMeta:new Map()
   }]));
-  for(const row of results||[]){
-    const target=byContext.get(row.context_key);
-    if(!target)continue;
-    if(row.row_kind==='aggregate')target.aggregateLevels.set(row.level,normalizeAggregate(row));
-    else if(row.row_kind==='shape_lane'){
-      const lane=Number(row.actual_lane);
-      if(Number.isFinite(lane))target.laneCounts.get(row.level)?.set(lane,Number(row.starts||0));
-    } else if(row.row_kind==='shape_meta')target.shapeMeta.set(row.level,row);
+  for(const row of aggregateRows||[]){
+    byContext.get(row.context_key)?.aggregateLevels.set(row.level,normalizeAggregate(row));
+  }
+  for(const row of laneRows||[]){
+    const lane=Number(row.actual_lane);
+    if(Number.isFinite(lane))byContext.get(row.context_key)?.laneCounts.get(row.level)?.set(lane,Number(row.starts||0));
+  }
+  for(const row of metaRows||[]){
+    byContext.get(row.context_key)?.shapeMeta.set(row.level,row);
   }
 
   const out=new Map();
