@@ -1,0 +1,103 @@
+name: Diagnose Step 1 D1 CPU
+
+on:
+  push:
+    branches:
+      - fix/step1-export-d1-cpu
+    paths:
+      - '.github/diagnose-step1-d1.trigger'
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Validate Cloudflare configuration
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Aggregate production diagnostics only
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "
+            SELECT 'race_rows' metric, COUNT(*) value FROM races;
+            SELECT 'race_date_min' metric, MIN(race_date) value FROM races;
+            SELECT 'race_date_max' metric, MAX(race_date) value FROM races;
+            SELECT 'result_rows' metric, COUNT(*) value FROM race_results;
+            SELECT 'backfill_rows' metric, COUNT(*) value FROM statistics_data_backfill_rounds;
+            SELECT 'backfill_waiting' metric, COUNT(*) value FROM statistics_data_backfill_rounds WHERE work_state='waiting';
+            SELECT 'backfill_retryable' metric, COUNT(*) value FROM statistics_data_backfill_rounds WHERE work_state='retryable';
+            SELECT 'backfill_manual_review' metric, COUNT(*) value FROM statistics_data_backfill_rounds WHERE work_state='manual_review';
+            SELECT 'backfill_due_now' metric, COUNT(*) value FROM statistics_data_backfill_rounds WHERE next_check_at IS NOT NULL AND datetime(next_check_at)<=datetime('now');
+          " > /tmp/aggregate.txt
+          cat /tmp/aggregate.txt
+
+      - name: Probe legacy full-population race-prior scan
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "
+            WITH race_fields AS (
+              SELECT r0.id AS race_id, SUM(CASE WHEN re0.scratched=0 THEN 1 ELSE 0 END) AS active_field_size
+              FROM races r0 JOIN race_entries re0 ON re0.race_id=r0.id
+              GROUP BY r0.id
+            ), eligible AS (
+              SELECT r.id AS race_id,re.id AS race_entry_id
+              FROM races r
+              JOIN race_fields rf ON rf.race_id=r.id
+              JOIN race_entries re ON re.race_id=r.id
+              JOIN race_results rr ON rr.race_entry_id=re.id
+              JOIN source_records sr ON sr.id=rr.source_record_id
+              WHERE re.scratched=0 AND rr.result_status='official'
+                AND sr.fetched_at<='2026-09-26T08:00:00.000Z'
+                AND COALESCE(r.scheduled_start_at,r.race_date || 'T23:59:59.999Z')<'2026-09-26T08:00:00.000Z'
+            )
+            SELECT COUNT(*) AS eligible_rows FROM eligible;
+          " > /tmp/full-scan.txt
+          echo "legacy_full_population_probe=success"
+
+      - name: Probe two-year sharded race-prior scan
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "
+            WITH race_fields AS MATERIALIZED (
+              SELECT r0.id AS race_id, SUM(CASE WHEN re0.scratched=0 THEN 1 ELSE 0 END) AS active_field_size
+              FROM races r0 INDEXED BY idx_races_date
+              JOIN race_entries re0 INDEXED BY idx_entries_race ON re0.race_id=r0.id
+              WHERE r0.race_date>='2025-01-01' AND r0.race_date<'2027-01-01'
+              GROUP BY r0.id
+            ), eligible AS MATERIALIZED (
+              SELECT r.id AS race_id,re.id AS race_entry_id
+              FROM races r INDEXED BY idx_races_date
+              JOIN race_fields rf ON rf.race_id=r.id
+              JOIN race_entries re ON re.race_id=r.id
+              JOIN race_results rr ON rr.race_entry_id=re.id
+              JOIN source_records sr ON sr.id=rr.source_record_id
+              WHERE r.race_date>='2025-01-01' AND r.race_date<'2027-01-01'
+                AND re.scratched=0 AND rr.result_status='official'
+                AND sr.fetched_at<='2026-09-26T08:00:00.000Z'
+                AND COALESCE(r.scheduled_start_at,r.race_date || 'T23:59:59.999Z')<'2026-09-26T08:00:00.000Z'
+            )
+            SELECT COUNT(*) AS eligible_rows FROM eligible;
+          " > /tmp/shard-scan.txt
+          echo "two_year_shard_probe=success"
