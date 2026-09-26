@@ -924,6 +924,7 @@ async function loadAggregateAndShapeLevelsBatchShard(env, contexts, shard, cutof
       MAX(e.source_observed_at) AS last_source_observed_at
     FROM context_levels cl
     LEFT JOIN eligible e ON ${HIERARCHY_MATCH_SQL}
+      AND e.race_id <> cl.context_key
     GROUP BY cl.context_key,cl.ordinal,cl.level
 
     UNION ALL
@@ -933,6 +934,7 @@ async function loadAggregateAndShapeLevelsBatchShard(env, contexts, shard, cutof
       NULL AS source_records,NULL AS first_source_observed_at,NULL AS last_source_observed_at
     FROM context_levels cl
     JOIN eligible e ON ${HIERARCHY_MATCH_SQL}
+      AND e.race_id <> cl.context_key
       AND e.placing=1 AND e.actual_lane IS NOT NULL
     GROUP BY cl.context_key,cl.ordinal,cl.level,e.actual_lane
 
@@ -947,6 +949,7 @@ async function loadAggregateAndShapeLevelsBatchShard(env, contexts, shard, cutof
       MAX(e.source_observed_at) AS last_source_observed_at
     FROM context_levels cl
     LEFT JOIN eligible e ON ${HIERARCHY_MATCH_SQL}
+      AND e.race_id <> cl.context_key
       AND e.placing=1 AND e.actual_lane IS NOT NULL
     GROUP BY cl.context_key,cl.ordinal,cl.level
 
@@ -1035,7 +1038,8 @@ async function loadSpecificContextRowsBatchShard(env,contexts,shard,cutoff){
         ORDER BY julianday(rpf.observed_at) DESC,rpf.id DESC LIMIT 1) AS proposition_facts_json
     FROM direct_contexts dc
     JOIN eligible ON
-      (dc.track_id IS NULL OR eligible.track_id=dc.track_id)
+      eligible.race_id <> dc.context_key
+      AND (dc.track_id IS NULL OR eligible.track_id=dc.track_id)
       AND (dc.method_key IS NULL OR eligible.method_key=dc.method_key)
       AND (dc.distance_bucket IS NULL OR eligible.distance_bucket=dc.distance_bucket)
       AND (dc.field_bucket IS NULL OR eligible.field_bucket=dc.field_bucket)
