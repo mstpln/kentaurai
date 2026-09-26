@@ -117,7 +117,8 @@ function normalizedEquipment(row) {
     exactSulky: row.exact_sulky ?? null,
     verificationStatus: row.verification_status || null,
     observedAt: row.fetched_at || null,
-    sourceRecordId: row.source_record_id || null
+    sourceRecordId: row.source_record_id || null,
+    changeFromPreviousJson: row.change_from_previous_json || null
   };
 }
 
@@ -562,7 +563,11 @@ export async function buildRelevantHistoryForEntries(env, raceEntryIds, asOf, op
       counts: { totalSafe: safe.length, included, omitted: safe.length - included },
       fullHistoryAggregates: aggregateHistory(safe),
       officialHistoryReference: officialReference(officialReferences.get(target.race_entry_id) || null),
-      relevantHistoryUnion: relevant.map(outputHistoryRow)
+      relevantHistoryUnion: relevant.map(outputHistoryRow),
+      // Request-internal projection reused by downstream deterministic feature
+      // builders. analysis-pack-v3 serializes only the explicit public fields,
+      // so this does not expand the external Step 1 contract.
+      internalFullSafeHistory: safe
     });
   }
   return out;
