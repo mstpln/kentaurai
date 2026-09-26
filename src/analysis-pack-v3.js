@@ -708,12 +708,15 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
     return !(fields.scratchSemanticsVerified === true && boolOrNull(fields.scratched) === true);
   });
   const history = await stage('relevant_history',()=>buildRelevantHistoryForEntries(env,eligibleIds,asOf));
-  const [performance,equipment,personContext,racePriors] = await stage('derived_features',()=>Promise.all([
-    buildPerformanceFeaturesV3ForEntries(env,eligibleIds,asOf,{relevantHistory:history}),
-    buildEquipmentResponseV1ForEntries(env,eligibleIds,asOf,{relevantHistory:history}),
-    buildPersonContextV1ForEntries(env,eligibleIds,asOf,{relevantHistory:history}),
-    buildRacePriorsV1ForEntries(env,eligibleIds,asOf)
-  ]));
+  const {performance,equipment,personContext,racePriors} = await stage('derived_features',async()=>{
+    // D1 executes on one database thread. Run the heavy feature families
+    // sequentially so they do not compete for the six available connections.
+    const performance=await buildPerformanceFeaturesV3ForEntries(env,eligibleIds,asOf,{relevantHistory:history});
+    const equipment=await buildEquipmentResponseV1ForEntries(env,eligibleIds,asOf,{relevantHistory:history});
+    const personContext=await buildPersonContextV1ForEntries(env,eligibleIds,asOf,{relevantHistory:history});
+    const racePriors=await buildRacePriorsV1ForEntries(env,eligibleIds,asOf);
+    return {performance,equipment,personContext,racePriors};
+  });
   const xlabsByRace = await stage('xlabs_profiles',()=>buildXlabsEvidenceProfilesForRaces(env,{
     raceIds,
     asOf,
