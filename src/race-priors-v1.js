@@ -287,133 +287,6 @@ function availableHierarchy(context) {
   return levels;
 }
 
-function levelCondition(level, context, alias = '') {
-  const prefix = alias ? `${alias}.` : '';
-  switch (level) {
-    case 'track_method_distance_field':
-      return { where: `${prefix}track_id = ? AND ${prefix}method_key = ? AND ${prefix}distance_bucket = ? AND ${prefix}field_bucket = ?`, bindings: [context.trackId, context.method, context.distanceBucket, context.fieldBucket] };
-    case 'track_method_distance':
-      return { where: `${prefix}track_id = ? AND ${prefix}method_key = ? AND ${prefix}distance_bucket = ?`, bindings: [context.trackId, context.method, context.distanceBucket] };
-    case 'track_method':
-      return { where: `${prefix}track_id = ? AND ${prefix}method_key = ?`, bindings: [context.trackId, context.method] };
-    case 'method_distance_field':
-      return { where: `${prefix}method_key = ? AND ${prefix}distance_bucket = ? AND ${prefix}field_bucket = ?`, bindings: [context.method, context.distanceBucket, context.fieldBucket] };
-    case 'method_distance':
-      return { where: `${prefix}method_key = ? AND ${prefix}distance_bucket = ?`, bindings: [context.method, context.distanceBucket] };
-    case 'method':
-      return { where: `${prefix}method_key = ?`, bindings: [context.method] };
-    case 'global':
-      return { where: '1 = 1', bindings: [] };
-    default:
-      throw new Error(`unsupported race prior level: ${level}`);
-  }
-}
-
-function baseCte() {
-  return `WITH race_fields AS MATERIALIZED (
-      SELECT r0.id AS race_id, SUM(CASE WHEN re0.scratched = 0 THEN 1 ELSE 0 END) AS active_field_size
-      FROM races r0 INDEXED BY idx_races_date
-      JOIN race_entries re0 INDEXED BY idx_entries_race ON re0.race_id = r0.id
-      WHERE r0.race_date >= ? AND r0.race_date < ?
-      GROUP BY r0.id
-    ), eligible AS MATERIALIZED (
-      SELECT r.id AS race_id, r.track_id, ${METHOD_SQL} AS method_key, ${DISTANCE_SQL} AS distance_bucket,
-             ${FIELD_SQL} AS field_bucket, re.actual_lane, re.start_tier, re.handicap_m,
-             rr.placing, rr.gallop, rr.source_record_id, sr.fetched_at AS source_observed_at,
-             r.race_name, r.main_class, r.class_flags_json
-      FROM races r INDEXED BY idx_races_date
-      JOIN race_fields rf ON rf.race_id = r.id
-      JOIN race_entries re ON re.race_id = r.id
-      JOIN race_results rr ON rr.race_entry_id = re.id
-      JOIN source_records sr ON sr.id = rr.source_record_id
-      WHERE r.race_date >= ? AND r.race_date < ?
-        AND re.scratched = 0 AND rr.result_status = 'official'
-        AND sr.fetched_at <= ?
-        AND COALESCE(r.scheduled_start_at, r.race_date || 'T23:59:59.999Z') < ?
-        AND r.id <> ?
-    )`;
-}
-
-function hierarchyRow(level, context, ordinal) {
-  const row = { ordinal, level, trackId: null, method: null, distanceBucket: null, fieldBucket: null };
-  if (level.includes('track')) row.trackId = context.trackId;
-  if (level.includes('method')) row.method = context.method;
-  if (level.includes('distance')) row.distanceBucket = context.distanceBucket;
-  if (level.includes('field')) row.fieldBucket = context.fieldBucket;
-  return row;
-}
-
-function hierarchyCte(context) {
-  const rows = context.hierarchy.map((level, index) => hierarchyRow(level, context, index));
-  return {
-    sql: `context_levels (ordinal, level, track_id, method_key, distance_bucket, field_bucket) AS (
-      VALUES ${rows.map(() => '(?,?,?,?,?,?)').join(',')}
-    )`,
-    bindings: rows.flatMap((row) => [
-      row.ordinal, row.level, row.trackId, row.method, row.distanceBucket, row.fieldBucket
-    ])
-  };
-}
-
-const HIERARCHY_MATCH_SQL = `
-  (cl.track_id IS NULL OR e.track_id = cl.track_id)
-  AND (cl.method_key IS NULL OR e.method_key = cl.method_key)
-  AND (cl.distance_bucket IS NULL OR e.distance_bucket = cl.distance_bucket)
-  AND (cl.field_bucket IS NULL OR e.field_bucket = cl.field_bucket)
-`;
-
-function hierarchyQueryBase(context, shard) {
-  const levels = hierarchyCte(context);
-  return {
-    sql: `${baseCte()},
-    ${levels.sql}`,
-    bindings: [shard.startDate, shard.endDate, shard.startDate, shard.endDate, context.cutoff, context.cutoff, context.raceId, ...levels.bindings]
-  };
-}
-
-function normalizeAggregate(row) {
-  const starts = Number(row?.starts ?? 0);
-  const races = Number(row?.races ?? 0);
-  const gallopKnown = Number(row?.gallop_known ?? 0);
-  return {
-    level: row?.level || null,
-    starts,
-    races,
-    wins: Number(row?.wins ?? 0),
-    top3: Number(row?.top3 ?? 0),
-    gallopKnown,
-    gallops: Number(row?.gallops ?? 0),
-    sourceRecords: Number(row?.source_records ?? 0),
-    firstSourceObservedAt: row?.first_source_observed_at || null,
-    lastSourceObservedAt: row?.last_source_observed_at || null,
-    winRate: starts ? Number(row?.wins ?? 0) / starts : null,
-    top3Rate: starts ? Number(row?.top3 ?? 0) / starts : null,
-    gallopRate: gallopKnown ? Number(row?.gallops ?? 0) / gallopKnown : null,
-    gallopCoverage: starts ? gallopKnown / starts : null
-  };
-}
-
-async function loadAggregateLevelsShard(env, context, shard) {
-  const query = hierarchyQueryBase(context, shard);
-  const { results } = await env.DB.prepare(`${query.sql}
-    SELECT cl.level,
-      COUNT(e.race_id) AS starts,
-      COUNT(DISTINCT e.race_id) AS races,
-      SUM(CASE WHEN e.placing = 1 THEN 1 ELSE 0 END) AS wins,
-      SUM(CASE WHEN e.placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) AS top3,
-      SUM(CASE WHEN e.gallop IS NOT NULL THEN 1 ELSE 0 END) AS gallop_known,
-      SUM(CASE WHEN e.gallop = 1 THEN 1 ELSE 0 END) AS gallops,
-      COUNT(DISTINCT e.source_record_id) AS source_records,
-      MIN(e.source_observed_at) AS first_source_observed_at,
-      MAX(e.source_observed_at) AS last_source_observed_at
-    FROM context_levels cl
-    LEFT JOIN eligible e ON ${HIERARCHY_MATCH_SQL}
-    GROUP BY cl.ordinal, cl.level
-    ORDER BY cl.ordinal
-  `).bind(...query.bindings).all();
-  return new Map(results.map((row) => [row.level, normalizeAggregate(row)]));
-}
-
 function hhi(values) {
   const total = values.reduce((sum, value) => sum + value, 0);
   if (!total) return null;
@@ -434,191 +307,180 @@ function normalizedEntropy(values) {
   return entropy / Math.log(positive.length);
 }
 
-async function loadShapeLevelsShard(env, context, shard) {
-  const laneQuery = hierarchyQueryBase(context, shard);
-  const metaQuery = hierarchyQueryBase(context, shard);
-  const [laneResult, metaResult] = await Promise.all([
-    env.DB.prepare(`${laneQuery.sql}
-      SELECT cl.level, e.actual_lane, COUNT(*) AS winners
-      FROM context_levels cl
-      JOIN eligible e ON ${HIERARCHY_MATCH_SQL}
-        AND e.placing = 1 AND e.actual_lane IS NOT NULL
-      GROUP BY cl.ordinal, cl.level, e.actual_lane
-      ORDER BY cl.ordinal, e.actual_lane
-    `).bind(...laneQuery.bindings).all(),
-    env.DB.prepare(`${metaQuery.sql}
-      SELECT cl.level,
-        COUNT(e.race_id) AS winners,
-        COUNT(DISTINCT e.race_id) AS races,
-        COUNT(DISTINCT e.source_record_id) AS source_records,
-        MIN(e.source_observed_at) AS first_source_observed_at,
-        MAX(e.source_observed_at) AS last_source_observed_at
-      FROM context_levels cl
-      LEFT JOIN eligible e ON ${HIERARCHY_MATCH_SQL}
-        AND e.placing = 1 AND e.actual_lane IS NOT NULL
-      GROUP BY cl.ordinal, cl.level
-      ORDER BY cl.ordinal
-    `).bind(...metaQuery.bindings).all()
-  ]);
-  const lanesByLevel = new Map(context.hierarchy.map((level) => [level, new Map()]));
-  for (const row of laneResult.results) {
-    const lane=Number(row.actual_lane);
-    if(Number.isFinite(lane)) lanesByLevel.get(row.level)?.set(lane,Number(row.winners ?? 0));
-  }
-  const metaByLevel = new Map(metaResult.results.map((row) => [row.level, row]));
-  const out = new Map();
-  for (const level of context.hierarchy) {
-    const laneCounts=lanesByLevel.get(level) || new Map();
-    const meta = metaByLevel.get(level) || {};
-    const counts=[...laneCounts.values()];
-    out.set(level, {
-      level,
-      starts: Number(meta.winners ?? 0),
-      races: Number(meta.races ?? 0),
-      sourceRecords: Number(meta.source_records ?? 0),
-      firstSourceObservedAt: meta.first_source_observed_at || null,
-      lastSourceObservedAt: meta.last_source_observed_at || null,
-      hhi: hhi(counts),
-      entropy: normalizedEntropy(counts),
-      laneCounts
-    });
-  }
-  return out;
+function rowMatchesLevel(row, context, level) {
+  if (level.includes('track') && row.trackId !== context.trackId) return false;
+  if (level.includes('method') && row.method !== context.method) return false;
+  if (level.includes('distance') && row.distanceBucket !== context.distanceBucket) return false;
+  if (level.includes('field') && row.fieldBucket !== context.fieldBucket) return false;
+  return true;
 }
 
-async function loadAggregateAndShapeLevelsShard(env, context, shard) {
-  const query = hierarchyQueryBase(context, shard);
-  const { results } = await env.DB.prepare(`${query.sql}
-    SELECT 'aggregate' AS row_kind, cl.ordinal, cl.level,
-      NULL AS actual_lane,
-      COUNT(e.race_id) AS starts,
-      COUNT(DISTINCT e.race_id) AS races,
-      SUM(CASE WHEN e.placing = 1 THEN 1 ELSE 0 END) AS wins,
-      SUM(CASE WHEN e.placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) AS top3,
-      SUM(CASE WHEN e.gallop IS NOT NULL THEN 1 ELSE 0 END) AS gallop_known,
-      SUM(CASE WHEN e.gallop = 1 THEN 1 ELSE 0 END) AS gallops,
-      COUNT(DISTINCT e.source_record_id) AS source_records,
-      MIN(e.source_observed_at) AS first_source_observed_at,
-      MAX(e.source_observed_at) AS last_source_observed_at
-    FROM context_levels cl
-    LEFT JOIN eligible e ON ${HIERARCHY_MATCH_SQL}
-    GROUP BY cl.ordinal, cl.level
-
-    UNION ALL
-
-    SELECT 'shape_lane' AS row_kind, cl.ordinal, cl.level,
-      e.actual_lane,
-      COUNT(*) AS starts,
-      NULL AS races,
-      NULL AS wins,
-      NULL AS top3,
-      NULL AS gallop_known,
-      NULL AS gallops,
-      NULL AS source_records,
-      NULL AS first_source_observed_at,
-      NULL AS last_source_observed_at
-    FROM context_levels cl
-    JOIN eligible e ON ${HIERARCHY_MATCH_SQL}
-      AND e.placing = 1 AND e.actual_lane IS NOT NULL
-    GROUP BY cl.ordinal, cl.level, e.actual_lane
-
-    UNION ALL
-
-    SELECT 'shape_meta' AS row_kind, cl.ordinal, cl.level,
-      NULL AS actual_lane,
-      COUNT(e.race_id) AS starts,
-      COUNT(DISTINCT e.race_id) AS races,
-      NULL AS wins,
-      NULL AS top3,
-      NULL AS gallop_known,
-      NULL AS gallops,
-      COUNT(DISTINCT e.source_record_id) AS source_records,
-      MIN(e.source_observed_at) AS first_source_observed_at,
-      MAX(e.source_observed_at) AS last_source_observed_at
-    FROM context_levels cl
-    LEFT JOIN eligible e ON ${HIERARCHY_MATCH_SQL}
-      AND e.placing = 1 AND e.actual_lane IS NOT NULL
-    GROUP BY cl.ordinal, cl.level
-
-    ORDER BY ordinal, row_kind, actual_lane
-  `).bind(...query.bindings).all();
-
-  const aggregateLevels = new Map();
-  const laneCountsByLevel = new Map(context.hierarchy.map((level) => [level, new Map()]));
-  const shapeMetaByLevel = new Map();
-
-  for (const row of results || []) {
-    if (row.row_kind === 'aggregate') {
-      aggregateLevels.set(row.level, normalizeAggregate(row));
-    } else if (row.row_kind === 'shape_lane') {
-      const lane = Number(row.actual_lane);
-      if (Number.isFinite(lane)) laneCountsByLevel.get(row.level)?.set(lane, Number(row.starts || 0));
-    } else if (row.row_kind === 'shape_meta') {
-      shapeMetaByLevel.set(row.level, row);
-    }
-  }
-
-  const shapeLevels = new Map();
-  for (const level of context.hierarchy) {
-    const laneCounts = laneCountsByLevel.get(level) || new Map();
-    const meta = shapeMetaByLevel.get(level) || {};
-    const counts = [...laneCounts.values()];
-    shapeLevels.set(level, {
-      level,
-      starts: Number(meta.starts ?? 0),
-      races: Number(meta.races ?? 0),
-      sourceRecords: Number(meta.source_records ?? 0),
-      firstSourceObservedAt: meta.first_source_observed_at || null,
-      lastSourceObservedAt: meta.last_source_observed_at || null,
-      hhi: hhi(counts),
-      entropy: normalizedEntropy(counts),
-      laneCounts
-    });
-  }
-  return { aggregateLevels, shapeLevels };
+async function loadRaceFieldSizesShard(env, shard) {
+  const { results } = await env.DB.prepare(`
+    SELECT r.id AS race_id,
+      SUM(CASE WHEN re.scratched = 0 THEN 1 ELSE 0 END) AS active_field_size
+    FROM races r INDEXED BY idx_races_date
+    JOIN race_entries re INDEXED BY idx_entries_race ON re.race_id = r.id
+    WHERE r.race_date >= ? AND r.race_date < ?
+    GROUP BY r.id
+    ORDER BY r.id
+  `).bind(shard.startDate, shard.endDate).all();
+  return new Map((results || []).map((row) => [String(row.race_id), Number(row.active_field_size || 0)]));
 }
 
-async function loadSpecificContextRowsShard(env, context, shard) {
-  const directLevel = context.hierarchy[0];
-  const condition = levelCondition(directLevel, context);
-  const { results } = await env.DB.prepare(`${baseCte()}
-    SELECT eligible.*,
-      (SELECT rpf.parse_status FROM race_proposition_facts rpf
-        JOIN source_records rpf_sr ON rpf_sr.id = rpf.source_record_id
-        WHERE rpf.race_id = eligible.race_id AND rpf.parser_version = ?
-          AND julianday(rpf.observed_at) <= julianday(?) AND julianday(rpf_sr.fetched_at) <= julianday(?)
-        ORDER BY julianday(rpf.observed_at) DESC, rpf.id DESC LIMIT 1) AS proposition_status,
-      (SELECT rpf.facts_json FROM race_proposition_facts rpf
-        JOIN source_records rpf_sr ON rpf_sr.id = rpf.source_record_id
-        WHERE rpf.race_id = eligible.race_id AND rpf.parser_version = ?
-          AND julianday(rpf.observed_at) <= julianday(?) AND julianday(rpf_sr.fetched_at) <= julianday(?)
-        ORDER BY julianday(rpf.observed_at) DESC, rpf.id DESC LIMIT 1) AS proposition_facts_json
-    FROM eligible
-    WHERE ${condition.where}
-    ORDER BY race_id, actual_lane
-  `).bind(
-    shard.startDate, shard.endDate, shard.startDate, shard.endDate,
-    context.cutoff, context.cutoff, context.raceId,
-    RACE_PROPOSITION_PARSER_VERSION, context.cutoff, context.cutoff,
-    RACE_PROPOSITION_PARSER_VERSION, context.cutoff, context.cutoff,
-    ...condition.bindings
-  ).all();
-  return results.map((row) => ({
-    raceId: row.race_id,
-    raceTypeSignature: raceTypeSignature(row),
-    propositionSignature: row.proposition_status === 'parsed'
-      ? propositionSignature({ parseStatus: 'parsed', facts: parseJson(row.proposition_facts_json, {}) })
-      : null,
-    actualLane: numberOrNull(row.actual_lane),
-    startTier: numberOrNull(row.start_tier),
-    handicapM: numberOrNull(row.handicap_m),
-    placing: numberOrNull(row.placing),
-    gallop: row.gallop == null ? null : Number(row.gallop) === 1,
-    sourceRecordId: row.source_record_id || null,
-    sourceObservedAt: row.source_observed_at || null
+async function loadRacePriorRowsShard(env, shard, cutoff, fieldSizes) {
+  const { results } = await env.DB.prepare(`
+    SELECT r.id AS race_id, r.track_id, r.race_date, r.start_method, r.distance_m,
+      r.race_name, r.main_class, r.class_flags_json,
+      re.id AS race_entry_id, re.actual_lane, re.start_tier, re.handicap_m,
+      rr.placing, rr.gallop, rr.source_record_id, sr.fetched_at AS source_observed_at
+    FROM races r INDEXED BY idx_races_date
+    JOIN race_entries re INDEXED BY idx_entries_race ON re.race_id = r.id
+    JOIN race_results rr ON rr.race_entry_id = re.id
+    JOIN source_records sr ON sr.id = rr.source_record_id
+    WHERE r.race_date >= ? AND r.race_date < ?
+      AND re.scratched = 0
+      AND rr.result_status = 'official'
+      AND sr.fetched_at <= ?
+      AND COALESCE(r.scheduled_start_at, r.race_date || 'T23:59:59.999Z') < ?
+    ORDER BY r.race_date, r.id, re.actual_lane, re.id
+  `).bind(shard.startDate, shard.endDate, cutoff, cutoff).all();
+
+  return (results || []).map((row) => ({
+    raceId:String(row.race_id),
+    trackId:row.track_id || null,
+    method:canonicalMethod(row.start_method),
+    distanceBucket:distanceBucket(numberOrNull(row.distance_m)),
+    fieldBucket:fieldBucket(fieldSizes.get(String(row.race_id)) || null),
+    raceTypeSignature:raceTypeSignature(row),
+    actualLane:numberOrNull(row.actual_lane),
+    startTier:numberOrNull(row.start_tier),
+    handicapM:numberOrNull(row.handicap_m),
+    placing:numberOrNull(row.placing),
+    gallop:row.gallop == null ? null : Number(row.gallop) === 1,
+    sourceRecordId:row.source_record_id || null,
+    sourceObservedAt:row.source_observed_at || null
   }));
 }
 
+async function loadRacePropositionsShard(env, shard, cutoff) {
+  const { results } = await env.DB.prepare(`
+    SELECT rpf.id, rpf.race_id, rpf.parse_status, rpf.facts_json, rpf.observed_at
+    FROM races r INDEXED BY idx_races_date
+    JOIN race_proposition_facts rpf ON rpf.race_id = r.id
+    JOIN source_records sr ON sr.id = rpf.source_record_id
+    WHERE r.race_date >= ? AND r.race_date < ?
+      AND rpf.parser_version = ?
+      AND julianday(rpf.observed_at) <= julianday(?)
+      AND julianday(sr.fetched_at) <= julianday(?)
+    ORDER BY rpf.race_id, julianday(rpf.observed_at) DESC, rpf.id DESC
+  `).bind(shard.startDate, shard.endDate, RACE_PROPOSITION_PARSER_VERSION, cutoff, cutoff).all();
+
+  const byRace = new Map();
+  for (const row of results || []) {
+    const raceId=String(row.race_id);
+    if (byRace.has(raceId)) continue;
+    byRace.set(raceId, row.parse_status === 'parsed'
+      ? propositionSignature({ parseStatus:'parsed', facts:parseJson(row.facts_json, {}) })
+      : null);
+  }
+  return byRace;
+}
+
+function deriveRaceContextShard(context, rows, propositionByRace) {
+  const aggregateStates=new Map(context.hierarchy.map((level)=>[level,{
+    level, starts:0, raceIds:new Set(), wins:0, top3:0, gallopKnown:0, gallops:0,
+    sourceRecords:new Set(), firstSourceObservedAt:null, lastSourceObservedAt:null
+  }]));
+  const shapeStates=new Map(context.hierarchy.map((level)=>[level,{
+    level, starts:0, raceIds:new Set(), sourceRecords:new Set(),
+    firstSourceObservedAt:null, lastSourceObservedAt:null, laneCounts:new Map()
+  }]));
+  const specificRows=[];
+  const directLevel=context.hierarchy[0];
+
+  for (const row of rows) {
+    if (row.raceId === context.raceId) continue;
+    for (const level of context.hierarchy) {
+      if (!rowMatchesLevel(row, context, level)) continue;
+      const aggregate=aggregateStates.get(level);
+      aggregate.starts += 1;
+      aggregate.raceIds.add(row.raceId);
+      if (row.placing === 1) aggregate.wins += 1;
+      if (row.placing != null && row.placing >= 1 && row.placing <= 3) aggregate.top3 += 1;
+      if (row.gallop != null) {
+        aggregate.gallopKnown += 1;
+        if (row.gallop) aggregate.gallops += 1;
+      }
+      if (row.sourceRecordId) aggregate.sourceRecords.add(row.sourceRecordId);
+      aggregate.firstSourceObservedAt=minIso(aggregate.firstSourceObservedAt,row.sourceObservedAt);
+      aggregate.lastSourceObservedAt=maxIso(aggregate.lastSourceObservedAt,row.sourceObservedAt);
+
+      if (row.placing === 1 && row.actualLane != null) {
+        const shape=shapeStates.get(level);
+        shape.starts += 1;
+        shape.raceIds.add(row.raceId);
+        if (row.sourceRecordId) shape.sourceRecords.add(row.sourceRecordId);
+        shape.firstSourceObservedAt=minIso(shape.firstSourceObservedAt,row.sourceObservedAt);
+        shape.lastSourceObservedAt=maxIso(shape.lastSourceObservedAt,row.sourceObservedAt);
+        shape.laneCounts.set(row.actualLane,(shape.laneCounts.get(row.actualLane)||0)+1);
+      }
+    }
+
+    if (rowMatchesLevel(row, context, directLevel)) {
+      specificRows.push({
+        raceId:row.raceId,
+        raceTypeSignature:row.raceTypeSignature,
+        propositionSignature:propositionByRace.get(row.raceId) ?? null,
+        actualLane:row.actualLane,
+        startTier:row.startTier,
+        handicapM:row.handicapM,
+        placing:row.placing,
+        gallop:row.gallop,
+        sourceRecordId:row.sourceRecordId,
+        sourceObservedAt:row.sourceObservedAt
+      });
+    }
+  }
+
+  const aggregateLevels=new Map();
+  const shapeLevels=new Map();
+  for (const level of context.hierarchy) {
+    const aggregate=aggregateStates.get(level);
+    aggregateLevels.set(level,{
+      level,
+      starts:aggregate.starts,
+      races:aggregate.raceIds.size,
+      wins:aggregate.wins,
+      top3:aggregate.top3,
+      gallopKnown:aggregate.gallopKnown,
+      gallops:aggregate.gallops,
+      sourceRecords:aggregate.sourceRecords.size,
+      firstSourceObservedAt:aggregate.firstSourceObservedAt,
+      lastSourceObservedAt:aggregate.lastSourceObservedAt,
+      winRate:aggregate.starts ? aggregate.wins/aggregate.starts : null,
+      top3Rate:aggregate.starts ? aggregate.top3/aggregate.starts : null,
+      gallopRate:aggregate.gallopKnown ? aggregate.gallops/aggregate.gallopKnown : null,
+      gallopCoverage:aggregate.starts ? aggregate.gallopKnown/aggregate.starts : null
+    });
+
+    const shape=shapeStates.get(level);
+    const counts=[...shape.laneCounts.values()];
+    shapeLevels.set(level,{
+      level,
+      starts:shape.starts,
+      races:shape.raceIds.size,
+      sourceRecords:shape.sourceRecords.size,
+      firstSourceObservedAt:shape.firstSourceObservedAt,
+      lastSourceObservedAt:shape.lastSourceObservedAt,
+      hhi:hhi(counts),
+      entropy:normalizedEntropy(counts),
+      laneCounts:shape.laneCounts
+    });
+  }
+
+  return {aggregateLevels,shapeLevels,specificRows};
+}
 function confidence(ess, coverage = 1) {
   if (!(ess > 0) || coverage == null) return null;
   return Math.round(Math.min(1, ess / RACE_PRIOR_POLICY.minEffectiveSampleSize) * coverage * 1_000_000) / 1_000_000;
