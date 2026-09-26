@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=b7337d72777437a5b6d411d4588d4b07b948fbe4
-release_nonce=2026-09-26-pr268-step1-d1-final-bounds-1
+source_main=3a4be561d69ca6169eca05a3d73f4388b4da0959
+release_nonce=2026-09-26-pr269-race-prior-cpu-final-1
