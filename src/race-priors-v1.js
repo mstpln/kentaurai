@@ -43,8 +43,8 @@ function chunks(values, size = 80) {
   return out;
 }
 
-const RACE_PRIOR_SHARD_YEARS = 1;
-const RACE_PRIOR_CONTEXT_BATCH_SIZE = 2;
+const RACE_PRIOR_SHARD_MONTHS = 3;
+const RACE_PRIOR_CONTEXT_BATCH_SIZE = 1;
 
 function minIso(...values) {
   return values.filter(Boolean).sort()[0] || null;
@@ -62,16 +62,28 @@ async function raceDateShards(env, cutoff) {
   `).bind(cutoffDate).first();
   const minDate=String(row?.min_date || cutoffDate);
   const minYear=Number(minDate.slice(0,4));
+  const minMonth=Number(minDate.slice(5,7));
   const cutoffYear=Number(cutoffDate.slice(0,4));
-  if (!Number.isInteger(minYear) || !Number.isInteger(cutoffYear)) {
+  const cutoffMonth=Number(cutoffDate.slice(5,7));
+  if (![minYear,minMonth,cutoffYear,cutoffMonth].every(Number.isInteger)) {
     throw new Error('race prior date bounds are invalid');
   }
+
+  // Race-prior aggregation is the remaining production D1 hotspot. Bound every
+  // historical population statement to one calendar quarter. Shards are merged
+  // deterministically afterwards, so no history or sample rows are dropped.
+  const firstQuarterMonth=Math.floor((minMonth-1)/RACE_PRIOR_SHARD_MONTHS)*RACE_PRIOR_SHARD_MONTHS;
+  let cursor=new Date(Date.UTC(minYear,firstQuarterMonth,1));
+  const cutoffQuarterMonth=Math.floor((cutoffMonth-1)/RACE_PRIOR_SHARD_MONTHS)*RACE_PRIOR_SHARD_MONTHS;
+  const horizon=new Date(Date.UTC(cutoffYear,cutoffQuarterMonth+RACE_PRIOR_SHARD_MONTHS,1));
   const shards=[];
-  for(let year=minYear;year<=cutoffYear;year+=RACE_PRIOR_SHARD_YEARS){
+  while(cursor<horizon){
+    const next=new Date(Date.UTC(cursor.getUTCFullYear(),cursor.getUTCMonth()+RACE_PRIOR_SHARD_MONTHS,1));
     shards.push({
-      startDate:`${year}-01-01`,
-      endDate:`${year+RACE_PRIOR_SHARD_YEARS}-01-01`
+      startDate:cursor.toISOString().slice(0,10),
+      endDate:next.toISOString().slice(0,10)
     });
+    cursor=next;
   }
   return shards;
 }
@@ -910,9 +922,15 @@ async function loadAggregateAndShapeLevelsBatchShard(env, contexts, shard, cutof
     shard.startDate,shard.endDate,shard.startDate,shard.endDate,cutoff,cutoff,
     ...levels.bindings
   ];
-  const {results}=await env.DB.prepare(`${batchBaseCte()},
+
+  // D1 enforces a CPU ceiling per statement. Keep aggregate, lane-shape and
+  // shape-metadata work in separate statements so no single query pays for
+  // three grouped scans of the same historical population. The quarterly
+  // population and context are identical for all three, and the results are
+  // merged below with unchanged race-prior semantics.
+  const {results:aggregateRows}=await env.DB.prepare(`${batchBaseCte()},
     ${levels.sql}
-    SELECT 'aggregate' AS row_kind,cl.context_key,cl.ordinal,cl.level,NULL AS actual_lane,
+    SELECT cl.context_key,cl.ordinal,cl.level,
       COUNT(e.race_id) AS starts,
       COUNT(DISTINCT e.race_id) AS races,
       SUM(CASE WHEN e.placing=1 THEN 1 ELSE 0 END) AS wins,
@@ -926,24 +944,25 @@ async function loadAggregateAndShapeLevelsBatchShard(env, contexts, shard, cutof
     LEFT JOIN eligible e ON ${HIERARCHY_MATCH_SQL}
       AND e.race_id <> cl.context_key
     GROUP BY cl.context_key,cl.ordinal,cl.level
+    ORDER BY cl.context_key,cl.ordinal
+  `).bind(...bindings).all();
 
-    UNION ALL
-
-    SELECT 'shape_lane',cl.context_key,cl.ordinal,cl.level,e.actual_lane,
-      COUNT(*) AS starts,NULL AS races,NULL AS wins,NULL AS top3,NULL AS gallop_known,NULL AS gallops,
-      NULL AS source_records,NULL AS first_source_observed_at,NULL AS last_source_observed_at
+  const {results:laneRows}=await env.DB.prepare(`${batchBaseCte()},
+    ${levels.sql}
+    SELECT cl.context_key,cl.ordinal,cl.level,e.actual_lane,COUNT(*) AS starts
     FROM context_levels cl
     JOIN eligible e ON ${HIERARCHY_MATCH_SQL}
       AND e.race_id <> cl.context_key
       AND e.placing=1 AND e.actual_lane IS NOT NULL
     GROUP BY cl.context_key,cl.ordinal,cl.level,e.actual_lane
+    ORDER BY cl.context_key,cl.ordinal,e.actual_lane
+  `).bind(...bindings).all();
 
-    UNION ALL
-
-    SELECT 'shape_meta',cl.context_key,cl.ordinal,cl.level,NULL AS actual_lane,
+  const {results:metaRows}=await env.DB.prepare(`${batchBaseCte()},
+    ${levels.sql}
+    SELECT cl.context_key,cl.ordinal,cl.level,
       COUNT(e.race_id) AS starts,
       COUNT(DISTINCT e.race_id) AS races,
-      NULL AS wins,NULL AS top3,NULL AS gallop_known,NULL AS gallops,
       COUNT(DISTINCT e.source_record_id) AS source_records,
       MIN(e.source_observed_at) AS first_source_observed_at,
       MAX(e.source_observed_at) AS last_source_observed_at
@@ -952,8 +971,7 @@ async function loadAggregateAndShapeLevelsBatchShard(env, contexts, shard, cutof
       AND e.race_id <> cl.context_key
       AND e.placing=1 AND e.actual_lane IS NOT NULL
     GROUP BY cl.context_key,cl.ordinal,cl.level
-
-    ORDER BY context_key,ordinal,row_kind,actual_lane
+    ORDER BY cl.context_key,cl.ordinal
   `).bind(...bindings).all();
 
   const byContext=new Map(contexts.map((context)=>[context.raceId,{
@@ -961,14 +979,15 @@ async function loadAggregateAndShapeLevelsBatchShard(env, contexts, shard, cutof
     laneCounts:new Map(context.hierarchy.map((level)=>[level,new Map()])),
     shapeMeta:new Map()
   }]));
-  for(const row of results||[]){
-    const target=byContext.get(row.context_key);
-    if(!target)continue;
-    if(row.row_kind==='aggregate')target.aggregateLevels.set(row.level,normalizeAggregate(row));
-    else if(row.row_kind==='shape_lane'){
-      const lane=Number(row.actual_lane);
-      if(Number.isFinite(lane))target.laneCounts.get(row.level)?.set(lane,Number(row.starts||0));
-    } else if(row.row_kind==='shape_meta')target.shapeMeta.set(row.level,row);
+  for(const row of aggregateRows||[]){
+    byContext.get(row.context_key)?.aggregateLevels.set(row.level,normalizeAggregate(row));
+  }
+  for(const row of laneRows||[]){
+    const lane=Number(row.actual_lane);
+    if(Number.isFinite(lane))byContext.get(row.context_key)?.laneCounts.get(row.level)?.set(lane,Number(row.starts||0));
+  }
+  for(const row of metaRows||[]){
+    byContext.get(row.context_key)?.shapeMeta.set(row.level,row);
   }
 
   const out=new Map();
@@ -1024,18 +1043,23 @@ function directContextRowsCte(contexts) {
 async function loadSpecificContextRowsBatchShard(env,contexts,shard,cutoff){
   const direct=directContextRowsCte(contexts);
   const {results}=await env.DB.prepare(`${batchBaseCte()},
-    ${direct.sql}
-    SELECT dc.context_key,eligible.*,
-      (SELECT rpf.parse_status FROM race_proposition_facts rpf
-        JOIN source_records rpf_sr ON rpf_sr.id=rpf.source_record_id
-        WHERE rpf.race_id=eligible.race_id AND rpf.parser_version=?
-          AND julianday(rpf.observed_at)<=julianday(?) AND julianday(rpf_sr.fetched_at)<=julianday(?)
-        ORDER BY julianday(rpf.observed_at) DESC,rpf.id DESC LIMIT 1) AS proposition_status,
-      (SELECT rpf.facts_json FROM race_proposition_facts rpf
-        JOIN source_records rpf_sr ON rpf_sr.id=rpf.source_record_id
-        WHERE rpf.race_id=eligible.race_id AND rpf.parser_version=?
-          AND julianday(rpf.observed_at)<=julianday(?) AND julianday(rpf_sr.fetched_at)<=julianday(?)
-        ORDER BY julianday(rpf.observed_at) DESC,rpf.id DESC LIMIT 1) AS proposition_facts_json
+    ${direct.sql},
+    proposition_ranked AS MATERIALIZED (
+      SELECT rpf.race_id,rpf.parse_status,rpf.facts_json,
+        ROW_NUMBER() OVER (
+          PARTITION BY rpf.race_id
+          ORDER BY julianday(rpf.observed_at) DESC,rpf.id DESC
+        ) AS row_number
+      FROM race_proposition_facts rpf
+      JOIN source_records rpf_sr ON rpf_sr.id=rpf.source_record_id
+      JOIN races pr ON pr.id=rpf.race_id
+      WHERE pr.race_date >= ? AND pr.race_date < ?
+        AND rpf.parser_version=?
+        AND julianday(rpf.observed_at)<=julianday(?)
+        AND julianday(rpf_sr.fetched_at)<=julianday(?)
+    )
+    SELECT dc.context_key,eligible.*,prop.parse_status AS proposition_status,
+      prop.facts_json AS proposition_facts_json
     FROM direct_contexts dc
     JOIN eligible ON
       eligible.race_id <> dc.context_key
@@ -1043,12 +1067,13 @@ async function loadSpecificContextRowsBatchShard(env,contexts,shard,cutoff){
       AND (dc.method_key IS NULL OR eligible.method_key=dc.method_key)
       AND (dc.distance_bucket IS NULL OR eligible.distance_bucket=dc.distance_bucket)
       AND (dc.field_bucket IS NULL OR eligible.field_bucket=dc.field_bucket)
+    LEFT JOIN proposition_ranked prop
+      ON prop.race_id=eligible.race_id AND prop.row_number=1
     ORDER BY dc.context_key,eligible.race_id,eligible.actual_lane
   `).bind(
     shard.startDate,shard.endDate,shard.startDate,shard.endDate,cutoff,cutoff,
     ...direct.bindings,
-    RACE_PROPOSITION_PARSER_VERSION,cutoff,cutoff,
-    RACE_PROPOSITION_PARSER_VERSION,cutoff,cutoff
+    shard.startDate,shard.endDate,RACE_PROPOSITION_PARSER_VERSION,cutoff,cutoff
   ).all();
   const out=new Map(contexts.map((context)=>[context.raceId,[]]));
   for(const row of results||[]){
@@ -1109,8 +1134,20 @@ async function buildRaceContextsBatch(env, targets, requested) {
       // sharply without multiplying one query across all eight legs.
       for(let offset=0;offset<contexts.length;offset+=RACE_PRIOR_CONTEXT_BATCH_SIZE){
         const contextBatch=contexts.slice(offset,offset+RACE_PRIOR_CONTEXT_BATCH_SIZE);
-        const combined=await loadAggregateAndShapeLevelsBatchShard(env,contextBatch,shard,cutoff);
-        const specific=await loadSpecificContextRowsBatchShard(env,contextBatch,shard,cutoff);
+        let combined;
+        try {
+          combined=await loadAggregateAndShapeLevelsBatchShard(env,contextBatch,shard,cutoff);
+        } catch (error) {
+          if(error && typeof error==='object' && !error.step1Stage) error.step1Stage='race_priors_aggregate';
+          throw error;
+        }
+        let specific;
+        try {
+          specific=await loadSpecificContextRowsBatchShard(env,contextBatch,shard,cutoff);
+        } catch (error) {
+          if(error && typeof error==='object' && !error.step1Stage) error.step1Stage='race_priors_context';
+          throw error;
+        }
         for(const context of contextBatch){
           const part=combined.get(context.raceId);
           aggregatePartsByRace.get(context.raceId).push(part?.aggregateLevels||new Map());
