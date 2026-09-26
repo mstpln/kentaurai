@@ -256,7 +256,7 @@ async function loadPositionRows(env, { trackId = null, countryCode = null, exclu
         sr.fetched_at AS source_selected_at,
         ROW_NUMBER() OVER (PARTITION BY rpc.race_entry_id,rpc.checkpoint_key ORDER BY julianday(sr.fetched_at) DESC,rpc.id DESC) AS row_number
       FROM eligible_entries e
-      JOIN race_position_checkpoints rpc INDEXED BY idx_position_checkpoints_entry_source
+      JOIN race_position_checkpoints rpc INDEXED BY idx_position_checkpoints_track_analysis
         ON rpc.race_entry_id=e.race_entry_id
       JOIN source_records sr ON sr.id=rpc.source_record_id
       WHERE ${checkpointConditions.join(' AND ')}
@@ -271,10 +271,9 @@ async function loadPositionRows(env, { trackId = null, countryCode = null, exclu
 
 
 async function loadEarly500Rows(env, { trackId = null, countryCode = null, excludeTrackId = null, startMethod, distanceGroup, asOf }) {
-  // Start from the much smaller race/entry context and probe the 500 m checkpoint
-  // by race_entry_id. On production history, starting from checkpoint_key='500m'
-  // can force D1 to scan the nationwide checkpoint population before track,
-  // distance and start-method filters are applied.
+  // Use the dedicated track-analysis index so D1 can restrict by reconstruction
+  // version and checkpoint before joining the eligible race-entry context. This
+  // keeps nationwide same-country baselines bounded as history grows.
   const entryConditions = [
     're.scratched = 0',
     "rr.result_status = 'official'"
@@ -328,7 +327,7 @@ async function loadEarly500Rows(env, { trackId = null, countryCode = null, exclu
           ORDER BY julianday(sr.fetched_at) DESC,rpc.id DESC
         ) AS row_number
       FROM eligible_entries e
-      JOIN race_position_checkpoints rpc INDEXED BY idx_position_checkpoints_entry_source
+      JOIN race_position_checkpoints rpc INDEXED BY idx_position_checkpoints_track_analysis
         ON rpc.race_entry_id=e.race_entry_id
       JOIN source_records sr ON sr.id=rpc.source_record_id
       WHERE ${checkpointConditions.join(' AND ')}
