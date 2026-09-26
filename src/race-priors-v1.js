@@ -43,8 +43,8 @@ function chunks(values, size = 80) {
   return out;
 }
 
-const RACE_PRIOR_SHARD_YEARS = 1;
-const RACE_PRIOR_CONTEXT_BATCH_SIZE = 2;
+const RACE_PRIOR_SHARD_MONTHS = 3;
+const RACE_PRIOR_CONTEXT_BATCH_SIZE = 1;
 
 function minIso(...values) {
   return values.filter(Boolean).sort()[0] || null;
@@ -62,16 +62,28 @@ async function raceDateShards(env, cutoff) {
   `).bind(cutoffDate).first();
   const minDate=String(row?.min_date || cutoffDate);
   const minYear=Number(minDate.slice(0,4));
+  const minMonth=Number(minDate.slice(5,7));
   const cutoffYear=Number(cutoffDate.slice(0,4));
-  if (!Number.isInteger(minYear) || !Number.isInteger(cutoffYear)) {
+  const cutoffMonth=Number(cutoffDate.slice(5,7));
+  if (![minYear,minMonth,cutoffYear,cutoffMonth].every(Number.isInteger)) {
     throw new Error('race prior date bounds are invalid');
   }
+
+  // Race-prior aggregation is the remaining production D1 hotspot. Bound every
+  // historical population statement to one calendar quarter. Shards are merged
+  // deterministically afterwards, so no history or sample rows are dropped.
+  const firstQuarterMonth=Math.floor((minMonth-1)/RACE_PRIOR_SHARD_MONTHS)*RACE_PRIOR_SHARD_MONTHS;
+  let cursor=new Date(Date.UTC(minYear,firstQuarterMonth,1));
+  const cutoffQuarterMonth=Math.floor((cutoffMonth-1)/RACE_PRIOR_SHARD_MONTHS)*RACE_PRIOR_SHARD_MONTHS;
+  const horizon=new Date(Date.UTC(cutoffYear,cutoffQuarterMonth+RACE_PRIOR_SHARD_MONTHS,1));
   const shards=[];
-  for(let year=minYear;year<=cutoffYear;year+=RACE_PRIOR_SHARD_YEARS){
+  while(cursor<horizon){
+    const next=new Date(Date.UTC(cursor.getUTCFullYear(),cursor.getUTCMonth()+RACE_PRIOR_SHARD_MONTHS,1));
     shards.push({
-      startDate:`${year}-01-01`,
-      endDate:`${year+RACE_PRIOR_SHARD_YEARS}-01-01`
+      startDate:cursor.toISOString().slice(0,10),
+      endDate:next.toISOString().slice(0,10)
     });
+    cursor=next;
   }
   return shards;
 }
@@ -1109,8 +1121,20 @@ async function buildRaceContextsBatch(env, targets, requested) {
       // sharply without multiplying one query across all eight legs.
       for(let offset=0;offset<contexts.length;offset+=RACE_PRIOR_CONTEXT_BATCH_SIZE){
         const contextBatch=contexts.slice(offset,offset+RACE_PRIOR_CONTEXT_BATCH_SIZE);
-        const combined=await loadAggregateAndShapeLevelsBatchShard(env,contextBatch,shard,cutoff);
-        const specific=await loadSpecificContextRowsBatchShard(env,contextBatch,shard,cutoff);
+        let combined;
+        try {
+          combined=await loadAggregateAndShapeLevelsBatchShard(env,contextBatch,shard,cutoff);
+        } catch (error) {
+          if(error && typeof error==='object' && !error.step1Stage) error.step1Stage='race_priors_aggregate';
+          throw error;
+        }
+        let specific;
+        try {
+          specific=await loadSpecificContextRowsBatchShard(env,contextBatch,shard,cutoff);
+        } catch (error) {
+          if(error && typeof error==='object' && !error.step1Stage) error.step1Stage='race_priors_context';
+          throw error;
+        }
         for(const context of contextBatch){
           const part=combined.get(context.raceId);
           aggregatePartsByRace.get(context.raceId).push(part?.aggregateLevels||new Map());
