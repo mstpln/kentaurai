@@ -728,6 +728,7 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
     loadTripScenariosForEntries(env,historyIds,asOf)
   ]));
   const trackAnalysisCache = new Map();
+  const trackPopulationCache = new Map();
   async function trackAnalysisForRace(raceRow, observation) {
     if (!raceRow?.track_id) return null;
     const fields = observation?.fields || {};
@@ -736,7 +737,7 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
     const distanceGroup = trackAnalysisDistanceGroup(fields.distanceM) || 'all';
     const key = [raceRow.track_id,startMethod,distanceGroup,asOf].join('|');
     if (!trackAnalysisCache.has(key)) {
-      const value = await getTrackAnalysisV1(env,raceRow.track_id,{ startMethod,distanceGroup,asOf });
+      const value = await getTrackAnalysisV1(env,raceRow.track_id,{ startMethod,distanceGroup,asOf,populationCache:trackPopulationCache });
       if (value) {
         const { generated_at: _generatedAt, ...stableValue } = value;
         trackAnalysisCache.set(key,stableValue);
