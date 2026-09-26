@@ -47,8 +47,9 @@ test('documentation agrees on the six-step external workflow, exact3 registratio
 test('active external prompts keep Step 1 blind and Step 2 market-only', () => {
   const step1 = getExternalAnalysisStep1Prompt('openai');
   const step2 = getExternalAnalysisStep2Prompt('openai');
-  assert.match(step1, /Sök inte på webben och använd inte aktuell streck-, odds- eller tippsinformation/i);
-  assert.match(step1, /Bygg inget system/i);
+  assert.match(step1, /Sök inte på webben/i);
+  assert.match(step1, /Använd inte streckprocent, odds, spelarkollektiv, externa tips/i);
+  assert.match(step1, /Bygg inget spelsystem/i);
   assert.match(step2, /Marknadsanalys/i);
   assert.match(step2, /Bygg inget system/i);
   assert.match(step2, /Välj inga spikar eller garderingar ännu/i);
