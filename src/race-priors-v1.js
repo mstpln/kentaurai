@@ -473,6 +473,98 @@ async function loadShapeLevelsShard(env, context, shard) {
   return out;
 }
 
+async function loadAggregateAndShapeLevelsShard(env, context, shard) {
+  const query = hierarchyQueryBase(context, shard);
+  const { results } = await env.DB.prepare(`${query.sql}
+    SELECT 'aggregate' AS row_kind, cl.ordinal, cl.level,
+      NULL AS actual_lane,
+      COUNT(e.race_id) AS starts,
+      COUNT(DISTINCT e.race_id) AS races,
+      SUM(CASE WHEN e.placing = 1 THEN 1 ELSE 0 END) AS wins,
+      SUM(CASE WHEN e.placing BETWEEN 1 AND 3 THEN 1 ELSE 0 END) AS top3,
+      SUM(CASE WHEN e.gallop IS NOT NULL THEN 1 ELSE 0 END) AS gallop_known,
+      SUM(CASE WHEN e.gallop = 1 THEN 1 ELSE 0 END) AS gallops,
+      COUNT(DISTINCT e.source_record_id) AS source_records,
+      MIN(e.source_observed_at) AS first_source_observed_at,
+      MAX(e.source_observed_at) AS last_source_observed_at
+    FROM context_levels cl
+    LEFT JOIN eligible e ON ${HIERARCHY_MATCH_SQL}
+    GROUP BY cl.ordinal, cl.level
+
+    UNION ALL
+
+    SELECT 'shape_lane' AS row_kind, cl.ordinal, cl.level,
+      e.actual_lane,
+      COUNT(*) AS starts,
+      NULL AS races,
+      NULL AS wins,
+      NULL AS top3,
+      NULL AS gallop_known,
+      NULL AS gallops,
+      NULL AS source_records,
+      NULL AS first_source_observed_at,
+      NULL AS last_source_observed_at
+    FROM context_levels cl
+    JOIN eligible e ON ${HIERARCHY_MATCH_SQL}
+      AND e.placing = 1 AND e.actual_lane IS NOT NULL
+    GROUP BY cl.ordinal, cl.level, e.actual_lane
+
+    UNION ALL
+
+    SELECT 'shape_meta' AS row_kind, cl.ordinal, cl.level,
+      NULL AS actual_lane,
+      COUNT(e.race_id) AS starts,
+      COUNT(DISTINCT e.race_id) AS races,
+      NULL AS wins,
+      NULL AS top3,
+      NULL AS gallop_known,
+      NULL AS gallops,
+      COUNT(DISTINCT e.source_record_id) AS source_records,
+      MIN(e.source_observed_at) AS first_source_observed_at,
+      MAX(e.source_observed_at) AS last_source_observed_at
+    FROM context_levels cl
+    LEFT JOIN eligible e ON ${HIERARCHY_MATCH_SQL}
+      AND e.placing = 1 AND e.actual_lane IS NOT NULL
+    GROUP BY cl.ordinal, cl.level
+
+    ORDER BY ordinal, row_kind, actual_lane
+  `).bind(...query.bindings).all();
+
+  const aggregateLevels = new Map();
+  const laneCountsByLevel = new Map(context.hierarchy.map((level) => [level, new Map()]));
+  const shapeMetaByLevel = new Map();
+
+  for (const row of results || []) {
+    if (row.row_kind === 'aggregate') {
+      aggregateLevels.set(row.level, normalizeAggregate(row));
+    } else if (row.row_kind === 'shape_lane') {
+      const lane = Number(row.actual_lane);
+      if (Number.isFinite(lane)) laneCountsByLevel.get(row.level)?.set(lane, Number(row.starts || 0));
+    } else if (row.row_kind === 'shape_meta') {
+      shapeMetaByLevel.set(row.level, row);
+    }
+  }
+
+  const shapeLevels = new Map();
+  for (const level of context.hierarchy) {
+    const laneCounts = laneCountsByLevel.get(level) || new Map();
+    const meta = shapeMetaByLevel.get(level) || {};
+    const counts = [...laneCounts.values()];
+    shapeLevels.set(level, {
+      level,
+      starts: Number(meta.starts ?? 0),
+      races: Number(meta.races ?? 0),
+      sourceRecords: Number(meta.source_records ?? 0),
+      firstSourceObservedAt: meta.first_source_observed_at || null,
+      lastSourceObservedAt: meta.last_source_observed_at || null,
+      hhi: hhi(counts),
+      entropy: normalizedEntropy(counts),
+      laneCounts
+    });
+  }
+  return { aggregateLevels, shapeLevels };
+}
+
 async function loadSpecificContextRowsShard(env, context, shard) {
   const directLevel = context.hierarchy[0];
   const condition = levelCondition(directLevel, context);
@@ -741,13 +833,14 @@ async function buildRaceContext(env, target, requested) {
   const shapeParts=[];
   const specificRows=[];
   for(const shard of shards){
-    const [aggregate,shape,specific]=await Promise.all([
-      loadAggregateLevelsShard(env,context,shard),
-      loadShapeLevelsShard(env,context,shard),
+    // Aggregate outcome and winner-shape rows share the same materialized
+    // nationwide shard in one statement instead of rebuilding it three times.
+    const [combined,specific]=await Promise.all([
+      loadAggregateAndShapeLevelsShard(env,context,shard),
       loadSpecificContextRowsShard(env,context,shard)
     ]);
-    aggregateParts.push(aggregate);
-    shapeParts.push(shape);
+    aggregateParts.push(combined.aggregateLevels);
+    shapeParts.push(combined.shapeLevels);
     specificRows.push(...specific);
   }
   const levels=mergeAggregateRows(context,aggregateParts);
