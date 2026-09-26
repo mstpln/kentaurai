@@ -37,7 +37,7 @@ const VOLT_LANES = new Set(['all','good','other']);
 const SEX_VALUES = new Set(['all','mare','stallion','gelding']);
 const DISTANCE_TOLERANCE_M = 100;
 const REST_DAYS = 60;
-const FORM_SQL_CHUNK_SIZE = 70;
+const FORM_SQL_CHUNK_SIZE = 40;
 
 const ENTITY_CONFIG = Object.freeze({
   trainers:{table:'trainers',entryColumn:'trainer_id',entryIndex:'idx_entries_trainer',resultKey:'trainer',formLimit:30,market:true,rest:true,volt:true},
