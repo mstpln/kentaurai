@@ -37,7 +37,8 @@ const VOLT_LANES = new Set(['all','good','other']);
 const SEX_VALUES = new Set(['all','mare','stallion','gelding']);
 const DISTANCE_TOLERANCE_M = 100;
 const REST_DAYS = 60;
-const FORM_SQL_CHUNK_SIZE = 40;
+const FORM_HORSE_CHUNK_SIZE = 24;
+const FORM_RACE_CHUNK_SIZE = 8;
 
 const ENTITY_CONFIG = Object.freeze({
   trainers:{table:'trainers',entryColumn:'trainer_id',entryIndex:'idx_entries_trainer',resultKey:'trainer',formLimit:30,market:true,rest:true,volt:true},
@@ -161,7 +162,7 @@ function stlDifficultyScore(value){
   return value&&Object.prototype.hasOwnProperty.call(scores,value)?scores[value]:null;
 }
 
-function chunks(values,size=FORM_SQL_CHUNK_SIZE){
+function chunks(values,size){
   const out=[];for(let i=0;i<values.length;i+=size)out.push(values.slice(i,i+size));return out;
 }
 
@@ -171,7 +172,7 @@ async function loadHorseFormsBatch(env,entityIds,filters,config){
   if(!horseIds.length)return empty;
 
   const targets=[];
-  for(const group of chunks(horseIds)){
+  for(const group of chunks(horseIds,FORM_HORSE_CHUNK_SIZE)){
     const conditions=['re.scratched=0',`re.horse_id IN (${group.map(()=>'?').join(',')})`,'(rr.placing IS NOT NULL OR rr.disqualified=1)'],bindings=[...group];
     addCommonFilters(conditions,bindings,filters,{includeVolt:false});
     if(filters.asOfInstant){
@@ -204,7 +205,7 @@ async function loadHorseFormsBatch(env,entityIds,filters,config){
   const raceIds=[...new Set(targets.map((row)=>row.race_id))];
   const fieldRows=[];
   const historicalCutoff=filters.asOfInstant||filters.asOfDate+'T23:59:59.999Z';
-  for(const raceGroup of chunks(raceIds)){
+  for(const raceGroup of chunks(raceIds,FORM_RACE_CHUNK_SIZE)){
     const racePlaceholders=raceGroup.map(()=>'?').join(',');
     const historicalResultJoin=filters.asOfInstant
       ? `LEFT JOIN race_results rr ON rr.race_entry_id=re.id

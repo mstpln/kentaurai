@@ -176,7 +176,12 @@ export async function createF3AnalysisPackBundleResponse(env, roundId, { asOf = 
       logStage({stage:name,duration_ms:Date.now()-started,ok:true});
       return value;
     }catch(error){
-      logStage({stage:name,duration_ms:Date.now()-started,ok:false,error_class:error?.name||'Error'});
+      const failedStage=error?.step1Stage||name;
+      logStage({stage:failedStage,duration_ms:Date.now()-started,ok:false,error_class:error?.name||'Error'});
+      if(error && typeof error === 'object') error.step1Stage=failedStage;
+      if(error instanceof Error && !String(error.message||'').startsWith('step1_stage=')){
+        error.message=`step1_stage=${failedStage}: ${error.message}`;
+      }
       throw error;
     }
   }

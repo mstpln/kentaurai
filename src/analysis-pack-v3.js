@@ -679,6 +679,7 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
       return value;
     }catch(error){
       reportStage?.({stage:name,duration_ms:Date.now()-started,ok:false,error_class:error?.name||'Error'});
+      if(error && typeof error === 'object' && !error.step1Stage) error.step1Stage=name;
       throw error;
     }
   }
@@ -708,15 +709,13 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
     return !(fields.scratchSemanticsVerified === true && boolOrNull(fields.scratched) === true);
   });
   const history = await stage('relevant_history',()=>buildRelevantHistoryForEntries(env,eligibleIds,asOf));
-  const {performance,equipment,personContext,racePriors} = await stage('derived_features',async()=>{
-    // D1 executes on one database thread. Run the heavy feature families
-    // sequentially so they do not compete for the six available connections.
-    const performance=await buildPerformanceFeaturesV3ForEntries(env,eligibleIds,asOf,{relevantHistory:history});
-    const equipment=await buildEquipmentResponseV1ForEntries(env,eligibleIds,asOf,{relevantHistory:history});
-    const personContext=await buildPersonContextV1ForEntries(env,eligibleIds,asOf,{relevantHistory:history});
-    const racePriors=await buildRacePriorsV1ForEntries(env,eligibleIds,asOf);
-    return {performance,equipment,personContext,racePriors};
-  });
+  // D1 executes on one database thread. Keep the heavy feature families
+  // sequential and report them separately so a production CPU reset identifies
+  // the exact deterministic family without exposing racing payloads.
+  const performance=await stage('performance_features',()=>buildPerformanceFeaturesV3ForEntries(env,eligibleIds,asOf,{relevantHistory:history}));
+  const equipment=await stage('equipment_response',()=>buildEquipmentResponseV1ForEntries(env,eligibleIds,asOf,{relevantHistory:history}));
+  const personContext=await stage('person_context',()=>buildPersonContextV1ForEntries(env,eligibleIds,asOf,{relevantHistory:history}));
+  const racePriors=await stage('race_priors',()=>buildRacePriorsV1ForEntries(env,eligibleIds,asOf));
   const xlabsByRace = await stage('xlabs_profiles',()=>buildXlabsEvidenceProfilesForRaces(env,{
     raceIds,
     asOf,
