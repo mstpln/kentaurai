@@ -545,7 +545,7 @@ function featureRowsCte(scopeSql = '1=1', entryIndex = 'idx_entries_race') {
         AND sr.source_type='xlabs_race_json'
         AND julianday(sr.fetched_at)<=julianday(?)
     ),
-    feature_rows AS (
+    feature_rows AS MATERIALIZED (
       SELECT
         re.id AS race_entry_id,
         re.horse_id,
@@ -704,39 +704,36 @@ async function populationDateBounds(env, cutoff) {
   return ranges;
 }
 
-async function loadPopulationAggregateShard(env, cutoff, startDate, endDate) {
-  const scopeSql = 'r.race_date >= ? AND r.race_date < ?';
-  const sql = `${featureRowsCte(scopeSql)},
-    dimensions (dimension) AS (
-      VALUES ('overall'),('year'),('track'),('method'),('distance'),
-        ('method_distance'),('class'),('race_type'),('field_size')
-    ),
-    expanded AS (
-      SELECT d.dimension,
-        CASE d.dimension
-          WHEN 'overall' THEN 'all'
-          WHEN 'year' THEN COALESCE(NULLIF(SUBSTR(fr.race_date,1,4),''),'unknown')
-          WHEN 'track' THEN COALESCE(CAST(fr.track_id AS TEXT),'unknown')
-          WHEN 'method' THEN ${methodSql('fr')}
-          WHEN 'distance' THEN ${distanceSql('fr')}
-          WHEN 'method_distance' THEN ${methodSql('fr')} || '|' || ${distanceSql('fr')}
-          WHEN 'class' THEN COALESCE(NULLIF(fr.stl_class,''),NULLIF(fr.main_class,''),'unclassified')
-          WHEN 'race_type' THEN COALESCE(NULLIF(fr.race_types,''),'unclassified')
-          WHEN 'field_size' THEN ${fieldSql('fr')}
-        END AS bucket,
-        fr.*
-      FROM feature_rows fr
-      CROSS JOIN dimensions d
-    )
-    SELECT dimension,bucket,COUNT(*) AS eligible,
+function populationAggregateSelect(dimension,bucketSql,{group=true}={}){
+  return `SELECT '${dimension}' AS dimension,${bucketSql} AS bucket,COUNT(*) AS eligible,
       SUM(CASE WHEN opening_100_km_pace_ms IS NOT NULL THEN 1 ELSE 0 END) AS opening_100_km_pace_ms_measured,
       TOTAL(opening_100_km_pace_ms) AS opening_100_km_pace_ms_sum,
       SUM(CASE WHEN closing_400_km_pace_ms IS NOT NULL THEN 1 ELSE 0 END) AS closing_400_km_pace_ms_measured,
       TOTAL(closing_400_km_pace_ms) AS closing_400_km_pace_ms_sum,
       SUM(CASE WHEN extra_distance_pct IS NOT NULL THEN 1 ELSE 0 END) AS extra_distance_pct_measured,
       TOTAL(extra_distance_pct) AS extra_distance_pct_sum
-    FROM expanded
-    GROUP BY dimension,bucket
+    FROM feature_rows fr
+    ${group?`GROUP BY ${bucketSql}`:''}`;
+}
+
+async function loadPopulationAggregateShard(env, cutoff, startDate, endDate) {
+  const scopeSql = 'r.race_date >= ? AND r.race_date < ?';
+  // Avoid the previous N x 9 CROSS JOIN dimensional expansion. feature_rows is
+  // materialized once and each compact aggregation scans that projection
+  // directly, which cuts sort/materialization pressure on production D1.
+  const selects=[
+    populationAggregateSelect('overall',"'all'",{group:false}),
+    populationAggregateSelect('year',"COALESCE(NULLIF(SUBSTR(fr.race_date,1,4),''),'unknown')"),
+    populationAggregateSelect('track',"COALESCE(CAST(fr.track_id AS TEXT),'unknown')"),
+    populationAggregateSelect('method',methodSql('fr')),
+    populationAggregateSelect('distance',distanceSql('fr')),
+    populationAggregateSelect('method_distance',`${methodSql('fr')} || '|' || ${distanceSql('fr')}`),
+    populationAggregateSelect('class',"COALESCE(NULLIF(fr.stl_class,''),NULLIF(fr.main_class,''),'unclassified')"),
+    populationAggregateSelect('race_type',"COALESCE(NULLIF(fr.race_types,''),'unclassified')"),
+    populationAggregateSelect('field_size',fieldSql('fr'))
+  ];
+  const sql = `${featureRowsCte(scopeSql)}
+    ${selects.join('\nUNION ALL\n')}
     ORDER BY dimension,bucket
   `;
   const { results } = await env.DB.prepare(sql)
