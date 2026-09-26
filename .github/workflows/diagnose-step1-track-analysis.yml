@@ -239,3 +239,70 @@ jobs:
             SELECT COUNT(*) observations FROM ranked WHERE row_number=1;
           " > /tmp/early500-probe.txt
           echo "baseline_500m_seconds=$(( $(date +%s) - start ))"
+
+      - name: Probe current-round baseline 500m using track-analysis index
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "
+            WITH target AS (
+              SELECT r.track_id,t.country_code,
+                CASE
+                  WHEN lower(coalesce(r.start_method,'')) IN ('auto','autostart') THEN 'auto'
+                  WHEN lower(coalesce(r.start_method,'')) IN ('volt','volte','voltstart') THEN 'volt'
+                  ELSE 'unknown'
+                END AS method_key,
+                r.distance_m
+              FROM game_rounds gr
+              JOIN game_legs gl ON gl.game_round_id=gr.id
+              JOIN races r ON r.id=gl.race_id
+              JOIN tracks t ON t.id=r.track_id
+              WHERE gr.game_type IN ('V85','V86')
+                AND gr.round_date >= date('now','-1 day')
+              ORDER BY gr.round_date ASC,gl.leg_number ASC
+              LIMIT 1
+            ),
+            eligible_entries AS MATERIALIZED (
+              SELECT re.id AS race_entry_id,r.id AS race_id
+              FROM target x
+              JOIN tracks t ON t.country_code=x.country_code
+              JOIN races r ON r.track_id=t.id
+              JOIN race_entries re INDEXED BY idx_entries_race ON re.race_id=r.id
+              JOIN race_results rr ON rr.race_entry_id=re.id
+              LEFT JOIN source_records rrs ON rrs.id=rr.source_record_id
+              WHERE r.track_id<>x.track_id
+                AND re.scratched=0
+                AND rr.result_status='official'
+                AND CASE
+                  WHEN lower(coalesce(r.start_method,'')) IN ('auto','autostart') THEN 'auto'
+                  WHEN lower(coalesce(r.start_method,'')) IN ('volt','volte','voltstart') THEN 'volt'
+                  ELSE 'unknown'
+                END=x.method_key
+                AND r.distance_m BETWEEN x.distance_m-100 AND x.distance_m+100
+                AND r.race_date < date('now')
+                AND rr.source_record_id IS NOT NULL
+                AND julianday(rrs.fetched_at)<=julianday('now')
+            ),
+            ranked AS (
+              SELECT rpc.id,rpc.race_entry_id,
+                ROW_NUMBER() OVER (
+                  PARTITION BY rpc.race_entry_id,rpc.checkpoint_key
+                  ORDER BY julianday(sr.fetched_at) DESC,rpc.id DESC
+                ) row_number
+              FROM race_position_checkpoints rpc INDEXED BY idx_position_checkpoints_track_analysis
+              JOIN eligible_entries e ON e.race_entry_id=rpc.race_entry_id
+              JOIN source_records sr ON sr.id=rpc.source_record_id
+              WHERE rpc.reconstruction_version='xlabs-position-reconstruction-v1'
+                AND rpc.checkpoint_key='500m'
+                AND rpc.position_rank IS NOT NULL
+                AND rpc.field_coverage>=0.999
+                AND rpc.longitudinal_confidence>=0.65
+                AND julianday(sr.fetched_at)<=julianday('now')
+            )
+            SELECT COUNT(*) observations FROM ranked WHERE row_number=1;
+          " > /tmp/early500-index-probe.txt
+          echo "baseline_500m_track_index_seconds=$(( $(date +%s) - start ))"
