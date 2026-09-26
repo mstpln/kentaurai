@@ -65,10 +65,10 @@ function seedProposition(db, { raceId, key, observedAt, facts = { sex_restrictio
 function seedHistoricalRace(db, index, {
   trackId = 'track-a', distance = 2140, method = 'auto', fieldCount = 3,
   winnerLane = 1, gallopLane = null, raceName = 'Stolopp', proposition = true,
-  resultObservedAt = null
+  resultObservedAt = null, dateOverride = null
 } = {}) {
   const day = String(index).padStart(2, '0');
-  const date = `2026-08-${day}`;
+  const date = dateOverride || `2026-08-${day}`;
   const raceId = `hist-${index}`;
   seedRace(db, { id: raceId, date, trackId, method, distance, name: raceName, fieldSize: fieldCount });
   for (let lane = 1; lane <= fieldCount; lane += 1) {
@@ -262,4 +262,20 @@ test('B6 marks a known but unseen race refinement sparse while broader backoff r
   assert.equal(pack.priors.race_context.win_rate.direct_sample_size, 0);
   assert.equal(pack.priors.race_context.win_rate.backoff_level, 'track_method_distance_field');
   assert.notEqual(pack.priors.race_context.win_rate.value, null);
+});
+
+
+test('B6 date sharding preserves aggregates across multiple historical year windows', async () => {
+  const { db, env } = createTestEnv();
+  const target = seedTarget(db);
+  seedHistoricalRace(db, 1, { trackId: 'track-a', winnerLane: 1, dateOverride: '2022-08-01' });
+  seedHistoricalRace(db, 2, { trackId: 'track-a', winnerLane: 2, dateOverride: '2024-08-02' });
+  seedHistoricalRace(db, 3, { trackId: 'track-a', winnerLane: 1, dateOverride: '2026-08-03' });
+
+  const pack = (await buildRacePriorsV1ForEntries(env, [target.entryId], '2026-09-20T13:00:00Z')).get(target.entryId);
+  assert.equal(pack.priors.race_outcome.win_rate.direct_effective_sample_size, 3);
+  assert.equal(pack.priors.race_outcome.win_rate.direct_sample_size, 9);
+  assert.equal(pack.priors.race_outcome.win_rate.value, 1 / 3);
+  assert.equal(pack.priors.starting_position.lane.win_rate.direct_effective_sample_size, 3);
+  assert.ok(pack.priors.shape.winner_lane_hhi.value > 0);
 });
