@@ -9,6 +9,7 @@ import {
   findAnalysisPackMarketLeaks
 } from '../src/analysis-pack-v3.js';
 import { assertAnalysisPackReplaySafe } from '../src/analysis-pack-v3-asof-guard.js';
+import { persistAnalysisFormSnapshots } from '../src/analysis-form-snapshot-v1.js';
 import { createTestEnv } from './helpers/d1.js';
 
 const AS_OF = '2099-01-02T11:00:00.000Z';
@@ -291,7 +292,7 @@ function seedWideStep1Round(db) {
 }
 
 test('D1 Step 1 handles a full 128-entry round without truncation, market leakage or post-as-of leakage', async () => {
-  const { env, db } = createTestEnv();
+  const { env, db, d1Metrics } = createTestEnv();
   seedWideStep1Round(db);
   db.prepare(`INSERT INTO race_positions
     (id,race_entry_id,observed_at_m,leader,event_json,source_record_id,evidence_type,confidence,classification_version)
@@ -299,6 +300,11 @@ test('D1 Step 1 handles a full 128-entry round without truncation, market leakag
     .run(JSON.stringify({ scenario_key:'leader', scenario_label:'Spets' }));
 
   const pack = await createPreMarketAnalysisPackV3(env,'wide_round',{asOf:'2099-02-01T11:30:00Z'});
+  await persistAnalysisFormSnapshots(env,pack);
+  assert.ok(
+    d1Metrics.statements < 600,
+    `production-sized Step 1 export exceeded D1 statement budget: ${d1Metrics.statements}`
+  );
   const legFiles = pack.files.filter((file) => /^\d{2}_leg_\d/.test(file.name));
   const entries = legFiles.flatMap((file) => file.payload.entries || []);
 
