@@ -877,16 +877,30 @@ function batchHierarchyCte(contexts) {
   for (const context of contexts) {
     for (let index = 0; index < context.hierarchy.length; index += 1) {
       const row = hierarchyRow(context.hierarchy[index], context, index);
-      rows.push({ contextKey:context.raceId, ...row });
+      rows.push({
+        contextKey:context.raceId,
+        ordinal:row.ordinal,
+        level:row.level,
+        trackId:row.trackId,
+        method:row.method,
+        distanceBucket:row.distanceBucket,
+        fieldBucket:row.fieldBucket
+      });
     }
   }
   return {
     sql: `context_levels (context_key, ordinal, level, track_id, method_key, distance_bucket, field_bucket) AS (
-      VALUES ${rows.map(() => '(?,?,?,?,?,?,?)').join(',')}
+      SELECT
+        json_extract(value,'$.contextKey'),
+        CAST(json_extract(value,'$.ordinal') AS INTEGER),
+        json_extract(value,'$.level'),
+        json_extract(value,'$.trackId'),
+        json_extract(value,'$.method'),
+        json_extract(value,'$.distanceBucket'),
+        json_extract(value,'$.fieldBucket')
+      FROM json_each(?)
     )`,
-    bindings: rows.flatMap((row) => [
-      row.contextKey,row.ordinal,row.level,row.trackId,row.method,row.distanceBucket,row.fieldBucket
-    ])
+    bindings:[JSON.stringify(rows)]
   };
 }
 
@@ -982,13 +996,25 @@ async function loadAggregateAndShapeLevelsBatchShard(env, contexts, shard, cutof
 function directContextRowsCte(contexts) {
   const rows=contexts.map((context)=>{
     const direct=hierarchyRow(context.hierarchy[0],context,0);
-    return {contextKey:context.raceId,...direct};
+    return {
+      contextKey:context.raceId,
+      trackId:direct.trackId,
+      method:direct.method,
+      distanceBucket:direct.distanceBucket,
+      fieldBucket:direct.fieldBucket
+    };
   });
   return {
     sql:`direct_contexts (context_key,track_id,method_key,distance_bucket,field_bucket) AS (
-      VALUES ${rows.map(()=>'(?,?,?,?,?)').join(',')}
+      SELECT
+        json_extract(value,'$.contextKey'),
+        json_extract(value,'$.trackId'),
+        json_extract(value,'$.method'),
+        json_extract(value,'$.distanceBucket'),
+        json_extract(value,'$.fieldBucket')
+      FROM json_each(?)
     )`,
-    bindings:rows.flatMap((row)=>[row.contextKey,row.trackId,row.method,row.distanceBucket,row.fieldBucket])
+    bindings:[JSON.stringify(rows)]
   };
 }
 
