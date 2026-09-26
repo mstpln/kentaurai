@@ -1104,15 +1104,19 @@ async function buildRaceContextsBatch(env, targets, requested) {
     const specificRowsByRace=new Map(contexts.map((context)=>[context.raceId,[]]));
 
     for(const shard of shards){
-      // Keep the two broad shard scans sequential. D1 is single-threaded, so
-      // Promise.all here only creates connection pressure.
-      const combined=await loadAggregateAndShapeLevelsBatchShard(env,contexts,shard,cutoff);
-      const specific=await loadSpecificContextRowsBatchShard(env,contexts,shard,cutoff);
-      for(const context of contexts){
-        const part=combined.get(context.raceId);
-        aggregatePartsByRace.get(context.raceId).push(part?.aggregateLevels||new Map());
-        shapePartsByRace.get(context.raceId).push(part?.shapeLevels||new Map());
-        specificRowsByRace.get(context.raceId).push(...(specific.get(context.raceId)||[]));
+      // Bound per-statement work as well as total fan-out. Two race contexts
+      // share each materialized nationwide shard; this cuts repeated scans
+      // sharply without multiplying one query across all eight legs.
+      for(let offset=0;offset<contexts.length;offset+=RACE_PRIOR_CONTEXT_BATCH_SIZE){
+        const contextBatch=contexts.slice(offset,offset+RACE_PRIOR_CONTEXT_BATCH_SIZE);
+        const combined=await loadAggregateAndShapeLevelsBatchShard(env,contextBatch,shard,cutoff);
+        const specific=await loadSpecificContextRowsBatchShard(env,contextBatch,shard,cutoff);
+        for(const context of contextBatch){
+          const part=combined.get(context.raceId);
+          aggregatePartsByRace.get(context.raceId).push(part?.aggregateLevels||new Map());
+          shapePartsByRace.get(context.raceId).push(part?.shapeLevels||new Map());
+          specificRowsByRace.get(context.raceId).push(...(specific.get(context.raceId)||[]));
+        }
       }
     }
 
