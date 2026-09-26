@@ -44,7 +44,6 @@ function chunks(values, size = 80) {
 }
 
 const RACE_PRIOR_SHARD_MONTHS = 3;
-const RACE_PRIOR_CONTEXT_BATCH_SIZE = 1;
 
 function minIso(...values) {
   return values.filter(Boolean).sort()[0] || null;
@@ -248,28 +247,6 @@ async function latestProposition(env, raceId, cutoff) {
     sourceRecordId: row.source_record_id
   } : null;
 }
-
-const METHOD_SQL = `CASE
-  WHEN LOWER(COALESCE(r.start_method,'')) IN ('auto','autostart') THEN 'auto'
-  WHEN LOWER(COALESCE(r.start_method,'')) IN ('volt','volte','voltstart') THEN 'volt'
-  WHEN r.start_method IS NULL OR TRIM(r.start_method) = '' THEN NULL
-  ELSE LOWER(r.start_method)
-END`;
-
-const DISTANCE_SQL = `CASE
-  WHEN r.distance_m IS NULL OR r.distance_m <= 0 THEN NULL
-  WHEN r.distance_m < 1800 THEN 'short'
-  WHEN r.distance_m < 2400 THEN 'middle'
-  WHEN r.distance_m < 3000 THEN 'long'
-  ELSE 'stayer'
-END`;
-
-const FIELD_SQL = `CASE
-  WHEN rf.active_field_size BETWEEN 1 AND 8 THEN 'small'
-  WHEN rf.active_field_size BETWEEN 9 AND 12 THEN 'medium'
-  WHEN rf.active_field_size >= 13 THEN 'large'
-  ELSE NULL
-END`;
 
 function availableHierarchy(context) {
   const levels = [];
@@ -687,39 +664,6 @@ function buildProvenance(context, targetProposition) {
       positionOutcomePriors: false
     }
   });
-}
-
-async function buildRaceContext(env, target, requested) {
-  const cutoff = targetCutoff(target, requested.ms);
-  const targetProposition = await latestProposition(env, target.race_id, cutoff);
-  const context = {
-    raceId: target.race_id,
-    cutoff,
-    trackId: target.track_id || null,
-    method: canonicalMethod(target.start_method),
-    distanceBucket: distanceBucket(numberOrNull(target.distance_m)),
-    fieldBucket: fieldBucket(Number(target.active_field_size || target.field_size || 0) || null),
-    raceTypeSignature: raceTypeSignature(target),
-    propositionSignature: propositionSignature(targetProposition)
-  };
-  context.hierarchy = availableHierarchy(context);
-  const shards=await raceDateShards(env,cutoff);
-  const aggregateParts=[];
-  const shapeParts=[];
-  const specificRows=[];
-  for(const shard of shards){
-    // Keep historical population statements sequential. D1 is CPU-bound on a
-    // single database and concurrent wide reads only compete for the same
-    // budget. Annual shards bound each statement without changing semantics.
-    const combined=await loadAggregateAndShapeLevelsShard(env,context,shard);
-    const specific=await loadSpecificContextRowsShard(env,context,shard);
-    aggregateParts.push(combined.aggregateLevels);
-    shapeParts.push(combined.shapeLevels);
-    specificRows.push(...specific);
-  }
-  const levels=mergeAggregateRows(context,aggregateParts);
-  const shapeLevels=mergeShapeRows(context,shapeParts);
-  return { context, levels, specificRows, shapeLevels, targetProposition };
 }
 
 async function buildRaceContextsBatch(env, targets, requested) {
