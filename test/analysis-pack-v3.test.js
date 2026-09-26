@@ -302,7 +302,7 @@ test('D1 Step 1 handles a full 128-entry round without truncation, market leakag
   const pack = await createPreMarketAnalysisPackV3(env,'wide_round',{asOf:'2099-02-01T11:30:00Z'});
   await persistAnalysisFormSnapshots(env,pack);
   assert.ok(
-    d1Metrics.statements < 600,
+    d1Metrics.statements < 400,
     `production-sized Step 1 export exceeded D1 statement budget: ${d1Metrics.statements}`
   );
   const legFiles = pack.files.filter((file) => /^\d{2}_leg_\d/.test(file.name));
