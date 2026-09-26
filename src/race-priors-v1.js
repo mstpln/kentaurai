@@ -1048,7 +1048,7 @@ async function loadSpecificContextRowsBatchShard(env,contexts,shard,cutoff){
       SELECT rpf.race_id,rpf.parse_status,rpf.facts_json,
         ROW_NUMBER() OVER (
           PARTITION BY rpf.race_id
-          ORDER BY julianday(rpf.observed_at) DESC,julianday(rpf_sr.fetched_at) DESC,rpf.id DESC
+          ORDER BY julianday(rpf.observed_at) DESC,rpf.id DESC
         ) AS row_number
       FROM race_proposition_facts rpf
       JOIN source_records rpf_sr ON rpf_sr.id=rpf.source_record_id
