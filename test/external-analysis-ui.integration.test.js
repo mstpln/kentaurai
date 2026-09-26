@@ -99,6 +99,7 @@ test('authenticated external workflow serves round-scoped analysis and registrat
   response = await worker.fetch(new Request('https://example.test/app/api/settings/external-step1-prompt?provider=openai',{headers}),env,{});
   assert.equal(response.status,200);
   data = await response.json();
+  assert.equal(data.prompt_version,'external-analysis-prompt-v3');
   assert.match(data.prompt,/Marknadsblind sportslig analys/);
   assert.match(data.prompt,/ANTI-FLATTENING-KONTROLL/);
   assert.match(data.prompt,/Trolig positionering när loppet satt sig/);
