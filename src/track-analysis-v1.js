@@ -666,6 +666,7 @@ async function loadTrackContext(env,trackId,{startMethod,distanceGroup,asOf}){
 export async function getTrackAnalysisV1(env,trackIdValue,options={}){
   if(!env?.DB)throw new Error('DB is not configured');const trackId=String(trackIdValue||'').trim();if(!trackId)return null;const track=await loadTrack(env,trackId);if(!track)return null;
   const startMethod=normalizeTrackAnalysisStartMethod(options.startMethod??'all'),distanceGroup=normalizeTrackAnalysisDistanceGroup(options.distanceGroup??'all'),asOf=options.asOf==null?null:new Date(options.asOf).toISOString();
+  const populationCache=options.populationCache instanceof Map?options.populationCache:null;
   const resolved=await resolveAnalysisBasis(env,trackId,{startMethod,distanceGroup,asOf});
   const selectedContext={startMethod,distanceGroup,asOf};
   const basisContext={startMethod:resolved.startMethod,distanceGroup:resolved.distanceGroup,asOf};
@@ -675,9 +676,17 @@ export async function getTrackAnalysisV1(env,trackIdValue,options={}){
     // the current track in that one read and split exact/baseline in memory,
     // eliminating a second broad family of D1 queries.
     if(track.country_code){
-      const allPos=await loadPositionRows(env,{countryCode:track.country_code,...context});
-      const allScen=await loadScenarioRows(env,{countryCode:track.country_code,...context});
-      const allEarly=await loadEarly500Rows(env,{countryCode:track.country_code,...context});
+      const cacheKey=`${track.country_code}|${context.startMethod}|${context.distanceGroup}|${context.asOf||''}`;
+      let population=populationCache?.get(cacheKey);
+      if(!population){
+        population=(async()=>({
+          pos:await loadPositionRows(env,{countryCode:track.country_code,...context}),
+          scen:await loadScenarioRows(env,{countryCode:track.country_code,...context}),
+          early:await loadEarly500Rows(env,{countryCode:track.country_code,...context})
+        }))();
+        populationCache?.set(cacheKey,population);
+      }
+      const {pos:allPos,scen:allScen,early:allEarly}=await population;
       return {
         exactPos:allPos.filter((row)=>row.trackId===trackId),
         baselinePos:allPos.filter((row)=>row.trackId!==trackId),
