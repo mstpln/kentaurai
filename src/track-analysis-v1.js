@@ -137,13 +137,49 @@ async function loadTrack(env, trackId) {
   `).bind(trackId).first();
 }
 
-async function loadScenarioRows(env, { trackId = null, countryCode = null, excludeTrackId = null, startMethod, distanceGroup, asOf }) {
+async function countryDateShards(env, countryCode, asOf) {
+  const cutoffDate = asOf ? String(asOf).slice(0, 10) : null;
+  const conditions = ['t.country_code = ?'];
+  const bindings = [countryCode];
+  if (cutoffDate) {
+    conditions.push('r.race_date < ?');
+    bindings.push(cutoffDate);
+  }
+  const row = await env.DB.prepare(`
+    SELECT MIN(r.race_date) AS min_date, MAX(r.race_date) AS max_date
+    FROM races r INDEXED BY idx_races_date
+    JOIN tracks t ON t.id=r.track_id
+    WHERE ${conditions.join(' AND ')}
+  `).bind(...bindings).first();
+  const minYear = Number(String(row?.min_date || '').slice(0, 4));
+  const maxYear = Number(String(row?.max_date || '').slice(0, 4));
+  if (!Number.isInteger(minYear) || !Number.isInteger(maxYear)) return [];
+  const shards = [];
+  for (let year = minYear; year <= maxYear; year += 1) {
+    shards.push({ startDate:`${year}-01-01`, endDate:`${year + 1}-01-01` });
+  }
+  return shards;
+}
+
+function appendDateShardConditions(conditions, bindings, startDate, endDate, alias = 'r') {
+  if (startDate) {
+    conditions.push(`${alias}.race_date >= ?`);
+    bindings.push(startDate);
+  }
+  if (endDate) {
+    conditions.push(`${alias}.race_date < ?`);
+    bindings.push(endDate);
+  }
+}
+
+async function loadScenarioRows(env, { trackId = null, countryCode = null, excludeTrackId = null, startMethod, distanceGroup, asOf, startDate = null, endDate = null }) {
   const entryConditions = ['re.scratched = 0',"rr.result_status = 'official'"];
   const entryBindings = [];
   if (trackId) { entryConditions.push('r.track_id = ?'); entryBindings.push(trackId); }
   if (countryCode) { entryConditions.push('t.country_code = ?'); entryBindings.push(countryCode); }
   if (excludeTrackId) { entryConditions.push('r.track_id <> ?'); entryBindings.push(excludeTrackId); }
   appendContextConditions(entryConditions, entryBindings, { startMethod, distanceGroup, asOf });
+  appendDateShardConditions(entryConditions, entryBindings, startDate, endDate);
   if (asOf) {
     entryConditions.push('rr.source_record_id IS NOT NULL');
     entryConditions.push('julianday(rrs.fetched_at) <= julianday(?)');
@@ -207,7 +243,7 @@ function scenarioLabelFromRow(row) {
   catch { return SCENARIO_LABELS[key]; }
 }
 
-async function loadPositionRows(env, { trackId = null, countryCode = null, excludeTrackId = null, startMethod, distanceGroup, asOf }) {
+async function loadPositionRows(env, { trackId = null, countryCode = null, excludeTrackId = null, startMethod, distanceGroup, asOf, startDate = null, endDate = null }) {
   const entryConditions = [
     're.scratched = 0',
     're.actual_lane BETWEEN 1 AND 8',
@@ -219,6 +255,7 @@ async function loadPositionRows(env, { trackId = null, countryCode = null, exclu
   if (countryCode) { entryConditions.push('t.country_code = ?'); entryBindings.push(countryCode); }
   if (excludeTrackId) { entryConditions.push('r.track_id <> ?'); entryBindings.push(excludeTrackId); }
   appendContextConditions(entryConditions, entryBindings, { startMethod, distanceGroup, asOf });
+  appendDateShardConditions(entryConditions, entryBindings, startDate, endDate);
   if (asOf) {
     entryConditions.push('rr.source_record_id IS NOT NULL');
     entryConditions.push('julianday(rrs.fetched_at) <= julianday(?)');
@@ -270,7 +307,7 @@ async function loadPositionRows(env, { trackId = null, countryCode = null, exclu
 }
 
 
-async function loadEarly500Rows(env, { trackId = null, countryCode = null, excludeTrackId = null, startMethod, distanceGroup, asOf }) {
+async function loadEarly500Rows(env, { trackId = null, countryCode = null, excludeTrackId = null, startMethod, distanceGroup, asOf, startDate = null, endDate = null }) {
   // Use the dedicated track-analysis index so D1 can restrict by reconstruction
   // version and checkpoint before joining the eligible race-entry context. This
   // keeps nationwide same-country baselines bounded as history grows.
@@ -283,6 +320,7 @@ async function loadEarly500Rows(env, { trackId = null, countryCode = null, exclu
   if (countryCode) { entryConditions.push('t.country_code = ?'); entryBindings.push(countryCode); }
   if (excludeTrackId) { entryConditions.push('r.track_id <> ?'); entryBindings.push(excludeTrackId); }
   appendContextConditions(entryConditions, entryBindings, { startMethod, distanceGroup, asOf });
+  appendDateShardConditions(entryConditions, entryBindings, startDate, endDate);
   if (asOf) {
     entryConditions.push('rr.source_record_id IS NOT NULL');
     entryConditions.push('julianday(rrs.fetched_at) <= julianday(?)');
@@ -679,11 +717,20 @@ export async function getTrackAnalysisV1(env,trackIdValue,options={}){
       const cacheKey=`${track.country_code}|${context.startMethod}|${context.distanceGroup}|${context.asOf||''}`;
       let population=populationCache?.get(cacheKey);
       if(!population){
-        population=(async()=>({
-          pos:await loadPositionRows(env,{countryCode:track.country_code,...context}),
-          scen:await loadScenarioRows(env,{countryCode:track.country_code,...context}),
-          early:await loadEarly500Rows(env,{countryCode:track.country_code,...context})
-        }))();
+        population=(async()=>{
+          const shards=await countryDateShards(env,track.country_code,context.asOf);
+          const pos=[],scen=[],early=[];
+          // Country baselines are the widest Bananalys reads in Step 1. Keep
+          // every D1 statement inside one calendar year, then merge rows in
+          // memory. Race entries belong to exactly one date shard, so this is
+          // semantically identical to the former all-history statement.
+          for(const shard of shards){
+            pos.push(...await loadPositionRows(env,{countryCode:track.country_code,...context,...shard}));
+            scen.push(...await loadScenarioRows(env,{countryCode:track.country_code,...context,...shard}));
+            early.push(...await loadEarly500Rows(env,{countryCode:track.country_code,...context,...shard}));
+          }
+          return {pos,scen,early};
+        })();
         populationCache?.set(cacheKey,population);
       }
       const {pos:allPos,scen:allScen,early:allEarly}=await population;
