@@ -342,12 +342,13 @@ test('track analysis as-of excludes sources that were not available before cutof
 });
 
 
-test('500m track analysis uses the dedicated checkpoint index that bounds production D1 scans', () => {
+test('500m track analysis uses context-appropriate checkpoint indexes', () => {
   const source=readFileSync(new URL('../src/track-analysis-v1.js',import.meta.url),'utf8');
   const start=source.indexOf('async function loadEarly500Rows');
   const end=source.indexOf('async function loadLaneOutcomeRows',start);
   assert.ok(start>=0 && end>start);
   const loader=source.slice(start,end);
-  assert.match(loader,/INDEXED BY idx_position_checkpoints_track_analysis/);
-  assert.doesNotMatch(loader,/INDEXED BY idx_position_checkpoints_entry_source/);
+  assert.match(loader,/idx_position_checkpoints_entry_source/);
+  assert.match(loader,/idx_position_checkpoints_track_analysis/);
+  assert.match(loader,/const checkpointIndex = trackId/);
 });

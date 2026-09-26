@@ -160,7 +160,27 @@ export async function buildF3WorkflowState(env, roundId, now = new Date().toISOS
 }
 
 export async function createF3AnalysisPackBundleResponse(env, roundId, { asOf = null } = {}) {
-  const pack = await createPreMarketAnalysisPackV3(env, roundId, { asOf });
+  function logStage(result){
+    console.info(JSON.stringify({
+      event:'step1_export_stage',
+      stage:result.stage,
+      duration_ms:result.duration_ms,
+      ok:result.ok,
+      error_class:result.error_class||null
+    }));
+  }
+  async function stage(name,action){
+    const started=Date.now();
+    try{
+      const value=await action();
+      logStage({stage:name,duration_ms:Date.now()-started,ok:true});
+      return value;
+    }catch(error){
+      logStage({stage:name,duration_ms:Date.now()-started,ok:false,error_class:error?.name||'Error'});
+      throw error;
+    }
+  }
+  const pack = await stage('analysis_pack',()=>createPreMarketAnalysisPackV3(env, roundId, { asOf, onStage:logStage }));
   const files = [
     { name: 'manifest.json', content: parseJson(pack.manifestContent, {}) },
     ...(pack.files || []).map((file) => ({ name: file.name, content: parseJson(file.content, {}) }))
@@ -178,8 +198,8 @@ export async function createF3AnalysisPackBundleResponse(env, roundId, { asOf = 
       if (entry?.current_facts?.analysis_eligible === true) target.entry_ids.push(String(entry.race_entry_id));
     }
   }
-  await persistAnalysisFormSnapshots(env, pack);
-  await recordExternalAnalysisExport(env, {
+  await stage('form_snapshots',()=>persistAnalysisFormSnapshots(env, pack));
+  await stage('export_registration',()=>recordExternalAnalysisExport(env, {
     stage: 'step1',
     roundId,
     artifactId: pack.manifest.pack_id,
@@ -191,7 +211,7 @@ export async function createF3AnalysisPackBundleResponse(env, roundId, { asOf = 
         .sort((a, b) => a.leg_number - b.leg_number)
         .map((leg) => ({ ...leg, entry_ids: [...new Set(leg.entry_ids)].sort() }))
     }
-  });
+  }));
   const body = {
     transport_contract: 'kentaurai-analysis-pack-v3-ui-bundle',
     analysis_contract: pack.manifest?.contract_version || 'kentaurai-analysis-pack-v3',

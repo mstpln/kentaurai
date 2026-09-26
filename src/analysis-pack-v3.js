@@ -670,7 +670,19 @@ function manifestVersions() {
 
 export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) {
   if (!env?.DB) throw new Error('DB is not configured');
-  const { round, rows } = await loadRoundIdentity(env, roundId);
+  const reportStage = typeof options.onStage === 'function' ? options.onStage : null;
+  async function stage(name,action){
+    const started=Date.now();
+    try{
+      const value=await action();
+      reportStage?.({stage:name,duration_ms:Date.now()-started,ok:true});
+      return value;
+    }catch(error){
+      reportStage?.({stage:name,duration_ms:Date.now()-started,ok:false,error_class:error?.name||'Error'});
+      throw error;
+    }
+  }
+  const { round, rows } = await stage('round_identity',()=>loadRoundIdentity(env, roundId));
   const cutoff = resolveCutoff(round, options.asOf ?? new Date().toISOString());
   const asOf = cutoff.effectiveAsOf;
   const raceIds = [...new Set(rows.map((row) => row.race_id))];
@@ -680,12 +692,12 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
   const trainerIds = [...new Set(rows.map((row) => row.trainer_id).filter(Boolean))];
   const trackIds = [...new Set(rows.map((row) => row.track_id).filter(Boolean))];
 
-  const [raceObs,entryObs,horseObs,driverObs,trainerObs,trackObs,firstPrizes,propositions,snapshots] = await Promise.all([
+  const [raceObs,entryObs,horseObs,driverObs,trainerObs,trackObs,firstPrizes,propositions,snapshots] = await stage('current_facts',()=>Promise.all([
     loadLatestObservations(env,'race',raceIds,asOf),loadLatestObservations(env,'race_entry',entryIds,asOf),
     loadLatestObservations(env,'horse',horseIds,asOf),loadLatestObservations(env,'driver',driverIds,asOf),
     loadLatestObservations(env,'trainer',trainerIds,asOf),loadLatestObservations(env,'track',trackIds,asOf),
     loadFirstPrizeAsOf(env,raceIds,asOf),loadPropositionsAsOf(env,raceIds,asOf),getOfficialHorseSnapshotsAsOf(env,horseIds,asOf)
-  ]);
+  ]));
   const missingRaceObs = raceIds.filter((id) => !raceObs.has(id));
   const missingEntryObs = entryIds.filter((id) => !entryObs.has(id));
   if (missingRaceObs.length) throw new Error(`pre-market pack cannot use mutable race state without an as-of official observation: ${missingRaceObs.join(', ')}`);
@@ -695,24 +707,28 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
     const fields = entryObs.get(id)?.fields || {};
     return !(fields.scratchSemanticsVerified === true && boolOrNull(fields.scratched) === true);
   });
-  const history = await buildRelevantHistoryForEntries(env,eligibleIds,asOf);
-  const [performance,equipment,personContext,racePriors] = await Promise.all([
-    buildPerformanceFeaturesV3ForEntries(env,eligibleIds,asOf,{relevantHistory:history}),
-    buildEquipmentResponseV1ForEntries(env,eligibleIds,asOf,{relevantHistory:history}),
-    buildPersonContextV1ForEntries(env,eligibleIds,asOf,{relevantHistory:history}),
-    buildRacePriorsV1ForEntries(env,eligibleIds,asOf)
-  ]);
-  const xlabsByRace = await buildXlabsEvidenceProfilesForRaces(env,{
+  const history = await stage('relevant_history',()=>buildRelevantHistoryForEntries(env,eligibleIds,asOf));
+  const {performance,equipment,personContext,racePriors} = await stage('derived_features',async()=>{
+    // D1 executes on one database thread. Run the heavy feature families
+    // sequentially so they do not compete for the six available connections.
+    const performance=await buildPerformanceFeaturesV3ForEntries(env,eligibleIds,asOf,{relevantHistory:history});
+    const equipment=await buildEquipmentResponseV1ForEntries(env,eligibleIds,asOf,{relevantHistory:history});
+    const personContext=await buildPersonContextV1ForEntries(env,eligibleIds,asOf,{relevantHistory:history});
+    const racePriors=await buildRacePriorsV1ForEntries(env,eligibleIds,asOf);
+    return {performance,equipment,personContext,racePriors};
+  });
+  const xlabsByRace = await stage('xlabs_profiles',()=>buildXlabsEvidenceProfilesForRaces(env,{
     raceIds,
     asOf,
     frontContenderEntryIdsByRace:{}
-  });
+  }));
   const historyIds = [...new Set([...history.values()].flatMap((item) => item.relevantHistoryUnion.map((start) => start.raceEntryId)))];
-  const [trajectories,tripScenarios] = await Promise.all([
+  const [trajectories,tripScenarios] = await stage('trajectory_trip',()=>Promise.all([
     loadTrajectories(env,historyIds,asOf),
     loadTripScenariosForEntries(env,historyIds,asOf)
-  ]);
+  ]));
   const trackAnalysisCache = new Map();
+  const trackPopulationCache = new Map();
   async function trackAnalysisForRace(raceRow, observation) {
     if (!raceRow?.track_id) return null;
     const fields = observation?.fields || {};
@@ -721,7 +737,7 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
     const distanceGroup = trackAnalysisDistanceGroup(fields.distanceM) || 'all';
     const key = [raceRow.track_id,startMethod,distanceGroup,asOf].join('|');
     if (!trackAnalysisCache.has(key)) {
-      const value = await getTrackAnalysisV1(env,raceRow.track_id,{ startMethod,distanceGroup,asOf });
+      const value = await getTrackAnalysisV1(env,raceRow.track_id,{ startMethod,distanceGroup,asOf,populationCache:trackPopulationCache });
       if (value) {
         const { generated_at: _generatedAt, ...stableValue } = value;
         trackAnalysisCache.set(key,stableValue);
@@ -731,6 +747,14 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
     }
     return trackAnalysisCache.get(key);
   }
+
+  const trackAnalysisByRace = new Map();
+  await stage('track_analysis',async()=>{
+    for(const raceId of raceIds){
+      const raceRow=rows.find((row)=>row.race_id===raceId);
+      trackAnalysisByRace.set(raceId,await trackAnalysisForRace(raceRow,raceObs.get(raceId)));
+    }
+  });
 
   const warnings = [];
   if (cutoff.clamped) warnings.push({ code: 'as_of_clamped_to_pre_market_cutoff', requested_as_of: cutoff.requestedAsOf, effective_as_of: asOf, cutoff_source: cutoff.cutoffSource });
@@ -749,7 +773,7 @@ export async function createPreMarketAnalysisPackV3(env, roundId, options = {}) 
     const xRace = xlabsByRace.get(raceId);
     const profileByEntry = new Map((xRace?.profiles || []).map((profile) => [profile.race_entry_id, profile]));
     const raceRow = legRows[0];
-    const trackAnalysis = await trackAnalysisForRace(raceRow,raceObs.get(raceId));
+    const trackAnalysis = trackAnalysisByRace.get(raceId) || null;
     const entries = legRows.map((row) => {
       const id = row.race_entry_id;
       const eq = equipment.get(id) || null;

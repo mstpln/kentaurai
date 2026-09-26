@@ -198,6 +198,40 @@ function normalizeEquipmentRow(row) {
     sourceRecordId: row.source_record_id || null
   };
 }
+function normalizeRelevantEquipment(value) {
+  if (!value || normalizeText(value.verificationStatus) === 'unknown') return null;
+  const state = {
+    shoesFront: normalizeText(value.shoesFront),
+    shoesRear: normalizeText(value.shoesRear),
+    barefootFront: normalizeBoolean(value.barefootFront),
+    barefootRear: normalizeBoolean(value.barefootRear),
+    sulkyType: normalizeText(value.sulkyType),
+    exactSulky: normalizeText(value.exactSulky)
+  };
+  const knownDimensions = STATE_FIELDS.filter((field) => state[field] != null).length;
+  if (!knownDimensions) return null;
+  return {
+    state,
+    stateKey: stableFeatureJson(state),
+    knownDimensions,
+    coverage: knownDimensions / EQUIPMENT_RESPONSE_POLICY.stateDimensions,
+    verificationStatus: value.verificationStatus || null,
+    change: parseChange(value.changeFromPreviousJson),
+    observedAt: value.observedAt || null,
+    sourceRecordId: value.sourceRecordId || null
+  };
+}
+
+function normalizeRelevantXlabs(value) {
+  if (!value) return null;
+  return {
+    first200Time: value.first200Time || null,
+    last400Time: value.last400Time || null,
+    observedAt: value.observedAt || null,
+    sourceRecordId: value.sourceRecordId || null
+  };
+}
+
 function normalizeXlabsRow(row) {
   if (!row || row.quality_status !== XLABS_TELEMETRY_VERSION) return null;
   return { first200Time: row.first_200_time || null, last400Time: row.last_400_time || null, observedAt: row.fetched_at || null, sourceRecordId: row.source_record_id || null };
@@ -409,18 +443,19 @@ export async function buildEquipmentResponseV1ForEntries(env, raceEntryIds, asOf
     ? options.relevantHistory
     : await buildRelevantHistoryForEntries(env, entryIds, requested.iso, options.relevantHistoryOptions || {});
   const cutoffByEntry = new Map(entryIds.map((entryId) => [entryId, requireInstant(relevantHistory.get(entryId)?.targetCutoff, `targetCutoff for ${entryId}`)]));
-  const horseHistory = await loadHorseHistory(env, targets.map((target) => target.horse_id));
 
-  const baseEntryIds = new Set(entryIds);
-  for (const target of targets) for (const row of horseHistory.get(target.horse_id) || []) baseEntryIds.add(row.race_entry_id);
-  let equipmentRows = await loadEquipmentRows(env, [...baseEntryIds]);
-
+  // Reuse the full, already as-of-filtered horse-history projection built by
+  // relevant-history-v1. This removes a second complete-career read plus
+  // duplicate equipment/X-Labs reads from every Step 1 export.
   const hashCache = new Map();
   const currentEquipmentByEntry = new Map();
   const trainerCutoffs = new Map();
   for (const target of targets) {
     const cutoff = cutoffByEntry.get(target.race_entry_id);
-    const current = await stateWithHash(latestAtOrBefore(equipmentRows.get(target.race_entry_id), cutoff.ms, normalizeEquipmentRow), hashCache);
+    const current = await stateWithHash(
+      normalizeRelevantEquipment(relevantHistory.get(target.race_entry_id)?.target?.equipment),
+      hashCache
+    );
     currentEquipmentByEntry.set(target.race_entry_id, current);
     if (current?.change?.status === 'changed' && current.change.type && target.trainer_id) {
       if (!trainerCutoffs.has(cutoff.iso)) trainerCutoffs.set(cutoff.iso, []);
@@ -429,25 +464,21 @@ export async function buildEquipmentResponseV1ForEntries(env, raceEntryIds, asOf
   }
 
   const trainerHistory = await loadTrainerHistory(env, trainerCutoffs, trainerHistoryLimit);
-  const trainerEntryIds = [...trainerHistory.values()].flat().map((row) => row.race_entry_id);
-  const missingTrainerEquipmentIds = [...new Set(trainerEntryIds)].filter((id) => !equipmentRows.has(id));
-  if (missingTrainerEquipmentIds.length) equipmentRows = new Map([...equipmentRows, ...await loadEquipmentRows(env, missingTrainerEquipmentIds)]);
-
-  const horseHistoryEntryIds = targets.flatMap((target) => (horseHistory.get(target.horse_id) || []).map((row) => row.race_entry_id));
-  const xlabsRows = await loadXlabsRows(env, horseHistoryEntryIds);
+  const trainerEntryIds = [...new Set([...trainerHistory.values()].flat().map((row) => row.race_entry_id))];
+  const equipmentRows = trainerEntryIds.length ? await loadEquipmentRows(env, trainerEntryIds) : new Map();
   const out = new Map();
 
   for (const target of targets) {
     const entryId = target.race_entry_id;
     const cutoff = cutoffByEntry.get(entryId);
     const current = currentEquipmentByEntry.get(entryId) || null;
-    const safeRows = safeHistoryRows(horseHistory.get(target.horse_id), cutoff.ms, entryId, target.race_id);
+    const safeRows = relevantHistory.get(entryId)?.internalFullSafeHistory || [];
     const decorated = [];
     for (const row of safeRows) {
       decorated.push({
         ...row,
-        equipment: await stateWithHash(latestAtOrBefore(equipmentRows.get(row.race_entry_id), cutoff.ms, normalizeEquipmentRow), hashCache),
-        xlabs: latestAtOrBefore(xlabsRows.get(row.race_entry_id), cutoff.ms, normalizeXlabsRow)
+        equipment: await stateWithHash(normalizeRelevantEquipment(row.equipment), hashCache),
+        xlabs: normalizeRelevantXlabs(row.xlabs)
       });
     }
 

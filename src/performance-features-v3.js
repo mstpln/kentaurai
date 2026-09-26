@@ -349,15 +349,33 @@ async function loadRaceContexts(env, raceIds) {
   return out;
 }
 
-async function snapshotContextForHistory(env, history, raceContext, cache) {
-  const cutoff = history.targetCutoff;
-  const key = `${history.target.raceId}|${cutoff}`;
-  if (cache.has(key)) return cache.get(key);
-  const horseIds = [...new Set((raceContext?.entries || []).filter((entry) => !entry.scratched).map((entry) => entry.horseId).filter(Boolean))];
-  const snapshots = horseIds.length ? await getOfficialHorseSnapshotsAsOf(env, horseIds, cutoff) : new Map();
-  const context = { snapshots, raceContext };
-  cache.set(key, context);
-  return context;
+async function buildSnapshotContexts(env,histories,raceContexts){
+  const groups=new Map();
+  for(const history of histories.values()){
+    const cutoff=history.targetCutoff;
+    if(!groups.has(cutoff))groups.set(cutoff,new Set());
+    const raceContext=raceContexts.get(history.target.raceId);
+    for(const entry of raceContext?.entries||[]){
+      if(!entry.scratched&&entry.horseId)groups.get(cutoff).add(entry.horseId);
+    }
+  }
+  const snapshotsByCutoff=new Map();
+  for(const [cutoff,horseIds] of groups){
+    snapshotsByCutoff.set(
+      cutoff,
+      horseIds.size?await getOfficialHorseSnapshotsAsOf(env,[...horseIds],cutoff):new Map()
+    );
+  }
+  const out=new Map();
+  for(const history of histories.values()){
+    const key=`${history.target.raceId}|${history.targetCutoff}`;
+    if(out.has(key))continue;
+    out.set(key,{
+      snapshots:snapshotsByCutoff.get(history.targetCutoff)||new Map(),
+      raceContext:raceContexts.get(history.target.raceId)||null
+    });
+  }
+  return out;
 }
 
 function buildCapacity(history, snapshot, asOf) {
@@ -741,7 +759,10 @@ export async function buildPerformanceFeaturesV3ForEntries(env, raceEntryIds, as
     : await buildRelevantHistoryForEntries(env, entryIds, asOf, historyOptions);
   const raceIds = [...new Set([...histories.values()].map((history) => history.target.raceId))];
   const raceContexts = await loadRaceContexts(env, raceIds);
-  const snapshotCache = new Map();
+  // All current Step 1 entries normally share the same pre-market cutoff.
+  // Load the union of opponent snapshots once per cutoff instead of repeating
+  // the four snapshot families for every target race.
+  const snapshotContexts = await buildSnapshotContexts(env,histories,raceContexts);
   const out = new Map();
 
   for (const entryId of entryIds) {
@@ -751,7 +772,10 @@ export async function buildPerformanceFeaturesV3ForEntries(env, raceEntryIds, as
       throw new Error('unexpected relevant-history contract version');
     }
     const featureAsOf = history.targetCutoff;
-    const snapshotContext = await snapshotContextForHistory(env, history, raceContexts.get(history.target.raceId), snapshotCache);
+    const snapshotContext = snapshotContexts.get(`${history.target.raceId}|${featureAsOf}`) || {
+      snapshots:new Map(),
+      raceContext:raceContexts.get(history.target.raceId)||null
+    };
     const snapshot = snapshotContext.snapshots.get(history.target.horseId) || null;
 
     out.set(entryId, {
