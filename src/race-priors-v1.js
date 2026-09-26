@@ -43,7 +43,7 @@ function chunks(values, size = 80) {
   return out;
 }
 
-const RACE_PRIOR_SHARD_YEARS = 2;
+const RACE_PRIOR_SHARD_YEARS = 1;
 const RACE_PRIOR_CONTEXT_BATCH_SIZE = 2;
 
 function minIso(...values) {
@@ -834,12 +834,11 @@ async function buildRaceContext(env, target, requested) {
   const shapeParts=[];
   const specificRows=[];
   for(const shard of shards){
-    // Aggregate outcome and winner-shape rows share the same materialized
-    // nationwide shard in one statement instead of rebuilding it three times.
-    const [combined,specific]=await Promise.all([
-      loadAggregateAndShapeLevelsShard(env,context,shard),
-      loadSpecificContextRowsShard(env,context,shard)
-    ]);
+    // Keep historical population statements sequential. D1 is CPU-bound on a
+    // single database and concurrent wide reads only compete for the same
+    // budget. Annual shards bound each statement without changing semantics.
+    const combined=await loadAggregateAndShapeLevelsShard(env,context,shard);
+    const specific=await loadSpecificContextRowsShard(env,context,shard);
     aggregateParts.push(combined.aggregateLevels);
     shapeParts.push(combined.shapeLevels);
     specificRows.push(...specific);
