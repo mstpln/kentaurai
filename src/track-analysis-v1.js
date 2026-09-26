@@ -306,6 +306,12 @@ async function loadEarly500Rows(env, { trackId = null, countryCode = null, exclu
     checkpointBindings.push(asOf);
   }
 
+  // Exact-track reads already have a narrow eligible-entry population and are
+  // better served by entry-first checkpoint access. Country baselines need the
+  // reconstruction/checkpoint-leading index to avoid scanning every checkpoint.
+  const checkpointIndex = trackId
+    ? 'idx_position_checkpoints_entry_source'
+    : 'idx_position_checkpoints_track_analysis';
   const { results } = await env.DB.prepare(`
     WITH eligible_entries AS MATERIALIZED (
       SELECT re.id AS race_entry_id,r.id AS race_id,r.race_date,
@@ -327,7 +333,7 @@ async function loadEarly500Rows(env, { trackId = null, countryCode = null, exclu
           ORDER BY julianday(sr.fetched_at) DESC,rpc.id DESC
         ) AS row_number
       FROM eligible_entries e
-      JOIN race_position_checkpoints rpc INDEXED BY idx_position_checkpoints_track_analysis
+      JOIN race_position_checkpoints rpc INDEXED BY ${checkpointIndex}
         ON rpc.race_entry_id=e.race_entry_id
       JOIN source_records sr ON sr.id=rpc.source_record_id
       WHERE ${checkpointConditions.join(' AND ')}
