@@ -78,7 +78,7 @@ test('production release validates and deploys Cloudflare usage runtime secrets 
   assert.match(releaseWorkflow, /d\?\.result\?\.type!==['"]secret_text['"]/);
   assert.doesNotMatch(releaseWorkflow, /echo\s+["']?\$CLOUDFLARE_USAGE_API_TOKEN/);
   assert.doesNotMatch(releaseWorkflow, /cat\s+["']?\$runtime_secrets_file/);
-  assert.match(wrangler, /"secrets"\s*:\s*\[[\s\S]*"CLOUDFLARE_ACCOUNT_ID"[\s\S]*"CLOUDFLARE_USAGE_API_TOKEN"[\s\S]*\]/);
+  assert.match(wrangler, /"secrets"\s*:\s*\{[\s\S]*"required"\s*:\s*\[[\s\S]*"CLOUDFLARE_ACCOUNT_ID"[\s\S]*"CLOUDFLARE_USAGE_API_TOKEN"[\s\S]*\][\s\S]*\}/);
 });
 
 test('production release verifies required migrations and private observability routes', () => {
