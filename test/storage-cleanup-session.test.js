@@ -15,6 +15,7 @@ test('cleanup session resumes one active operation and a completed operation can
   assert.equal(created.status, 'running');
   assert.equal(created.continuationCount, 1);
   assert.equal(created.maxContinuations, 48);
+  assert.equal(created.auditVerified, false);
   assert.equal(created.targets.length, 5);
 
   const cursor = 'cGF5bG9hZA.c2lnbmF0dXJl';
@@ -160,4 +161,20 @@ test('completed targets are monotonic within a cleanup session', async () => {
   const target = resumed.targets.find((item) => item.target === 'horse_record');
   assert.equal(target.complete, true);
   assert.equal(target.cursor, null);
+});
+
+
+test('cleanup session reports a bound integrity audit', async () => {
+  const { db, env } = createTestEnv();
+  const created = await startOrResumeStorageCleanupSession(env, { source_sha: SOURCE_SHA });
+  db.prepare(`
+    INSERT INTO storage_cleanup_session_audits(session_id,source_sha)
+    VALUES (?,?)
+  `).run(created.sessionId, SOURCE_SHA);
+
+  const resumed = await startOrResumeStorageCleanupSession(env, {
+    session_id: created.sessionId,
+    source_sha: SOURCE_SHA
+  });
+  assert.equal(resumed.auditVerified, true);
 });
