@@ -342,3 +342,83 @@ test('snapshot as-of observation join has a dedicated snapshot lookup index', ()
   `).all('synthetic-horse');
   assert.match(JSON.stringify(plan), /idx_official_snapshot_observations_snapshot_lookup/);
 });
+
+
+test('legacy base snapshots remain visible before a later identical observation reuses them', async () => {
+  const { db, env } = createTestEnv();
+  seedEntities(db);
+  addSource(db, 'legacy-base-source', '2026-09-10T10:00:00Z', 'legacy-base');
+  db.prepare(`
+    INSERT INTO official_snapshot_source_sync
+      (source_record_id,status,horse_profile_count,horse_stat_count,horse_record_count,person_stat_count)
+    VALUES ('legacy-base-source','complete',1,1,1,1)
+  `).run();
+  db.prepare(`
+    INSERT INTO horse_profile_snapshots
+      (id,horse_id,observed_at,age_years,source_record_id)
+    VALUES ('legacy-profile','horse-a','2026-09-10T10:00:00Z',4,'legacy-base-source')
+  `).run();
+  db.prepare(`
+    INSERT INTO horse_stat_snapshots
+      (id,horse_id,observed_at,snapshot_scope,stat_year,starts,earnings_raw,wins,seconds,thirds,
+       win_percentage_raw,place_percentage_raw,earnings_per_start_raw,start_points,source_record_id)
+    VALUES (
+      'legacy-life','horse-a','2026-09-10T10:00:00Z','life',NULL,10,456700,3,2,1,
+      3000,6000,45670,1200,'legacy-base-source'
+    )
+  `).run();
+  db.prepare(`
+    INSERT INTO horse_record_snapshots
+      (id,horse_id,observed_at,record_scope,stat_year,record_ordinal,code,start_method,distance_group,
+       time_minutes,time_seconds,time_tenths,place,source_record_id)
+    VALUES (
+      'legacy-current','horse-a','2026-09-10T10:00:00Z','current',NULL,0,'aM','auto','medium',
+      1,14,5,NULL,'legacy-base-source'
+    )
+  `).run();
+  db.prepare(`
+    INSERT INTO person_stat_snapshots
+      (id,person_type,person_id,observed_at,stat_year,starts,earnings_raw,wins,seconds,thirds,
+       win_percentage_raw,source_record_id)
+    VALUES (
+      'legacy-driver','driver','driver-a','2026-09-10T10:00:00Z',2026,100,1000000,20,15,10,
+      2000,'legacy-base-source'
+    )
+  `).run();
+
+  addSource(db, 'same-later-source', '2026-09-12T10:00:00Z', 'same-later');
+  await putPayload(env, 'same-later', payload());
+  await syncOfficialSnapshotsFromSource(env, 'same-later-source');
+
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS n FROM official_snapshot_observations WHERE source_record_id='legacy-base-source'").get().n,
+    0,
+    'the regression must exercise a pre-observation legacy base source'
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS n FROM official_snapshot_observations WHERE source_record_id='same-later-source' AND factual_changed=0").get().n,
+    4
+  );
+
+  const before = await getOfficialHorseSnapshotsAsOf(env, ['horse-a'], '2026-09-11T00:00:00Z');
+  const beforeHorse = before.get('horse-a');
+  assert.equal(beforeHorse.age.sourceRecordId, 'legacy-base-source');
+  assert.equal(beforeHorse.officialStatistics.life.sourceRecordId, 'legacy-base-source');
+  assert.equal(beforeHorse.currentRecord.sourceRecordId, 'legacy-base-source');
+
+  const beforeDriver = await getOfficialPersonAnnualSnapshotsAsOf(
+    env, 'driver', ['driver-a'], '2026-09-11T00:00:00Z', 2026
+  );
+  assert.equal(beforeDriver.get('driver-a').sourceRecordId, 'legacy-base-source');
+
+  const after = await getOfficialHorseSnapshotsAsOf(env, ['horse-a'], '2026-09-13T00:00:00Z');
+  const afterHorse = after.get('horse-a');
+  assert.equal(afterHorse.age.sourceRecordId, 'same-later-source');
+  assert.equal(afterHorse.officialStatistics.life.sourceRecordId, 'same-later-source');
+  assert.equal(afterHorse.currentRecord.sourceRecordId, 'same-later-source');
+
+  const afterDriver = await getOfficialPersonAnnualSnapshotsAsOf(
+    env, 'driver', ['driver-a'], '2026-09-13T00:00:00Z', 2026
+  );
+  assert.equal(afterDriver.get('driver-a').sourceRecordId, 'same-later-source');
+});
