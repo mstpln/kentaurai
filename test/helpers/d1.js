@@ -117,7 +117,8 @@ export function createTestEnv() {
     '../../migrations/0042_cost_storage_safety_v1.sql',
     '../../migrations/0043_storage_cleanup_executor_v1.sql',
     '../../migrations/0044_storage_cleanup_resume_state.sql',
-    '../../migrations/0045_storage_cleanup_sessions.sql'
+    '../../migrations/0045_storage_cleanup_sessions.sql',
+    '../../migrations/0046_snapshot_observation_lookup_index.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }
