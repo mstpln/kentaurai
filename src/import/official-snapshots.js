@@ -487,7 +487,7 @@ export async function getOfficialHorseSnapshotsAsOf(env, horseIds, asOf) {
         WHERE NOT (oso.source_record_id=base.source_record_id AND oso.observed_at=base.observed_at)
       ), ranked AS (
         SELECT events.*,
-          ROW_NUMBER() OVER (PARTITION BY events.horse_id ORDER BY julianday(events.effective_observed_at) DESC, events.id DESC) AS rn
+          ROW_NUMBER() OVER (PARTITION BY events.horse_id ORDER BY julianday(events.effective_observed_at) DESC, events.effective_source_record_id DESC, events.id DESC) AS rn
         FROM events
         JOIN official_snapshot_source_sync os ON os.source_record_id=events.effective_source_record_id AND os.status='complete'
         JOIN source_records sr ON sr.id=events.effective_source_record_id
@@ -519,7 +519,7 @@ export async function getOfficialHorseSnapshotsAsOf(env, horseIds, asOf) {
         WHERE NOT (oso.source_record_id=base.source_record_id AND oso.observed_at=base.observed_at)
       ), ranked AS (
         SELECT events.*,
-          ROW_NUMBER() OVER (PARTITION BY events.horse_id,events.snapshot_scope ORDER BY julianday(events.effective_observed_at) DESC, events.id DESC) AS rn
+          ROW_NUMBER() OVER (PARTITION BY events.horse_id,events.snapshot_scope ORDER BY julianday(events.effective_observed_at) DESC, events.effective_source_record_id DESC, events.id DESC) AS rn
         FROM events
         JOIN official_snapshot_source_sync os ON os.source_record_id=events.effective_source_record_id AND os.status='complete'
         JOIN source_records sr ON sr.id=events.effective_source_record_id
@@ -550,7 +550,7 @@ export async function getOfficialHorseSnapshotsAsOf(env, horseIds, asOf) {
         WHERE NOT (oso.source_record_id=base.source_record_id AND oso.observed_at=base.observed_at)
       ), ranked AS (
         SELECT events.*,
-          ROW_NUMBER() OVER (PARTITION BY events.horse_id ORDER BY julianday(events.effective_observed_at) DESC, events.id DESC) AS rn
+          ROW_NUMBER() OVER (PARTITION BY events.horse_id ORDER BY julianday(events.effective_observed_at) DESC, events.effective_source_record_id DESC, events.id DESC) AS rn
         FROM events
         JOIN official_snapshot_source_sync os ON os.source_record_id=events.effective_source_record_id AND os.status='complete'
         JOIN source_records sr ON sr.id=events.effective_source_record_id
@@ -617,7 +617,7 @@ export async function getOfficialPersonAnnualSnapshotsAsOf(env, personType, pers
         WHERE NOT (oso.source_record_id=base.source_record_id AND oso.observed_at=base.observed_at)
       ), ranked AS (
         SELECT events.*,
-          ROW_NUMBER() OVER (PARTITION BY events.person_id ORDER BY julianday(events.effective_observed_at) DESC, events.id DESC) AS rn
+          ROW_NUMBER() OVER (PARTITION BY events.person_id ORDER BY julianday(events.effective_observed_at) DESC, events.effective_source_record_id DESC, events.id DESC) AS rn
         FROM events
         JOIN official_snapshot_source_sync os ON os.source_record_id=events.effective_source_record_id AND os.status='complete'
         JOIN source_records sr ON sr.id=events.effective_source_record_id
