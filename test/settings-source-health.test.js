@@ -23,7 +23,7 @@ function insertOfficialHistorical(db, overrides = {}) {
     reused_races: 4,
     consecutive_errors: 0,
     last_error: null,
-    last_run_at: '2099-09-21T19:59:00Z',
+    last_run_at: '2099-09-21T19:00:00Z',
     ...overrides
   };
   db.prepare(`
@@ -123,6 +123,20 @@ test('persistent historical jobs drive source health and date progress without r
   assert.equal(official.processing.processedRaces, 120);
   assert.equal(xlabs.status, 'never_run');
   assert.equal(xlabs.processing.status, 'never_run');
+});
+
+test('recent explicitly run historical work still appears active while automatic history remains disabled', async () => {
+  const { env, db } = createTestEnv();
+  insertOfficialHistorical(db, {
+    last_run_at: '2099-09-21T19:55:00Z'
+  });
+
+  const result = await getSettingsSourceHealth(env, { now: NOW });
+  const official = result.sources.find((source) => source.id === 'official');
+
+  assert.equal(official.processing.status, 'running');
+  assert.equal(official.processing.paused, false);
+  assert.equal(official.issue, null);
 });
 
 test('intentionally paused official history does not raise a stale or retry alert', async () => {
@@ -314,7 +328,7 @@ test('multiple historical periods stay visible as separate Settings jobs', async
     status: 'running',
     processed_dates: 365,
     processed_races: 4000,
-    last_run_at: '2099-09-21T19:59:00Z'
+    last_run_at: '2099-09-21T19:00:00Z'
   });
   db.prepare("UPDATE historical_backfill_jobs SET created_at='2099-09-20T00:00:00Z' WHERE id='official-history-current'").run();
   db.prepare("UPDATE historical_backfill_jobs SET created_at='2099-09-21T00:00:00Z' WHERE id='official-history-extension'").run();
