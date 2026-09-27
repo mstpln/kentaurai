@@ -7,6 +7,7 @@ import {
   billingCycleFromAnchor,
   getAutomationControl,
   getCloudflareUsage,
+  getDriftOverview,
   setAutomationControl
 } from '../src/settings-drift.js';
 import { createTestEnv } from './helpers/d1.js';
@@ -281,6 +282,64 @@ test('D1 rows read shows verified published-pricing overage when Cloudflare omit
   assert.equal(writes.billingCostSource, 'published_pricing');
 });
 
+test('Drift estimates per-workflow D1 usage from daily Cloudflare totals and monthly threshold position', async () => {
+  const { env } = createTestEnv();
+  env.CLOUDFLARE_ACCOUNT_ID = 'account-synthetic';
+  env.CLOUDFLARE_USAGE_API_TOKEN = 'usage-token-synthetic';
+  await env.DB.prepare(`
+    INSERT INTO import_runs
+      (id,source_type,started_at,finished_at,status,inserted_count,updated_count,skipped_count,error_count)
+    VALUES
+      ('run-a','official_live','2026-09-27T05:15:00Z','2026-09-27T05:20:00Z','success',300,0,0,0),
+      ('run-b','xlabs_daily','2026-09-27T05:20:00Z','2026-09-27T05:24:00Z','success',100,0,0,0)
+  `).run();
+
+  const fetchImpl = async (url, options = {}) => {
+    if (String(url).endsWith('/billable-usage/info')) {
+      return new Response(JSON.stringify({
+        success:true,
+        result:{ subscriptions:[{ id:'a', billing_cycle_anchor_timestamp:'2026-09-12T00:00:00Z', start_timestamp:'2026-09-12T00:00:00Z' }] }
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    if (String(url).endsWith('/graphql')) {
+      const body = JSON.parse(options.body);
+      assert.match(body.query, /dimensions \{ date databaseId \}/);
+      return new Response(JSON.stringify({
+        data:{ viewer:{ accounts:[{
+          d1AnalyticsAdaptiveGroups:[
+            { dimensions:{ date:'2026-09-27', databaseId:'db-a' }, sum:{ rowsRead:30_000_000_000, rowsWritten:60_000_000 } }
+          ],
+          d1StorageAdaptiveGroups:[
+            { dimensions:{ date:'2026-09-27', databaseId:'db-a' }, max:{ databaseSizeBytes:1_000_000_000 } }
+          ]
+        }] } }
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    if (String(url).includes('/billable-usage?')) {
+      return new Response(JSON.stringify({ success:true, result:[] }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    throw new Error('unexpected URL');
+  };
+
+  const drift = await getDriftOverview(env, { fetchImpl, now:'2026-09-27T18:00:00Z' });
+  assert.equal(Object.prototype.hasOwnProperty.call(drift.cloudflare, '_dailyUsage'), false);
+  assert.match(drift.usageEstimateNote, /uppskattning/i);
+
+  const a = drift.recentRunEstimates['run-a'];
+  const b = drift.recentRunEstimates['run-b'];
+  assert.equal(a.approximate, true);
+  assert.equal(a.rowsRead, 22_500_000_000);
+  assert.equal(a.rowsWritten, 45_000_000);
+  assert.equal(a.sameDayRunCount, 2);
+  assert.equal(a.allocationShare, 0.75);
+  assert.equal(a.estimatedReadCostUsd, 3.75);
+  assert.equal(a.estimatedWriteCostUsd, 7.5);
+  assert.equal(a.estimatedCostUsd, 11.25);
+  assert.equal(b.rowsRead, 7_500_000_000);
+  assert.equal(b.rowsWritten, 15_000_000);
+  assert.equal(b.estimatedCostUsd, 3.75);
+});
+
 test('Cloudflare usage does not turn missing analytics datasets into zero usage', async () => {
   const { env } = createTestEnv();
   env.CLOUDFLARE_ACCOUNT_ID = 'account-synthetic';
@@ -423,6 +482,17 @@ test('usage UI renders verified per-metric cost in the right-aligned card header
   assert.match(backend, /R2 · Lagring/);
   assert.match(backend, /R2 · Class A/);
   assert.match(backend, /R2 · Class B/);
+});
+
+test('recent activity UI is expandable and shows approximate D1 reads, writes and USD cost', () => {
+  const source = readFileSync(new URL('../src/settings-drift-ui.js', import.meta.url), 'utf8');
+  assert.match(source, /<details class="settings-drift-activity-row"/);
+  assert.match(source, /settings-drift-activity-chevron/);
+  assert.match(source, /Beräknade D1 reads/);
+  assert.match(source, /Beräknade D1 writes/);
+  assert.match(source, /Beräknad D1-kostnad/);
+  assert.match(source, /recentRunEstimates/);
+  assert.match(source, /usageEstimateNote/);
 });
 
 test('billing period UI renders the exclusive cycle end as the previous inclusive date', () => {
