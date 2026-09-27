@@ -24,10 +24,11 @@ export async function archiveRawSnapshot(env, {
   rightsStatus = null,
   metadata = null
 }) {
+  const normalizedSourceType = String(sourceType || '').trim();
+  if (!/^[a-z0-9][a-z0-9_-]{0,79}$/.test(normalizedSourceType)) throw new Error('raw snapshot source type is invalid');
   const rawBody = typeof body === 'string' ? body : JSON.stringify(body);
   const hash = await sha256Hex(rawBody);
-  const day = fetchedAt.slice(0, 10);
-  const objectKey = `raw/${sourceType}/${day}/${hash}.${normalizedExtension(extension)}`;
+  const objectKey = `raw/${normalizedSourceType}/${hash}.${normalizedExtension(extension)}`;
 
   if (externalId != null) {
     const existing = await env.DB.prepare(`
@@ -35,7 +36,7 @@ export async function archiveRawSnapshot(env, {
       FROM source_records
       WHERE source_type = ? AND external_id = ? AND fetched_at = ?
       LIMIT 1
-    `).bind(sourceType, externalId, fetchedAt).first();
+    `).bind(normalizedSourceType, externalId, fetchedAt).first();
     if (existing) {
       if (existing.content_hash && existing.content_hash !== hash) {
         throw new Error('source snapshot conflict: same external id and timestamp has different content');
@@ -50,10 +51,13 @@ export async function archiveRawSnapshot(env, {
   }
 
   if (env.RAW_BUCKET) {
-    await env.RAW_BUCKET.put(objectKey, rawBody, {
-      httpMetadata: { contentType },
-      customMetadata: { sourceType, fetchedAt, contentHash: hash, contentType }
-    });
+    const existingObject = typeof env.RAW_BUCKET.head === 'function' ? await env.RAW_BUCKET.head(objectKey) : null;
+    if (!existingObject) {
+      await env.RAW_BUCKET.put(objectKey, rawBody, {
+        httpMetadata: { contentType },
+        customMetadata: { sourceType: normalizedSourceType, contentHash: hash, contentType }
+      });
+    }
   }
 
   const sourceRecordId = randomId('src');
@@ -63,7 +67,7 @@ export async function archiveRawSnapshot(env, {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     sourceRecordId,
-    sourceType,
+    normalizedSourceType,
     externalId,
     sourceUrl,
     fetchedAt,

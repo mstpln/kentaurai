@@ -3,6 +3,7 @@ import { persistAnalysisFormSnapshots } from './analysis-form-snapshot-v1.js';
 import { requireLatestStep1LockV1 } from './analysis-step1-revision-v1.js';
 import { buildDataCoverageReport } from './data-coverage-v2.js';
 import { recordExternalAnalysisExport } from './external-analysis-flow-v1.js';
+import { observeD1Operation } from './cost-safety.js';
 
 export const F3_PRIVATE_UI_VERSION = 'private-ui-observability-v1-f3';
 
@@ -159,7 +160,7 @@ export async function buildF3WorkflowState(env, roundId, now = new Date().toISOS
   };
 }
 
-export async function createF3AnalysisPackBundleResponse(env, roundId, { asOf = null } = {}) {
+async function createF3AnalysisPackBundleResponseInner(env, roundId, { asOf = null } = {}) {
   function logStage(result){
     console.info(JSON.stringify({
       event:'step1_export_stage',
@@ -229,6 +230,13 @@ export async function createF3AnalysisPackBundleResponse(env, roundId, { asOf = 
   return jsonResponse(body, 200, {
     'content-disposition': `attachment; filename="kentaurai-analysis-pack-v3_${safeRound}.json"`
   });
+}
+
+export async function createF3AnalysisPackBundleResponse(env, roundId, options = {}) {
+  const observed = await observeD1Operation(env, 'step1_export', (observedEnv) =>
+    createF3AnalysisPackBundleResponseInner(observedEnv, roundId, options)
+  );
+  return observed.value;
 }
 
 export async function buildF3OperationalStatus(env, now = new Date().toISOString()) {

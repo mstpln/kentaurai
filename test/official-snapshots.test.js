@@ -8,6 +8,7 @@ import {
   parseOfficialRecord,
   syncOfficialSnapshotsFromSource
 } from '../src/import/official-snapshots.js';
+import { planOfficialSnapshotCleanup } from '../src/storage-cleanup-plans.js';
 
 function seedEntities(db) {
   db.prepare("INSERT INTO horses (id, canonical_name) VALUES ('horse-a','Synthetic Horse')").run();
@@ -270,4 +271,57 @@ test('A4 person as-of reader returns every requested ID across the D1 parameter 
   assert.equal(snapshots.get('bulk-driver-127').starts, 127);
   assert.equal(snapshots.get('bulk-driver-128'), null);
   assert.equal([...snapshots.keys()].filter((id) => id === 'bulk-driver-1').length, 1);
+});
+
+test('identical factual observations reuse change-points while retaining source provenance', async () => {
+  const { db, env } = createTestEnv();
+  seedEntities(db);
+  for (const [id, date] of [['same-a','2026-09-10T10:00:00Z'],['same-b','2026-09-11T10:00:00Z']]) {
+    addSource(db, id, date, id);
+    await putPayload(env, id, payload());
+    await syncOfficialSnapshotsFromSource(env, id);
+  }
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM horse_profile_snapshots').get().n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM horse_stat_snapshots').get().n, 2);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM person_stat_snapshots').get().n, 2);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM official_snapshot_observations WHERE source_record_id='same-b' AND factual_changed=0").get().n, 7);
+  const current = await getOfficialHorseSnapshotsAsOf(env, ['horse-a'], '2026-09-12T00:00:00Z');
+  assert.equal(current.get('horse-a').age.sourceRecordId, 'same-b');
+});
+
+test('A to B to A creates three sequential change-points and preserves null/value transitions', async () => {
+  const { db, env } = createTestEnv();
+  seedEntities(db);
+  const cases = [
+    ['state-a1','2026-09-10T10:00:00Z',4,1200],
+    ['state-b','2026-09-11T10:00:00Z',5,null],
+    ['state-a2','2026-09-12T10:00:00Z',4,1200]
+  ];
+  for (const [id, date, age, startPoints] of cases) {
+    addSource(db, id, date, id);
+    const body = payload({ age });
+    body.races[0].starts[0].horse.statistics.life.startPoints = startPoints;
+    await putPayload(env, id, body);
+    await syncOfficialSnapshotsFromSource(env, id);
+  }
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM horse_profile_snapshots').get().n, 3);
+  assert.deepEqual(db.prepare("SELECT start_points FROM horse_stat_snapshots WHERE snapshot_scope='life' ORDER BY observed_at").all().map((row) => row.start_points), [1200, null, 1200]);
+});
+
+test('snapshot cleanup dry-run removes only sequential repeats and mutates nothing', async () => {
+  const { db, env } = createTestEnv();
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('cleanup-horse','Cleanup Horse')").run();
+  for (let index = 0; index < 6; index += 1) {
+    const source = `cleanup-source-${index}`;
+    addSource(db, source, `2026-09-${10 + index}T10:00:00Z`, source);
+    db.prepare('INSERT INTO horse_profile_snapshots (id,horse_id,observed_at,age_years,source_record_id) VALUES (?,?,?,?,?)')
+      .run(`cleanup-${index}`, 'cleanup-horse', `2026-09-${10 + index}T10:00:00Z`, [4,4,4,5,5,4][index], source);
+  }
+  const first = await planOfficialSnapshotCleanup(env, { family: 'horse_profile', limit: 20 });
+  const second = await planOfficialSnapshotCleanup(env, { family: 'horse_profile', limit: 20 });
+  assert.deepEqual(first, second);
+  assert.equal(first.rowsRetained, 3);
+  assert.equal(first.rowsRemovable, 3);
+  assert.equal(JSON.stringify(first).includes('cleanup-'), false);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM horse_profile_snapshots').get().n, 6);
 });
