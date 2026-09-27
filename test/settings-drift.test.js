@@ -131,6 +131,28 @@ test('Cloudflare usage uses verified API values and never starts from zero estim
 });
 
 
+
+test('Cloudflare usage does not turn missing analytics datasets into zero usage', async () => {
+  const { env } = createTestEnv();
+  env.CLOUDFLARE_ACCOUNT_ID = 'account-synthetic';
+  env.CLOUDFLARE_USAGE_API_TOKEN = 'usage-token-synthetic';
+  const fetchImpl = async (url) => {
+    if (String(url).endsWith('/billable-usage/info')) {
+      return new Response(JSON.stringify({
+        success:true,
+        result:{ subscriptions:[{ id:'a', billing_cycle_anchor_timestamp:'2026-09-12T00:00:00Z', start_timestamp:'2026-09-12T00:00:00Z' }] }
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    if (String(url).endsWith('/graphql')) {
+      return new Response(JSON.stringify({ data:{ viewer:{ accounts:[{}] } } }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    throw new Error('unexpected URL');
+  };
+  const usage = await getCloudflareUsage(env, { fetchImpl, now:'2026-09-27T18:00:00Z' });
+  assert.equal(usage.available, false);
+  assert.deepEqual(usage.metrics, []);
+});
+
 test('Cloudflare usage refuses to guess when active subscription billing anchors disagree', async () => {
   const { env } = createTestEnv();
   env.CLOUDFLARE_ACCOUNT_ID = 'account-synthetic';
