@@ -226,6 +226,20 @@ function visibleHistoricalJobs(jobs, nowMs) {
   }));
 }
 
+async function latestDailyOfficial(env) {
+  return env.DB.prepare(`
+    SELECT id, start_date, end_date, next_date, next_race_index, status,
+           processed_dates, processed_races, reused_races, consecutive_errors,
+           last_error, last_run_at,
+           CASE WHEN consecutive_errors > 0 THEN lease_until ELSE NULL END AS retry_after,
+           created_at, updated_at
+    FROM historical_backfill_jobs
+    WHERE start_date = end_date
+    ORDER BY end_date DESC, datetime(created_at) DESC, id DESC
+    LIMIT 1
+  `).first();
+}
+
 async function latestDailyXlabs(env) {
   return env.DB.prepare(`
     SELECT id, start_date, end_date, next_date, next_race_index, status,
@@ -321,6 +335,7 @@ export async function getSettingsSourceHealth(env, options = {}) {
   const [
     officialHistoricalJobs,
     xlabsHistoricalJobs,
+    officialDaily,
     xlabsDaily,
     officialCapture,
     officialNormalize,
@@ -329,6 +344,7 @@ export async function getSettingsSourceHealth(env, options = {}) {
   ] = await Promise.all([
     historicalOfficialJobs(env),
     historicalXlabsJobs(env),
+    latestDailyOfficial(env),
     latestDailyXlabs(env),
     latestRun(env, 'official_live_scheduled_capture'),
     latestRun(env, 'official_live_normalize_auto'),
@@ -346,6 +362,7 @@ export async function getSettingsSourceHealth(env, options = {}) {
     historicalJob: officialHistorical,
     historicalJobs: officialHistoricalJobs,
     historicalProcessingState: officialProcessing,
+    supportingJobs: officialDaily ? [{ job: officialDaily, scope: 'daily' }] : [],
     runs: [officialCapture, officialNormalize].filter(Boolean),
     fallbackRun: officialFallback,
     nowMs
