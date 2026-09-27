@@ -1,4 +1,5 @@
 ## Broad cost/storage QA follow-up
+- The cleanup runner now records cumulative D1 rows read/written across its API requests and stops without automatic continuation at 1,000,000 reads or 100,000 writes in one run; this prevents a pathologically expensive scan from being repeated by run-until-complete chaining.
 - Automatic live normalization is restricted to the recent three-day recovery window and migration `0048_live_pending_cost_indexes.sql` adds narrow pending-game and failed-normalization indexes so old captured history is not scanned during the morning loop.
 - Cleanup workflow now refuses to run unless checked-out `main` exactly matches the latest successful production-release SHA, preventing a newer runner from controlling an older deployed Worker.
 - Integrity preflight also fails on unfinished `started` cleanup batches or raw rewrites that reached zero legacy D1 references without a verified legacy-object deletion, covering interruption/crash residue before another destructive session.
