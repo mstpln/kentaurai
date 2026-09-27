@@ -1,4 +1,8 @@
 ## Broad cost/storage QA follow-up
+- Cleanup workflow now refuses to run unless checked-out `main` exactly matches the latest successful production-release SHA, preventing a newer runner from controlling an older deployed Worker.
+- Integrity preflight also fails on unfinished `started` cleanup batches or raw rewrites that reached zero legacy D1 references without a verified legacy-object deletion, covering interruption/crash residue before another destructive session.
+- Cost observation of D1 `.first()` reads is bounded to one-row metadata-returning SQL instead of expanding point reads into full-result scans.
+- Settings evaluates the three most recent automatic daily jobs per source, so a newer healthy day cannot hide an older failure still inside the bounded catch-up window.
 - Branch: `fix/storage-cleanup-legacy-provenance` / PR #284.
 - The production cleanup execute run started during review was cancelled before completion; no automatic continuation was queued, the temporary cleanup credential was removed and the post-cancel Worker health check passed.
 - Deep review found that legacy duplicate snapshot rows created before `official_snapshot_observations` could lose source/as-of provenance when deleted. Cleanup now materializes the missing observation on the retained change-point before deletion and marks duplicate observations as `factual_changed=0`.
