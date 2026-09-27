@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import worker from '../src/index.js';
+import { createTestEnv } from './helpers/d1.js';
 import {
   MAX_HISTORICAL_CHECKPOINTS_PER_BATCH,
   runHistoricalBackfillBatch
@@ -85,6 +87,17 @@ for (const [label, runBatch, maximum] of BATCHES) {
     assert.deepEqual(committed, [1]);
   });
 }
+
+test('legacy minute cron is ignored without writing an orchestrator run', async () => {
+  const { env, db } = createTestEnv();
+  const queued = [];
+  const result = worker.scheduled({ cron: '* * * * *', scheduledTime: Date.now() }, env, {
+    waitUntil(promise) { queued.push(promise); }
+  });
+  await Promise.all(queued);
+  assert.deepEqual(await result, { skipped:true, reason:'unsupported_cron', cron:'* * * * *' });
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM import_runs WHERE source_type = 'scheduled_orchestrator'").get().n, 0);
+});
 
 test('automatic maintenance is reduced to one bounded morning schedule', () => {
   const wrangler = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
