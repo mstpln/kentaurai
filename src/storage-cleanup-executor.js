@@ -78,6 +78,24 @@ function snapshotOrderTuple(family, row, columns) {
   return columns.map((column) => snapshotOrderValue(family, row, column));
 }
 
+function snapshotObservationIdentity(family, row) {
+  if (family === 'horse_profile') {
+    return { entityKey: row.horse_id, scopeKey: 'profile' };
+  }
+  if (family === 'horse_stat') {
+    return { entityKey: row.horse_id, scopeKey: row.snapshot_scope };
+  }
+  if (family === 'horse_record') {
+    const scope = row.record_scope === 'year' ? `year:${row.stat_year}` : row.record_scope;
+    return { entityKey: row.horse_id, scopeKey: `${scope}:${row.record_ordinal}` };
+  }
+  if (family === 'person_stat') {
+    return { entityKey: `${row.person_type}:${row.person_id}`, scopeKey: String(row.stat_year) };
+  }
+  throw new Error('unsupported snapshot family');
+}
+
+
 async function detailedSnapshotPlan(env, { family, limit, cursor = null }) {
   if (!env?.DB) throw new Error('DB is not configured');
   const definition = SNAPSHOT_FAMILIES[String(family || '')];
@@ -107,7 +125,15 @@ async function detailedSnapshotPlan(env, { family, limit, cursor = null }) {
     const partitionKey = snapshotPartitionKey(row, partition);
     const facts = snapshotTuple(row, definition.facts);
     if (partitionKey === priorPartition && snapshotFactsEqual(facts, priorFacts)) {
-      candidates.push({ removeId: row.id, retainId: retainedId });
+      const observation = snapshotObservationIdentity(family, row);
+      candidates.push({
+        removeId: row.id,
+        retainId: retainedId,
+        sourceRecordId: row.source_record_id,
+        observedAt: row.observed_at,
+        entityKey: observation.entityKey,
+        scopeKey: observation.scopeKey
+      });
     } else {
       rowsRetained += 1;
       priorPartition = partitionKey;
@@ -163,6 +189,18 @@ export async function executeSnapshotCleanupBatch(env, options = {}) {
     VALUES (?,'snapshot',?,?,?,'started')
   `).bind(batchId, plan.family, plan.planToken, plan.candidates.length)];
   for (const candidate of plan.candidates) {
+    statements.push(env.DB.prepare(`
+      INSERT OR IGNORE INTO official_snapshot_observations
+        (source_record_id,snapshot_family,entity_key,scope_key,observed_at,snapshot_id,factual_changed)
+      VALUES (?,?,?,?,?,?,0)
+    `).bind(
+      candidate.sourceRecordId,
+      plan.family,
+      candidate.entityKey,
+      candidate.scopeKey,
+      candidate.observedAt,
+      candidate.retainId
+    ));
     statements.push(env.DB.prepare(`
       UPDATE official_snapshot_observations SET snapshot_id=?
       WHERE snapshot_family=? AND snapshot_id=?
