@@ -43,10 +43,16 @@ test('production migration workflow prevents overlapping database writes', () =>
   assert.match(workflow, /cancel-in-progress: false/);
 });
 
-test('production release verifies the Settings alert migration and private observability routes', () => {
+test('production release verifies required migrations and private observability routes', () => {
   assert.match(releaseWorkflow, /0034_settings_alert_acknowledgements\.sql/);
   assert.match(releaseWorkflow, /settings_alert_acknowledgements/);
+  assert.match(releaseWorkflow, /0045_storage_cleanup_sessions\.sql/);
+  assert.match(releaseWorkflow, /storage_cleanup_sessions/);
+  assert.match(releaseWorkflow, /storage_cleanup_session_targets/);
+  assert.match(releaseWorkflow, /idx_storage_cleanup_sessions_one_running_source/);
   assert.match(releaseWorkflow, /\/app\/api\/settings\/status/);
   assert.match(releaseWorkflow, /\/app\/api\/settings\/alerts'/);
   assert.match(releaseWorkflow, /\/app\/api\/settings\/alerts\/acknowledge/);
+  assert.match(releaseWorkflow, /\/v1\/storage-cleanup\/session\/start/);
+  assert.match(releaseWorkflow, /\/v1\/storage-cleanup\/session\/checkpoint/);
 });
