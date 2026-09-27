@@ -1,3 +1,10 @@
+## Ephemeral production cleanup authentication candidate
+- Branch: `codex/ephemeral-cleanup-auth`.
+- The manual storage-cleanup workflow no longer requires a duplicated GitHub copy of the Worker `ADMIN_TOKEN`.
+- GitHub Actions uses the already-configured Cloudflare API credentials to generate a random short-lived `STORAGE_CLEANUP_TOKEN`, stores it as a temporary Worker secret, and uses it only for `/v1/storage-cleanup/*`.
+- The temporary token embeds its issue time and is accepted for at most one hour. Normal admin routes still require `ADMIN_TOKEN`.
+- The workflow removes the temporary Worker secret in an `always()` cleanup step and still keeps all existing restore-point, dry-run, confirmation, cost-safety and batch bounds.
+
 ## Manual production storage-cleanup workflow candidate
 - Branch: `codex/manual-production-storage-cleanup-workflow`.
 - Adds a manual GitHub Actions `workflow_dispatch` entry point for production storage cleanup; there is no schedule.
