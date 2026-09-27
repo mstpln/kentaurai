@@ -354,8 +354,10 @@ async function objectBytes(object) {
   throw new Error('legacy R2 object body is unreadable');
 }
 
-function verifiedCanonicalHead(head, hash, legacyHead) {
-  if (head?.customMetadata?.contentHash !== hash) throw new Error('canonical R2 object metadata/hash conflict');
+function verifiedCanonicalHead(head, hash, sourceType, legacyHead) {
+  if (head?.customMetadata?.contentHash !== hash || head?.customMetadata?.sourceType !== sourceType) {
+    throw new Error('canonical R2 object metadata/hash conflict');
+  }
   if (Number.isFinite(head.size) && Number.isFinite(legacyHead?.size) && head.size !== legacyHead.size) {
     throw new Error('canonical R2 object size conflict');
   }
@@ -411,7 +413,7 @@ export async function executeRawCleanupBatch(env, options = {}) {
     canonicalHead = await env.RAW_BUCKET.head(selected.canonicalKey);
     canonicalObjectsCreated = 1;
   }
-  verifiedCanonicalHead(canonicalHead, selected.hash, legacyHead);
+  verifiedCanonicalHead(canonicalHead, selected.hash, selected.row.source_type, legacyHead);
   const batchId = crypto.randomUUID();
   const ids = plan.references.map((row) => row.id);
   if (ids.length > 0) {
