@@ -119,6 +119,7 @@ const D1_USAGE_QUERY = `query KentaurAiD1Usage($accountTag: string!, $start: Dat
         filter: { date_geq: $start, date_leq: $end }
       ) {
         sum { rowsRead rowsWritten }
+        dimensions { date databaseId }
       }
       d1StorageAdaptiveGroups(
         limit: 10000
@@ -168,6 +169,108 @@ function currentD1Storage(groups) {
     }
   }
   return [...latestByDatabase.values()].reduce((sum, item) => sum + item.value, 0);
+}
+
+function dailyD1Usage(groups) {
+  const byDate = new Map();
+  for (const group of groups || []) {
+    const date = String(group?.dimensions?.date || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    const rowsRead = verifiedNonNegativeNumber(group?.sum?.rowsRead, 'D1 rowsRead');
+    const rowsWritten = verifiedNonNegativeNumber(group?.sum?.rowsWritten, 'D1 rowsWritten');
+    const current = byDate.get(date) || { date, rowsRead:0, rowsWritten:0 };
+    current.rowsRead += rowsRead;
+    current.rowsWritten += rowsWritten;
+    byDate.set(date, current);
+  }
+  return [...byDate.values()].sort((a,b) => a.date.localeCompare(b.date));
+}
+
+function runDate(value) {
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : null;
+}
+
+function runActivityWeight(run) {
+  const activity = ['inserted_count','updated_count','skipped_count','error_count']
+    .reduce((sum, key) => sum + Math.max(0, Number(run?.[key] || 0)), 0);
+  if (activity > 0) return activity;
+  const start = Date.parse(run?.started_at || '');
+  const end = Date.parse(run?.finished_at || run?.started_at || '');
+  if (Number.isFinite(start) && Number.isFinite(end) && end >= start) {
+    return Math.max(1, Math.round((end - start) / 1000));
+  }
+  return 1;
+}
+
+function billableDelta(before, amount, included) {
+  const prior = Math.max(0, before - included);
+  const after = Math.max(0, before + amount - included);
+  return Math.max(0, after - prior);
+}
+
+async function estimateRecentRunD1Usage(env, cycle, dailyUsage) {
+  if (!env?.DB || !Array.isArray(dailyUsage) || !dailyUsage.length) return {};
+  const { results = [] } = await env.DB.prepare(`
+    SELECT id, source_type, started_at, finished_at,
+           inserted_count, updated_count, skipped_count, error_count
+    FROM import_runs
+    WHERE datetime(started_at) >= datetime(?)
+      AND datetime(started_at) < datetime(?)
+    ORDER BY datetime(started_at) DESC, id DESC
+    LIMIT 1000
+  `).bind(cycle.start, cycle.end).all();
+
+  const byDate = new Map();
+  for (const run of results) {
+    const date = runDate(run.started_at);
+    if (!date) continue;
+    if (!byDate.has(date)) byDate.set(date, []);
+    byDate.get(date).push(run);
+  }
+
+  const cumulativeBefore = new Map();
+  let readsBefore = 0;
+  let writesBefore = 0;
+  for (const day of dailyUsage) {
+    cumulativeBefore.set(day.date, { rowsRead:readsBefore, rowsWritten:writesBefore });
+    readsBefore += day.rowsRead;
+    writesBefore += day.rowsWritten;
+  }
+
+  const estimates = {};
+  for (const day of dailyUsage) {
+    const runs = byDate.get(day.date) || [];
+    if (!runs.length) continue;
+    const totalWeight = runs.reduce((sum, run) => sum + runActivityWeight(run), 0);
+    if (!(totalWeight > 0)) continue;
+    const before = cumulativeBefore.get(day.date) || { rowsRead:0, rowsWritten:0 };
+    const billableReads = billableDelta(before.rowsRead, day.rowsRead, CLOUDFLARE_USAGE_LIMITS.d1RowsRead);
+    const billableWrites = billableDelta(before.rowsWritten, day.rowsWritten, CLOUDFLARE_USAGE_LIMITS.d1RowsWritten);
+
+    for (const run of runs) {
+      const share = runActivityWeight(run) / totalWeight;
+      const rowsRead = Math.round(day.rowsRead * share);
+      const rowsWritten = Math.round(day.rowsWritten * share);
+      const runBillableReads = billableReads * share;
+      const runBillableWrites = billableWrites * share;
+      const readCostUsd = (runBillableReads / 1_000_000) * 0.001;
+      const writeCostUsd = (runBillableWrites / 1_000_000) * 1;
+      estimates[String(run.id)] = {
+        method:'daily_cloudflare_allocation_v1',
+        approximate:true,
+        date:day.date,
+        rowsRead,
+        rowsWritten,
+        estimatedCostUsd:readCostUsd + writeCostUsd,
+        estimatedReadCostUsd:readCostUsd,
+        estimatedWriteCostUsd:writeCostUsd,
+        allocationShare:share,
+        sameDayRunCount:runs.length
+      };
+    }
+  }
+  return estimates;
 }
 
 function classifyBillingRecord(record) {
@@ -284,7 +387,8 @@ async function d1Usage(env, fetchImpl, cycle, now) {
   return {
     rowsRead: sumMetric(account.d1AnalyticsAdaptiveGroups, 'rowsRead'),
     rowsWritten: sumMetric(account.d1AnalyticsAdaptiveGroups, 'rowsWritten'),
-    storageBytes: currentD1Storage(account.d1StorageAdaptiveGroups)
+    storageBytes: currentD1Storage(account.d1StorageAdaptiveGroups),
+    dailyUsage: dailyD1Usage(account.d1AnalyticsAdaptiveGroups)
   };
 }
 
@@ -375,7 +479,8 @@ export async function getCloudflareUsage(env, options = {}) {
       additional: {
         billingCostAvailable,
         r2Available: Boolean(r2Storage?.available || r2ClassA?.available || r2ClassB?.available)
-      }
+      },
+      ...(options.includeDailyUsage ? { _dailyUsage:d1.dailyUsage } : {})
     };
   } catch (error) {
     return {
@@ -392,11 +497,18 @@ export async function getCloudflareUsage(env, options = {}) {
 export async function getDriftOverview(env, options = {}) {
   const [automation, cloudflare] = await Promise.all([
     getAutomationControl(env),
-    getCloudflareUsage(env, options)
+    getCloudflareUsage(env, { ...options, includeDailyUsage:true })
   ]);
+  let recentRunEstimates = {};
+  if (cloudflare?.configured && cloudflare.available !== false && cloudflare.billingPeriod && Array.isArray(cloudflare._dailyUsage)) {
+    recentRunEstimates = await estimateRecentRunD1Usage(env, cloudflare.billingPeriod, cloudflare._dailyUsage).catch(() => ({}));
+  }
+  if (cloudflare && Object.prototype.hasOwnProperty.call(cloudflare, '_dailyUsage')) delete cloudflare._dailyUsage;
   return {
     automation,
     cloudflare,
+    recentRunEstimates,
+    usageEstimateNote:'Beräknad fördelning av den dagens verifierade Cloudflare D1-usage mellan registrerade workflows. Detta är en uppskattning, inte exakt per-query-mätning.',
     schedule: {
       cron: '15 5 * * *',
       timeZone: 'Europe/Stockholm'
