@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const workflow = readFileSync(new URL('../.github/workflows/production-d1-migrations.yml', import.meta.url), 'utf8');
 const releaseWorkflow = readFileSync(new URL('../.github/workflows/production-release-v060.yml', import.meta.url), 'utf8');
+const buildsPolicy = readFileSync(new URL('../scripts/cloudflare-builds-policy.mjs', import.meta.url), 'utf8');
 
 test('production migration workflow is manual and main-only', () => {
   assert.match(workflow, /workflow_dispatch:/);
@@ -41,6 +42,22 @@ test('production migration workflow pins third-party actions to immutable commit
 test('production migration workflow prevents overlapping database writes', () => {
   assert.match(workflow, /kentaurai-production-d1-migrations/);
   assert.match(workflow, /cancel-in-progress: false/);
+});
+
+
+test('production release disables direct Cloudflare Git promotion before migrations', () => {
+  const promotionGate = releaseWorkflow.indexOf('Enforce single production promotion path');
+  const migrate = releaseWorkflow.indexOf('Apply pending production migrations');
+  assert.ok(promotionGate >= 0, 'Cloudflare promotion gate step missing');
+  assert.ok(migrate >= 0, 'production migration step missing');
+  assert.ok(promotionGate < migrate, 'Cloudflare promotion gate must run before production migrations');
+  assert.match(releaseWorkflow, /CLOUDFLARE_BUILDS_API_TOKEN/);
+  assert.match(releaseWorkflow, /scripts\/cloudflare-builds-policy\.mjs --apply/);
+  assert.match(releaseWorkflow, /secrets\.CLOUDFLARE_BUILDS_API_TOKEN \|\| secrets\.CLOUDFLARE_API_TOKEN/);
+  assert.match(buildsPolicy, /npx wrangler versions upload/);
+  assert.match(buildsPolicy, /single_release_promotion_path_v1/);
+  assert.match(buildsPolicy, /builds\/workers\/.*\/triggers/);
+  assert.match(buildsPolicy, /builds\/triggers\/.*PATCH|method: 'PATCH'/s);
 });
 
 test('production release verifies required migrations and private observability routes', () => {
