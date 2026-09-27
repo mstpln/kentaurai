@@ -114,7 +114,7 @@ test('usage overview uses account-wide Cloudflare metrics and billing-period lim
 
   const data = await getCloudflareUsageOverview({
     CLOUDFLARE_USAGE_API_TOKEN:'synthetic-token',
-    CLOUDFLARE_ACCOUNT_ID:'synthetic-account'
+    KENTAURAI_CLOUDFLARE_ACCOUNT_ID:'synthetic-account'
   }, {
     now:new Date('2026-09-27T18:00:00Z'),
     fetchImpl
@@ -169,7 +169,7 @@ test('ambiguous Cloudflare billing anchors fail rather than combining unlike per
   await assert.rejects(
     getCloudflareUsageOverview({
       CLOUDFLARE_USAGE_API_TOKEN:'synthetic-token',
-      CLOUDFLARE_ACCOUNT_ID:'synthetic-account'
+      KENTAURAI_CLOUDFLARE_ACCOUNT_ID:'synthetic-account'
     }, {
       now:new Date('2026-09-27T18:00:00Z'),
       fetchImpl
