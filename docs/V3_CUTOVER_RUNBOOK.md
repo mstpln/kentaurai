@@ -21,8 +21,8 @@ F4 makes the sealed v3 workflow the normal KentaurAI analysis path while preserv
 ## Controlled production release
 1. Run full QA before any production action.
 2. Validate Cloudflare configuration.
-3. Apply only pending migrations. F4 itself requires no new migration.
-4. Verify existing production schema through migration 0025 without exposing rows.
+3. Apply only pending migrations. The current Settings Drift release adds migration `0049_runtime_controls.sql`; release verification must confirm it before Worker promotion.
+4. Verify the required production schema through migration `0049_runtime_controls.sql` without exposing production rows.
 5. Deploy Worker v079; it must preserve the delegated worker-v078/worker-v077/worker-v076 v3/rollback semantics.
 6. Verify `/health` returns service/version plus `analysisWorkflow: "v3"`, the F4 cutover version and `legacyAnalysisCreationEnabled: false`.
 7. Verify `/app/login`.
