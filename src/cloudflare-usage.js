@@ -159,19 +159,20 @@ function sumBillingMetric(rows, matcher) {
 }
 
 function findWorkersCpuMs(rows) {
-  const quantity = sumBillingMetric(rows, (id, row) =>
-    String(row?.x_ProductFamilyName || '').toLowerCase() === 'workers'
-    && /cpu/.test(id)
-  );
-  if (!quantity) return null;
-  const matching = (rows || []).find((row) =>
+  const candidates = (rows || []).filter((row) =>
     String(row?.x_ProductFamilyName || '').toLowerCase() === 'workers'
     && /cpu/.test(metricRecordId(row))
   );
-  const unit = String(matching?.ConsumedUnit || matching?.PricingUnit || '').toLowerCase();
-  if (unit.includes('millisecond') || unit === 'ms') return quantity;
-  if (unit.includes('second')) return quantity * 1000;
-  return null;
+  if (!candidates.length) return null;
+  let totalMs = 0;
+  for (const row of candidates) {
+    const unit = String(row?.ConsumedUnit || row?.PricingUnit || '').toLowerCase();
+    const quantity = numberOrZero(row?.ConsumedQuantity);
+    if (unit.includes('millisecond') || unit === 'ms') totalMs += quantity;
+    else if (unit.includes('second')) totalMs += quantity * 1000;
+    else return null;
+  }
+  return totalMs;
 }
 
 function findR2StorageGbMonth(rows) {
