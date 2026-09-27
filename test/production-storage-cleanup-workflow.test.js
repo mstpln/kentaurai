@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-test('manual production storage cleanup workflow stays gated and bounded', () => {
+test('manual production storage cleanup workflow stays gated, resumable and bounded per operation', () => {
   const workflow = readFileSync(new URL('../.github/workflows/production-storage-cleanup.yml', import.meta.url), 'utf8');
   const runner = readFileSync(new URL('../scripts/run-production-storage-cleanup.mjs', import.meta.url), 'utf8');
 
@@ -18,7 +18,16 @@ test('manual production storage cleanup workflow stays gated and bounded', () =>
   assert.match(workflow, /seq 1 15/);
   assert.match(workflow, /concurrency:/);
   assert.doesNotMatch(workflow, /schedule:/);
-  assert.match(runner, /MAX_BATCHES > 250/);
+  assert.match(workflow, /CLEANUP_SOFT_DEADLINE_MS: "2100000"/);
+  assert.match(workflow, /Queue controlled continuation/);
+  assert.match(workflow, /actions\/workflows\/production-storage-cleanup\.yml\/dispatches/);
+  assert.match(workflow, /actions: write/);
+
+  assert.match(runner, /DRY_RUN_MAX_BATCHES > 250/);
+  assert.match(runner, /while \(MODE === 'execute' \|\| runPages < DRY_RUN_MAX_BATCHES\)/);
+  assert.match(runner, /while \(MODE === 'execute' \|\| runBatches < DRY_RUN_MAX_BATCHES\)/);
+  assert.match(runner, /storage-cleanup\/state/);
+  assert.match(runner, /deadlineReached\(\)/);
   assert.match(runner, /limit: 25/);
   assert.match(runner, /safetyStop === true/);
   assert.match(runner, /execution count differed from its dry-run plan/);
