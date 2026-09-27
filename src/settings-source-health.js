@@ -226,8 +226,8 @@ function visibleHistoricalJobs(jobs, nowMs) {
   }));
 }
 
-async function latestDailyOfficial(env) {
-  return env.DB.prepare(`
+async function recentDailyOfficialJobs(env) {
+  const { results = [] } = await env.DB.prepare(`
     SELECT id, start_date, end_date, next_date, next_race_index, status,
            processed_dates, processed_races, reused_races, consecutive_errors,
            last_error, last_run_at,
@@ -236,12 +236,13 @@ async function latestDailyOfficial(env) {
     FROM historical_backfill_jobs
     WHERE start_date = end_date
     ORDER BY end_date DESC, datetime(created_at) DESC, id DESC
-    LIMIT 1
-  `).first();
+    LIMIT 3
+  `).all();
+  return results;
 }
 
-async function latestDailyXlabs(env) {
-  return env.DB.prepare(`
+async function recentDailyXlabsJobs(env) {
+  const { results = [] } = await env.DB.prepare(`
     SELECT id, start_date, end_date, next_date, next_race_index, status,
            processed_dates, processed_races, reused_races, unavailable_dates,
            unavailable_races, consecutive_errors, last_error, last_run_at,
@@ -249,8 +250,9 @@ async function latestDailyXlabs(env) {
     FROM xlabs_backfill_jobs
     WHERE scope = 'daily_v85_v86'
     ORDER BY end_date DESC, datetime(created_at) DESC, id DESC
-    LIMIT 1
-  `).first();
+    LIMIT 3
+  `).all();
+  return results;
 }
 
 async function latestRun(env, sourceType) {
@@ -335,8 +337,8 @@ export async function getSettingsSourceHealth(env, options = {}) {
   const [
     officialHistoricalJobs,
     xlabsHistoricalJobs,
-    officialDaily,
-    xlabsDaily,
+    officialDailyJobs,
+    xlabsDailyJobs,
     officialCapture,
     officialNormalize,
     officialFallback,
@@ -344,8 +346,8 @@ export async function getSettingsSourceHealth(env, options = {}) {
   ] = await Promise.all([
     historicalOfficialJobs(env),
     historicalXlabsJobs(env),
-    latestDailyOfficial(env),
-    latestDailyXlabs(env),
+    recentDailyOfficialJobs(env),
+    recentDailyXlabsJobs(env),
     latestRun(env, 'official_live_scheduled_capture'),
     latestRun(env, 'official_live_normalize_auto'),
     latestFamilyRun(env, 'official'),
@@ -362,7 +364,7 @@ export async function getSettingsSourceHealth(env, options = {}) {
     historicalJob: officialHistorical,
     historicalJobs: officialHistoricalJobs,
     historicalProcessingState: officialProcessing,
-    supportingJobs: officialDaily ? [{ job: officialDaily, scope: 'daily' }] : [],
+    supportingJobs: officialDailyJobs.map((job) => ({ job, scope: 'daily' })),
     runs: [officialCapture, officialNormalize].filter(Boolean),
     fallbackRun: officialFallback,
     nowMs
@@ -373,7 +375,7 @@ export async function getSettingsSourceHealth(env, options = {}) {
     historicalJob: xlabsHistorical,
     historicalJobs: xlabsHistoricalJobs,
     historicalProcessingState: xlabsProcessing,
-    supportingJobs: xlabsDaily ? [{ job: xlabsDaily, scope: 'daily' }] : [],
+    supportingJobs: xlabsDailyJobs.map((job) => ({ job, scope: 'daily' })),
     fallbackRun: xlabsFallback,
     nowMs
   });
