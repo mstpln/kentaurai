@@ -92,9 +92,18 @@ async function billingCycle(env, fetchImpl, now) {
     token
   );
   const subscriptions = data?.result?.subscriptions || [];
-  const active = subscriptions.find((item) => !item.end_timestamp) || subscriptions[0] || null;
-  const anchor = active?.billing_cycle_anchor_timestamp || active?.start_timestamp || null;
-  const cycle = anchor ? billingCycleFromAnchor(anchor, now) : null;
+  const active = subscriptions.filter((item) => !item.end_timestamp);
+  const candidates = (active.length ? active : subscriptions)
+    .map((item) => item?.billing_cycle_anchor_timestamp || item?.start_timestamp || null)
+    .filter(Boolean);
+  const anchorDays = [...new Set(candidates.map((value) => {
+    const date = new Date(value);
+    return Number.isFinite(date.getTime()) ? date.getUTCDate() : null;
+  }).filter((value) => value != null))];
+  if (anchorDays.length !== 1 || !candidates.length) {
+    throw new Error('Cloudflare billing cycle is unavailable or ambiguous');
+  }
+  const cycle = billingCycleFromAnchor(candidates[0], now);
   if (!cycle) throw new Error('Cloudflare billing cycle is unavailable');
   return cycle;
 }
