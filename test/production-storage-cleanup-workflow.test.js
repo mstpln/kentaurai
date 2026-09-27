@@ -29,6 +29,7 @@ test('manual production storage cleanup workflow stays gated and bounded', () =>
   assert.match(runner, /storage-cleanup\/session\/start/);
   assert.match(runner, /storage-cleanup\/session\/checkpoint/);
   assert.match(runner, /CHECKPOINT_EVERY = 10/);
+  assert.match(runner, /confirmedComplete = true/);
   assert.match(runner, /limit: 25/);
   assert.match(runner, /safetyStop === true/);
   assert.match(runner, /execution count differed from its dry-run plan/);
