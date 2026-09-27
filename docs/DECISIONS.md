@@ -346,7 +346,7 @@ A single race must not directly change model weights. Candidate learnings are re
 
 
 ## Destructive storage cleanup is explicit, bounded and plan-bound
-1. Storage cleanup has no scheduled entry point. Every batch requires ADMIN_TOKEN, an exact confirmation phrase and the token from the immediately matching bounded dry run.
+1. Storage cleanup has no scheduled entry point. Every destructive batch requires cleanup-admin authorization, an exact batch confirmation phrase and the token from the immediately matching bounded dry run.
 2. Snapshot cleanup removes only sequentially equal facts within the same logical partition. A later return to an older factual state remains a new change-point; null/value transitions remain changes.
 3. Snapshot observation rows are repointed to the retained predecessor in the same D1 transaction. A database constraint forces rollback unless the number of deleted snapshot rows equals the dry-run plan.
 4. Cleanup cursors are keyset-based, bounded and HMAC-signed. They preserve cross-page change-point state without repeatedly rescanning earlier rows and cannot be edited into a destructive plan.
@@ -355,8 +355,9 @@ A single race must not directly change model weights. Candidate learnings are re
 
 
 ## Production cleanup is manually initiated through GitHub Actions
-1. Production storage cleanup has no automatic schedule. The only supported operator entry point is a reviewed `workflow_dispatch` workflow on `main`.
-2. Dry-run is the default mode. Destructive execution requires an exact human-entered confirmation string and the private admin token supplied only through GitHub Actions secrets.
-3. A current D1 Time Travel bookmark must be verified before cleanup starts. Missing Cloudflare credentials, admin token, Worker route, health, bookmark, plan token or cost-safety acceptance fails closed.
-4. Workflow orchestration may repeat reviewed 25-row/reference executor batches, but each run has an explicit hard batch cap. A partial run is valid; remaining work waits for another manual run.
-5. Production cleanup workflow code may print only sanitized counts, completion flags and warning classes. It must never log private payloads, object keys, external ids, tokens or bookmark values.
+1. Production storage cleanup has no schedule. The operator starts the reviewed `workflow_dispatch` workflow on `main` once; execute mode may queue controlled resumable follow-on runs only while verified progress is being made.
+2. Dry-run is the default mode. Destructive execution requires the exact human-entered confirmation string on the initial run. GitHub Actions then creates a short-lived `STORAGE_CLEANUP_TOKEN` scoped only to `/v1/storage-cleanup/*`; the normal `ADMIN_TOKEN` is not copied into GitHub.
+3. A current D1 Time Travel bookmark must be verified before each mutating run. Missing Cloudflare credentials, cleanup auth, Worker route, health, bookmark, plan token or cost-safety acceptance fails closed.
+4. The executor remains capped at 25 rows/references per request. Execute orchestration has no arbitrary 250-batch ceiling; instead it uses a soft wall-clock deadline, persists HMAC-signed resumable cursor state in D1 and queues a continuation only after a run that made progress. A stalled or conflicting run stops rather than looping.
+5. Dry-run remains non-mutating and may use a bounded operator-selected batch cap.
+6. Production cleanup workflow code may print only sanitized counts, completion flags and warning classes. It must never log private payloads, object keys, external ids, tokens, persisted cursors or bookmark values.
