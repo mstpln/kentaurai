@@ -50,7 +50,11 @@ class StatementAdapter {
     return { success: true, meta: { changes: Number(result.changes ?? 0), last_row_id: result.lastInsertRowid == null ? null : Number(result.lastInsertRowid) } };
   }
   async first() { this.markExecution('firsts'); return this.db.prepare(this.sql).get(...this.args) ?? null; }
-  async all() { this.markExecution('alls'); return { results: this.db.prepare(this.sql).all(...this.args) }; }
+  async all() {
+    this.markExecution('alls');
+    const results = this.db.prepare(this.sql).all(...this.args);
+    return { results, meta: { rows_read: results.length, rows_written: 0, duration: 0 } };
+  }
 }
 
 class D1Adapter {
