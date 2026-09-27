@@ -307,3 +307,85 @@ test('execute continuation reuses the session-bound audit without rerunning the 
   assert.equal(auditCalls, 0);
   assert.equal(planCalls, 1);
 });
+
+
+test('execute refuses to plan when the session-bound integrity audit fails', async () => {
+  const sessionId = '55555555-5555-4555-8555-555555555555';
+  const sourceSha = 'f'.repeat(40);
+  let planCalls = 0;
+  let sessionAuditCalls = 0;
+
+  const server = createServer(async (req, res) => {
+    const url = new URL(req.url, 'http://127.0.0.1');
+    if (req.method === 'POST' && url.pathname === '/v1/storage-cleanup/session/start') {
+      json(res, {
+        sessionId,
+        sourceSha,
+        status: 'running',
+        continuationCount: 1,
+        maxContinuations: 48,
+        expiresAt: '2099-01-01T00:00:00.000Z',
+        auditVerified: false,
+        targets: ['horse_profile','horse_stat','horse_record','person_stat','raw_object']
+          .map((target) => ({ target, cursor: null, complete: false })),
+        safetyStop: false
+      });
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/v1/storage-cleanup/session/audit') {
+      const body = await readBody(req);
+      assert.equal(body.session_id, sessionId);
+      assert.equal(body.source_sha, sourceSha);
+      sessionAuditCalls += 1;
+      json(res, {
+        ok: false,
+        auditVerified: false,
+        sessionId,
+        families: [{
+          family: 'horse_profile',
+          mismatchedSources: 1,
+          missingRepresentations: 1,
+          excessRepresentations: 0,
+          danglingObservations: 0,
+          identityMismatchObservations: 0,
+          ok: false
+        }],
+        safetyStop: false
+      });
+      return;
+    }
+    if (url.pathname.includes('/plan') || url.pathname.includes('/execute')) planCalls += 1;
+    json(res, { error: 'unexpected_test_route' }, 500);
+  });
+
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  const script = fileURLToPath(new URL('../scripts/run-production-storage-cleanup.mjs', import.meta.url));
+  const child = spawn(process.execPath, [script], {
+    env: {
+      ...process.env,
+      MODE: 'execute',
+      DRY_RUN_MAX_BATCHES: '25',
+      CLEANUP_SOFT_DEADLINE_MS: String(5 * 60 * 1000),
+      WORKER_URL: `http://127.0.0.1:${address.port}`,
+      ADMIN_TOKEN: 'synthetic-cleanup-token',
+      GITHUB_SHA: sourceSha,
+      CLEANUP_SESSION_ID: '',
+      GITHUB_OUTPUT: ''
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  const [code] = await once(child, 'close');
+  server.close();
+  await once(server, 'close');
+
+  assert.notEqual(code, 0);
+  assert.equal(sessionAuditCalls, 1);
+  assert.equal(planCalls, 0);
+  assert.match(stderr, /storage cleanup session integrity audit failed; refusing cleanup/);
+});
