@@ -31,7 +31,8 @@ test('manual production storage cleanup workflow stays gated, resumable and boun
   assert.match(runner, /while \(MODE === 'execute' \|\| runPages < DRY_RUN_MAX_BATCHES\)/);
   assert.match(runner, /while \(MODE === 'execute' \|\| runBatches < DRY_RUN_MAX_BATCHES\)/);
   assert.match(runner, /storage-cleanup\/audit/);
-  assert.match(runner, /storage cleanup integrity audit failed; refusing cleanup/);
+  assert.match(runner, /storage-cleanup\/session\/audit/);
+  assert.match(runner, /storage cleanup integrity audit failed; refusing cleanup|storage cleanup session integrity audit failed; refusing cleanup/);
   assert.match(runner, /storage-cleanup\/session\/start/);
   assert.match(runner, /storage-cleanup\/session\/checkpoint/);
   assert.match(runner, /GITHUB_SHA/);
