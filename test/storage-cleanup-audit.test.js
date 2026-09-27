@@ -154,3 +154,43 @@ test('session-bound cleanup audit does not mark a session when provenance integr
     0
   );
 });
+
+
+test('session-bound cleanup audit route is private and persists verification', async () => {
+  const { db, env } = createTestEnv();
+  const sourceSha = 'e'.repeat(40);
+  const sessionId = '44444444-4444-4444-8444-444444444444';
+  db.prepare(`
+    INSERT INTO storage_cleanup_sessions
+      (id,source_sha,status,continuation_count,expires_at)
+    VALUES (?,?,'running',1,'2099-01-01T00:00:00.000Z')
+  `).run(sessionId, sourceSha);
+
+  const url = 'https://example.invalid/v1/storage-cleanup/session/audit';
+  const body = JSON.stringify({ session_id: sessionId, source_sha: sourceSha });
+
+  const denied = await worker.fetch(new Request(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body
+  }), {});
+  assert.equal(denied.status, 503);
+
+  const response = await worker.fetch(new Request(url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${env.ADMIN_TOKEN}`
+    },
+    body
+  }), env);
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.ok, true);
+  assert.equal(payload.auditVerified, true);
+  assert.equal(payload.safetyStop, false);
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS n FROM storage_cleanup_session_audits WHERE session_id=?').get(sessionId).n,
+    1
+  );
+});
