@@ -53,10 +53,24 @@ test('usage overview uses account-wide Cloudflare metrics and billing-period lim
       return jsonResponse({
         success:true,
         result:[
-          { uuid:'synthetic-db-1', file_size:4_700_000_000 },
-          { uuid:'synthetic-db-2', file_size:100_000_000 }
+          { uuid:'synthetic-db-1', name:'kentaurai' },
+          { uuid:'synthetic-db-2', name:'synthetic-other' }
         ],
-        result_info:{ total_pages:1 }
+        result_info:{ count:2, page:1, per_page:1000, total_count:2 }
+      });
+    }
+
+    if (String(url).includes('/d1/database/synthetic-db-1?')) {
+      return jsonResponse({
+        success:true,
+        result:{ uuid:'synthetic-db-1', name:'kentaurai', file_size:4_700_000_000 }
+      });
+    }
+
+    if (String(url).includes('/d1/database/synthetic-db-2?')) {
+      return jsonResponse({
+        success:true,
+        result:{ uuid:'synthetic-db-2', name:'synthetic-other', file_size:100_000_000 }
       });
     }
 
