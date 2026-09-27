@@ -1,4 +1,5 @@
 const HISTORICAL_STALE_MS = 15 * 60 * 1000;
+const DAILY_AUTOMATIC_STALE_MS = 30 * 60 * 60 * 1000;
 const RUN_STALE_MS = 30 * 60 * 1000;
 const MAX_AUTOMATIC_ERRORS = 3;
 const HISTORICAL_AUTOMATIC_ENABLED = false;
@@ -29,7 +30,7 @@ function daysInclusive(startDate, endDate) {
   return Math.floor((end - start) / 86400000) + 1;
 }
 
-function historicalProcessing(job, nowMs, { automaticEnabled = true } = {}) {
+function historicalProcessing(job, nowMs, { automaticEnabled = true, staleAfterMs = HISTORICAL_STALE_MS } = {}) {
   if (!job) {
     return {
       status: 'never_run',
@@ -68,7 +69,7 @@ function historicalProcessing(job, nowMs, { automaticEnabled = true } = {}) {
     && automaticEnabled
     && !retryScheduled
     && lastActivityMs !== null
-    && nowMs - lastActivityMs > HISTORICAL_STALE_MS;
+    && nowMs - lastActivityMs > staleAfterMs;
 
   let status = 'running';
   if (completed) status = 'completed';
@@ -285,7 +286,7 @@ function sourceCard({ id, historicalJob, historicalJobs = [], historicalProcessi
   }
 
   for (const { job, scope } of supportingJobs) {
-    const processing = historicalProcessing(job, nowMs);
+    const processing = historicalProcessing(job, nowMs, { staleAfterMs: DAILY_AUTOMATIC_STALE_MS });
     const issue = jobIssue(id, job, processing, nowMs, scope);
     if (issue) issues.push(issue);
   }
@@ -438,5 +439,6 @@ export async function acknowledgeSettingsAlerts(env) {
 export const SETTINGS_SOURCE_HEALTH_LIMITS = {
   historicalStaleMs: HISTORICAL_STALE_MS,
   runStaleMs: RUN_STALE_MS,
-  maxAutomaticErrors: MAX_AUTOMATIC_ERRORS
+  maxAutomaticErrors: MAX_AUTOMATIC_ERRORS,
+  dailyAutomaticStaleMs: DAILY_AUTOMATIC_STALE_MS
 };
