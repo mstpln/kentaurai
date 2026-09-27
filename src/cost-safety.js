@@ -18,10 +18,26 @@ function addMeta(target, meta) {
   target.d1DurationMs += finite(meta.duration);
 }
 
-function wrapStatement(statement, metrics) {
+function firstResult(result, columnName) {
+  const row = result?.results?.[0] ?? null;
+  if (row == null) return null;
+  if (columnName === undefined) return row;
+  if (!Object.prototype.hasOwnProperty.call(row, columnName)) {
+    throw new Error(`D1_ERROR: column not found: ${columnName}`);
+  }
+  return row[columnName];
+}
+
+function firstWithMetaSql(sql) {
+  const normalized = String(sql || '').trim().replace(/;+\s*$/, '');
+  if (!/^(SELECT|WITH)\b/i.test(normalized)) return null;
+  return `SELECT * FROM (${normalized}) AS __kentaurai_first LIMIT 1`;
+}
+
+function wrapStatement(statement, metrics, context = {}) {
   const wrapper = {
     bind(...values) {
-      return wrapStatement(statement.bind(...values), metrics);
+      return wrapStatement(statement.bind(...values), metrics, { ...context, bindings: values });
     }
   };
   wrapper[RAW_STATEMENT] = statement;
@@ -33,13 +49,24 @@ function wrapStatement(statement, metrics) {
       return result;
     };
   }
-  if (typeof statement?.first === 'function' && typeof statement?.all === 'function') {
+  if (typeof statement?.first === 'function') {
     wrapper.first = async (columnName) => {
-      const result = await statement.all();
-      addMeta(metrics, result?.meta);
-      const row = result?.results?.[0] ?? null;
-      if (row == null) return null;
-      if (columnName === undefined) return row;
+      const limitedSql = context.db && context.sql ? firstWithMetaSql(context.sql) : null;
+      if (limitedSql && typeof context.db.prepare === 'function') {
+        let prepared = context.db.prepare(limitedSql);
+        if (context.bindings?.length) prepared = prepared.bind(...context.bindings);
+        const result = await prepared.all();
+        addMeta(metrics, result?.meta);
+        return firstResult(result, columnName);
+      }
+      if (typeof statement.run === 'function') {
+        const result = await statement.run();
+        addMeta(metrics, result?.meta);
+        return firstResult(result, columnName);
+      }
+      const row = await statement.first();
+      if (row != null) metrics.rowsRead += 1;
+      if (columnName === undefined || row == null) return row;
       if (!Object.prototype.hasOwnProperty.call(row, columnName)) {
         throw new Error(`D1_ERROR: column not found: ${columnName}`);
       }
@@ -52,7 +79,7 @@ function wrapStatement(statement, metrics) {
 function instrumentDb(db, metrics) {
   return new Proxy(db, {
     get(target, property) {
-      if (property === 'prepare') return (sql) => wrapStatement(target.prepare(sql), metrics);
+      if (property === 'prepare') return (sql) => wrapStatement(target.prepare(sql), metrics, { db: target, sql, bindings: [] });
       if (property === 'batch' && typeof target.batch === 'function') {
         return async (statements) => {
           const result = await target.batch(statements.map((statement) => statement?.[RAW_STATEMENT] || statement));
