@@ -119,10 +119,10 @@ test('Cloudflare usage uses verified API values and never starts from zero estim
       return new Response(JSON.stringify({
         success:true,
         result:[
-          { ServiceFamilyName:'D1', ServiceName:'D1 Rows Read', BilledCost:1.25, BillingCurrency:'USD' },
-          { ServiceFamilyName:'D1', ServiceName:'D1 Rows Read', BilledCost:0.50, BillingCurrency:'USD' },
-          { ServiceFamilyName:'D1', ServiceName:'D1 Rows Written', BilledCost:0, BillingCurrency:'USD' },
-          { ServiceFamilyName:'D1', ServiceName:'D1 Storage', BilledCost:0.75, BillingCurrency:'USD' },
+          { ServiceFamilyName:'D1', ServiceName:'D1 Rows Read', BilledCost:1.25, BillingCurrency:'USD', ConsumedQuantity:20_000_000_000, ConsumedUnit:'Count' },
+          { ServiceFamilyName:'D1', ServiceName:'D1 Rows Read', BilledCost:0.50, BillingCurrency:'USD', ConsumedQuantity:7_000_000_000, ConsumedUnit:'Count' },
+          { ServiceFamilyName:'D1', ServiceName:'D1 Rows Written', BilledCost:0, BillingCurrency:'USD', ConsumedQuantity:1_000_000, ConsumedUnit:'Count' },
+          { ServiceFamilyName:'D1', ServiceName:'D1 Storage', BilledCost:0.75, BillingCurrency:'USD', ConsumedQuantity:4.7, ConsumedUnit:'GB-months' },
           { ServiceFamilyName:'Workers', ServiceName:'Workers Standard Requests', BilledCost:9.99, BillingCurrency:'USD' }
         ]
       }), { status:200, headers:{ 'content-type':'application/json' } });
@@ -370,9 +370,10 @@ test('usage UI renders verified per-metric cost in the right-aligned card header
   assert.match(source, /billingCost/);
   assert.match(source, /billingCurrency/);
   assert.match(source, /settings-usage-meta/);
-  assert.match(source, /R2 · Lagring/);
-  assert.match(source, /R2 · Class A/);
-  assert.match(source, /R2 · Class B/);
+  const backend = readFileSync(new URL('../src/settings-drift.js', import.meta.url), 'utf8');
+  assert.match(backend, /R2 · Lagring/);
+  assert.match(backend, /R2 · Class A/);
+  assert.match(backend, /R2 · Class B/);
 });
 
 test('billing period UI renders the exclusive cycle end as the previous inclusive date', () => {
