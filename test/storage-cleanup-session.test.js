@@ -93,7 +93,7 @@ test('cleanup session is source-bound and incomplete checkpoints require a signe
   );
 });
 
-test('cleanup sessions expire and stop after the hard continuation limit', async () => {
+test('cleanup sessions expire, stop at the hard continuation limit and allow a fresh manual operation', async () => {
   const { db, env } = createTestEnv();
   const capped = await startOrResumeStorageCleanupSession(env, { source_sha: SOURCE_SHA });
   db.prepare('UPDATE storage_cleanup_sessions SET continuation_count=48 WHERE id=?')
@@ -106,9 +106,15 @@ test('cleanup sessions expire and stop after the hard continuation limit', async
     }),
     /continuation limit reached/
   );
+  assert.equal(
+    db.prepare('SELECT status FROM storage_cleanup_sessions WHERE id=?').get(capped.sessionId).status,
+    'exhausted'
+  );
 
-  db.prepare("UPDATE storage_cleanup_sessions SET status='expired' WHERE id=?")
-    .run(capped.sessionId);
+  const freshAfterCap = await startOrResumeStorageCleanupSession(env, { source_sha: SOURCE_SHA });
+  assert.notEqual(freshAfterCap.sessionId, capped.sessionId);
+  assert.equal(freshAfterCap.continuationCount, 1);
+
   const expiredSource = 'c'.repeat(40);
   const expired = await startOrResumeStorageCleanupSession(env, { source_sha: expiredSource });
   db.prepare("UPDATE storage_cleanup_sessions SET expires_at='2000-01-01T00:00:00Z' WHERE id=?")
