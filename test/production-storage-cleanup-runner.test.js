@@ -389,3 +389,68 @@ test('execute refuses to plan when the session-bound integrity audit fails', asy
   assert.equal(planCalls, 0);
   assert.match(stderr, /storage cleanup session integrity audit failed; refusing cleanup/);
 });
+
+
+test('runner stops safely when cumulative D1 read budget is reached', async () => {
+  let plans = 0;
+  const server = createServer((req, res) => {
+    const url = new URL(req.url, 'http://127.0.0.1');
+    if (req.method === 'GET' && url.pathname === '/v1/storage-cleanup/audit') {
+      json(res, {
+        ok: true,
+        families: [],
+        operations: { startedBatches: 0, strandedRawBatches: 0, ok: true },
+        cost: { rowsRead: 1, rowsWritten: 0, d1DurationMs: 1 },
+        safetyStop: false
+      });
+      return;
+    }
+    if (req.method === 'POST' && url.pathname === '/v1/storage-cleanup/snapshots/plan') {
+      plans += 1;
+      json(res, {
+        rowsScanned: 25,
+        rowsRemovable: 0,
+        warnings: ['limit_reached_results_incomplete'],
+        planToken: 'a'.repeat(64),
+        nextCursor: `p${plans}.sig`,
+        cost: { rowsRead: 100000, rowsWritten: 0, d1DurationMs: 10 },
+        safetyStop: false
+      });
+      return;
+    }
+    json(res, { error: 'unexpected_test_route' }, 404);
+  });
+
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  const script = fileURLToPath(new URL('../scripts/run-production-storage-cleanup.mjs', import.meta.url));
+  const child = spawn(process.execPath, [script], {
+    env: {
+      ...process.env,
+      MODE: 'dry-run',
+      DRY_RUN_MAX_BATCHES: '25',
+      CLEANUP_SOFT_DEADLINE_MS: String(5 * 60 * 1000),
+      CLEANUP_RUN_MAX_ROWS_READ: '250000',
+      CLEANUP_RUN_MAX_ROWS_WRITTEN: '10000',
+      WORKER_URL: `http://127.0.0.1:${address.port}`,
+      ADMIN_TOKEN: 'synthetic-cleanup-token',
+      GITHUB_OUTPUT: ''
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  let stdout = '';
+  let stderr = '';
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  const [code] = await once(child, 'close');
+  server.close();
+  await once(server, 'close');
+
+  assert.equal(code, 0, stderr);
+  assert.equal(plans, 3);
+  assert.match(stdout, /"cleanup":"snapshot".*"complete":false/);
+});
