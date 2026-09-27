@@ -1,6 +1,7 @@
 const HISTORICAL_STALE_MS = 15 * 60 * 1000;
 const RUN_STALE_MS = 30 * 60 * 1000;
 const MAX_AUTOMATIC_ERRORS = 3;
+const HISTORICAL_AUTOMATIC_ENABLED = false;
 
 function isoTime(value) {
   if (!value) return null;
@@ -28,7 +29,7 @@ function daysInclusive(startDate, endDate) {
   return Math.floor((end - start) / 86400000) + 1;
 }
 
-function historicalProcessing(job, nowMs) {
+function historicalProcessing(job, nowMs, { automaticEnabled = true } = {}) {
   if (!job) {
     return {
       status: 'never_run',
@@ -61,14 +62,18 @@ function historicalProcessing(job, nowMs) {
     && retryAfterMs !== null
     && retryAfterMs > nowMs;
   const waiting = retryScheduled && Number(job.consecutive_errors || 0) === 0;
+  const paused = job.status === 'running' && !automaticEnabled;
   const stale = job.status === 'running'
+    && automaticEnabled
     && !retryScheduled
     && lastActivityMs !== null
     && nowMs - lastActivityMs > HISTORICAL_STALE_MS;
 
   let status = 'running';
   if (completed) status = 'completed';
-  else if (job.status === 'failed' || stale) status = 'action_required';
+  else if (job.status === 'failed') status = 'action_required';
+  else if (paused) status = 'paused';
+  else if (stale) status = 'action_required';
   else if (waiting) status = 'waiting';
 
   return {
@@ -87,12 +92,14 @@ function historicalProcessing(job, nowMs) {
     lastRunAt: job.last_run_at || null,
     lastError: job.last_error || null,
     retryAfter: job.retry_after || null,
+    paused,
     stale
   };
 }
 
 function jobIssue(sourceId, job, processing, nowMs, scope) {
   if (!job) return null;
+  if (processing?.status === 'paused') return null;
   const checkpoint = `${job.next_date || 'none'}:${Number(job.next_race_index || 0)}`;
   const prefix = `${sourceId}:${scope}:${job.id}:${checkpoint}`;
 
@@ -214,7 +221,7 @@ function visibleHistoricalJobs(jobs, nowMs) {
     id: job.id,
     startDate: job.start_date,
     endDate: job.end_date,
-    processing: historicalProcessing(job, nowMs)
+    processing: historicalProcessing(job, nowMs, { automaticEnabled: HISTORICAL_AUTOMATIC_ENABLED })
   }));
 }
 
@@ -255,7 +262,7 @@ async function latestFamilyRun(env, family) {
 function sourceCard({ id, historicalJob, historicalJobs = [], historicalProcessingState, supportingJobs = [], runs = [], fallbackRun, nowMs }) {
   const issues = [];
   for (const job of historicalJobs) {
-    const processing = historicalProcessing(job, nowMs);
+    const processing = historicalProcessing(job, nowMs, { automaticEnabled: HISTORICAL_AUTOMATIC_ENABLED });
     const historicalIssue = jobIssue(id, job, processing, nowMs, 'historical');
     if (historicalIssue) issues.push(historicalIssue);
   }
@@ -330,8 +337,8 @@ export async function getSettingsSourceHealth(env, options = {}) {
 
   const officialHistorical = officialHistoricalJobs[0] || null;
   const xlabsHistorical = xlabsHistoricalJobs[0] || null;
-  const officialProcessing = historicalProcessing(officialHistorical, nowMs);
-  const xlabsProcessing = historicalProcessing(xlabsHistorical, nowMs);
+  const officialProcessing = historicalProcessing(officialHistorical, nowMs, { automaticEnabled: HISTORICAL_AUTOMATIC_ENABLED });
+  const xlabsProcessing = historicalProcessing(xlabsHistorical, nowMs, { automaticEnabled: HISTORICAL_AUTOMATIC_ENABLED });
 
   const official = sourceCard({
     id: 'official',
