@@ -358,40 +358,63 @@ async function runScheduledPart(name, fn) {
 }
 
 async function runLiveNormalizationMorning(env) {
-  const results = [];
+  let runCount = 0;
+  let completedSources = 0;
+  let sourceGaps = 0;
+  let finalStatus = 'idle';
   for (let index = 0; index < DAILY_LIVE_NORMALIZE_RUNS; index += 1) {
     const result = await normalizeNextPendingOfficialGame(env, { maxSteps: 12 });
-    results.push(result);
+    runCount += 1;
+    finalStatus = result?.status || 'unknown';
+    if (result?.status === 'completed_source') completedSources += 1;
+    if (result?.status === 'source_gap') sourceGaps += 1;
     if (!result || result.status === 'idle') break;
   }
-  return { runCount: results.length, maxRuns: DAILY_LIVE_NORMALIZE_RUNS, results };
+  return { runCount, maxRuns: DAILY_LIVE_NORMALIZE_RUNS, completedSources, sourceGaps, finalStatus };
 }
 
 async function runDailyOfficialIncremental(env, scheduledTime) {
   const jobs = await ensureDailyOfficialHistoryJobs(env, scheduledTime);
-  const batches = [];
+  let batchCount = 0;
   let remaining = DAILY_OFFICIAL_BATCH_RUNS;
+  let finalStatus = 'idle';
   for (const job of jobs.jobs || []) {
     while (remaining > 0) {
       const batch = await runHistoricalBackfillBatch(env, job.id);
-      batches.push(batch);
+      batchCount += 1;
       remaining -= 1;
+      finalStatus = batch?.status || 'unknown';
       if (!batch || batch.done || batch.status !== 'running') break;
     }
     if (remaining <= 0) break;
   }
-  return { jobs, batchCount: batches.length, maxBatches: DAILY_OFFICIAL_BATCH_RUNS, batches };
+  return {
+    lookbackDays: jobs.lookbackDays,
+    jobIds: (jobs.jobs || []).map((job) => job.id),
+    batchCount,
+    maxBatches: DAILY_OFFICIAL_BATCH_RUNS,
+    finalStatus
+  };
 }
 
 async function runDailyXlabsIncremental(env, scheduledTime) {
   const job = await ensureDailyXlabsJob(env, scheduledTime);
-  const batches = [];
+  let batchCount = 0;
+  let finalStatus = 'idle';
   for (let index = 0; index < DAILY_XLABS_BATCH_RUNS; index += 1) {
     const batch = await runXlabsBackfillBatch(env, job.id);
-    batches.push(batch);
+    batchCount += 1;
+    finalStatus = batch?.status || 'unknown';
     if (!batch || batch.done || batch.status !== 'running') break;
   }
-  return { job, batchCount: batches.length, maxBatches: DAILY_XLABS_BATCH_RUNS, batches };
+  return {
+    jobId: job.id,
+    startDate: job.start_date,
+    endDate: job.end_date,
+    batchCount,
+    maxBatches: DAILY_XLABS_BATCH_RUNS,
+    finalStatus
+  };
 }
 
 async function handleScheduled(controller, env) {
