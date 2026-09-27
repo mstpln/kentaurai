@@ -73,3 +73,26 @@ test('raw cleanup planning is deterministic, keeps legacy keys readable and muta
   assert.equal(db.prepare("SELECT raw_object_key FROM source_records WHERE id='legacy-source'").get().raw_object_key, oldKey);
   assert.ok(await env.RAW_BUCKET.get(oldKey));
 });
+
+
+test('raw snapshot archive refuses a conflicting pre-existing canonical object', async () => {
+  const { env, objects } = createTestEnv();
+  const payload = structuredClone(snapshot);
+  const body = JSON.stringify(payload.payload);
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body));
+  const hash = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  const key = `raw/${payload.sourceType}/${hash}.json`;
+
+  objects.set(key, {
+    body: body + 'corrupt',
+    options: {
+      customMetadata: { sourceType: payload.sourceType, contentHash: hash, contentType: 'application/json' },
+      httpMetadata: { contentType: 'application/json' }
+    }
+  });
+
+  await assert.rejects(
+    () => archiveRawPayload(env, payload),
+    /canonical raw object metadata or size conflict/
+  );
+});
