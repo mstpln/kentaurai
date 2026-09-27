@@ -127,7 +127,7 @@ jobs:
         run: |
           set -euo pipefail
           if npx --yes wrangler@4.114.0 secret list --name "$WORKER_NAME" --format json | jq -e '.[] | select(.name == "STORAGE_CLEANUP_TOKEN")' >/dev/null; then
-            npx --yes wrangler@4.114.0 secret delete STORAGE_CLEANUP_TOKEN --name "$WORKER_NAME" --skip-confirmation
+            printf 'y\n' | npx --yes wrangler@4.114.0 secret delete STORAGE_CLEANUP_TOKEN --name "$WORKER_NAME"
           fi
 
       - name: Verify production health after cleanup run
