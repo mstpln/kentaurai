@@ -439,6 +439,7 @@ async function runDailyOfficialIncremental(env, scheduledTime) {
   let batchCount = 0;
   let remaining = DAILY_OFFICIAL_BATCH_RUNS;
   let finalStatus = 'idle';
+  const failures = [];
   const active = new Set(
     (jobs.jobs || []).filter((job) => job.status === 'running').map((job) => job.id)
   );
@@ -449,13 +450,23 @@ async function runDailyOfficialIncremental(env, scheduledTime) {
       if (remaining <= 0) break;
       if (!active.has(job.id)) continue;
       attempted = true;
-      const batch = await runHistoricalBackfillBatch(env, job.id);
-      batchCount += 1;
-      remaining -= 1;
-      finalStatus = batch?.status || 'unknown';
-      if (!batch || batch.done || batch.status !== 'running') active.delete(job.id);
+      try {
+        const batch = await runHistoricalBackfillBatch(env, job.id);
+        batchCount += 1;
+        remaining -= 1;
+        finalStatus = batch?.status || 'unknown';
+        if (!batch || batch.done || batch.status !== 'running') active.delete(job.id);
+      } catch (error) {
+        batchCount += 1;
+        remaining -= 1;
+        active.delete(job.id);
+        failures.push(error);
+      }
     }
     if (!attempted) break;
+  }
+  if (failures.length) {
+    throw new Error(`${failures.length} bounded official daily batch(es) failed`);
   }
   return {
     lookbackDays: jobs.lookbackDays,
@@ -474,15 +485,25 @@ async function runDailyXlabsIncremental(env, scheduledTime) {
   let batchCount = 0;
   let finalStatus = 'idle';
   const processedJobIds = [];
+  const failures = [];
   let remaining = DAILY_XLABS_BATCH_RUNS;
 
   for (const job of recent.jobs || []) {
     if (remaining <= 0) break;
-    const batch = await runXlabsBackfillBatch(env, job.id);
-    batchCount += 1;
-    remaining -= 1;
-    finalStatus = batch?.status || 'unknown';
-    processedJobIds.push(job.id);
+    try {
+      const batch = await runXlabsBackfillBatch(env, job.id);
+      batchCount += 1;
+      remaining -= 1;
+      finalStatus = batch?.status || 'unknown';
+      processedJobIds.push(job.id);
+    } catch (error) {
+      batchCount += 1;
+      remaining -= 1;
+      failures.push(error);
+    }
+  }
+  if (failures.length) {
+    throw new Error(`${failures.length} bounded X-Labs daily batch(es) failed`);
   }
 
   return {
