@@ -155,9 +155,17 @@ export async function selectPendingOfficialGameSource(env) {
   const pending = await env.DB.prepare(`
     SELECT sr.id, sr.external_id, sr.fetched_at
     FROM source_records sr
-    WHERE sr.source_type = ? AND (sr.quality_status = ? OR (sr.quality_status = 'captured_source_gap' AND json_extract(sr.metadata_json, '$.sourceGap.code') = 'missing_horse_identity'))
+    WHERE sr.source_type = 'official_provider'
+      AND (
+        sr.quality_status = 'captured_unmapped'
+        OR (
+          sr.quality_status = 'captured_source_gap'
+          AND json_extract(sr.metadata_json, '$.sourceGap.code') = 'missing_horse_identity'
+        )
+      )
+      AND substr(sr.external_id,1,9) IN ('game:V85_','game:V86_')
+      AND substr(sr.external_id,10,10) >= date('now','-3 day')
       AND COALESCE(json_extract(sr.metadata_json, '$.normalizationOwner'),'') <> 'post_race_settlement_final'
-      AND (sr.external_id LIKE 'game:V85\\_%' ESCAPE '\\' OR sr.external_id LIKE 'game:V86\\_%' ESCAPE '\\')
       AND NOT EXISTS (
         SELECT 1
         FROM source_records newer
@@ -174,7 +182,7 @@ export async function selectPendingOfficialGameSource(env) {
         OR (
           SELECT COUNT(*)
           FROM import_runs ir
-          WHERE ir.source_type = ?
+          WHERE ir.source_type = 'official_live_normalize_auto'
             AND ir.status = 'failed'
             AND json_extract(ir.metadata_json, '$.sourceRecordId') = sr.id
         ) < ?
@@ -189,7 +197,7 @@ export async function selectPendingOfficialGameSource(env) {
       sr.fetched_at DESC,
       sr.id DESC
     LIMIT 1
-  `).bind(SOURCE_TYPE, PENDING_QUALITY, AUTO_NORMALIZE_SOURCE_TYPE, MAX_AUTO_NORMALIZE_FAILURES).first();
+  `).bind(MAX_AUTO_NORMALIZE_FAILURES).first();
   return pending || null;
 }
 
