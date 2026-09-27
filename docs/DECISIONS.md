@@ -331,6 +331,14 @@ A single race must not directly change model weights. Candidate learnings are re
 8. Whole-game and chunked official normalization use the same identity precedence: canonical race + horse first, source start id as fallback, and known stored identity is never overwritten by a later remap.
 
 
+## Production deployment has one promotion path
+1. Explicit user approval to merge/deploy authorizes the reviewed KentaurAI release chain: merge the reviewed PR, run the production release workflow, apply pending migrations, deploy the Worker and verify production. It does not authorize a parallel provider-side Git push to promote production independently.
+2. Cloudflare Workers Builds may remain connected to the public GitHub repository for build/status visibility, but the production Git trigger must use `npx wrangler versions upload`. A push to `main` may therefore create an inactive Worker version but must not activate it.
+3. The production release workflow enforces this provider-side trigger policy before any D1 migration. It discovers the exact `kentaurai-api` Worker and exact GitHub/`kentaurai` production trigger, fails closed on missing/ambiguous identity or API permission, patches only the deploy command when necessary and verifies the persisted value.
+4. `wrangler deploy` is reserved for the reviewed production release workflow. If the Cloudflare Builds policy cannot be verified, the release stops before database mutation or Worker deployment.
+5. No recurring GitHub workflow is introduced for this policy. The durable protection is the Cloudflare trigger configuration itself, with release-time verification as a regression guard.
+
+
 ## Automatic maintenance cost-safety
 1. KentaurAI automatic maintenance runs once each morning, not every minute. The normal schedule is `05:15 UTC`.
 2. Upcoming official capture keeps a seven-day V85/V86 horizon so lower frequency does not reduce the normal upcoming-round workspace.
