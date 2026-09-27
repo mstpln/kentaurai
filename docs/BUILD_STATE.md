@@ -5,6 +5,7 @@
 - The outer production worker checks the control before entering the scheduled worker chain. The scheduled orchestrator also rechecks it before each morning part, and legacy scheduled wrapper side-jobs recheck it before their own work; a newly paused switch therefore stops subsequent automatic work, while an operation already in flight is allowed to finish. Control-read failures fail closed.
 - Cloudflare is the billing-usage source of truth. D1 rows read/written and storage are queried from Cloudflare analytics for the billing period derived from Cloudflare billing metadata. Missing API access produces an unavailable state rather than a zero or estimated value.
 - Runtime Cloudflare usage requires `CLOUDFLARE_ACCOUNT_ID` plus a dedicated read-only `CLOUDFLARE_USAGE_API_TOKEN` with Account Analytics Read and Billing Read. Neither value is committed.
+- The reviewed production release consumes the GitHub Actions usage token only at runtime, validates billing + D1 analytics access before any production migration, uploads both runtime bindings alongside the Worker with Wrangler's `--secrets-file`, and then verifies only the secret names/types through Cloudflare's secret-binding API. Secret values are never printed or committed.
 - Production entrypoint candidate is `src/worker-v079.js`. Production release verifies migration 0049 before promotion.
 
 ## Cloudflare single-promotion-path hardening candidate
