@@ -56,6 +56,7 @@ test('production release verifies required migrations and private observability 
   assert.match(releaseWorkflow, /\/app\/api\/settings\/status/);
   assert.match(releaseWorkflow, /\/app\/api\/settings\/alerts'/);
   assert.match(releaseWorkflow, /\/app\/api\/settings\/alerts\/acknowledge/);
+  assert.match(releaseWorkflow, /\/v1\/storage-cleanup\/audit/);
   assert.match(releaseWorkflow, /\/v1\/storage-cleanup\/session\/start/);
   assert.match(releaseWorkflow, /\/v1\/storage-cleanup\/session\/checkpoint/);
 });
