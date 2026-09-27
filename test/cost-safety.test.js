@@ -50,10 +50,10 @@ test('cost observer counts reads performed through D1 first()', async () => {
 
   const observed = await observeD1Operation(env, 'synthetic_first', async (observedEnv) => {
     return observedEnv.DB.prepare('SELECT id,canonical_name FROM horses ORDER BY id').first();
-  }, { rowsRead: 1, rowsWritten: 100, durationMs: 10000 });
+  }, { rowsRead: 0, rowsWritten: 100, durationMs: 10000 });
 
   assert.equal(observed.value.id, 'first-a');
-  assert.equal(observed.metrics.rowsRead, 2);
+  assert.equal(observed.metrics.rowsRead, 1);
   assert.equal(observed.safetyStop, true);
 });
 
@@ -83,4 +83,27 @@ test('GitHub operational workflows contain no recurring schedule', () => {
     assert.doesNotMatch(workflow, /^\s*schedule:\s*$/m, `${name} must remain non-scheduled`);
     assert.doesNotMatch(workflow, /^\s*-\s*cron:\s*/m, `${name} must not add a GitHub cron`);
   }
+});
+
+
+test('cost observer preserves first(column) semantics without reading the full result set', async () => {
+  const { env } = createTestEnv();
+  for (const id of ['first-c','first-d','first-e']) {
+    await env.DB.prepare('INSERT INTO horses (id,canonical_name) VALUES (?,?)').bind(id, id).run();
+  }
+
+  const observed = await observeD1Operation(env, 'synthetic_first_column', async (observedEnv) => {
+    return observedEnv.DB.prepare('SELECT id,canonical_name FROM horses ORDER BY id').first('canonical_name');
+  }, { rowsRead: 10, rowsWritten: 100, durationMs: 10000 });
+
+  assert.equal(observed.value, 'first-c');
+  assert.equal(observed.metrics.rowsRead, 1);
+  assert.equal(observed.safetyStop, false);
+
+  await assert.rejects(
+    () => observeD1Operation(env, 'synthetic_first_missing_column', (observedEnv) =>
+      observedEnv.DB.prepare('SELECT id FROM horses ORDER BY id').first('missing_column')
+    ),
+    /column not found/
+  );
 });
