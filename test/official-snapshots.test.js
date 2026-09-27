@@ -325,3 +325,20 @@ test('snapshot cleanup dry-run removes only sequential repeats and mutates nothi
   assert.equal(JSON.stringify(first).includes('cleanup-'), false);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM horse_profile_snapshots').get().n, 6);
 });
+
+
+test('snapshot as-of observation join has a dedicated snapshot lookup index', () => {
+  const { db } = createTestEnv();
+  const index = db.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_official_snapshot_observations_snapshot_lookup'").get();
+  assert.match(index.sql, /official_snapshot_observations\(snapshot_family, snapshot_id, observed_at DESC, source_record_id DESC\)/);
+
+  const plan = db.prepare(`
+    EXPLAIN QUERY PLAN
+    SELECT hps.id
+    FROM horse_profile_snapshots hps
+    LEFT JOIN official_snapshot_observations oso
+      ON oso.snapshot_family='horse_profile' AND oso.snapshot_id=hps.id
+    WHERE hps.horse_id=?
+  `).all('synthetic-horse');
+  assert.match(JSON.stringify(plan), /idx_official_snapshot_observations_snapshot_lookup/);
+});
