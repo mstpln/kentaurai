@@ -288,6 +288,7 @@ jobs:
             '/v1/post-race/settlement/private-probe' \
             '/v1/statistics/backfill/status' \
             '/v1/statistics/backfill/step' \
+            '/v1/storage-cleanup/audit' \
             '/v1/storage-cleanup/session/start' \
             '/v1/storage-cleanup/session/checkpoint'; do
             status="$(curl --silent --show-error --output /tmp/private-response.json --write-out '%{http_code}' "$WORKER_URL$path")"
