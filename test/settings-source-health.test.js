@@ -192,6 +192,36 @@ test('intentionally paused official history does not raise a stale or retry aler
   assert.equal(result.alerts.length, 0);
 });
 
+test('daily automatic work is not declared stale between morning runs', async () => {
+  const { env, db } = createTestEnv();
+  insertOfficialDaily(db, {
+    last_run_at: '2099-09-20T20:00:00Z',
+    status: 'running',
+    consecutive_errors: 0,
+    last_error: null
+  });
+
+  const result = await getSettingsSourceHealth(env, { now: NOW });
+  const official = result.sources.find((source) => source.id === 'official');
+  assert.equal(official.status, 'working');
+  assert.equal(official.issue, null);
+});
+
+test('daily automatic work becomes actionable after missing the next morning window', async () => {
+  const { env, db } = createTestEnv();
+  insertOfficialDaily(db, {
+    last_run_at: '2099-09-20T12:00:00Z',
+    status: 'running',
+    consecutive_errors: 0,
+    last_error: null
+  });
+
+  const result = await getSettingsSourceHealth(env, { now: NOW });
+  const official = result.sources.find((source) => source.id === 'official');
+  assert.equal(official.status, 'action_required');
+  assert.equal(official.issue.label, 'Åtgärd krävs');
+});
+
 test('official daily retry error remains a red alert while long history stays paused', async () => {
   const { env, db } = createTestEnv();
   insertOfficialHistorical(db);
