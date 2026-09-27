@@ -212,3 +212,8 @@ test('billing period UI renders the exclusive cycle end as the previous inclusiv
   assert.match(source, /setUTCDate\(d\.getUTCDate\(\)-1\)/);
   assert.match(source, /fmtBillingEnd\(cf\.billingPeriod\.end\)/);
 });
+
+test('runtime controls stay outside structured data exports', () => {
+  const source = readFileSync(new URL('../src/settings-data.js', import.meta.url), 'utf8');
+  assert.match(source, /EXCLUDED_TABLES = new Set\(\['d1_migrations', 'runtime_controls'\]\)/);
+});
