@@ -8,7 +8,10 @@ test('manual production storage cleanup workflow stays gated and bounded', () =>
 
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /EXECUTE REVIEWED STORAGE CLEANUP/);
-  assert.match(workflow, /KENTAURAI_ADMIN_TOKEN/);
+  assert.match(workflow, /STORAGE_CLEANUP_TOKEN/);
+  assert.match(workflow, /wrangler@4\.114\.0 secret put STORAGE_CLEANUP_TOKEN/);
+  assert.match(workflow, /secret delete STORAGE_CLEANUP_TOKEN/);
+  assert.doesNotMatch(workflow, /secrets\.ADMIN_TOKEN|secrets\.KENTAURAI_ADMIN_TOKEN/);
   assert.match(workflow, /time_travel\/bookmark/);
   assert.match(workflow, /concurrency:/);
   assert.doesNotMatch(workflow, /schedule:/);
