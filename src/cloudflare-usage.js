@@ -252,21 +252,36 @@ query KentaurAICloudflareUsage(
 `;
 
 async function allD1DatabaseBytes(fetchImpl, accountId, token) {
+  const perPage = 1000;
+  const databases = [];
   let page = 1;
-  let total = 0;
   for (;;) {
     const body = await cloudflareGet(
       fetchImpl,
-      `${API_ROOT}/accounts/${encodeURIComponent(accountId)}/d1/database?page=${page}&per_page=100`,
+      `${API_ROOT}/accounts/${encodeURIComponent(accountId)}/d1/database?page=${page}&per_page=${perPage}`,
       token,
       'Cloudflare D1 database list'
     );
-    const databases = body?.result || [];
-    total += databases.reduce((sum, database) => sum + numberOrZero(database?.file_size), 0);
-    const totalPages = Number(body?.result_info?.total_pages || 1);
-    if (!Number.isFinite(totalPages) || page >= totalPages || !databases.length) break;
+    const batch = body?.result || [];
+    databases.push(...batch);
+    const totalCount = Number(body?.result_info?.total_count);
+    if (!batch.length || batch.length < perPage || (Number.isFinite(totalCount) && databases.length >= totalCount)) break;
     page += 1;
     if (page > 100) throw new Error('Cloudflare D1 database list exceeded pagination safety limit');
+  }
+
+  let total = 0;
+  const uuids = databases.map((database) => String(database?.uuid || '').trim()).filter(Boolean);
+  for (let index = 0; index < uuids.length; index += 25) {
+    const details = await Promise.all(uuids.slice(index, index + 25).map((databaseId) =>
+      cloudflareGet(
+        fetchImpl,
+        `${API_ROOT}/accounts/${encodeURIComponent(accountId)}/d1/database/${encodeURIComponent(databaseId)}?fields=file_size,uuid,name`,
+        token,
+        'Cloudflare D1 database details'
+      )
+    ));
+    total += details.reduce((sum, body) => sum + numberOrZero(body?.result?.file_size), 0);
   }
   return total;
 }
