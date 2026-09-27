@@ -9,6 +9,7 @@ import {
   planSnapshotCleanupBatch
 } from '../src/storage-cleanup-executor.js';
 import worker from '../src/index.js';
+import { getOfficialHorseSnapshotsAsOf } from '../src/import/official-snapshots.js';
 
 function addSource(db, id, fetchedAt, rawObjectKey = id, contentHash = null, sourceType = 'official_provider') {
   db.prepare(`
