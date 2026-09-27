@@ -3,7 +3,10 @@ const AUTOMATION_KEY = 'automatic_workflows_enabled';
 export const CLOUDFLARE_USAGE_LIMITS = Object.freeze({
   d1RowsRead: 25_000_000_000,
   d1RowsWritten: 50_000_000,
-  d1StorageBytes: 5_000_000_000
+  d1StorageBytes: 5_000_000_000,
+  r2StorageBytes: 10_000_000_000,
+  r2ClassAOperations: 1_000_000,
+  r2ClassBOperations: 10_000_000
 });
 
 function nowIso(now = new Date()) {
@@ -167,23 +170,29 @@ function currentD1Storage(groups) {
   return [...latestByDatabase.values()].reduce((sum, item) => sum + item.value, 0);
 }
 
-function classifyD1BillingRecord(record) {
+function classifyBillingRecord(record) {
   const family = String(record?.ServiceFamilyName || record?.x_ProductFamilyName || '').toLowerCase();
   const service = String(record?.ServiceName || record?.x_BillableMetricName || '').toLowerCase();
   const description = String(record?.ChargeDescription || '').toLowerCase();
   const metricId = String(record?.x_BillableMetricId || '').toLowerCase();
   const combined = [family, service, description, metricId].filter(Boolean).join(' ');
-  if (!combined.includes('d1')) return null;
-  if (/rows?\s*(read|reads)|read\s*rows?/.test(combined)) return 'd1_rows_read';
-  if (/rows?\s*(written|write|writes)|written\s*rows?|write\s*rows?/.test(combined)) return 'd1_rows_written';
-  if (/storage|gb[- ]?months?|database\s*storage/.test(combined)) return 'd1_storage';
+  if (combined.includes('d1')) {
+    if (/rows?\s*(read|reads)|read\s*rows?/.test(combined)) return 'd1_rows_read';
+    if (/rows?\s*(written|write|writes)|written\s*rows?|write\s*rows?/.test(combined)) return 'd1_rows_written';
+    if (/storage|gb[- ]?months?|database\s*storage/.test(combined)) return 'd1_storage';
+  }
+  if (combined.includes('r2')) {
+    if (/class\s*a|class[_ -]?a/.test(combined)) return 'r2_class_a';
+    if (/class\s*b|class[_ -]?b/.test(combined)) return 'r2_class_b';
+    if (/storage/.test(combined) && !/infrequent|retrieval|catalog|sql/.test(combined)) return 'r2_storage';
+  }
   return null;
 }
 
-function aggregateD1BillingCosts(records) {
+function aggregateBillingCosts(records) {
   const totals = new Map();
   for (const record of records || []) {
-    const id = classifyD1BillingRecord(record);
+    const id = classifyBillingRecord(record);
     if (!id) continue;
     const cost = record?.BilledCost;
     const currency = String(record?.BillingCurrency || '').trim().toUpperCase();
@@ -199,7 +208,7 @@ function aggregateD1BillingCosts(records) {
   return totals;
 }
 
-async function d1BillingCosts(env, fetchImpl, cycle, now) {
+async function billingCosts(env, fetchImpl, cycle, now) {
   const accountId = String(env.CLOUDFLARE_ACCOUNT_ID || '').trim();
   const token = String(env.CLOUDFLARE_USAGE_API_TOKEN || '').trim();
   const url = new URL(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/billable-usage`);
@@ -207,7 +216,101 @@ async function d1BillingCosts(env, fetchImpl, cycle, now) {
   url.searchParams.set('to', dateKey(now));
   const data = await cloudflareJson(fetchImpl, url.toString(), token);
   if (!Array.isArray(data?.result)) throw new Error('Cloudflare billable usage records are unavailable');
-  return aggregateD1BillingCosts(data.result);
+  return aggregateBillingCosts(data.result);
+}
+
+const R2_USAGE_QUERY = `query KentaurAiR2Usage($accountTag: string!, $start: Time, $end: Time) {
+  viewer {
+    accounts(filter: { accountTag: $accountTag }) {
+      r2OperationsAdaptiveGroups(
+        limit: 10000
+        filter: { datetime_geq: $start, datetime_leq: $end }
+      ) {
+        sum { requests }
+        dimensions { actionType }
+      }
+      r2StorageAdaptiveGroups(
+        limit: 10000
+        filter: { datetime_geq: $start, datetime_leq: $end }
+        orderBy: [datetime_DESC]
+      ) {
+        max { payloadSize metadataSize }
+        dimensions { datetime bucketName }
+      }
+    }
+  }
+}`;
+
+const R2_CLASS_A_ACTIONS = new Set([
+  'listbuckets','putbucket','listobjects','putobject','copyobject','completemultipartupload',
+  'createmultipartupload','lifecyclestoragetiertransition','listmultipartuploads','uploadpart',
+  'uploadpartcopy','listparts','putbucketencryption','putbucketcors','putbucketlifecycleconfiguration'
+]);
+const R2_CLASS_B_ACTIONS = new Set([
+  'headbucket','headobject','getobject','usagesummary','getbucketencryption','getbucketlocation',
+  'getbucketcors','getbucketlifecycleconfiguration'
+]);
+
+function normalizeR2Action(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function r2OperationCounts(groups) {
+  let classA = 0;
+  let classB = 0;
+  for (const group of groups || []) {
+    const requests = verifiedNonNegativeNumber(group?.sum?.requests, 'R2 requests');
+    const action = normalizeR2Action(group?.dimensions?.actionType);
+    if (R2_CLASS_A_ACTIONS.has(action)) classA += requests;
+    else if (R2_CLASS_B_ACTIONS.has(action)) classB += requests;
+  }
+  return { classA, classB };
+}
+
+function currentR2Storage(groups) {
+  const latestByBucket = new Map();
+  for (const group of groups || []) {
+    const bucket = String(group?.dimensions?.bucketName || '').trim();
+    const datetime = String(group?.dimensions?.datetime || '').trim();
+    const time = Date.parse(datetime);
+    if (!bucket || !Number.isFinite(time)) throw new Error('Cloudflare R2 storage dimensions are unavailable');
+    const payload = verifiedNonNegativeNumber(group?.max?.payloadSize, 'R2 payload storage');
+    const metadata = verifiedNonNegativeNumber(group?.max?.metadataSize, 'R2 metadata storage');
+    const value = payload + metadata;
+    const existing = latestByBucket.get(bucket);
+    if (!existing || time > existing.time || (time === existing.time && value > existing.value)) {
+      latestByBucket.set(bucket, { time, value });
+    }
+  }
+  return [...latestByBucket.values()].reduce((sum, item) => sum + item.value, 0);
+}
+
+async function r2Usage(env, fetchImpl, cycle, now) {
+  const accountId = String(env.CLOUDFLARE_ACCOUNT_ID || '').trim();
+  const token = String(env.CLOUDFLARE_USAGE_API_TOKEN || '').trim();
+  const data = await cloudflareJson(fetchImpl, 'https://api.cloudflare.com/client/v4/graphql', token, {
+    method:'POST',
+    body: JSON.stringify({
+      query: R2_USAGE_QUERY,
+      variables: {
+        accountTag: accountId,
+        start: cycle.start,
+        end: new Date(now).toISOString()
+      }
+    })
+  });
+  const account = data?.data?.viewer?.accounts?.[0];
+  if (!account) throw new Error('Cloudflare R2 analytics account is unavailable');
+  if (!Array.isArray(account.r2OperationsAdaptiveGroups) || !Array.isArray(account.r2StorageAdaptiveGroups)) {
+    throw new Error('Cloudflare R2 analytics datasets are unavailable');
+  }
+  if (!account.r2StorageAdaptiveGroups.length) throw new Error('Cloudflare R2 storage metric is unavailable');
+  const operations = r2OperationCounts(account.r2OperationsAdaptiveGroups);
+  return {
+    classAOperations: operations.classA,
+    classBOperations: operations.classB,
+    storageBytes: currentR2Storage(account.r2StorageAdaptiveGroups)
+  };
 }
 
 async function d1Usage(env, fetchImpl, cycle, now) {
@@ -271,11 +374,14 @@ export async function getCloudflareUsage(env, options = {}) {
   }
   try {
     const cycle = await billingCycle(env, fetchImpl, now);
-    const d1 = await d1Usage(env, fetchImpl, cycle, now);
-    let billingCosts = new Map();
+    const [d1, r2] = await Promise.all([
+      d1Usage(env, fetchImpl, cycle, now),
+      r2Usage(env, fetchImpl, cycle, now)
+    ]);
+    let costByMetric = new Map();
     let billingCostAvailable = true;
     try {
-      billingCosts = await d1BillingCosts(env, fetchImpl, cycle, now);
+      costByMetric = await billingCosts(env, fetchImpl, cycle, now);
     } catch {
       billingCostAvailable = false;
     }
@@ -285,11 +391,17 @@ export async function getCloudflareUsage(env, options = {}) {
       billingPeriod: cycle,
       metrics: [
         usageMetric('d1_rows_read', 'D1 · Rows read', d1.rowsRead, CLOUDFLARE_USAGE_LIMITS.d1RowsRead, 'rows',
-          '25 miljarder ingår per billingperiod. Därefter debiteras överförbrukning.', billingCosts.get('d1_rows_read')),
+          '25 miljarder ingår per billingperiod. Därefter debiteras överförbrukning.', costByMetric.get('d1_rows_read')),
         usageMetric('d1_rows_written', 'D1 · Rows written', d1.rowsWritten, CLOUDFLARE_USAGE_LIMITS.d1RowsWritten, 'rows',
-          '50 miljoner ingår per billingperiod.', billingCosts.get('d1_rows_written')),
+          '50 miljoner ingår per billingperiod.', costByMetric.get('d1_rows_written')),
         usageMetric('d1_storage', 'D1 · Lagring', d1.storageBytes, CLOUDFLARE_USAGE_LIMITS.d1StorageBytes, 'bytes',
-          '5 GB ingår. Lagring över den inkluderade nivån debiteras.', billingCosts.get('d1_storage'))
+          '5 GB ingår. Lagring över den inkluderade nivån debiteras.', costByMetric.get('d1_storage')),
+        usageMetric('r2_storage', 'R2 · Lagring', r2.storageBytes, CLOUDFLARE_USAGE_LIMITS.r2StorageBytes, 'bytes',
+          '10 GB-månad ingår för Standard storage.', costByMetric.get('r2_storage')),
+        usageMetric('r2_class_a', 'R2 · Class A', r2.classAOperations, CLOUDFLARE_USAGE_LIMITS.r2ClassAOperations, 'requests',
+          '1 miljon Class A-operationer ingår per månad.', costByMetric.get('r2_class_a')),
+        usageMetric('r2_class_b', 'R2 · Class B', r2.classBOperations, CLOUDFLARE_USAGE_LIMITS.r2ClassBOperations, 'requests',
+          '10 miljoner Class B-operationer ingår per månad.', costByMetric.get('r2_class_b'))
       ],
       additional: {
         billingCostAvailable,
