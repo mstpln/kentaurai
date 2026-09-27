@@ -384,6 +384,14 @@ The external-analysis production release was accepted after:
 - Regression coverage includes a synthetic final payload whose two source-start ids are swapped while canonical horse ids remain stable.
 
 
+## Reviewed storage cleanup executor candidate
+- Branch: `codex/storage-cleanup-executor-v1`.
+- Production cleanup remains blocked until this branch is reviewed, merged, deployed and the separate restore/dry-run gates pass; this build itself performs no production cleanup.
+- Snapshot cleanup is explicit, ADMIN_TOKEN-protected and limited to 25 deterministic change-point candidates per batch. A fresh signed cursor, matching dry-run token and exact confirmation are required. Observation provenance is rewired before a duplicate snapshot row can be deleted, and an audited D1 constraint rolls the batch back if the delete count differs from plan.
+- Raw-object cleanup verifies the legacy key/hash and object, creates or verifies the canonical object first, rewrites at most 25 indexed D1 references, confirms zero legacy references, and deletes the legacy object last. Conflicts and missing/unverifiable objects stop the operation.
+- Migration `0043_storage_cleanup_executor_v1.sql` records sanitized batch assertions and completion state. No automatic schedule, backfill, deployment or production mutation is introduced.
+
+
 ## Winner index, Trend sort and final-game settlement ownership
 - Spel → Statistik winner-rate tables now also expose a deterministic Vinnarindex: winner share divided by starter share within the same known-value metric population.
 - The UI keeps existing filters/layout and adds the Vinnarindex column with an inline explanation; unknown values remain null.

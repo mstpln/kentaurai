@@ -1,4 +1,4 @@
-const SNAPSHOT_FAMILIES = Object.freeze({
+export const SNAPSHOT_FAMILIES = Object.freeze({
   horse_profile: {
     table: 'horse_profile_snapshots', entity: ['horse_id'], scope: [],
     facts: ['age_years']
@@ -17,7 +17,7 @@ const SNAPSHOT_FAMILIES = Object.freeze({
   }
 });
 
-function boundedLimit(value, max = 10000) {
+export function boundedCleanupLimit(value, max = 10000) {
   const limit = value == null ? 1000 : Number(value);
   if (!Number.isInteger(limit) || limit < 1 || limit > max) throw new Error(`limit must be between 1 and ${max}`);
   return limit;
@@ -26,6 +26,7 @@ function boundedLimit(value, max = 10000) {
 function tuple(row, columns) { return columns.map((column) => row[column]); }
 function equalTuple(left, right) { return left.length === right.length && left.every((value, index) => Object.is(value, right[index])); }
 function key(row, columns) { return JSON.stringify(tuple(row, columns)); }
+export function snapshotFactsEqual(left, right) { return equalTuple(left, right); }
 function chunks(values, size = 80) {
   const out = [];
   for (let index = 0; index < values.length; index += size) out.push(values.slice(index, index + size));
@@ -36,7 +37,7 @@ export async function planOfficialSnapshotCleanup(env, { family, limit } = {}) {
   if (!env?.DB) throw new Error('DB is not configured');
   const definition = SNAPSHOT_FAMILIES[String(family || '')];
   if (!definition) throw new Error('unsupported snapshot family');
-  const rowLimit = boundedLimit(limit);
+  const rowLimit = boundedCleanupLimit(limit);
   const partition = [...definition.entity, ...definition.scope];
   const { results = [] } = await env.DB.prepare(
     `SELECT * FROM ${definition.table} ORDER BY ${partition.join(',')}, julianday(observed_at), id LIMIT ?`
@@ -79,7 +80,7 @@ function hashFromKey(keyValue) {
 
 export async function planRawObjectDeduplication(env, { sourceType = null, limit } = {}) {
   if (!env?.DB) throw new Error('DB is not configured');
-  const rowLimit = boundedLimit(limit);
+  const rowLimit = boundedCleanupLimit(limit);
   const filter = sourceType == null ? '' : 'AND source_type = ?';
   const statement = env.DB.prepare(`
     SELECT id,source_type,content_hash,raw_object_key

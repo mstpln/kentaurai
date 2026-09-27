@@ -114,7 +114,8 @@ export function createTestEnv() {
     '../../migrations/0039_game_statistics_v1.sql',
     '../../migrations/0040_statistics_data_backfill_v1.sql',
     '../../migrations/0041_statistics_data_backfill_state_v2.sql',
-    '../../migrations/0042_cost_storage_safety_v1.sql'
+    '../../migrations/0042_cost_storage_safety_v1.sql',
+    '../../migrations/0043_storage_cleanup_executor_v1.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }
@@ -126,16 +127,28 @@ export function createTestEnv() {
     d1Metrics,
     env: {
       DB: new D1Adapter(db, d1Metrics),
+      ADMIN_TOKEN: 'synthetic-test-admin-token',
       V85_LINE_PRICE_SEK: '0.50',
       V86_LINE_PRICE_SEK: '0.25',
       RAW_BUCKET: {
-        async put(key, body, options) { objects.set(key, { body, options }); },
-        async head(key) { return objects.has(key) ? { key } : null; },
+        async put(key, body, options = {}) {
+          objects.set(key, { body, options });
+        },
+        async head(key) {
+          const stored = objects.get(key);
+          const bytes = stored && (typeof stored.body === 'string' ? new TextEncoder().encode(stored.body) : stored.body);
+          return stored ? { key, size: bytes.byteLength, customMetadata: stored.options.customMetadata, httpMetadata: stored.options.httpMetadata } : null;
+        },
         async get(key) {
           const stored = objects.get(key);
           if (!stored) return null;
-          return { async text() { return stored.body; } };
-        }
+          const bytes = typeof stored.body === 'string' ? new TextEncoder().encode(stored.body) : stored.body;
+          return {
+            async text() { return typeof stored.body === 'string' ? stored.body : new TextDecoder().decode(bytes); },
+            async arrayBuffer() { return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength); }
+          };
+        },
+        async delete(key) { objects.delete(key); }
       }
     },
     objects
