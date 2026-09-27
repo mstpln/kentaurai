@@ -65,18 +65,20 @@ test('usage overview uses account-wide Cloudflare metrics and billing-period lim
         success:true,
         result:[
           {
-            x_ProductFamilyName:'Workers',
-            x_BillableMetricId:'workers_cpu_time',
+            ServiceFamilyName:'Workers',
+            ServiceName:'Workers Standard CPU Time',
+            ChargeDescription:'Workers Standard CPU Time usage',
             ConsumedQuantity:10000,
             ConsumedUnit:'seconds',
             BilledCost:1.25,
             BillingCurrency:'USD'
           },
           {
-            x_ProductFamilyName:'R2',
-            x_BillableMetricId:'r2_storage',
+            ServiceFamilyName:'R2',
+            ServiceName:'R2 Standard Storage',
+            ChargeDescription:'R2 Standard storage usage',
             ConsumedQuantity:4.2,
-            ConsumedUnit:'GB-month',
+            ConsumedUnit:'GB-months',
             BilledCost:0.5,
             BillingCurrency:'USD'
           }
