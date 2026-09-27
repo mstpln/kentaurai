@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=fab7976906e88c0b1995273091046a65b60382f8
-release_nonce=2026-09-27-pr285-cloudflare-promotion-gate-retry1
+source_main=7417f8a383a6d2c70ef94a9a57b3b5a4bfd0da34
+release_nonce=2026-09-27-pr287-settings-drift
