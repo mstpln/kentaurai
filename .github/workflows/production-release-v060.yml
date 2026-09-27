@@ -59,6 +59,19 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN" || { echo 'CLOUDFLARE_API_TOKEN is not configured'; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'CLOUDFLARE_ACCOUNT_ID is not configured'; exit 1; }
 
+      - name: Enforce single production promotion path
+        shell: bash
+        env:
+          CLOUDFLARE_BUILDS_API_TOKEN: ${{ secrets.CLOUDFLARE_BUILDS_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_WORKER_NAME: kentaurai-api
+          CLOUDFLARE_REPO_NAME: kentaurai
+          CLOUDFLARE_PRODUCTION_BRANCH: main
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_BUILDS_API_TOKEN" || { echo 'Cloudflare Builds API token is not configured'; exit 1; }
+          node scripts/cloudflare-builds-policy.mjs --apply
+
       - name: Apply pending production migrations
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
