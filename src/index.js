@@ -47,6 +47,7 @@ import {
 } from './storage-cleanup-executor.js';
 import { checkpointStorageCleanupSession, startOrResumeStorageCleanupSession } from './storage-cleanup-session.js';
 import { auditStorageCleanupIntegrity, bindStorageCleanupIntegrityAudit } from './storage-cleanup-audit.js';
+import { getAutomationControl } from './settings-drift.js';
 
 const LIVE_MORNING_CRON = '15 5 * * *';
 const DAILY_LIVE_NORMALIZE_RUNS = 16;
@@ -526,14 +527,34 @@ export async function handleScheduled(controller, env) {
   const id = `cron_${crypto.randomUUID()}`;
   const parts = [];
   const safety = createRunSafetyState();
+  let automationStopReason = null;
+
+  async function automationAllowed(name) {
+    if (automationStopReason) {
+      parts.push(skippedScheduledPart(name, automationStopReason));
+      return false;
+    }
+    try {
+      const control = await getAutomationControl(env);
+      if (control.enabled) return true;
+      automationStopReason = 'automatic_workflows_paused';
+    } catch (error) {
+      console.error('automatic workflow control unavailable', error);
+      automationStopReason = 'automation_control_unavailable';
+    }
+    parts.push(skippedScheduledPart(name, automationStopReason));
+    return false;
+  }
 
   async function critical(name, action) {
+    if (!(await automationAllowed(name))) return;
     const part = await runScheduledPart(name, env, (observedEnv) => action(observedEnv));
     parts.push(part);
     applyRunSafetyResult(safety, name, part);
   }
 
   async function nonCritical(name, action) {
+    if (!(await automationAllowed(name))) return;
     if (safety.stopped) {
       parts.push(skippedScheduledPart(name, safety.reason));
       return;

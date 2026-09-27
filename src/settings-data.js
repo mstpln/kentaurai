@@ -13,7 +13,7 @@ export const FULL_EXPORT_VERSION = 'kentaurai-full-export-v1';
 const EXPORT_BATCH_SIZE = 500;
 const MAX_ANALYSIS_UPLOAD_BYTES = 1024 * 1024;
 const MARKET_BLIND_FEATURE_VERSIONS = new Set(['form-v2', 'class-exposure-v2', 'development-v2']);
-const EXCLUDED_TABLES = new Set(['d1_migrations']);
+const EXCLUDED_TABLES = new Set(['d1_migrations', 'runtime_controls']);
 
 function quoteIdentifier(value) {
   return `"${String(value).replaceAll('"', '""')}"`;

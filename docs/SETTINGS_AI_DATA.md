@@ -18,12 +18,27 @@ Aktuell standardpolicy för huvudsystemet är 150-250 SEK. Om fler rader inte ö
 ### Legacy
 Historiska v1/v2-analyser och system får fortfarande läsas. Nya gamla combined/declared-unsealed analyser kan inte skapas när ANALYSIS_WORKFLOW_MODE=v3. legacy_v2 är endast ett kontrollerat rollback-läge och aktiveras aldrig automatiskt.
 
-## Data
+## Inställningar
 
-### Datatäckning och drift
-Data-fliken visar Coverage v2 i läsbar form, inklusive täckning för nästa omgång och sanerad status för officiell historik/X-Labs-jobb. Full datatäckningsrapport kan hämtas via den privata app-sessionen.
+Inställningar är uppdelat i två flikar:
 
-Driftinformationen är skrivskyddad i appen. Råpayloads, privata R2-objektnycklar, råa feltexter, hemligheter och ADMIN_TOKEN visas inte. Att återuppta eller ändra historiska jobb görs endast via det separata administratörsflödet.
+### Drift
+Drift är den operativa kontrollpanelen. Den visar:
+- om schemalagda KentaurAI-jobb är aktiva eller pausade,
+- verifierad Cloudflare D1-användning mot de inkluderade nivåerna för aktuell billingperiod,
+- datakällornas jobbstatus,
+- de senaste registrerade aktiviteterna.
+
+Switchen **Automatiska jobb** är en verklig runtime-kontroll. När den är avstängd avslutas nya schemalagda körningar före datainsamling/bearbetning. Den kontrolleras även mellan morgonkörningens delar och före äldre schemalagda sidjobb, så en paus som görs medan en körning redan pågår stoppar efterföljande automatiskt arbete. En SQL/API-operation som redan har startat avbryts inte mitt i operationen. Om kontrollen inte kan läsas failar schemalagd automation stängt. Vanlig appanvändning och uttryckligen manuella funktioner påverkas inte.
+
+Cloudflare är source of truth för progress bars. KentaurAI ska inte räkna upp billingvärden från noll eller ersätta saknad Cloudflare-data med uppskattningar. D1 rows read/written hämtas från Cloudflares GraphQL Analytics API och D1 storage från D1 analytics; billingperioden härleds från Cloudflares billing metadata. Värdena visas rött först när den inkluderade nivån är passerad, annars grönt.
+
+Runtime behöver `CLOUDFLARE_ACCOUNT_ID` och en dedikerad read-only hemlighet `CLOUDFLARE_USAGE_API_TOKEN` med minsta nödvändiga Cloudflare-behörighet för Account Analytics Read och Billing Read. Token får aldrig visas i UI, loggas eller läggas i GitHub. Om integrationen inte är konfigurerad eller Cloudflare inte kan läsas visas statusen som otillgänglig i stället för fabricerade siffror.
+
+### Data
+Data-fliken visar den lagrade datamängden och länken till den aggregerade datatäckningsrapporten. Rapporten kan hämtas via den privata app-sessionen. Råpayloads, privata R2-objektnycklar, hemligheter och privat redaktionell proveniens visas inte.
+
+Historiska backfills/cleanup och andra administratörsoperationer förblir separata manuella adminflöden och aktiveras inte av Drift-switchen.
 
 ## Säkerhet
 Alla app-routes kräver giltig privat session via APP_PASSWORD. Operativa /v1/*-routes använder separat ADMIN_TOKEN. Den privata appen exponerar aldrig administratörstoken och svar använder no-store där relevant.
