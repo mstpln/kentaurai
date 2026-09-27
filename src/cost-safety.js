@@ -25,12 +25,25 @@ function wrapStatement(statement, metrics) {
     }
   };
   wrapper[RAW_STATEMENT] = statement;
-  for (const method of ['all', 'run', 'first', 'raw']) {
+  for (const method of ['all', 'run', 'raw']) {
     if (typeof statement?.[method] !== 'function') continue;
     wrapper[method] = async (...args) => {
       const result = await statement[method](...args);
       addMeta(metrics, result?.meta);
       return result;
+    };
+  }
+  if (typeof statement?.first === 'function' && typeof statement?.all === 'function') {
+    wrapper.first = async (columnName) => {
+      const result = await statement.all();
+      addMeta(metrics, result?.meta);
+      const row = result?.results?.[0] ?? null;
+      if (row == null) return null;
+      if (columnName === undefined) return row;
+      if (!Object.prototype.hasOwnProperty.call(row, columnName)) {
+        throw new Error(`D1_ERROR: column not found: ${columnName}`);
+      }
+      return row[columnName];
     };
   }
   return wrapper;
