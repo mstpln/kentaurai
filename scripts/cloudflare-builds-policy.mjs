@@ -83,15 +83,14 @@ export function selectProductionTrigger(
     .filter((trigger) => triggerMatchesRepository(trigger, repoName))
     .filter((trigger) => !excludesBranch(trigger?.branch_excludes, productionBranch));
 
-  const exact = active.filter((trigger) => includesBranch(trigger?.branch_includes, productionBranch));
-  if (exact.length === 1) return exact[0];
-  if (exact.length > 1) {
-    throw new Error(`multiple Cloudflare production build triggers target ${productionBranch}; refusing to choose one`);
+  const matching = active.filter((trigger) =>
+    includesBranch(trigger?.branch_includes, productionBranch) ||
+    includesWildcard(trigger?.branch_includes)
+  );
+  if (matching.length !== 1) {
+    throw new Error(`expected exactly one Cloudflare production build trigger for ${repoName}/${productionBranch}; found ${matching.length}`);
   }
-
-  const wildcard = active.filter((trigger) => includesWildcard(trigger?.branch_includes));
-  if (wildcard.length === 1) return wildcard[0];
-  throw new Error(`expected exactly one Cloudflare production build trigger for ${repoName}/${productionBranch}; found ${wildcard.length}`);
+  return matching[0];
 }
 
 export function isNonPromotingTrigger(trigger) {
