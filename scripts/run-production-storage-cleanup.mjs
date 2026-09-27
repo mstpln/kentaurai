@@ -1,13 +1,28 @@
+import { writeFileSync } from 'node:fs';
+
 const MODE = process.env.MODE;
 const MAX_BATCHES = Number(process.env.MAX_BATCHES || 50);
+const RUN_UNTIL_COMPLETE = process.env.RUN_UNTIL_COMPLETE === 'true';
+const CLEANUP_SESSION_ID = process.env.CLEANUP_SESSION_ID || null;
+const SOURCE_SHA = process.env.GITHUB_SHA || '';
 const WORKER_URL = process.env.WORKER_URL;
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 const CONFIRMATION = 'execute-reviewed-storage-cleanup-batch';
 const FAMILIES = ['horse_profile', 'horse_stat', 'horse_record', 'person_stat'];
+const TARGETS = [...FAMILIES, 'raw_object'];
+const CHECKPOINT_EVERY = 10;
+const AUTO_TIME_BUDGET_MS = 32 * 60 * 1000;
+const startedAt = Date.now();
 
 if (!['dry-run', 'execute'].includes(MODE)) throw new Error('MODE must be dry-run or execute');
 if (!Number.isInteger(MAX_BATCHES) || MAX_BATCHES < 1 || MAX_BATCHES > 250) throw new Error('MAX_BATCHES must be between 1 and 250');
 if (!WORKER_URL || !ADMIN_TOKEN) throw new Error('WORKER_URL and ADMIN_TOKEN are required');
+if (RUN_UNTIL_COMPLETE && MODE !== 'execute') throw new Error('run-until-complete is available only in execute mode');
+if (RUN_UNTIL_COMPLETE && !/^[a-f0-9]{40}$/.test(SOURCE_SHA)) throw new Error('run-until-complete requires GITHUB_SHA');
+
+async function sleep(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 async function post(path, body) {
   for (let attempt = 1; attempt <= 15; attempt += 1) {
@@ -23,7 +38,7 @@ async function post(path, body) {
     let data;
     try { data = JSON.parse(text); } catch { throw new Error(`${path} returned non-JSON HTTP ${response.status}`); }
     if (response.status === 401 && attempt < 15) {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await sleep(2000);
       continue;
     }
     if (!response.ok) throw new Error(`${path} failed with HTTP ${response.status}: ${String(data?.error || 'unknown_error').slice(0, 160)}`);
@@ -37,15 +52,32 @@ function safeWarnings(value) {
   return Array.isArray(value) ? value.map(String).slice(0, 20) : [];
 }
 
-async function runSnapshotFamily(family) {
-  let cursor = null;
+function withinAutoBudget() {
+  return !RUN_UNTIL_COMPLETE || (Date.now() - startedAt) < AUTO_TIME_BUDGET_MS;
+}
+
+async function checkpoint(sessionId, target, cursor, complete) {
+  if (!RUN_UNTIL_COMPLETE) return { sessionComplete: false };
+  return post('/v1/storage-cleanup/session/checkpoint', {
+    session_id: sessionId,
+    source_sha: SOURCE_SHA,
+    target,
+    cursor: complete ? null : cursor,
+    complete
+  });
+}
+
+async function runSnapshotFamily(family, initialCursor = null, alreadyComplete = false, sessionId = null) {
+  if (alreadyComplete) return { target: family, complete: true, cursor: null, pages: 0 };
+  let cursor = initialCursor;
   let pages = 0;
   let scanned = 0;
   let removable = 0;
   let removed = 0;
   const warnings = new Set();
+  const batchLimit = RUN_UNTIL_COMPLETE ? Number.MAX_SAFE_INTEGER : MAX_BATCHES;
 
-  while (pages < MAX_BATCHES) {
+  while (pages < batchLimit && withinAutoBudget()) {
     const plan = await post('/v1/storage-cleanup/snapshots/plan', { family, limit: 25, cursor });
     pages += 1;
     scanned += Number(plan.rowsScanned || 0);
@@ -68,8 +100,15 @@ async function runSnapshotFamily(family) {
     } else {
       cursor = plan.nextCursor || null;
     }
+
     if (!cursor) break;
+    if (RUN_UNTIL_COMPLETE && pages % CHECKPOINT_EVERY === 0) {
+      await checkpoint(sessionId, family, cursor, false);
+    }
   }
+
+  const complete = cursor === null;
+  if (RUN_UNTIL_COMPLETE) await checkpoint(sessionId, family, cursor, complete);
 
   console.log(JSON.stringify({
     cleanup: 'snapshot',
@@ -79,13 +118,16 @@ async function runSnapshotFamily(family) {
     rowsScanned: scanned,
     rowsRemovable: removable,
     rowsRemoved: removed,
-    completeWithinRun: cursor === null,
+    completeWithinRun: complete,
+    autoContinuation: RUN_UNTIL_COMPLETE && !complete,
     warnings: [...warnings]
   }));
+  return { target: family, complete, cursor, pages };
 }
 
-async function runRawCleanup() {
-  let cursor = null;
+async function runRawCleanup(initialCursor = null, alreadyComplete = false, sessionId = null) {
+  if (alreadyComplete) return { target: 'raw_object', complete: true, cursor: null, batches: 0 };
+  let cursor = initialCursor;
   let batches = 0;
   let scanned = 0;
   let rewritesPlanned = 0;
@@ -93,9 +135,11 @@ async function runRawCleanup() {
   let canonicalCreated = 0;
   let legacyDeleted = 0;
   let conflicts = 0;
+  let confirmedComplete = false;
   const warnings = new Set();
+  const batchLimit = RUN_UNTIL_COMPLETE ? Number.MAX_SAFE_INTEGER : MAX_BATCHES;
 
-  while (batches < MAX_BATCHES) {
+  while (batches < batchLimit && withinAutoBudget()) {
     const plan = await post('/v1/storage-cleanup/raw/plan', { limit: 25, cursor });
     batches += 1;
     scanned += Number(plan.rowsScanned || 0);
@@ -131,7 +175,21 @@ async function runRawCleanup() {
     } else {
       cursor = plan.nextCursor || null;
     }
-    if (!cursor && Number(plan.referenceRewrites || 0) === 0) break;
+
+    const complete = cursor === null && Number(plan.referenceRewrites || 0) === 0;
+    if (complete) {
+      confirmedComplete = true;
+      break;
+    }
+    if (RUN_UNTIL_COMPLETE && batches % CHECKPOINT_EVERY === 0 && cursor) {
+      await checkpoint(sessionId, 'raw_object', cursor, false);
+    }
+  }
+
+  const complete = confirmedComplete;
+  if (RUN_UNTIL_COMPLETE) {
+    if (complete) await checkpoint(sessionId, 'raw_object', null, true);
+    else if (cursor) await checkpoint(sessionId, 'raw_object', cursor, false);
   }
 
   console.log(JSON.stringify({
@@ -144,10 +202,54 @@ async function runRawCleanup() {
     canonicalObjectsCreated: canonicalCreated,
     legacyObjectsDeleted: legacyDeleted,
     conflictsSkipped: conflicts,
-    completeWithinRun: cursor === null && rewritesPlanned === rewritesDone,
+    completeWithinRun: complete,
+    autoContinuation: RUN_UNTIL_COMPLETE && !complete,
     warnings: [...warnings]
   }));
+  return { target: 'raw_object', complete, cursor, batches };
 }
 
-for (const family of FAMILIES) await runSnapshotFamily(family);
-await runRawCleanup();
+let session = null;
+let targetState = new Map(TARGETS.map((target) => [target, { cursor: null, complete: false }]));
+if (RUN_UNTIL_COMPLETE) {
+  session = await post('/v1/storage-cleanup/session/start', {
+    session_id: CLEANUP_SESSION_ID,
+    source_sha: SOURCE_SHA
+  });
+  targetState = new Map(session.targets.map((target) => [target.target, target]));
+}
+
+const results = [];
+for (const family of FAMILIES) {
+  const state = targetState.get(family) || { cursor: null, complete: false };
+  results.push(await runSnapshotFamily(family, state.cursor, state.complete, session?.sessionId || null));
+  if (!withinAutoBudget()) break;
+}
+
+if (withinAutoBudget()) {
+  const rawState = targetState.get('raw_object') || { cursor: null, complete: false };
+  results.push(await runRawCleanup(rawState.cursor, rawState.complete, session?.sessionId || null));
+}
+
+if (RUN_UNTIL_COMPLETE) {
+  const completedTargets = new Set([
+    ...[...targetState.entries()].filter(([, value]) => value.complete).map(([target]) => target),
+    ...results.filter((result) => result.complete).map((result) => result.target)
+  ]);
+  const complete = TARGETS.every((target) => completedTargets.has(target));
+  const result = {
+    sessionId: session.sessionId,
+    complete,
+    continuationRequired: !complete,
+    continuationCount: session.continuationCount,
+    sourceSha: SOURCE_SHA
+  };
+  writeFileSync('/tmp/storage-cleanup-result.json', JSON.stringify(result));
+  console.log(JSON.stringify({
+    cleanup: 'session',
+    mode: MODE,
+    complete,
+    continuationRequired: !complete,
+    continuationCount: session.continuationCount
+  }));
+}

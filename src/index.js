@@ -45,6 +45,10 @@ import {
   planRawCleanupBatch,
   planSnapshotCleanupBatch
 } from './storage-cleanup-executor.js';
+import {
+  checkpointStorageCleanupSession,
+  startOrResumeStorageCleanupSession
+} from './storage-cleanup-session.js';
 
 const LIVE_MORNING_CRON = '15 5 * * *';
 const DAILY_LIVE_NORMALIZE_RUNS = 16;
@@ -355,6 +359,12 @@ async function handleFetch(request, env) {
   }
   if (request.method === 'GET' && path === '/v1/statistics/backfill/status') {
     return json(await getStatisticsDataBackfillStatus(env));
+  }
+  if (request.method === 'POST' && path === '/v1/storage-cleanup/session/start') {
+    return json(await startOrResumeStorageCleanupSession(env, await readJson(request)));
+  }
+  if (request.method === 'POST' && path === '/v1/storage-cleanup/session/checkpoint') {
+    return json(await checkpointStorageCleanupSession(env, await readJson(request)));
   }
   if (request.method === 'POST' && path === '/v1/storage-cleanup/snapshots/plan') {
     const body = await readJson(request);

@@ -18,7 +18,18 @@ test('manual production storage cleanup workflow stays gated and bounded', () =>
   assert.match(workflow, /seq 1 15/);
   assert.match(workflow, /concurrency:/);
   assert.doesNotMatch(workflow, /schedule:/);
+  assert.match(workflow, /execution_scope:/);
+  assert.match(workflow, /until-complete/);
+  assert.match(workflow, /actions: write/);
+  assert.match(workflow, /Queue automatic continuation/);
+  assert.match(workflow, /production-storage-cleanup\.yml\/dispatches/);
+  assert.match(workflow, /continuation_session/);
   assert.match(runner, /MAX_BATCHES > 250/);
+  assert.match(runner, /AUTO_TIME_BUDGET_MS/);
+  assert.match(runner, /storage-cleanup\/session\/start/);
+  assert.match(runner, /storage-cleanup\/session\/checkpoint/);
+  assert.match(runner, /CHECKPOINT_EVERY = 10/);
+  assert.match(runner, /confirmedComplete = true/);
   assert.match(runner, /limit: 25/);
   assert.match(runner, /safetyStop === true/);
   assert.match(runner, /execution count differed from its dry-run plan/);

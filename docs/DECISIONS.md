@@ -360,3 +360,11 @@ A single race must not directly change model weights. Candidate learnings are re
 3. A current D1 Time Travel bookmark must be verified before cleanup starts. Missing Cloudflare credentials, admin token, Worker route, health, bookmark, plan token or cost-safety acceptance fails closed.
 4. Workflow orchestration may repeat reviewed 25-row/reference executor batches, but each run has an explicit hard batch cap. A partial run is valid; remaining work waits for another manual run.
 5. Production cleanup workflow code may print only sanitized counts, completion flags and warning classes. It must never log private payloads, object keys, external ids, tokens or bookmark values.
+
+
+## Production cleanup may self-continue, but each mutation remains bounded
+1. A manually authorized execute run may open a resumable cleanup session and automatically dispatch bounded continuations until every target is complete.
+2. Session progress is stored per cleanup target as the signed executor cursor; continuations must resume from that cursor rather than rescanning cleaned history from the beginning.
+3. Each continuation still performs plan-before-execute checks, cost-safety checks, restore-point capture, temporary cleanup-only authentication and post-run health verification.
+4. A cleanup session is bound to the exact source commit, expires after 24 hours and has a hard continuation cap. Source-code changes, expiry or cap exhaustion fail closed and require a new manual decision.
+5. Automatic continuation does not make cleanup scheduled or recurring. It exists only to finish the single cleanup operation explicitly started by the user.
