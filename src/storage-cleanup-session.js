@@ -69,6 +69,16 @@ async function loadRunningForSource(env, sourceSha) {
   `).bind(sourceSha).first();
 }
 
+async function sessionAuditVerified(env, id, sourceSha) {
+  const row = await env.DB.prepare(`
+    SELECT 1 AS ok
+    FROM storage_cleanup_session_audits
+    WHERE session_id=? AND source_sha=?
+    LIMIT 1
+  `).bind(id, sourceSha).first();
+  return Boolean(row?.ok);
+}
+
 async function loadTargets(env, id) {
   const { results = [] } = await env.DB.prepare(`
     SELECT target,cursor,is_complete,updated_at
@@ -136,7 +146,7 @@ async function createSession(env, sourceSha) {
   return loadSession(env, id);
 }
 
-function toResponse(session, targets) {
+function toResponse(session, targets, auditVerified = false) {
   return {
     sessionId: session.id,
     sourceSha: session.source_sha,
@@ -144,6 +154,7 @@ function toResponse(session, targets) {
     continuationCount: Number(session.continuation_count || 0),
     maxContinuations: MAX_CONTINUATIONS,
     expiresAt: session.expires_at,
+    auditVerified: Boolean(auditVerified),
     targets
   };
 }
@@ -180,7 +191,8 @@ export async function startOrResumeStorageCleanupSession(env, options = {}) {
     else session = await createSession(env, sourceSha);
   }
 
-  return toResponse(session, await loadTargets(env, session.id));
+  const auditVerified = await sessionAuditVerified(env, session.id, sourceSha);
+  return toResponse(session, await loadTargets(env, session.id), auditVerified);
 }
 
 export async function checkpointStorageCleanupSession(env, options = {}) {
