@@ -8,13 +8,13 @@ import {
 
 export { renderLoginPage, htmlResponse, redirectResponse, safeReturnPath };
 
-const statusTextBefore = `function statusText(status){return ({working:'Fungerar',success:'Klar',warning:'Varning',error:'Fel upptäckt',running:'Pågår',never_run:'Ingen körning ännu',waiting:'Väntar',completed:'Klar',error_retrying:'Fel upptäckt',action_required:'Åtgärd krävs'})[status]||status}`;
-const statusTextAfter = `function statusText(status){return ({working:'✓',success:'✓',warning:'!',error:'✕',running:'…',never_run:'?',waiting:'…',completed:'✓',error_retrying:'✕',action_required:'✕'})[status]||status}`;
+const statusTextBefore = `function statusText(status){return ({working:'Fungerar',success:'Klar',warning:'Varning',error:'Fel upptäckt',running:'Pågår',never_run:'Ingen körning ännu',waiting:'Väntar',completed:'Klar',error_retrying:'Fel upptäckt',action_required:'Åtgärd krävs',paused:'Pausad'})[status]||status}`;
+const statusTextAfter = `function statusText(status){return ({working:'✓',success:'✓',warning:'!',error:'✕',running:'…',never_run:'?',waiting:'…',completed:'✓',error_retrying:'✕',action_required:'✕',paused:'–'})[status]||status}`;
 
 const feedbackCss = `
 <style id="kentaurai-feedback-fixes">
 .status-pill{border:0!important;border-radius:0!important;background:transparent!important;padding:0!important;min-width:24px;text-align:center;font-size:19px!important;font-weight:800!important;line-height:1!important}
-.status-pill.working,.status-pill.success{color:#8eb28a!important}.status-pill.error{color:#d58f83!important}.status-pill.warning,.status-pill.running,.status-pill.unknown{color:#d0b178!important}
+.status-pill.working,.status-pill.success{color:#8eb28a!important}.status-pill.error{color:#d58f83!important}.status-pill.warning,.status-pill.running,.status-pill.unknown{color:#d0b178!important}.status-pill.paused{color:#aaa39a!important}
 </style>`;
 
 const feedbackScript = `
