@@ -39,9 +39,7 @@ export async function getAutomationControl(env) {
     WHERE control_key = ?
     LIMIT 1
   `).bind(AUTOMATION_KEY).first();
-  if (!row) {
-    return { enabled: true, updatedAt: null, updatedBy: 'default' };
-  }
+  if (!row) throw new Error('automatic workflow control is missing');
   return {
     enabled: String(row.control_value) === '1',
     updatedAt: row.updated_at || null,
