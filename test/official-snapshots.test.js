@@ -289,6 +289,25 @@ test('identical factual observations reuse change-points while retaining source 
   assert.equal(current.get('horse-a').age.sourceRecordId, 'same-b');
 });
 
+test('same-time identical snapshot observations use stable source-id provenance ordering', async () => {
+  const { db, env } = createTestEnv();
+  seedEntities(db);
+  for (const id of ['tie-a','tie-z']) {
+    addSource(db, id, '2026-09-10T10:00:00Z', id);
+    await putPayload(env, id, payload({ age: 4 }));
+    await syncOfficialSnapshotsFromSource(env, id);
+  }
+
+  const horse = (await getOfficialHorseSnapshotsAsOf(env, ['horse-a'], '2026-09-10T11:00:00Z')).get('horse-a');
+  assert.equal(horse.age.years, 4);
+  assert.equal(horse.age.sourceRecordId, 'tie-z');
+
+  const driver = (await getOfficialPersonAnnualSnapshotsAsOf(
+    env, 'driver', ['driver-a'], '2026-09-10T11:00:00Z'
+  )).get('driver-a');
+  assert.equal(driver.sourceRecordId, 'tie-z');
+});
+
 test('A to B to A creates three sequential change-points and preserves null/value transitions', async () => {
   const { db, env } = createTestEnv();
   seedEntities(db);
