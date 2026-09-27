@@ -8,6 +8,10 @@
     "V85_LINE_PRICE_SEK": "0.50",
     "V86_LINE_PRICE_SEK": "0.25"
   },
+  "secrets": [
+    "CLOUDFLARE_ACCOUNT_ID",
+    "CLOUDFLARE_USAGE_API_TOKEN"
+  ],
   "workers_dev": true,
   "preview_urls": true,
   "d1_databases": [
