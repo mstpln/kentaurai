@@ -46,7 +46,7 @@ import {
   planSnapshotCleanupBatch
 } from './storage-cleanup-executor.js';
 import { checkpointStorageCleanupSession, startOrResumeStorageCleanupSession } from './storage-cleanup-session.js';
-import { auditStorageCleanupIntegrity } from './storage-cleanup-audit.js';
+import { auditStorageCleanupIntegrity, bindStorageCleanupIntegrityAudit } from './storage-cleanup-audit.js';
 
 const LIVE_MORNING_CRON = '15 5 * * *';
 const DAILY_LIVE_NORMALIZE_RUNS = 16;
@@ -360,6 +360,11 @@ async function handleFetch(request, env) {
   }
   if (request.method === 'GET' && path === '/v1/storage-cleanup/audit') {
     const observed = await observeD1Operation(env, 'storage_cleanup_integrity_audit', (observedEnv) => auditStorageCleanupIntegrity(observedEnv));
+    return json({ ...observed.value, cost: observed.metrics, safetyStop: observed.safetyStop });
+  }
+  if (request.method === 'POST' && path === '/v1/storage-cleanup/session/audit') {
+    const body = await readJson(request);
+    const observed = await observeD1Operation(env, 'storage_cleanup_session_integrity_audit', (observedEnv) => bindStorageCleanupIntegrityAudit(observedEnv, body));
     return json({ ...observed.value, cost: observed.metrics, safetyStop: observed.safetyStop });
   }
   if (request.method === 'POST' && path === '/v1/storage-cleanup/session/start') {
