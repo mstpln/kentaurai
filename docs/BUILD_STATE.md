@@ -1,3 +1,11 @@
+## Run-until-complete production cleanup candidate
+- Branch: `feat/storage-cleanup-run-until-complete`.
+- Execute mode keeps the 25-row/reference executor cap but removes the workflow-level 250-batch ceiling.
+- A soft 35-minute cleanup window checkpoints HMAC-signed per-target cursor/progress state in D1 through migration `0044_storage_cleanup_resume_state.sql`.
+- If the cleanup is still incomplete after the soft deadline and the run made progress, GitHub Actions queues a controlled follow-on run. If no progress is made, cost safety trips, a plan mismatch occurs or a raw conflict is found, execution fails closed instead of chaining.
+- The short-lived cleanup-only Worker token, 401 propagation retries, D1 Time Travel restore point, plan/execute count equality, post-run health check and automatic token deletion remain mandatory.
+- Dry-run stays bounded and non-mutating. No backfill, repair, historical acquisition, VACUUM or unrelated collection is introduced.
+
 ## Ephemeral production cleanup authentication candidate
 - Branch: `codex/ephemeral-cleanup-auth`.
 - The manual storage-cleanup workflow no longer requires a duplicated GitHub copy of the Worker `ADMIN_TOKEN`.
