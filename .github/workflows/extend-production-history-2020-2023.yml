@@ -8,7 +8,7 @@ on:
         description: Type START HISTORY EXTENSION 2020-09-08 TO 2023-09-07 to authorize the production job
         required: true
         type: string
- permissions:
+permissions:
   contents: read
 
 concurrency:
