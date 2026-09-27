@@ -352,3 +352,11 @@ A single race must not directly change model weights. Candidate learnings are re
 4. Cleanup cursors are keyset-based, bounded and HMAC-signed. They preserve cross-page change-point state without repeatedly rescanning earlier rows and cannot be edited into a destructive plan.
 5. Raw-object cleanup derives candidates from indexed `source_records` metadata. It never deletes an object until the canonical object is verified, the bounded D1 rewrites succeed and a fresh indexed count confirms zero remaining references.
 6. Hash, extension, metadata, object-presence or reference conflicts stop the batch. The executor does not run VACUUM, backfills, repair jobs or unrelated collection.
+
+
+## Production cleanup is manually initiated through GitHub Actions
+1. Production storage cleanup has no automatic schedule. The only supported operator entry point is a reviewed `workflow_dispatch` workflow on `main`.
+2. Dry-run is the default mode. Destructive execution requires an exact human-entered confirmation string and the private admin token supplied only through GitHub Actions secrets.
+3. A current D1 Time Travel bookmark must be verified before cleanup starts. Missing Cloudflare credentials, admin token, Worker route, health, bookmark, plan token or cost-safety acceptance fails closed.
+4. Workflow orchestration may repeat reviewed 25-row/reference executor batches, but each run has an explicit hard batch cap. A partial run is valid; remaining work waits for another manual run.
+5. Production cleanup workflow code may print only sanitized counts, completion flags and warning classes. It must never log private payloads, object keys, external ids, tokens or bookmark values.

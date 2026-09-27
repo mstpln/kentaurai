@@ -1,3 +1,11 @@
+## Manual production storage-cleanup workflow candidate
+- Branch: `codex/manual-production-storage-cleanup-workflow`.
+- Adds a manual GitHub Actions `workflow_dispatch` entry point for production storage cleanup; there is no schedule.
+- Dry-run is the default. Execute mode requires the exact confirmation `EXECUTE REVIEWED STORAGE CLEANUP`.
+- The workflow requires the existing Cloudflare API token/account id plus a GitHub Actions secret named `KENTAURAI_ADMIN_TOKEN`, resolves the production workers.dev URL through the Cloudflare API, verifies health and captures a current D1 Time Travel bookmark before any cleanup call.
+- Cleanup remains bounded to 25 rows/references per executor batch with a configurable hard cap of at most 250 batches per family per workflow run. Every destructive batch is immediately preceded by its matching plan token and aborts on cost-safety or plan/execution count mismatch.
+- No backfill, repair, historical collection, VACUUM or full database export is invoked by the workflow.
+
 ## Post-cost-safety follow-up candidate
 - Branch: `codex/post-cost-safety-followups`.
 - Production release #138 already has the emergency cost stop live: one `05:15 UTC` Worker cron, no minute cron, no scheduled multi-year history extension and no exhausted failed-import fallback scan.

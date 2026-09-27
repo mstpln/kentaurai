@@ -1,0 +1,137 @@
+name: Production storage cleanup
+run-name: Production storage cleanup (${{ inputs.mode }}) — @${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Dry-run only, or execute reviewed bounded cleanup
+        required: true
+        type: choice
+        options:
+          - dry-run
+          - execute
+        default: dry-run
+      confirmation:
+        description: For execute, type exactly EXECUTE REVIEWED STORAGE CLEANUP
+        required: false
+        type: string
+      max_batches:
+        description: Maximum bounded batches per cleanup family in this run
+        required: true
+        type: choice
+        options:
+          - "25"
+          - "50"
+          - "100"
+          - "250"
+        default: "50"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kentaurai-production-storage-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: ${{ inputs.mode == 'dry-run' || (inputs.mode == 'execute' && inputs.confirmation == 'EXECUTE REVIEWED STORAGE CLEANUP') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      KENTAURAI_ADMIN_TOKEN: ${{ secrets.KENTAURAI_ADMIN_TOKEN }}
+      MODE: ${{ inputs.mode }}
+      MAX_BATCHES: ${{ inputs.max_batches }}
+      D1_DATABASE_ID: d8189e0e-6127-4ef2-88cc-534cb2217340
+      WORKER_NAME: kentaurai-api
+
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Require main branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main" || { echo "::error::Production cleanup must run from main"; exit 1; }
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+
+      - name: Run QA before production operation
+        run: npm run qa
+
+      - name: Validate production credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::CLOUDFLARE_API_TOKEN is not configured"; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::CLOUDFLARE_ACCOUNT_ID is not configured"; exit 1; }
+          test -n "$KENTAURAI_ADMIN_TOKEN" || { echo "::error::GitHub Actions secret KENTAURAI_ADMIN_TOKEN is not configured"; exit 1; }
+          echo "::add-mask::$CLOUDFLARE_API_TOKEN"
+          echo "::add-mask::$KENTAURAI_ADMIN_TOKEN"
+
+      - name: Resolve and verify production Worker URL
+        id: worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl --fail --silent --show-error             --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN"             "$api/workers/subdomain" > /tmp/workers-subdomain.json
+          jq -e '.success == true and (.result.subdomain | type == "string") and (.result.subdomain | length > 0)' /tmp/workers-subdomain.json >/dev/null
+          subdomain="$(jq -r '.result.subdomain' /tmp/workers-subdomain.json)"
+
+          curl --fail --silent --show-error             --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN"             "$api/workers/scripts/$WORKER_NAME/subdomain" > /tmp/worker-route.json
+          jq -e '.success == true and .result.enabled == true' /tmp/worker-route.json >/dev/null
+
+          worker_url="https://$WORKER_NAME.$subdomain.workers.dev"
+          curl --fail --silent --show-error --retry 3 --retry-delay 2 "$worker_url/health" > /tmp/health.json
+          jq -e '.ok == true and .service == "kentaurai-api"' /tmp/health.json >/dev/null
+          echo "worker_url=$worker_url" >> "$GITHUB_OUTPUT"
+
+      - name: Capture D1 Time Travel restore point
+        id: restore
+        shell: bash
+        run: |
+          set -euo pipefail
+          restore_timestamp="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          url="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$D1_DATABASE_ID/time_travel/bookmark"
+          curl --fail --silent --show-error --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$url" > /tmp/d1-bookmark.json
+          jq -e '.success == true and (.result.bookmark | type == "string") and (.result.bookmark | length > 0)' /tmp/d1-bookmark.json >/dev/null
+          bookmark="$(jq -r '.result.bookmark' /tmp/d1-bookmark.json)"
+          echo "::add-mask::$bookmark"
+          echo "restore_timestamp=$restore_timestamp" >> "$GITHUB_OUTPUT"
+          echo "Verified D1 Time Travel restore point at $restore_timestamp."
+
+      - name: Run bounded cleanup
+        env:
+          WORKER_URL: ${{ steps.worker.outputs.worker_url }}
+          ADMIN_TOKEN: ${{ secrets.KENTAURAI_ADMIN_TOKEN }}
+        run: node scripts/run-production-storage-cleanup.mjs
+
+      - name: Verify production health after cleanup run
+        env:
+          WORKER_URL: ${{ steps.worker.outputs.worker_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 3 --retry-delay 2 "$WORKER_URL/health" > /tmp/health-after.json
+          jq -e '.ok == true and .service == "kentaurai-api"' /tmp/health-after.json >/dev/null
+          echo "Production health check passed."
+
+      - name: Cleanup summary
+        shell: bash
+        run: |
+          echo "Mode: $MODE"
+          echo "Maximum batches per family: $MAX_BATCHES"
+          echo "D1 restore point: ${{ steps.restore.outputs.restore_timestamp }}"
+          if [ "$MODE" = "dry-run" ]; then
+            echo "No cleanup mutation was authorized."
+          else
+            echo "Execution used only reviewed, plan-bound, bounded cleanup routes."
+          fi

@@ -416,6 +416,6 @@ export async function executeRawCleanupBatch(env, options = {}) {
     canonicalObjectsCreated,
     legacyObjectsDeleted,
     legacyReferencesRemaining: Number(remaining?.n || 0),
-    nextCursor: plan.pageCursor
+    nextCursor: plan.selected ? (options.cursor || null) : plan.pageCursor
   };
 }
