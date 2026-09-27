@@ -19,6 +19,10 @@ test('manual production storage cleanup workflow stays gated, resumable and boun
   assert.match(workflow, /concurrency:/);
   assert.doesNotMatch(workflow, /schedule:/);
   assert.match(workflow, /CLEANUP_SOFT_DEADLINE_MS: "2100000"/);
+  assert.match(workflow, /CLEANUP_RUN_MAX_ROWS_READ: "1000000"/);
+  assert.match(workflow, /CLEANUP_RUN_MAX_ROWS_WRITTEN: "100000"/);
+  assert.match(workflow, /Refuse automatic continuation after cumulative cost stop/);
+  assert.match(workflow, /cost_budget_stop/);
   assert.match(workflow, /Queue controlled continuation/);
   assert.match(workflow, /actions\/workflows\/production-storage-cleanup\.yml\/dispatches/);
   assert.match(workflow, /actions: write/);
