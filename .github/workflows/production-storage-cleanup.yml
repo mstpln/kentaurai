@@ -64,6 +64,24 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/main" || { echo "::error::Production cleanup must run from main"; exit 1; }
 
+      - name: Require exact deployed main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/production-release-v060.yml/runs?branch=main&status=success&per_page=1")"
+          deployed_sha="$(printf '%s' "$response" | jq -r '.workflow_runs[0].head_sha // empty')"
+          test -n "$deployed_sha" || { echo "::error::No successful production release was found"; exit 1; }
+          test "$deployed_sha" = "$GITHUB_SHA" || {
+            echo "::error::Cleanup requires main to match the exact latest successful production release"
+            exit 1
+          }
+
       - name: Use Node.js 22
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
