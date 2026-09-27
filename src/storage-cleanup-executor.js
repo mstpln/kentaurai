@@ -66,8 +66,16 @@ function snapshotTuple(row, columns) {
   return columns.map((column) => row[column]);
 }
 
-function snapshotOrderTuple(row, columns) {
-  return columns.map((column) => row[column] == null ? '' : String(row[column]));
+function snapshotOrderExpression(family, column) {
+  return family === 'horse_record' && column === 'stat_year' ? 'COALESCE(stat_year,-1)' : column;
+}
+
+function snapshotOrderValue(family, row, column) {
+  return family === 'horse_record' && column === 'stat_year' ? (row[column] ?? -1) : row[column];
+}
+
+function snapshotOrderTuple(family, row, columns) {
+  return columns.map((column) => snapshotOrderValue(family, row, column));
 }
 
 async function detailedSnapshotPlan(env, { family, limit, cursor = null }) {
@@ -81,12 +89,12 @@ async function detailedSnapshotPlan(env, { family, limit, cursor = null }) {
   let bindings = [];
   if (decoded) {
     if (!Array.isArray(decoded.order) || decoded.order.length !== partition.length + 2) throw new Error('cleanup cursor is invalid');
-    const left = [...partition.map((column) => `COALESCE(CAST(${column} AS TEXT),'')`), 'julianday(observed_at)', 'id'].join(',');
-    const right = [...partition.map(() => '?'), 'julianday(?)', '?'].join(',');
+    const left = [...partition.map((column) => snapshotOrderExpression(family, column)), 'observed_at', 'id'].join(',');
+    const right = [...partition.map(() => '?'), '?', '?'].join(',');
     sql += ` WHERE (${left}) > (${right})`;
     bindings = decoded.order;
   }
-  sql += ` ORDER BY ${partition.map((column) => `COALESCE(CAST(${column} AS TEXT),'')`).join(',')}, julianday(observed_at), id LIMIT ?`;
+  sql += ` ORDER BY ${partition.map((column) => snapshotOrderExpression(family, column)).join(',')}, observed_at, id LIMIT ?`;
   const { results = [] } = await env.DB.prepare(sql).bind(...bindings, rowLimit + 1).all();
   const truncated = results.length > rowLimit;
   const rows = results.slice(0, rowLimit);
@@ -111,7 +119,7 @@ async function detailedSnapshotPlan(env, { family, limit, cursor = null }) {
   const nextCursor = truncated && last ? await encodeCursor(env, {
     v: 1,
     kind: `snapshot:${family}`,
-    order: [...snapshotOrderTuple(last, partition), last.observed_at, last.id],
+    order: [...snapshotOrderTuple(family, last, partition), last.observed_at, last.id],
     priorPartition,
     priorFacts,
     retainedId
@@ -347,6 +355,14 @@ export async function executeRawCleanupBatch(env, options = {}) {
     verifiedLegacyBytes = await objectBytes(legacyObject);
     if (verifiedLegacyBytes.byteLength > MAX_RAW_COPY_BYTES) throw new Error('legacy R2 object exceeds copy safety limit');
     if (await sha256Hex(verifiedLegacyBytes) !== selected.hash) throw new Error('legacy R2 body hash mismatch');
+  }
+  if (canonicalHead && !reusableVerification) {
+    if (Number.isFinite(canonicalHead.size) && canonicalHead.size > MAX_RAW_COPY_BYTES) throw new Error('canonical R2 object exceeds verification safety limit');
+    const canonicalObject = await env.RAW_BUCKET.get(selected.canonicalKey);
+    if (!canonicalObject) throw new Error('canonical R2 object disappeared during verification');
+    const canonicalBytes = await objectBytes(canonicalObject);
+    if (canonicalBytes.byteLength > MAX_RAW_COPY_BYTES) throw new Error('canonical R2 object exceeds verification safety limit');
+    if (await sha256Hex(canonicalBytes) !== selected.hash) throw new Error('canonical R2 body hash mismatch');
   }
   if (!canonicalHead) {
     if (!verifiedLegacyBytes) throw new Error('legacy R2 verification state is invalid');

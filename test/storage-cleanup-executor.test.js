@@ -189,6 +189,16 @@ test('raw executor stops before mutation on hash mismatch or canonical conflict'
     sourceType: 'synthetic_provider', limit: 25, planToken: plan.planToken, confirmation: CLEANUP_CONFIRMATION
   }), /metadata\/hash conflict/);
   assert.ok(await env.RAW_BUCKET.head(legacyKey));
+
+  objects.set(canonicalKey, {
+    body: 'x'.repeat(body.length),
+    options: { customMetadata: { contentHash: hash } }
+  });
+  plan = await planRawCleanupBatch(env, { sourceType: 'synthetic_provider', limit: 25 });
+  await assert.rejects(() => executeRawCleanupBatch(env, {
+    sourceType: 'synthetic_provider', limit: 25, planToken: plan.planToken, confirmation: CLEANUP_CONFIRMATION
+  }), /canonical R2 body hash mismatch/);
+  assert.ok(await env.RAW_BUCKET.head(legacyKey));
 });
 
 test('raw executor keeps the legacy object until every bounded reference batch is rewritten', async () => {
