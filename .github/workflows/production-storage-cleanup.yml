@@ -50,6 +50,8 @@ jobs:
       MODE: ${{ inputs.mode }}
       DRY_RUN_MAX_BATCHES: ${{ inputs.dry_run_max_batches }}
       CLEANUP_SOFT_DEADLINE_MS: "2100000"
+      CLEANUP_RUN_MAX_ROWS_READ: "1000000"
+      CLEANUP_RUN_MAX_ROWS_WRITTEN: "100000"
       CLEANUP_SESSION_ID: ${{ inputs.continuation_session }}
       D1_DATABASE_ID: d8189e0e-6127-4ef2-88cc-534cb2217340
       WORKER_NAME: kentaurai-api
@@ -191,6 +193,13 @@ jobs:
           jq -e '.ok == true and .service == "kentaurai-api"' /tmp/health-after.json >/dev/null
           echo "Production health check passed."
 
+      - name: Refuse automatic continuation after cumulative cost stop
+        if: ${{ success() && env.MODE == 'execute' && steps.cleanup.outputs.cleanup_complete == 'false' && steps.cleanup.outputs.cost_budget_stop == 'true' }}
+        shell: bash
+        run: |
+          echo "::error::Cleanup reached the cumulative D1 run-cost budget; automatic continuation is disabled."
+          exit 1
+
       - name: Refuse stalled execute continuation
         if: ${{ success() && env.MODE == 'execute' && steps.cleanup.outputs.cleanup_complete == 'false' && steps.cleanup.outputs.progress_made != 'true' }}
         shell: bash
@@ -199,7 +208,7 @@ jobs:
           exit 1
 
       - name: Queue controlled continuation
-        if: ${{ success() && env.MODE == 'execute' && steps.cleanup.outputs.cleanup_complete == 'false' && steps.cleanup.outputs.progress_made == 'true' && steps.cleanup.outputs.cleanup_session_id != '' }}
+        if: ${{ success() && env.MODE == 'execute' && steps.cleanup.outputs.cleanup_complete == 'false' && steps.cleanup.outputs.progress_made == 'true' && steps.cleanup.outputs.cost_budget_stop != 'true' && steps.cleanup.outputs.cleanup_session_id != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           CLEANUP_SESSION_ID: ${{ steps.cleanup.outputs.cleanup_session_id }}
@@ -227,6 +236,8 @@ jobs:
             echo "No cleanup mutation was authorized."
           elif [ "${{ steps.cleanup.outputs.cleanup_complete }}" = "true" ]; then
             echo "Cleanup completed across all snapshot families and raw storage."
+          elif [ "${{ steps.cleanup.outputs.cost_budget_stop }}" = "true" ]; then
+            echo "Cleanup stopped at the cumulative D1 run-cost budget; no automatic continuation was queued."
           elif [ "${{ steps.cleanup.outputs.progress_made }}" = "true" ]; then
             echo "Cleanup checkpointed safely and a controlled continuation was queued."
             echo "Continuation number: ${{ steps.cleanup.outputs.continuation_count }}"
