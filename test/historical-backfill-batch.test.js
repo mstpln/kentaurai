@@ -98,6 +98,7 @@ test('automatic maintenance is reduced to one bounded morning schedule', () => {
   assert.doesNotMatch(indexSource, /xlabs_position_reconstruction', \(\) => runXlabsPositionReconstructionBatch/);
   assert.match(indexSource, /official_daily_incremental/);
   assert.match(indexSource, /xlabs_daily_incremental/);
+  assert.match(indexSource, /daysAhead: 7/);
   assert.match(indexSource, /runHistoricalBackfillBatch\(env, job\.id\)/);
   assert.match(indexSource, /runXlabsBackfillBatch\(env, job\.id\)/);
 
