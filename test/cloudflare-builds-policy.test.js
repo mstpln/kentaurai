@@ -42,7 +42,7 @@ test('selectWorkerScript requires the exact KentaurAI Worker identity', () => {
   );
 });
 
-test('selectProductionTrigger chooses the exact main trigger for the KentaurAI GitHub repo', () => {
+test('selectProductionTrigger requires exactly one trigger that can match main', () => {
   const preview = {
     ...productionTrigger(NON_PROMOTING_DEPLOY_COMMAND),
     trigger_uuid: '22222222-2222-4222-8222-222222222222',
@@ -54,7 +54,18 @@ test('selectProductionTrigger chooses the exact main trigger for the KentaurAI G
 
   assert.throws(
     () => selectProductionTrigger([productionTrigger(), productionTrigger()]),
-    /multiple Cloudflare production build triggers/
+    /expected exactly one Cloudflare production build trigger .* found 2/
+  );
+
+  const overlappingWildcard = {
+    ...productionTrigger(),
+    trigger_uuid: '33333333-3333-4333-8333-333333333333',
+    branch_includes: ['*'],
+    branch_excludes: []
+  };
+  assert.throws(
+    () => selectProductionTrigger([productionTrigger(), overlappingWildcard]),
+    /expected exactly one Cloudflare production build trigger .* found 2/
   );
 });
 
