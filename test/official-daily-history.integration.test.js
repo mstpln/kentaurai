@@ -58,9 +58,11 @@ test('morning scheduler pins official and X-Labs work to daily job ids only', ()
 
   const source = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
   const officialIndex = source.indexOf("official_daily_incremental");
+  const settlementIndex = source.indexOf("post_race_settlement");
   const xlabsIndex = source.indexOf("xlabs_daily_incremental");
   assert.ok(officialIndex >= 0);
-  assert.ok(xlabsIndex > officialIndex);
+  assert.ok(settlementIndex > officialIndex);
+  assert.ok(xlabsIndex > settlementIndex);
   assert.match(source, /runHistoricalBackfillBatch\(env, job\.id\)/);
   assert.match(source, /runXlabsBackfillBatch\(env, job\.id\)/);
   assert.doesNotMatch(source, /30 4 \* \* \*/);
