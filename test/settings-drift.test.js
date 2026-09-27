@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import worker from '../src/worker-v079.js';
 import {
@@ -148,4 +149,19 @@ test('production app contains the Drift/Data settings overlay and no concept bad
   assert.match(html, /Cloudflare-användning/);
   assert.match(html, /automationToggleV079/);
   assert.doesNotMatch(html, /Konceptvy/);
+});
+
+test('scheduled orchestrator rechecks persisted automation control before every morning part', () => {
+  const source = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+  assert.match(source, /async function automationAllowed\(name\)/);
+  assert.match(source, /async function critical\(name, action\) \{\s*if \(!\(await automationAllowed\(name\)\)\) return;/);
+  assert.match(source, /async function nonCritical\(name, action\) \{\s*if \(!\(await automationAllowed\(name\)\)\) return;/);
+  assert.match(source, /automationStopReason = 'automatic_workflows_paused'/);
+  assert.match(source, /automationStopReason = 'automation_control_unavailable'/);
+});
+
+test('billing period UI renders the exclusive cycle end as the previous inclusive date', () => {
+  const source = readFileSync(new URL('../src/settings-drift-ui.js', import.meta.url), 'utf8');
+  assert.match(source, /setUTCDate\(d\.getUTCDate\(\)-1\)/);
+  assert.match(source, /fmtBillingEnd\(cf\.billingPeriod\.end\)/);
 });
