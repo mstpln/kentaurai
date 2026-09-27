@@ -175,7 +175,7 @@ function findWorkersCpuMs(rows) {
   if (!candidates.length) return null;
   let totalMs = 0;
   for (const row of candidates) {
-    const unit = String(row?.ConsumedUnit || row?.PricingUnit || '').toLowerCase();
+    const unit = String(row?.ConsumedUnit || '').toLowerCase();
     const quantity = numberOrZero(row?.ConsumedQuantity);
     if (unit.includes('millisecond') || unit === 'ms') totalMs += quantity;
     else if (unit.includes('second')) totalMs += quantity * 1000;
@@ -192,7 +192,7 @@ function findR2StorageGbMonth(rows) {
   if (!candidates.length) return null;
   let total = 0;
   for (const row of candidates) {
-    const unit = String(row?.ConsumedUnit || row?.PricingUnit || '').toLowerCase();
+    const unit = String(row?.ConsumedUnit || '').toLowerCase();
     const quantity = numberOrZero(row?.ConsumedQuantity);
     if (unit.includes('gb')) total += quantity;
     else return null;
