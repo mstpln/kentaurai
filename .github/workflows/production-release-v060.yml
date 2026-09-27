@@ -36,7 +36,7 @@ jobs:
           test "$(printf '%s' "$source_main" | wc -c)" -eq 40 || { echo 'source_main must be a full 40-character lowercase commit SHA'; exit 1; }
           git cat-file -e "$source_main^{commit}"
           git merge-base --is-ancestor "$source_main" HEAD
-          grep -Fq '"main": "./src/worker-v078.js"' wrangler.jsonc
+          grep -Fq '"main": "./src/worker-v079.js"' wrangler.jsonc
           grep -Fq '"ANALYSIS_WORKFLOW_MODE": "v3"' wrangler.jsonc
           grep -Fq '"V85_LINE_PRICE_SEK": "0.50"' wrangler.jsonc
           grep -Fq '"V86_LINE_PRICE_SEK": "0.25"' wrangler.jsonc
@@ -180,6 +180,10 @@ jobs:
           grep -q '0046_snapshot_observation_lookup_index.sql' /tmp/storage-cleanup-session-schema-check.txt
           grep -q '0047_storage_cleanup_session_audits.sql' /tmp/storage-cleanup-session-schema-check.txt
           grep -q '0048_live_pending_cost_indexes.sql' /tmp/storage-cleanup-session-schema-check.txt
+
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT control_key,control_value,updated_at,updated_by FROM runtime_controls LIMIT 0; SELECT name FROM sqlite_master WHERE type='table' AND name='runtime_controls'; SELECT name FROM d1_migrations WHERE name='0049_runtime_controls.sql';" > /tmp/runtime-controls-schema-check.txt
+          grep -q 'runtime_controls' /tmp/runtime-controls-schema-check.txt
+          grep -q '0049_runtime_controls.sql' /tmp/runtime-controls-schema-check.txt
           grep -q 'idx_storage_cleanup_sessions_status' /tmp/storage-cleanup-session-schema-check.txt
           grep -q 'idx_storage_cleanup_sessions_one_running_source' /tmp/storage-cleanup-session-schema-check.txt
           grep -q 'idx_official_snapshot_observations_snapshot_lookup' /tmp/storage-cleanup-session-schema-check.txt
