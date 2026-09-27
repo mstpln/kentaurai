@@ -432,8 +432,8 @@ async function handleScheduled(controller, env) {
     daysAhead: 7
   })));
   parts.push(await runScheduledPart('live_normalize_morning', () => runLiveNormalizationMorning(env)));
-  parts.push(await runScheduledPart('post_race_settlement', () => runPostRaceSettlementBatch(env)));
   parts.push(await runScheduledPart('official_daily_incremental', () => runDailyOfficialIncremental(env, controller.scheduledTime)));
+  parts.push(await runScheduledPart('post_race_settlement', () => runPostRaceSettlementBatch(env)));
   parts.push(await runScheduledPart('xlabs_daily_incremental', () => runDailyXlabsIncremental(env, controller.scheduledTime)));
 
   const failures = parts.filter((part) => !part.ok);
