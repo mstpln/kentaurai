@@ -59,6 +59,10 @@ test('snapshot executor removes only sequential repeats and rewires provenance a
     [4, 5, 4]
   );
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM official_snapshot_observations').get().n, 6);
+  assert.deepEqual(
+    db.prepare('SELECT factual_changed FROM official_snapshot_observations ORDER BY observed_at').all().map((row) => row.factual_changed),
+    [1, 0, 0, 1, 0, 1]
+  );
   assert.equal(db.prepare(`
     SELECT COUNT(*) AS n FROM official_snapshot_observations o
     LEFT JOIN horse_profile_snapshots s ON s.id=o.snapshot_id
