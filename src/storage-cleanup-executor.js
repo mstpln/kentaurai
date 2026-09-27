@@ -212,11 +212,20 @@ export async function executeSnapshotCleanupBatch(env, options = {}) {
   const sameFacts = plan.definition.facts.map((column) => `prior.${column} IS doomed.${column}`).join(' AND ');
   const betweenSameFacts = plan.definition.facts.map((column) => `between_row.${column} IS doomed.${column}`).join(' AND ');
   const candidateGuards = plan.candidates.map(() => `(
-    doomed.id=? AND EXISTS (
+    doomed.id=?
+    AND EXISTS (
+      SELECT 1 FROM official_snapshot_source_sync doomed_sync
+      WHERE doomed_sync.source_record_id=doomed.source_record_id AND doomed_sync.status='complete'
+    )
+    AND EXISTS (
       SELECT 1 FROM ${plan.definition.table} prior
+      JOIN official_snapshot_source_sync prior_sync
+        ON prior_sync.source_record_id=prior.source_record_id AND prior_sync.status='complete'
       WHERE prior.id=? AND ${samePartition} AND ${sameFacts}
         AND NOT EXISTS (
           SELECT 1 FROM ${plan.definition.table} between_row
+          JOIN official_snapshot_source_sync between_sync
+            ON between_sync.source_record_id=between_row.source_record_id AND between_sync.status='complete'
           WHERE ${betweenPartition}
             AND (julianday(between_row.observed_at),between_row.id) > (julianday(prior.observed_at),prior.id)
             AND (julianday(between_row.observed_at),between_row.id) < (julianday(doomed.observed_at),doomed.id)
