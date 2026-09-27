@@ -5,8 +5,6 @@ import { finishImportRun, startImportRun } from './common.js';
 
 const GAME_TYPES = ['V85', 'V86'];
 const DEFAULT_DAYS_AHEAD = 7;
-const SOURCE_TYPE = 'official_provider';
-const PENDING_QUALITY = 'captured_unmapped';
 const AUTO_NORMALIZE_SOURCE_TYPE = 'official_live_normalize_auto';
 const MAX_AUTO_NORMALIZE_FAILURES = 3;
 const DEFAULT_NORMALIZE_STEPS_PER_RUN = 8;
