@@ -39,10 +39,10 @@ import { appAuthConfigured, appPasswordMatches, createAppSessionCookie, hasValid
 import { htmlResponse, redirectResponse, renderAppPage, renderLoginPage } from './app-page-history.js';
 import { renderReferenceImportPage } from './app-reference-import.js';
 
-const BACKFILL_CRON = '* * * * *';
 const LIVE_MORNING_CRON = '15 5 * * *';
-const LIVE_EVENING_CRON = '15 17 * * *';
-const XLABS_DAILY_CRON = '30 4 * * *';
+const DAILY_LIVE_NORMALIZE_RUNS = 16;
+const DAILY_OFFICIAL_BATCH_RUNS = 10;
+const DAILY_XLABS_BATCH_RUNS = 3;
 const MAX_REFERENCE_IMPORT_BYTES = 1024 * 1024;
 const MAX_REFERENCE_MULTIPART_BYTES = MAX_REFERENCE_IMPORT_BYTES + 64 * 1024;
 
@@ -357,27 +357,53 @@ async function runScheduledPart(name, fn) {
   }
 }
 
+async function runLiveNormalizationMorning(env) {
+  const results = [];
+  for (let index = 0; index < DAILY_LIVE_NORMALIZE_RUNS; index += 1) {
+    const result = await normalizeNextPendingOfficialGame(env, { maxSteps: 12 });
+    results.push(result);
+    if (!result || result.status === 'idle') break;
+  }
+  return { runCount: results.length, maxRuns: DAILY_LIVE_NORMALIZE_RUNS, results };
+}
+
+async function runDailyOfficialIncremental(env, scheduledTime) {
+  const jobs = await ensureDailyOfficialHistoryJobs(env, scheduledTime);
+  const batches = [];
+  for (let index = 0; index < DAILY_OFFICIAL_BATCH_RUNS; index += 1) {
+    const batch = await runHistoricalBackfillBatch(env);
+    batches.push(batch);
+    if (!batch || batch.status === 'idle') break;
+  }
+  return { jobs, batchCount: batches.length, maxBatches: DAILY_OFFICIAL_BATCH_RUNS, batches };
+}
+
+async function runDailyXlabsIncremental(env, scheduledTime) {
+  const job = await ensureDailyXlabsJob(env, scheduledTime);
+  const batches = [];
+  for (let index = 0; index < DAILY_XLABS_BATCH_RUNS; index += 1) {
+    const batch = await runXlabsBackfillBatch(env);
+    batches.push(batch);
+    if (!batch || batch.status === 'idle') break;
+  }
+  return { job, batchCount: batches.length, maxBatches: DAILY_XLABS_BATCH_RUNS, batches };
+}
+
 async function handleScheduled(controller, env) {
   const scheduledAt = new Date(controller.scheduledTime || Date.now()).toISOString();
   const startedAt = new Date().toISOString();
   const id = `cron_${crypto.randomUUID()}`;
   const parts = [];
 
-  if (controller.cron === BACKFILL_CRON) {
+  if (controller.cron === LIVE_MORNING_CRON) {
+    parts.push(await runScheduledPart('live_capture_morning', () => captureUpcomingOfficialGames(env, controller.scheduledTime, {
+      includeToday: true,
+      daysAhead: 1
+    })));
+    parts.push(await runScheduledPart('live_normalize_morning', () => runLiveNormalizationMorning(env)));
     parts.push(await runScheduledPart('post_race_settlement', () => runPostRaceSettlementBatch(env)));
-    parts.push(await runScheduledPart('live_normalize', () => normalizeNextPendingOfficialGame(env)));
-    parts.push(await runScheduledPart('statistics_data_backfill', () => runNextStatisticsDataBackfill(env)));
-    parts.push(await runScheduledPart('historical_backfill', () => runHistoricalBackfillBatch(env)));
-    parts.push(await runScheduledPart('xlabs_backfill', () => runXlabsBackfillBatch(env)));
-    parts.push(await runScheduledPart('xlabs_interval_repair', () => runXlabsIntervalRepairBatch(env)));
-    parts.push(await runScheduledPart('xlabs_position_reconstruction', () => runXlabsPositionReconstructionBatch(env)));
-  } else if (controller.cron === LIVE_MORNING_CRON) {
-    parts.push(await runScheduledPart('live_capture_morning', () => captureUpcomingOfficialGames(env, controller.scheduledTime, { includeToday: true })));
-  } else if (controller.cron === LIVE_EVENING_CRON) {
-    parts.push(await runScheduledPart('live_capture_evening', () => captureUpcomingOfficialGames(env, controller.scheduledTime, { includeToday: false })));
-  } else if (controller.cron === XLABS_DAILY_CRON) {
-    parts.push(await runScheduledPart('official_daily_history_jobs', () => ensureDailyOfficialHistoryJobs(env, controller.scheduledTime)));
-    parts.push(await runScheduledPart('xlabs_daily_job', () => ensureDailyXlabsJob(env, controller.scheduledTime)));
+    parts.push(await runScheduledPart('official_daily_incremental', () => runDailyOfficialIncremental(env, controller.scheduledTime)));
+    parts.push(await runScheduledPart('xlabs_daily_incremental', () => runDailyXlabsIncremental(env, controller.scheduledTime)));
   } else {
     parts.push({ name: 'unknown_cron', ok: false, error: `unsupported cron ${controller.cron}` });
   }
