@@ -403,7 +403,7 @@ async function handleScheduled(controller, env) {
   if (controller.cron === LIVE_MORNING_CRON) {
     parts.push(await runScheduledPart('live_capture_morning', () => captureUpcomingOfficialGames(env, controller.scheduledTime, {
       includeToday: true,
-      daysAhead: 1
+      daysAhead: 7
     })));
     parts.push(await runScheduledPart('live_normalize_morning', () => runLiveNormalizationMorning(env)));
     parts.push(await runScheduledPart('post_race_settlement', () => runPostRaceSettlementBatch(env)));
