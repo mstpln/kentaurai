@@ -1,4 +1,5 @@
 import worker from './index.js';
+import { getAutomationControl } from './settings-drift.js';
 import { requireAdmin } from './auth.js';
 import {
   getRoundAnalysisSubmission,
@@ -133,9 +134,10 @@ export default {
       const result = await worker.scheduled(controller, env, ctx);
       if (controller.cron === BACKFILL_CRON) {
         try {
-          await runNextPostRaceReview(env);
+          const control = await getAutomationControl(env);
+          if (control.enabled) await runNextPostRaceReview(env);
         } catch (error) {
-          console.error(error);
+          console.error('automatic workflow control unavailable', error);
         }
       }
       return result;
