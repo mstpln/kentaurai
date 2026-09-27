@@ -439,15 +439,23 @@ async function runDailyOfficialIncremental(env, scheduledTime) {
   let batchCount = 0;
   let remaining = DAILY_OFFICIAL_BATCH_RUNS;
   let finalStatus = 'idle';
-  for (const job of jobs.jobs || []) {
-    while (remaining > 0) {
+  const active = new Set(
+    (jobs.jobs || []).filter((job) => job.status === 'running').map((job) => job.id)
+  );
+
+  while (remaining > 0 && active.size > 0) {
+    let attempted = false;
+    for (const job of jobs.jobs || []) {
+      if (remaining <= 0) break;
+      if (!active.has(job.id)) continue;
+      attempted = true;
       const batch = await runHistoricalBackfillBatch(env, job.id);
       batchCount += 1;
       remaining -= 1;
       finalStatus = batch?.status || 'unknown';
-      if (!batch || batch.done || batch.status !== 'running') break;
+      if (!batch || batch.done || batch.status !== 'running') active.delete(job.id);
     }
-    if (remaining <= 0) break;
+    if (!attempted) break;
   }
   return {
     lookbackDays: jobs.lookbackDays,
