@@ -69,6 +69,61 @@ test('snapshot executor removes only sequential repeats and rewires provenance a
   );
 });
 
+test('snapshot cleanup preserves legacy source/as-of provenance when duplicate rows predate observation storage', async () => {
+  const { db, env } = createTestEnv();
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('horse-legacy','Legacy Horse')").run();
+
+  for (const [sourceId, snapshotId, observedAt] of [
+    ['legacy-source-a','legacy-snapshot-a','2026-09-10T10:00:00Z'],
+    ['legacy-source-b','legacy-snapshot-b','2026-09-11T10:00:00Z']
+  ]) {
+    addSource(db, sourceId, observedAt);
+    db.prepare(`
+      INSERT INTO official_snapshot_source_sync
+        (source_record_id,status,horse_profile_count)
+      VALUES (?,'complete',1)
+    `).run(sourceId);
+    db.prepare(`
+      INSERT INTO horse_profile_snapshots
+        (id,horse_id,observed_at,age_years,source_record_id)
+      VALUES (?,'horse-legacy',?,4,?)
+    `).run(snapshotId, observedAt, sourceId);
+  }
+
+  let current = await getOfficialHorseSnapshotsAsOf(env, ['horse-legacy'], '2026-09-11T12:00:00Z');
+  assert.equal(current.get('horse-legacy').age.sourceRecordId, 'legacy-source-b');
+
+  const plan = await planSnapshotCleanupBatch(env, { family: 'horse_profile', limit: 25 });
+  assert.equal(plan.rowsRemovable, 1);
+
+  const result = await executeSnapshotCleanupBatch(env, {
+    family: 'horse_profile',
+    limit: 25,
+    planToken: plan.planToken,
+    confirmation: CLEANUP_CONFIRMATION
+  });
+  assert.equal(result.rowsRemoved, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM horse_profile_snapshots').get().n, 1);
+
+  const observation = db.prepare(`
+    SELECT source_record_id,observed_at,snapshot_id,factual_changed
+    FROM official_snapshot_observations
+    WHERE source_record_id='legacy-source-b' AND snapshot_family='horse_profile'
+  `).get();
+  assert.deepEqual({ ...observation }, {
+    source_record_id: 'legacy-source-b',
+    observed_at: '2026-09-11T10:00:00Z',
+    snapshot_id: 'legacy-snapshot-a',
+    factual_changed: 0
+  });
+
+  current = await getOfficialHorseSnapshotsAsOf(env, ['horse-legacy'], '2026-09-11T12:00:00Z');
+  assert.equal(current.get('horse-legacy').age.years, 4);
+  assert.equal(current.get('horse-legacy').age.sourceRecordId, 'legacy-source-b');
+  assert.equal(current.get('horse-legacy').age.observedAt, '2026-09-11T10:00:00Z');
+});
+
+
 test('storage cleanup routes fail closed behind ADMIN_TOKEN', async () => {
   const request = (authorization) => new Request('https://example.invalid/v1/storage-cleanup/snapshots/execute', {
     method: 'POST',
