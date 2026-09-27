@@ -110,6 +110,49 @@ test('snapshot cleanup ignores rows from failed source syncs', async () => {
   assert.equal(plan.nextCursor, null);
 });
 
+test('failed snapshot rows do not block dedupe across complete sources', async () => {
+  const { db, env } = createTestEnv();
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('horse-failed-gap','Failed Gap Horse')").run();
+  const rows = [
+    ['gap-source-a','gap-snapshot-a','2026-09-10T10:00:00Z',4,'complete'],
+    ['gap-source-b','gap-snapshot-b','2026-09-11T10:00:00Z',5,'failed'],
+    ['gap-source-c','gap-snapshot-c','2026-09-12T10:00:00Z',4,'complete']
+  ];
+  for (const [sourceId,snapshotId,observedAt,age,status] of rows) {
+    addSource(db, sourceId, observedAt);
+    db.prepare(`
+      INSERT INTO official_snapshot_source_sync
+        (source_record_id,status,horse_profile_count,error_message)
+      VALUES (?,?,1,?)
+    `).run(sourceId, status, status === 'failed' ? 'synthetic failure' : null);
+    db.prepare(`
+      INSERT INTO horse_profile_snapshots
+        (id,horse_id,observed_at,age_years,source_record_id)
+      VALUES (?,'horse-failed-gap',?,?,?)
+    `).run(snapshotId, observedAt, age, sourceId);
+  }
+
+  const plan = await planSnapshotCleanupBatch(env, { family: 'horse_profile', limit: 25 });
+  assert.equal(plan.rowsScanned, 2);
+  assert.equal(plan.rowsRemovable, 1);
+
+  const result = await executeSnapshotCleanupBatch(env, {
+    family: 'horse_profile',
+    limit: 25,
+    planToken: plan.planToken,
+    confirmation: CLEANUP_CONFIRMATION
+  });
+  assert.equal(result.rowsRemoved, 1);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS n FROM horse_profile_snapshots WHERE source_record_id='gap-source-c'").get().n,
+    0
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS n FROM horse_profile_snapshots WHERE source_record_id='gap-source-b'").get().n,
+    1
+  );
+});
+
 test('snapshot cleanup preserves legacy source/as-of provenance when duplicate rows predate observation storage', async () => {
   const { db, env } = createTestEnv();
   db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('horse-legacy','Legacy Horse')").run();
