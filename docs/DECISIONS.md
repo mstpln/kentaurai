@@ -51,7 +51,7 @@
 19. Visual direction is minimal and strongly structured, using black/grey/brown/beige as the base with restrained warm accent color and clear card/divider/tab separation.
 20. The approved Sagittarius KentaurAI brand stays separate from entity navigation symbolism.
 21. Bottom-navigation symbols are Trend = the existing approved Trend chart-line, Statistik = Phosphor Table, Analys = Phosphor Magnifying Glass, and Spel = Phosphor Currency Circle Dollar. Entity profile tiles use initials rather than category symbols.
-22. Trend keeps the approved chart-line symbol and its current workspace content. Analys owns the existing external-AI workflow that previously lived under Settings. Settings is data-only and does not keep a redundant one-item tab bar.
+22. Trend keeps the approved chart-line symbol and its current workspace content. Analys owns the existing external-AI workflow that previously lived under Settings. Settings is operationally split into **Drift / Data**; no AI workflow is moved back into Settings.
 23. KentaurAI is packaged as an installable PWA scoped to `/app/` with standalone launch and dedicated Sagittarius icons. Its service worker may cache public PWA metadata/icon assets only; authenticated app HTML and API data remain outside the offline cache.
 24. Bana uses **Banprofil -> Bananalys -> Spårstatistik -> Hemmatränare**. User-facing country codes are localized (for example `SE` -> `Sverige`) while storage/API identities remain unchanged.
 25. Spårstatistik owns Period, Startmetod, Distans, STL-klass and Lopptyp in the canonical lane-statistics flow. Optional filters combine with AND semantics; the literal all-period label is `All data`.
@@ -218,6 +218,15 @@ A single race must not directly change model weights. Candidate learnings are re
 4. Any alternate data-channel clue keeps the checkpoint failed/paused for investigation rather than being silently skipped.
 5. Daily/current X-Labs jobs retain the stricter behavior; this neutral static-page rule is limited to the historical-all backfill.
 
+
+## Settings Drift, usage and automation control
+1. Settings has exactly two operational tabs: **Drift** and **Data**. Drift is the default and groups automation control, Cloudflare usage, job/source health and recent activity. Data groups database counts and sanitized coverage.
+2. The automatic-workflow switch controls scheduled KentaurAI work only. App reads and explicitly initiated manual functions remain available while paused.
+3. The durable `automatic_workflows` state is checked at the outer production Worker `scheduled()` boundary before any nested scheduled wrapper executes. Disabled state exits without scheduled acquisition/processing; inability to read the control fails closed.
+4. Cloudflare is the source of truth for the usage progress bars. The displayed numerator must have the same account/billing-period scope as the included limit. Missing credentials, ambiguous billing periods or unavailable metrics are surfaced as unavailable, never initialized at zero.
+5. Progress bars are green while usage is within the configured included allowance and red after the allowance is exceeded. Billing-period dates come from Cloudflare subscription metadata rather than assuming a calendar month.
+6. Cloudflare usage access is server-side only through a least-privilege runtime token. Tokens, account secrets and raw Cloudflare responses are never exposed to the browser or committed to GitHub.
+7. The Cloudflare observability read is infrastructure-only. Settings health remains prohibited from making extra racing-provider requests merely to render the page.
 
 ## Settings health and notification semantics
 1. **Datakällor** is operational health, not a mirror of the recent-run list. It must use durable official/X-Labs job state and relevant scheduled-run evidence so an active source cannot become “unknown” merely because another source filled the latest log window.
