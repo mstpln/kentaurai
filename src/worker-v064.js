@@ -19,6 +19,7 @@ import { getTrackDetailV064, getTrackLaneStatsV064 } from './routes/tracks-v064.
 import { applyTrackContactEnrichment, listTrackContactTargets } from './track-contact-enrichment.js';
 import { applyTrackProfileEnrichment, listTrackProfileTargets } from './track-profile-enrichment.js';
 import { syncOnePendingHorseStartPointSource } from './import/official-start-points.js';
+import { getAutomationControl } from './settings-drift.js';
 import { getHorseDetailStatistics, getHorseRankings } from './statistics/horses-complete.js';
 import { getDriverDetailStatistics, getDriverFilterOptions, getDriverRankings } from './statistics/drivers.js';
 import { getTrainerDetailStatistics, getTrainerFilterOptions, getTrainerRankings } from './statistics/trainers.js';
@@ -235,6 +236,10 @@ export default {
 
   async scheduled(controller, env, ctx) {
     const result = await worker.scheduled(controller, env, ctx);
+    let control;
+    try { control = await getAutomationControl(env); }
+    catch (error) { console.error('automatic workflow control unavailable', error); return result; }
+    if (!control.enabled) return result;
     const startPointSync = syncOnePendingHorseStartPointSource(env);
     if (ctx?.waitUntil) ctx.waitUntil(startPointSync); else await startPointSync;
     return result;
