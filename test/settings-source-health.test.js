@@ -212,6 +212,70 @@ test('official daily retry error remains a red alert while long history stays pa
   assert.equal(result.alerts.length, 1);
 });
 
+test('older recent official daily failure remains visible behind a newer healthy daily job', async () => {
+  const { env, db } = createTestEnv();
+  insertOfficialDaily(db, {
+    id: 'official-daily-new',
+    start_date: '2099-09-20',
+    end_date: '2099-09-20',
+    next_date: '2099-09-19',
+    status: 'completed',
+    processed_dates: 1,
+    consecutive_errors: 0,
+    last_error: null,
+    last_run_at: '2099-09-21T19:59:00Z'
+  });
+  insertOfficialDaily(db, {
+    id: 'official-daily-old-failed',
+    start_date: '2099-09-19',
+    end_date: '2099-09-19',
+    next_date: '2099-09-19',
+    status: 'failed',
+    consecutive_errors: 3,
+    last_error: 'Older recent official failure',
+    last_run_at: '2099-09-21T19:58:00Z'
+  });
+
+  const result = await getSettingsSourceHealth(env, { now: NOW });
+  const official = result.sources.find((source) => source.id === 'official');
+  assert.equal(official.status, 'action_required');
+  assert.equal(official.issue.label, 'Åtgärd krävs');
+  assert.match(official.issue.error, /Older recent official failure/);
+  assert.equal(result.alerts.length, 1);
+});
+
+test('older recent X-Labs daily failure remains visible behind a newer healthy daily job', async () => {
+  const { env, db } = createTestEnv();
+  insertXlabsDaily(db, {
+    id: 'xlabs-daily-new',
+    start_date: '2099-09-20',
+    end_date: '2099-09-20',
+    next_date: '2099-09-19',
+    status: 'completed',
+    processed_dates: 1,
+    consecutive_errors: 0,
+    last_error: null,
+    last_run_at: '2099-09-21T19:59:00Z'
+  });
+  insertXlabsDaily(db, {
+    id: 'xlabs-daily-old-failed',
+    start_date: '2099-09-19',
+    end_date: '2099-09-19',
+    next_date: '2099-09-19',
+    status: 'failed',
+    consecutive_errors: 3,
+    last_error: 'Older recent X-Labs failure',
+    last_run_at: '2099-09-21T19:58:00Z'
+  });
+
+  const result = await getSettingsSourceHealth(env, { now: NOW });
+  const xlabs = result.sources.find((source) => source.id === 'xlabs');
+  assert.equal(xlabs.status, 'action_required');
+  assert.equal(xlabs.issue.label, 'Åtgärd krävs');
+  assert.match(xlabs.issue.error, /Older recent X-Labs failure/);
+  assert.equal(result.alerts.length, 1);
+});
+
 test('X-Labs daily retry error remains a red alert while historical work stays paused', async () => {
   const { env, db } = createTestEnv();
   insertXlabsHistorical(db);
