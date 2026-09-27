@@ -166,23 +166,6 @@ test('Cloudflare usage adds R2 storage and operation progress with matching bill
       }), { status:200, headers:{ 'content-type':'application/json' } });
     }
     if (String(url).endsWith('/graphql')) {
-      const body = JSON.parse(options.body);
-      if (String(body.query).includes('KentaurAiR2Usage')) {
-        return new Response(JSON.stringify({
-          data:{ viewer:{ accounts:[{
-            r2OperationsAdaptiveGroups:[
-              { dimensions:{ actionType:'PutObject' }, sum:{ requests:1200 } },
-              { dimensions:{ actionType:'ListObjects' }, sum:{ requests:300 } },
-              { dimensions:{ actionType:'GetObject' }, sum:{ requests:5400 } },
-              { dimensions:{ actionType:'DeleteObject' }, sum:{ requests:99 } }
-            ],
-            r2StorageAdaptiveGroups:[
-              { dimensions:{ datetime:'2026-09-27T12:00:00Z', bucketName:'kentaurai-raw' }, max:{ payloadSize:2_000_000_000, metadataSize:20_000_000 } },
-              { dimensions:{ datetime:'2026-09-26T12:00:00Z', bucketName:'kentaurai-raw' }, max:{ payloadSize:1_500_000_000, metadataSize:15_000_000 } }
-            ]
-          }] } }
-        }), { status:200, headers:{ 'content-type':'application/json' } });
-      }
       return new Response(JSON.stringify({
         data:{ viewer:{ accounts:[{
           d1AnalyticsAdaptiveGroups:[{ sum:{ rowsRead:10, rowsWritten:2 } }],
@@ -194,9 +177,9 @@ test('Cloudflare usage adds R2 storage and operation progress with matching bill
       return new Response(JSON.stringify({
         success:true,
         result:[
-          { ServiceFamilyName:'R2', ServiceName:'R2 Data Storage', BilledCost:0.12, BillingCurrency:'USD' },
-          { ServiceFamilyName:'R2', ServiceName:'R2 Storage Class A Operations', BilledCost:0.03, BillingCurrency:'USD' },
-          { ServiceFamilyName:'R2', ServiceName:'R2 Storage Class B Operations', BilledCost:0.01, BillingCurrency:'USD' }
+          { ServiceFamilyName:'R2', ServiceName:'R2 Data Storage', BilledCost:0.12, BillingCurrency:'USD', ConsumedQuantity:2.02, ConsumedUnit:'GB-months' },
+          { ServiceFamilyName:'R2', ServiceName:'R2 Storage Class A Operations', BilledCost:0.03, BillingCurrency:'USD', ConsumedQuantity:1500, ConsumedUnit:'Count' },
+          { ServiceFamilyName:'R2', ServiceName:'R2 Storage Class B Operations', BilledCost:0.01, BillingCurrency:'USD', ConsumedQuantity:5400, ConsumedUnit:'Count' }
         ]
       }), { status:200, headers:{ 'content-type':'application/json' } });
     }
@@ -207,8 +190,8 @@ test('Cloudflare usage adds R2 storage and operation progress with matching bill
   const storage = usage.metrics.find((item) => item.id === 'r2_storage');
   const classA = usage.metrics.find((item) => item.id === 'r2_class_a');
   const classB = usage.metrics.find((item) => item.id === 'r2_class_b');
-  assert.equal(storage.used, 2_020_000_000);
-  assert.equal(storage.limit, 10_000_000_000);
+  assert.equal(storage.used, 2.02);
+  assert.equal(storage.limit, 10);
   assert.equal(storage.billingCost, 0.12);
   assert.equal(classA.used, 1500);
   assert.equal(classA.limit, 1_000_000);
