@@ -108,14 +108,30 @@ async function operationalCounts(env) {
     FROM storage_cleanup_sessions
     GROUP BY status
   `).all();
+  const anomalies = await env.DB.prepare(`
+    SELECT
+      COALESCE(SUM(CASE WHEN b.status='started' THEN 1 ELSE 0 END),0) AS started_batches,
+      COALESCE(SUM(CASE
+        WHEN b.cleanup_kind='raw_object'
+          AND b.status='references_rewritten'
+          AND NOT EXISTS (
+            SELECT 1 FROM source_records sr WHERE sr.raw_object_key=b.legacy_key
+          )
+        THEN 1 ELSE 0 END),0) AS stranded_raw_batches
+    FROM storage_cleanup_batches b
+  `).first();
 
   const toObject = (rows) => Object.fromEntries(
     (rows || []).map((row) => [String(row.status), number(row.n)])
   );
-  return {
+  const result = {
     batchStatuses: toObject(batches?.results),
-    sessionStatuses: toObject(sessions?.results)
+    sessionStatuses: toObject(sessions?.results),
+    startedBatches: number(anomalies?.started_batches),
+    strandedRawBatches: number(anomalies?.stranded_raw_batches)
   };
+  result.ok = result.startedBatches === 0 && result.strandedRawBatches === 0;
+  return result;
 }
 
 export async function auditStorageCleanupIntegrity(env) {
@@ -126,7 +142,7 @@ export async function auditStorageCleanupIntegrity(env) {
   }
   const operations = await operationalCounts(env);
   return {
-    ok: families.every((family) => family.ok),
+    ok: families.every((family) => family.ok) && operations.ok,
     families,
     operations
   };
