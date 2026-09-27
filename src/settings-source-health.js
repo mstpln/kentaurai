@@ -62,7 +62,8 @@ function historicalProcessing(job, nowMs, { automaticEnabled = true } = {}) {
     && retryAfterMs !== null
     && retryAfterMs > nowMs;
   const waiting = retryScheduled && Number(job.consecutive_errors || 0) === 0;
-  const paused = job.status === 'running' && !automaticEnabled;
+  const inactiveLongEnough = lastActivityMs === null || nowMs - lastActivityMs > HISTORICAL_STALE_MS;
+  const paused = job.status === 'running' && !automaticEnabled && inactiveLongEnough;
   const stale = job.status === 'running'
     && automaticEnabled
     && !retryScheduled
