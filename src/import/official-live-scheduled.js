@@ -236,7 +236,7 @@ export async function selectPendingOfficialGameSource(env) {
       sr.id DESC
     LIMIT 1
   `).bind(SOURCE_TYPE, PENDING_QUALITY, AUTO_NORMALIZE_SOURCE_TYPE, MAX_AUTO_NORMALIZE_FAILURES).first();
-  return pending || selectExhaustedKnownSourceGap(env);
+  return pending || null;
 }
 
 function normalizeStepLimit(value) {
