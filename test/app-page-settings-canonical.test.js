@@ -38,7 +38,9 @@ test('primary Analysis owns the approved external workflow while Settings is spl
   assert.match(html, /Jobbstatus/);
   assert.match(html, /Senaste aktivitet/);
   assert.match(html, /settings-usage-progress-fill/);
-  assert.match(html, /settings-usage-progress-fill '+\(over\?'over':''\)/);
+  assert.match(html, /settings-usage-progress-fill\.over/);
+  assert.match(html, /over\?'over':''/);
+  assert.doesNotMatch(html, /Konceptvy/);
   assert.match(html, /\/app\/api\/settings\/automation/);
   assert.match(html, /\/app\/api\/settings\/cloudflare-usage/);
   assert.match(html, /settingsAlertBadge/);
