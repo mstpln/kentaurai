@@ -1,3 +1,12 @@
+## Scoped production cleanup session safety follow-up
+- Branch: `fix/storage-cleanup-session-safety`.
+- The run-until-complete workflow now stores progress inside an explicit cleanup session rather than permanent per-target global state.
+- Each session is bound to the exact Git commit that started it, expires after 24 hours and stops after at most 48 workflow runs. A changed `main` therefore cannot silently continue an older destructive cleanup cursor under different code.
+- Only one running session is allowed per source commit. An interrupted manual retry resumes that session; once it completes, a later manual cleanup starts a fresh session so future newly accumulated duplicates are not skipped.
+- Migration `0045_storage_cleanup_sessions.sql` adds the session/target state. The earlier additive `0044_storage_cleanup_resume_state.sql` remains in migration history but is no longer used by runtime cleanup orchestration.
+- Production release now verifies the 0045 migration, both session tables and their safety indexes before the Worker deploy can pass.
+- The existing 25-row/reference executor bound, plan token, exact confirmation, temporary cleanup-only auth, D1 restore point, cost-safety stop, conflict fail-closed behavior, health verification and automatic token removal remain unchanged.
+
 ## Run-until-complete production cleanup candidate
 - Branch: `feat/storage-cleanup-run-until-complete`.
 - Execute mode keeps the 25-row/reference executor cap but removes the workflow-level 250-batch ceiling.
