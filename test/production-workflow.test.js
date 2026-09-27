@@ -49,7 +49,7 @@ test('production release verifies required migrations and private observability 
   assert.match(releaseWorkflow, /0045_storage_cleanup_sessions\.sql/);
   assert.match(releaseWorkflow, /0046_snapshot_observation_lookup_index\.sql/);
   assert.match(releaseWorkflow, /0047_storage_cleanup_session_audits\.sql/);
-  assert.match(releaseWorkflow, /SELECT name FROM sqlite_master WHERE type='table' AND name IN \('storage_cleanup_sessions','storage_cleanup_session_targets'\)/);
+  assert.match(releaseWorkflow, /SELECT name FROM sqlite_master WHERE type='table' AND name IN \('storage_cleanup_sessions','storage_cleanup_session_targets','storage_cleanup_session_audits'\)/);
   assert.match(releaseWorkflow, /storage_cleanup_sessions/);
   assert.match(releaseWorkflow, /storage_cleanup_session_targets/);
   assert.match(releaseWorkflow, /storage_cleanup_session_audits/);
