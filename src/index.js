@@ -221,6 +221,9 @@ async function handleFetch(request, env) {
       : requireAdmin(request, env);
     if (denied) return denied;
   }
+  if (request.method === 'GET' && path === '/v1/storage-cleanup/auth-check') {
+    return json({ ok: true, scope: 'storage_cleanup' });
+  }
   if (request.method === 'GET' && path.startsWith('/v1/rounds/')) {
     const roundId = decodeURIComponent(path.slice('/v1/rounds/'.length));
     const data = await getRound(env, roundId);

@@ -101,6 +101,24 @@ jobs:
           jq -e '.ok == true and .service == "kentaurai-api"' /tmp/health.json >/dev/null
           echo "worker_url=$worker_url" >> "$GITHUB_OUTPUT"
 
+      - name: Wait for cleanup auth to propagate
+        env:
+          WORKER_URL: ${{ steps.worker.outputs.worker_url }}
+          CLEANUP_TOKEN: ${{ steps.cleanup_token.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 15); do
+            status="$(curl --silent --output /tmp/cleanup-auth.json --write-out '%{http_code}'               --header "Authorization: Bearer $CLEANUP_TOKEN"               "$WORKER_URL/v1/storage-cleanup/auth-check" || true)"
+            if [ "$status" = "200" ] && jq -e '.ok == true and .scope == "storage_cleanup"' /tmp/cleanup-auth.json >/dev/null 2>&1; then
+              echo "Cleanup auth propagated."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Cleanup auth did not propagate within 30 seconds"
+          exit 1
+
       - name: Capture D1 Time Travel restore point
         id: restore
         shell: bash
