@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs';
 import { createTestEnv } from './helpers/d1.js';
 import {
   MAX_HISTORICAL_CHECKPOINTS_PER_BATCH,
-  runHistoricalBackfillBatch
+  runHistoricalBackfillBatch,
+  runHistoricalBackfillStep
 } from '../src/import/official-historical-backfill.js';
 import {
   MAX_XLABS_CHECKPOINTS_PER_BATCH,
@@ -86,6 +87,16 @@ for (const [label, runBatch, maximum] of BATCHES) {
     assert.deepEqual(committed, [1]);
   });
 }
+
+test('automatic official history ignores multi-day backfill jobs', async () => {
+  const { env, db } = createTestEnv();
+  db.prepare(`
+    INSERT INTO historical_backfill_jobs (id,start_date,end_date,next_date,status)
+    VALUES ('long_history','2098-01-01','2099-01-01','2099-01-01','running')
+  `).run();
+
+  assert.deepEqual(await runHistoricalBackfillStep(env), { status:'idle', done:true });
+});
 
 test('automatic maintenance is reduced to one bounded morning schedule', () => {
   const wrangler = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
