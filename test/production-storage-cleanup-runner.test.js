@@ -17,21 +17,45 @@ async function readBody(req) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
 }
 
-test('execute runner continues beyond 250 batches and checkpoints completion', async () => {
-  const states = new Map();
+test('execute runner continues beyond 250 batches and checkpoints one source-bound session', async () => {
+  const sessionId = '11111111-1111-4111-8111-111111111111';
+  const sourceSha = 'a'.repeat(40);
+  const targets = new Map(
+    ['horse_profile','horse_stat','horse_record','person_stat','raw_object']
+      .map((target) => [target, { target, cursor: null, complete: false }])
+  );
   let snapshotPlans = 0;
+  let startCalls = 0;
 
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://127.0.0.1');
-      if (req.method === 'GET' && url.pathname === '/v1/storage-cleanup/state') {
-        json(res, { targets: [...states.values()] });
+      if (req.method === 'POST' && url.pathname === '/v1/storage-cleanup/session/start') {
+        const body = await readBody(req);
+        startCalls += 1;
+        assert.equal(body.source_sha, sourceSha);
+        json(res, {
+          sessionId,
+          sourceSha,
+          status: 'running',
+          continuationCount: startCalls,
+          maxContinuations: 48,
+          expiresAt: '2099-01-01T00:00:00.000Z',
+          targets: [...targets.values()],
+          safetyStop: false
+        });
         return;
       }
-      if (req.method === 'POST' && url.pathname === '/v1/storage-cleanup/state') {
+      if (req.method === 'POST' && url.pathname === '/v1/storage-cleanup/session/checkpoint') {
         const body = await readBody(req);
-        states.set(body.target, { ...body });
-        json(res, { ok: true, target: body.target, complete: body.complete });
+        assert.equal(body.session_id, sessionId);
+        assert.equal(body.source_sha, sourceSha);
+        targets.set(body.target, {
+          target: body.target,
+          cursor: body.complete ? null : body.cursor,
+          complete: body.complete === true
+        });
+        json(res, { sessionId, target: body.target, complete: body.complete, sessionComplete: false, safetyStop: false });
         return;
       }
       if (req.method === 'POST' && url.pathname === '/v1/storage-cleanup/snapshots/plan') {
@@ -90,6 +114,8 @@ test('execute runner continues beyond 250 batches and checkpoints completion', a
       CLEANUP_SOFT_DEADLINE_MS: String(5 * 60 * 1000),
       WORKER_URL: `http://127.0.0.1:${address.port}`,
       ADMIN_TOKEN: 'synthetic-cleanup-token',
+      GITHUB_SHA: sourceSha,
+      CLEANUP_SESSION_ID: '',
       GITHUB_OUTPUT: ''
     },
     stdio: ['ignore', 'pipe', 'pipe']
@@ -107,12 +133,8 @@ test('execute runner continues beyond 250 batches and checkpoints completion', a
   await once(server, 'close');
 
   assert.equal(code, 0, stderr);
+  assert.equal(startCalls, 1);
   assert.ok(snapshotPlans > 250, `expected >250 snapshot plans, saw ${snapshotPlans}`);
-  assert.equal(states.get('horse_profile')?.complete, true);
-  assert.equal(states.get('horse_profile')?.pages, 260);
-  assert.equal(states.get('horse_stat')?.complete, true);
-  assert.equal(states.get('horse_record')?.complete, true);
-  assert.equal(states.get('person_stat')?.complete, true);
-  assert.equal(states.get('raw_object')?.complete, true);
-  assert.match(stdout, /"cleanup":"run".*"complete":true/);
+  assert.ok([...targets.values()].every((target) => target.complete));
+  assert.match(stdout, /"cleanup":"session".*"complete":true/);
 });
