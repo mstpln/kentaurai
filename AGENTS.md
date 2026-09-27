@@ -28,3 +28,5 @@ This repository implements the V85/V86 KentaurAI build plan.
 ## Production safety
 Do not deploy, create/alter production Cloudflare resources, run production backfills, or mutate production data without explicit approval.
 Do not commit API keys, passwords, tokens, provider payloads, database dumps or private import files.
+- The Settings `automatic_workflows` master control gates the outer production Worker `scheduled()` entrypoint. Disabled or unreadable control state must fail closed before scheduled acquisition/processing is delegated. Manual app/admin actions remain explicit and are not silently disabled by this switch.
+- Cloudflare usage displayed in Settings must come from Cloudflare account metrics/billing metadata through a least-privilege runtime secret. Missing or ambiguous Cloudflare usage data is shown as unavailable, never as zero or an invented estimate.
