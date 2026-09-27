@@ -64,24 +64,30 @@ function logIntegrityAudit(audit, { sessionBound = false } = {}) {
   console.log(JSON.stringify({
     cleanup: 'integrity_audit',
     mode: MODE,
-    ok: true,
+    ok: audit?.ok === true,
     sessionBound,
-    families: (audit.families || []).map((family) => ({
+    families: (audit?.families || []).map((family) => ({
       family: family.family,
       mismatchedSources: Number(family.mismatchedSources || 0),
       missingRepresentations: Number(family.missingRepresentations || 0),
       excessRepresentations: Number(family.excessRepresentations || 0),
       danglingObservations: Number(family.danglingObservations || 0),
-      identityMismatchObservations: Number(family.identityMismatchObservations || 0)
-    }))
+      identityMismatchObservations: Number(family.identityMismatchObservations || 0),
+      timestampMismatchRepresentations: Number(family.timestampMismatchRepresentations || 0)
+    })),
+    operations: {
+      startedBatches: Number(audit?.operations?.startedBatches || 0),
+      strandedRawBatches: Number(audit?.operations?.strandedRawBatches || 0),
+      ok: audit?.operations?.ok !== false
+    }
   }));
 }
 
 async function verifyDryRunIntegrity() {
   if (MODE !== 'dry-run') return;
   const audit = await request('/v1/storage-cleanup/audit');
-  if (audit?.ok !== true) throw new Error('storage cleanup integrity audit failed; refusing cleanup');
   logIntegrityAudit(audit);
+  if (audit?.ok !== true) throw new Error('storage cleanup integrity audit failed; refusing cleanup');
 }
 
 async function verifyExecuteSessionIntegrity(session) {
@@ -91,10 +97,10 @@ async function verifyExecuteSessionIntegrity(session) {
     session_id: session.sessionId,
     source_sha: SOURCE_SHA
   });
+  logIntegrityAudit(audit, { sessionBound: true });
   if (audit?.ok !== true || audit?.auditVerified !== true) {
     throw new Error('storage cleanup session integrity audit failed; refusing cleanup');
   }
-  logIntegrityAudit(audit, { sessionBound: true });
 }
 
 async function startSession() {
