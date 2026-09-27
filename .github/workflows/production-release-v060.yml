@@ -273,6 +273,8 @@ jobs:
           for path in \
             '/app/api/settings/status' \
             '/app/api/settings/alerts' \
+            '/app/api/settings/automation' \
+            '/app/api/settings/cloudflare-usage' \
             '/app/api/settings/analysis-prompt?provider=anthropic' \
             '/app/api/settings/analysis-method-prompt?step=1' \
             '/app/api/settings/export?provider=anthropic&stage=pre_market' \
@@ -324,6 +326,10 @@ jobs:
 
           status="$(curl --silent --show-error --request POST --header 'content-type: application/json' --data '{}' --output /tmp/private-response.json --write-out '%{http_code}' "$WORKER_URL/app/api/settings/alerts/acknowledge")"
           test "$status" = '401' || { echo "Expected /app/api/settings/alerts/acknowledge to return 401 without authorization, got $status"; cat /tmp/private-response.json; exit 1; }
+          grep -q 'unauthorized' /tmp/private-response.json
+
+          status="$(curl --silent --show-error --request POST --header 'content-type: application/json' --data '{"enabled":false}' --output /tmp/private-response.json --write-out '%{http_code}' "$WORKER_URL/app/api/settings/automation")"
+          test "$status" = '401' || { echo "Expected /app/api/settings/automation POST to return 401 without authorization, got $status"; cat /tmp/private-response.json; exit 1; }
           grep -q 'unauthorized' /tmp/private-response.json
 
           status="$(curl --silent --show-error --request POST --header 'content-type: application/json' --data '{"tracks":[]}' --output /tmp/private-response.json --write-out '%{http_code}' "$WORKER_URL/v1/admin/tracks/profile-enrichment")"
