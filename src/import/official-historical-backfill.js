@@ -150,9 +150,8 @@ async function selectAutomaticHistoricalJob(env) {
     SELECT *
     FROM historical_backfill_jobs
     WHERE status = 'running'
-    ORDER BY CASE WHEN start_date = end_date THEN 0 ELSE 1 END,
-             CASE WHEN start_date = end_date THEN end_date ELSE NULL END DESC,
-             created_at
+      AND start_date = end_date
+    ORDER BY end_date DESC, created_at
     LIMIT 1
   `).first();
 }
