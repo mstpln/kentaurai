@@ -148,6 +148,7 @@ test('production app contains the Drift/Data settings overlay and no concept bad
   assert.match(html, /data-settings-primary="data"/);
   assert.match(html, /Cloudflare-användning/);
   assert.match(html, /automationToggleV079/);
+  assert.match(html, /dataCoverageAuditCard/);
   assert.doesNotMatch(html, /Konceptvy/);
 });
 
