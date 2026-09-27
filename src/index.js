@@ -418,23 +418,23 @@ async function runDailyXlabsIncremental(env, scheduledTime) {
 }
 
 async function handleScheduled(controller, env) {
+  if (controller.cron !== LIVE_MORNING_CRON) {
+    return { skipped: true, reason: 'unsupported_cron', cron: controller.cron };
+  }
+
   const scheduledAt = new Date(controller.scheduledTime || Date.now()).toISOString();
   const startedAt = new Date().toISOString();
   const id = `cron_${crypto.randomUUID()}`;
   const parts = [];
 
-  if (controller.cron === LIVE_MORNING_CRON) {
-    parts.push(await runScheduledPart('live_capture_morning', () => captureUpcomingOfficialGames(env, controller.scheduledTime, {
-      includeToday: true,
-      daysAhead: 7
-    })));
-    parts.push(await runScheduledPart('live_normalize_morning', () => runLiveNormalizationMorning(env)));
-    parts.push(await runScheduledPart('post_race_settlement', () => runPostRaceSettlementBatch(env)));
-    parts.push(await runScheduledPart('official_daily_incremental', () => runDailyOfficialIncremental(env, controller.scheduledTime)));
-    parts.push(await runScheduledPart('xlabs_daily_incremental', () => runDailyXlabsIncremental(env, controller.scheduledTime)));
-  } else {
-    parts.push({ name: 'unknown_cron', ok: false, error: `unsupported cron ${controller.cron}` });
-  }
+  parts.push(await runScheduledPart('live_capture_morning', () => captureUpcomingOfficialGames(env, controller.scheduledTime, {
+    includeToday: true,
+    daysAhead: 7
+  })));
+  parts.push(await runScheduledPart('live_normalize_morning', () => runLiveNormalizationMorning(env)));
+  parts.push(await runScheduledPart('post_race_settlement', () => runPostRaceSettlementBatch(env)));
+  parts.push(await runScheduledPart('official_daily_incremental', () => runDailyOfficialIncremental(env, controller.scheduledTime)));
+  parts.push(await runScheduledPart('xlabs_daily_incremental', () => runDailyXlabsIncremental(env, controller.scheduledTime)));
 
   const failures = parts.filter((part) => !part.ok);
   await env.DB.prepare(`
