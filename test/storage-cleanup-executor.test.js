@@ -19,6 +19,14 @@ function addSource(db, id, fetchedAt, rawObjectKey = id, contentHash = null, sou
   `).run(id, sourceType, id, fetchedAt, rawObjectKey, contentHash);
 }
 
+function markSnapshotSourceComplete(db, sourceId) {
+  db.prepare(`
+    INSERT INTO official_snapshot_source_sync
+      (source_record_id,status)
+    VALUES (?,'complete')
+  `).run(sourceId);
+}
+
 async function sha256(value) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -33,6 +41,7 @@ test('snapshot executor removes only sequential repeats and rewires provenance a
     const snapshotId = `snapshot-${index}`;
     const observedAt = `2026-09-${String(10 + index).padStart(2, '0')}T10:00:00Z`;
     addSource(db, id, observedAt);
+    markSnapshotSourceComplete(db, id);
     db.prepare(`INSERT INTO horse_profile_snapshots
       (id,horse_id,observed_at,age_years,source_record_id) VALUES (?,'horse-cleanup',?,?,?)`)
       .run(snapshotId, observedAt, facts[index], id);
@@ -147,6 +156,7 @@ test('snapshot executor preserves A-B-A and null-value-null change points', asyn
     const id = `change-source-${index}`;
     const observedAt = `2026-08-${String(10 + index).padStart(2, '0')}T10:00:00Z`;
     addSource(db, id, observedAt);
+    markSnapshotSourceComplete(db, id);
     db.prepare(`INSERT INTO horse_profile_snapshots
       (id,horse_id,observed_at,age_years,source_record_id) VALUES (?,'horse-changes',?,?,?)`)
       .run(`change-snapshot-${index}`, observedAt, facts[index], id);
@@ -163,6 +173,7 @@ test('snapshot execution rejects a stale or unconfirmed plan without mutation', 
     const id = `safe-source-${index}`;
     const observedAt = `2026-07-${10 + index}T10:00:00Z`;
     addSource(db, id, observedAt);
+    markSnapshotSourceComplete(db, id);
     db.prepare(`INSERT INTO horse_profile_snapshots
       (id,horse_id,observed_at,age_years,source_record_id) VALUES (?,'horse-safe',?,4,?)`)
       .run(`safe-snapshot-${index}`, observedAt, id);
@@ -181,6 +192,7 @@ test('snapshot cursor preserves sequential comparison across a bounded page boun
     const id = `page-source-${String(index).padStart(2, '0')}`;
     const observedAt = `2026-06-${String(index + 1).padStart(2, '0')}T10:00:00Z`;
     addSource(db, id, observedAt);
+    markSnapshotSourceComplete(db, id);
     db.prepare(`INSERT INTO horse_profile_snapshots
       (id,horse_id,observed_at,age_years,source_record_id) VALUES (?,'horse-page',?,?,?)`)
       .run(`page-snapshot-${index}`, observedAt, index === 25 ? 24 : index, id);
