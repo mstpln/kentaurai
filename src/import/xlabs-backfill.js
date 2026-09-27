@@ -101,6 +101,19 @@ export async function ensureDailyXlabsJob(env, scheduledTime = Date.now()) {
   return ensureXlabsDailyDateJob(env, yesterday);
 }
 
+export async function ensureRecentDailyXlabsJobs(env, scheduledTime = Date.now(), lookbackDays = 3) {
+  const instant = new Date(scheduledTime);
+  if (Number.isNaN(instant.getTime())) throw new Error('scheduled time is invalid');
+  const days = Number(lookbackDays);
+  if (!Number.isInteger(days) || days < 1 || days > 7) throw new Error('lookbackDays must be between 1 and 7');
+  const today = instant.toISOString().slice(0, 10);
+  const jobs = [];
+  for (let offset = 1; offset <= days; offset += 1) {
+    jobs.push(await ensureXlabsDailyDateJob(env, addDays(today, -offset)));
+  }
+  return { lookbackDays: days, jobs };
+}
+
 async function acquireLease(env, job) {
   const token = crypto.randomUUID();
   const now = new Date().toISOString();

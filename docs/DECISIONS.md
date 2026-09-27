@@ -336,9 +336,10 @@ A single race must not directly change model weights. Candidate learnings are re
 2. Upcoming official capture keeps a seven-day V85/V86 horizon so lower frequency does not reduce the normal upcoming-round workspace.
 3. Automatic live normalization may process only bounded pending current captures. Exhausted failed-import history is never rescanned as a fallback for idle current work.
 4. Automatic official result ingestion operates only on the rolling one-day daily jobs created for recent settled dates. Long multi-day historical jobs are never selected implicitly by cron.
-5. Automatic X-Labs ingestion operates only on the explicit `daily_v85_v86` job created for current incremental work. Historical-all X-Labs jobs remain explicit/manual operations.
+5. Automatic X-Labs ingestion operates only on explicit `daily_v85_v86` jobs for the previous three dates, newest first, within one fixed morning batch budget. This bounded catch-up window covers late-settled recent rounds without scanning history. Historical-all X-Labs jobs remain explicit/manual operations.
 6. Multi-year history expansion has no recurring GitHub schedule. Starting or resuming such work requires explicit manual authorization.
 7. Statistics-history repair, X-Labs interval repair and X-Labs position reconstruction do not run as general recurring cron repair loops. They remain explicit/admin operations until a separately reviewed low-cost queue model exists.
 8. Existing stored history is preserved. Cost control must not delete verified racing facts or private raw provenance as a side effect.
 9. Normal app reads and analysis exports must reuse stored data/derived state wherever possible; user navigation must not trigger provider acquisition or hidden historical backfill.
 10. Cost safety takes precedence over background freshness: if bounded daily work cannot finish safely, remaining work waits for the next bounded run or explicit manual action rather than hot-looping.
+11. Settings treats retained multi-day historical jobs as intentionally paused while automatic history is disabled; a paused job must not create a stale/error badge merely because it is not being scheduled. Explicit failed jobs still require attention.

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createTestEnv } from './helpers/d1.js';
 import {
   ensureDailyXlabsJob,
+  ensureRecentDailyXlabsJobs,
   ensureXlabsDailyDateJob,
   runXlabsBackfillBatch,
   runXlabsBackfillStep,
@@ -32,6 +33,21 @@ test('a deferred daily X-Labs job does not starve a ready historical job', async
   assert.equal(second.scope, 'historical_all');
   assert.equal(second.status, 'completed');
   assert.equal(second.done, true);
+});
+
+test('recent automatic X-Labs catch-up creates only the previous three daily jobs newest first', async () => {
+  const { env } = createTestEnv();
+  const result = await ensureRecentDailyXlabsJobs(env, '2099-01-05T05:15:00.000Z', 3);
+
+  assert.equal(result.lookbackDays, 3);
+  assert.deepEqual(
+    result.jobs.map((job) => [job.scope, job.start_date, job.end_date]),
+    [
+      ['daily_v85_v86', '2099-01-04', '2099-01-04'],
+      ['daily_v85_v86', '2099-01-03', '2099-01-03'],
+      ['daily_v85_v86', '2099-01-02', '2099-01-02']
+    ]
+  );
 });
 
 test('exact-date X-Labs recovery reopens a completed daily job when a newly settled saved round adds eligible races', async () => {

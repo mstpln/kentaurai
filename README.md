@@ -5,7 +5,7 @@ Private V85/V86 data, analysis backend and read-only intelligence interface with
 ## Current build
 Version 0.6.0 contains the verified official/X-Labs data foundation, resumable history pipelines, the external two-step V85/V86 analysis workflow, the historical sealed-v3 stack, replay/calibration, post-race learning diagnostics, private workflow/coverage observability and the read-only PWA. Real provider payloads and private reference/editorial/contact data remain outside the public repository; GitHub contains code, migrations, tests, documentation and synthetic fixtures only.
 
-Production release #137 is the currently deployed baseline. The production entrypoint is `src/worker-v078.js` with `ANALYSIS_WORKFLOW_MODE=v3`; that default mode now serves the external-AI workflow described below. Historical v1/v2 and sealed-v3 artifacts remain readable, while their creation/mutation routes are disabled in the default mode. `legacy_v2` remains a controlled release rollback value only. Production changes are accepted only through the repository's reviewed release workflow, which applies pending migrations before deploying the Worker and verifies health/private-route boundaries.
+Production release #138 is the currently deployed baseline. The production entrypoint is `src/worker-v078.js` with `ANALYSIS_WORKFLOW_MODE=v3`; that default mode now serves the external-AI workflow described below. Historical v1/v2 and sealed-v3 artifacts remain readable, while their creation/mutation routes are disabled in the default mode. `legacy_v2` remains a controlled release rollback value only. Production changes are accepted only through the repository's reviewed release workflow, which applies pending migrations before deploying the Worker and verifies health/private-route boundaries.
 
 ### Default external AI analysis workflow
 1. Select one complete V85/V86 round and AI provider in the private app.
@@ -49,7 +49,7 @@ The current build contains:
 - guided private four-stage external-AI workflow, separate external-evidence registration and sanitized coverage/backfill observability
 - complete presentation of currently stored measurement families on entity/start detail, including horse External statistics / Interviews and trainer Interviews tabs, while internal provenance remains backend-only
 - verified X-Labs race-telemetry capture, whole-race and 100 m interval normalization, bounded repair of previously captured telemetry, and raw-vs-normalized checks; exact payloads remain private
-- scheduled previous-day X-Labs catch-up for stored V85/V86 game legs
+- bounded three-day X-Labs daily catch-up for recent stored V85/V86 game legs, newest date first
 - a separate three-year-capable historical X-Labs job that follows verified official-history readiness rather than outrunning it
 - persistent official and X-Labs backfill jobs with idempotent source reuse, checkpoints, leases and bounded retries
 - private sanitized X-Labs script inspection for request mechanisms and endpoint clues without returning raw script bodies
@@ -138,11 +138,11 @@ Real source data belongs only in the private Cloudflare D1/R2 deployment or is s
 All `/v1/*` routes fail closed unless `ADMIN_TOKEN` is configured and supplied.
 
 ### Automatic V85/V86 acquisition
-The configured official schedules are `15 5 * * *` and `15 17 * * *` in UTC. The morning run captures the current date plus the next seven dates. The evening run starts from the next date and therefore never changes the current race-day snapshot automatically after the morning refresh. Late changes can still be handled through the admin-only manual refresh path.
+The only automatic Worker schedule is `15 5 * * *` UTC. The morning run captures the current date plus the next seven dates, normalizes pending current game snapshots within a fixed run budget, imports recent official results through explicit one-day jobs, settles eligible saved rounds and then processes a bounded three-day X-Labs daily catch-up window. There is no automatic evening refresh and no minute cron. Late changes can still be handled through the admin-only manual refresh path.
 
 Each calendar snapshot is archived privately before game discovery. Discovery accepts only V85/V86 identities for the requested date with exactly eight same-date race ids. Each discovered game is then captured through the same verified official provider path and archived before normalization. A partial date/game capture failure marks the scheduled operation as failed rather than silently reporting success.
 
-Captured game normalization is intentionally bounded to one entry checkpoint per minute. Progress is derived from successful contiguous normalization runs, not merely from partially written entity observations. This means a failed per-entry operation cannot cause the next scheduled invocation to skip unfinished betting, odds or equipment facts.
+Captured game normalization is bounded inside the morning run and resumes only from successful contiguous checkpoints. Exhausted failed-import history is not rescanned as a fallback. Long multi-day official history jobs, `historical_all` X-Labs jobs and general repair/reconstruction queues are never selected implicitly by the automatic schedule.
 
 ### Official-provider capture and normalization
 Calendar/day, game-by-id and ordinary race-by-id are wired from observed official browser traffic. Captured responses are archived exactly to private R2 and recorded in D1 before any field mapping occurs.

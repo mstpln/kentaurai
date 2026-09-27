@@ -114,6 +114,9 @@ test('automatic maintenance is reduced to one bounded morning schedule', () => {
   assert.match(indexSource, /daysAhead: 7/);
   assert.match(indexSource, /runHistoricalBackfillBatch\(env, job\.id\)/);
   assert.match(indexSource, /runXlabsBackfillBatch\(env, job\.id\)/);
+  assert.match(indexSource, /ensureRecentDailyXlabsJobs\(env, scheduledTime, 3\)/);
+  assert.doesNotMatch(indexSource, /ensureDailyXlabsJob\(env, scheduledTime\)/);
+  assert.doesNotMatch(indexSource, /for \(const job of recent\.jobs \|\| \[\]\) \{\s*while \(remaining > 0\)/);
 
   const extensionWorkflow = readFileSync(new URL('../.github/workflows/extend-production-history-2020-2023.yml', import.meta.url), 'utf8');
   assert.doesNotMatch(extensionWorkflow, /^\s*schedule:\s*$/m);

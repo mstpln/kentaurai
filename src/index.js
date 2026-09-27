@@ -15,7 +15,7 @@ import {
 import { ensureXlabsIntervalsForSource, runXlabsIntervalRepairBatch } from './import/xlabs-interval-repair.js';
 import { normalizeCapturedOfficialRace } from './import/official-historical-race.js';
 import { ensureDailyOfficialHistoryJobs, getHistoricalBackfill, runHistoricalBackfillBatch, runHistoricalBackfillStep, startHistoricalBackfill } from './import/official-historical-backfill.js';
-import { ensureDailyXlabsJob, getXlabsBackfill, runXlabsBackfillBatch, runXlabsBackfillStep, startXlabsBackfill } from './import/xlabs-backfill.js';
+import { ensureRecentDailyXlabsJobs, getXlabsBackfill, runXlabsBackfillBatch, runXlabsBackfillStep, startXlabsBackfill } from './import/xlabs-backfill.js';
 import { captureCalendar, captureGame, captureRace } from './provider/official.js';
 import { runPostRaceSettlementBatch } from './post-race-settlement-v1.js';
 import { getStatisticsDataBackfillStatus, runNextStatisticsDataBackfill } from './statistics-data-backfill-v1.js';
@@ -398,19 +398,25 @@ async function runDailyOfficialIncremental(env, scheduledTime) {
 }
 
 async function runDailyXlabsIncremental(env, scheduledTime) {
-  const job = await ensureDailyXlabsJob(env, scheduledTime);
+  const recent = await ensureRecentDailyXlabsJobs(env, scheduledTime, 3);
   let batchCount = 0;
   let finalStatus = 'idle';
-  for (let index = 0; index < DAILY_XLABS_BATCH_RUNS; index += 1) {
+  const processedJobIds = [];
+  let remaining = DAILY_XLABS_BATCH_RUNS;
+
+  for (const job of recent.jobs || []) {
+    if (remaining <= 0) break;
     const batch = await runXlabsBackfillBatch(env, job.id);
     batchCount += 1;
+    remaining -= 1;
     finalStatus = batch?.status || 'unknown';
-    if (!batch || batch.done || batch.status !== 'running') break;
+    processedJobIds.push(job.id);
   }
+
   return {
-    jobId: job.id,
-    startDate: job.start_date,
-    endDate: job.end_date,
+    lookbackDays: recent.lookbackDays,
+    jobIds: (recent.jobs || []).map((job) => job.id),
+    processedJobIds,
     batchCount,
     maxBatches: DAILY_XLABS_BATCH_RUNS,
     finalStatus

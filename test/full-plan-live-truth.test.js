@@ -30,7 +30,7 @@ test('live-state documentation contains no pre-cutover candidate markers', () =>
   assert.doesNotMatch(serialized, /target contract only; not active runtime behavior/i);
   assert.doesNotMatch(serialized, /legacy runtime behavior until the later v3 cutover build/i);
   assert.doesNotMatch(serialized, /worker-v075/i);
-  assert.match(files.readme, /Production release #137 (?:is current|is the currently deployed baseline)/i);
+  assert.match(files.readme, /Production release #138 (?:is current|is the currently deployed baseline)/i);
   assert.match(files.readme, /production entrypoint is `src\/worker-v078\.js`/i);
   assert.match(files.buildState, /Production schema is current through migration `0041_statistics_data_backfill_state_v2\.sql`/i);
   assert.match(files.buildState, /External analysis workflow production live/i);
