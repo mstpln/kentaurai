@@ -99,3 +99,42 @@ test('an old pending game source is outside automatic normalization scope', asyn
 
   assert.equal(await selectPendingOfficialGameSource(env), null);
 });
+
+
+test('live pending selection uses the dedicated cost indexes', () => {
+  const { db } = createTestEnv();
+  const plan = db.prepare(`
+    EXPLAIN QUERY PLAN
+    SELECT sr.id, sr.external_id, sr.fetched_at
+    FROM source_records sr
+    WHERE sr.source_type = 'official_provider'
+      AND sr.quality_status IN ('captured_unmapped','captured_source_gap')
+      AND (
+        sr.quality_status = 'captured_unmapped'
+        OR (
+          sr.quality_status = 'captured_source_gap'
+          AND json_extract(sr.metadata_json, '$.sourceGap.code') = 'missing_horse_identity'
+        )
+      )
+      AND substr(sr.external_id,1,9) IN ('game:V85_','game:V86_')
+      AND substr(sr.external_id,10,10) >= date('now','-3 day')
+      AND (
+        sr.quality_status = 'captured_source_gap'
+        OR (
+          SELECT COUNT(*)
+          FROM import_runs ir
+          WHERE ir.source_type = 'official_live_normalize_auto'
+            AND ir.status = 'failed'
+            AND json_extract(ir.metadata_json, '$.sourceRecordId') = sr.id
+        ) < 3
+      )
+    ORDER BY
+      CASE WHEN substr(sr.external_id,10,10) >= date('now') THEN 0 ELSE 1 END,
+      sr.fetched_at DESC,
+      sr.id DESC
+    LIMIT 1
+  `).all();
+  const details = plan.map((row) => String(row.detail || '')).join('\n');
+  assert.match(details, /idx_source_records_live_game_pending/);
+  assert.match(details, /idx_import_runs_live_normalize_failures/);
+});
