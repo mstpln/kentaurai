@@ -150,52 +150,6 @@ export async function completedNormalizationCursor(env, sourceRecordId) {
   return results.length;
 }
 
-function failedRunMessage(errorJson) {
-  try {
-    const parsed = errorJson ? JSON.parse(errorJson) : null;
-    return typeof parsed?.message === 'string' ? parsed.message : null;
-  } catch {
-    return null;
-  }
-}
-
-async function selectExhaustedKnownSourceGap(env) {
-  const { results } = await env.DB.prepare(`
-    SELECT sr.id, sr.external_id, sr.fetched_at,
-      (
-        SELECT ir.error_json
-        FROM import_runs ir
-        WHERE ir.source_type = ?
-          AND ir.status = 'failed'
-          AND json_extract(ir.metadata_json, '$.sourceRecordId') = sr.id
-        ORDER BY ir.started_at DESC, ir.id DESC
-        LIMIT 1
-      ) AS last_error_json
-    FROM source_records sr
-    WHERE sr.source_type = ? AND (sr.quality_status = ? OR (sr.quality_status = 'captured_source_gap' AND json_extract(sr.metadata_json, '$.sourceGap.code') = 'missing_horse_identity'))
-      AND COALESCE(json_extract(sr.metadata_json, '$.normalizationOwner'),'') <> 'post_race_settlement_final'
-      AND (sr.external_id LIKE 'game:V85\\_%' ESCAPE '\\' OR sr.external_id LIKE 'game:V86\\_%' ESCAPE '\\')
-      AND (
-        SELECT COUNT(*)
-        FROM import_runs ir
-        WHERE ir.source_type = ?
-          AND ir.status = 'failed'
-          AND json_extract(ir.metadata_json, '$.sourceRecordId') = sr.id
-      ) >= ?
-    ORDER BY sr.fetched_at, sr.id
-    LIMIT 20
-  `).bind(AUTO_NORMALIZE_SOURCE_TYPE, SOURCE_TYPE, PENDING_QUALITY, AUTO_NORMALIZE_SOURCE_TYPE, MAX_AUTO_NORMALIZE_FAILURES).all();
-
-  for (const row of results) {
-    const message = failedRunMessage(row.last_error_json);
-    if (message && /^races\[\d+\]\.starts\[\d+\]\.horse\.id is required$/.test(message)) {
-      const { last_error_json: _lastError, ...source } = row;
-      return source;
-    }
-  }
-  return null;
-}
-
 export async function selectPendingOfficialGameSource(env) {
   if (!env.DB) throw new Error('DB is not configured');
   const pending = await env.DB.prepare(`
@@ -236,7 +190,7 @@ export async function selectPendingOfficialGameSource(env) {
       sr.id DESC
     LIMIT 1
   `).bind(SOURCE_TYPE, PENDING_QUALITY, AUTO_NORMALIZE_SOURCE_TYPE, MAX_AUTO_NORMALIZE_FAILURES).first();
-  return pending || selectExhaustedKnownSourceGap(env);
+  return pending || null;
 }
 
 function normalizeStepLimit(value) {

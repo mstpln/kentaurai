@@ -1,3 +1,15 @@
+## Emergency Cloudflare cost-safety candidate
+- Branch: `codex/emergency-cost-stop` / PR #271.
+- Cloudflare D1 query analytics identified the exhausted live-import recovery scan as the dominant current read path; the automatic fallback scan over failed import history is removed.
+- Worker scheduling is reduced from the minute orchestrator plus separate daily jobs to one bounded morning schedule at `05:15 UTC`.
+- Morning live capture preserves the seven-day upcoming V85/V86 horizon; captured live normalization is bounded and stops on idle.
+- Daily official result ingestion is limited to the existing one-day rolling jobs and is called by explicit daily job id, so a long multi-day historical job cannot be picked up by the automatic scheduler.
+- Daily X-Labs ingestion is likewise called by explicit `daily_v85_v86` job id; `historical_all` jobs remain available only through explicit/manual execution.
+- Automatic statistics-history repair, X-Labs interval repair and X-Labs position-reconstruction loops are removed from cron execution. Their admin/manual routes remain available.
+- The GitHub 2020-2023 history-extension workflow has no schedule and requires explicit workflow dispatch confirmation.
+- Existing historical data is preserved. No migration deletes or rewrites historical facts, and no private payload is committed.
+- This candidate is not production-active until reviewed, explicitly authorized for merge and released.
+
 ## Track physical profile candidate
 - Branch: `feat/track-physical-profile-v1`.
 - Bana Översikt follows the approved V5 layout: an initially empty **Bananalys** section first, followed by grouped **Grundmått / Start & bredd / Till första sväng / Kurvradier / Dosering**, then existing Datatäckning, Kontakt & plats and optional Startnoteringar.
@@ -43,16 +55,16 @@
 # Build state
 
 Version: 0.6.0
-Updated: 2026-09-20
+Updated: 2026-09-27
 
 ## Current production truth
 - Worker: `kentaurai-api`.
 - D1: `kentaurai`.
 - R2: `kentaurai-raw`.
-- Current deployed main head before PR #204 is `f4cf8e0b1cddae94ad48df45a65179f397022a96`.
-- Worker entrypoint is `src/worker-v077.js` with `ANALYSIS_WORKFLOW_MODE=v3`; the default mode serves the external-AI workflow while historical sealed-v3 artifacts remain read-compatible.
+- Current deployed main head is `f69678ca5dbc7bcaddb6f8e8b830dc2e8c93223c`.
+- Worker entrypoint is `src/worker-v078.js` with `ANALYSIS_WORKFLOW_MODE=v3`; the default mode serves the external-AI workflow while historical sealed-v3 artifacts remain read-compatible.
 - The latest production release completed successfully with full QA, Cloudflare validation, migration/schema/index verification, Worker deploy, `/health`, `/app/login` and private analysis/evidence route protection.
-- Production schema is current through migration `0028_external_evidence_v1.sql`.
+- Production schema is current through migration `0041_statistics_data_backfill_state_v2.sql`.
 - External Step 1/Step 2 analysis exchange, later system registration, audited external lineage, external-aware F1 replay/F2 post-race diagnostics and the private-app performance layer are production-live.
 - Historical official/X-Labs jobs keep their durable cursors. The external-analysis release did not reset, recreate or resume stopped historical work.
 
@@ -66,7 +78,7 @@ Updated: 2026-09-20
 - Post-deadline registration remains allowed for bookkeeping but is marked `post_race_recovery` / `manual_review_required`. F1/F2 can diagnose it but exclude it from automatic promotion evidence.
 - Verified Step 2 reads enforce both observation/published timestamps and source-record availability at the cutoff. Missing market percentages stay null.
 - F1 and F2 understand the external lineage directly; they do not fabricate sealed Step 1/decision/optimizer parents. If an external run exists for a round, stale sealed-v3 system lineage is not selected as the current F1/F2 target.
-- Exact-head CI passed with 809/809 tests before merge. Production release #64 then reran full QA, verified migration 0027 and the external schema, deployed the Worker and passed health/login/private-route verification.
+- The currently deployed baseline is production release #137 on main head `f69678ca5dbc7bcaddb6f8e8b830dc2e8c93223c`.
 
 ## External evidence workflow production live
 - The Analys workspace flow is Step 1 blind analysis -> Step 2 market analysis only -> Step 3 interviews/external horse statistics -> Step 4 user/AI system dialogue -> Step 5 separate external-evidence registration -> Step 6 separate system registration.

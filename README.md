@@ -5,7 +5,7 @@ Private V85/V86 data, analysis backend and read-only intelligence interface with
 ## Current build
 Version 0.6.0 contains the verified official/X-Labs data foundation, resumable history pipelines, the external two-step V85/V86 analysis workflow, the historical sealed-v3 stack, replay/calibration, post-race learning diagnostics, private workflow/coverage observability and the read-only PWA. Real provider payloads and private reference/editorial/contact data remain outside the public repository; GitHub contains code, migrations, tests, documentation and synthetic fixtures only.
 
-Production release #64 is the currently deployed baseline. The production entrypoint is `src/worker-v078.js` with `ANALYSIS_WORKFLOW_MODE=v3`; that default mode now serves the external-AI workflow described below. Historical v1/v2 and sealed-v3 artifacts remain readable, while their creation/mutation routes are disabled in the default mode. `legacy_v2` remains a controlled release rollback value only. Production changes are accepted only through the repository's reviewed release workflow, which applies pending migrations before deploying the Worker and verifies health/private-route boundaries.
+Production release #137 is the currently deployed baseline. The production entrypoint is `src/worker-v078.js` with `ANALYSIS_WORKFLOW_MODE=v3`; that default mode now serves the external-AI workflow described below. Historical v1/v2 and sealed-v3 artifacts remain readable, while their creation/mutation routes are disabled in the default mode. `legacy_v2` remains a controlled release rollback value only. Production changes are accepted only through the repository's reviewed release workflow, which applies pending migrations before deploying the Worker and verifies health/private-route boundaries.
 
 ### Default external AI analysis workflow
 1. Select one complete V85/V86 round and AI provider in the private app.
@@ -28,8 +28,9 @@ The current build contains:
 - private import APIs for reference-round and structured editorial data
 - private official-provider calendar/day, game and ordinary-race capture
 - verified official-game normalizer for the observed live payload shape
-- automatic upcoming V85/V86 calendar/game capture twice daily with race-day morning as the final automatic same-day refresh
+- automatic upcoming V85/V86 calendar/game capture once each morning across the seven-day upcoming horizon
 - bounded, resumable automatic normalization of captured V85/V86 game snapshots
+- automatic multi-year history expansion is disabled; historical backfill remains explicit/manual-only while current daily official/X-Labs ingestion is bounded
 - immutable normalized observations plus timestamped betting/odds/equipment snapshots
 - private raw-vs-normalized verification endpoint
 - private read-only KentaurAI interface at `/app`

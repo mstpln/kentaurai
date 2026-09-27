@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import worker from '../src/index.js';
 import { createTestEnv } from './helpers/d1.js';
 import {
@@ -87,33 +88,34 @@ for (const [label, runBatch, maximum] of BATCHES) {
   });
 }
 
-test('minute scheduler prioritizes live normalization and records bounded historical batches', async () => {
+test('legacy minute cron is ignored without writing an orchestrator run', async () => {
   const { env, db } = createTestEnv();
   const queued = [];
-  worker.scheduled({ cron: '* * * * *', scheduledTime: Date.now() }, env, {
+  const result = worker.scheduled({ cron: '* * * * *', scheduledTime: Date.now() }, env, {
     waitUntil(promise) { queued.push(promise); }
   });
-  assert.equal(queued.length, 1);
   await Promise.all(queued);
+  assert.deepEqual(await result, { skipped:true, reason:'unsupported_cron', cron:'* * * * *' });
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM import_runs WHERE source_type = 'scheduled_orchestrator'").get().n, 0);
+});
 
-  const row = db.prepare(`
-    SELECT metadata_json
-    FROM import_runs
-    WHERE source_type = 'scheduled_orchestrator'
-    ORDER BY started_at DESC
-    LIMIT 1
-  `).get();
-  const metadata = JSON.parse(row.metadata_json);
-  assert.deepEqual(metadata.parts.map((part) => part.name), [
-    'post_race_settlement',
-    'live_normalize',
-    'statistics_data_backfill',
-    'historical_backfill',
-    'xlabs_backfill',
-    'xlabs_interval_repair',
-    'xlabs_position_reconstruction'
-  ]);
-  assert.equal(metadata.parts[0].result.maxSteps, 3);
-  assert.equal(metadata.parts[3].result.maxCheckpoints, 3);
-  assert.equal(metadata.parts[4].result.maxCheckpoints, 3);
+test('automatic maintenance is reduced to one bounded morning schedule', () => {
+  const wrangler = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
+  assert.deepEqual(wrangler.triggers?.crons, ['15 5 * * *']);
+
+  const indexSource = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(indexSource, /BACKFILL_CRON/);
+  assert.doesNotMatch(indexSource, /live_capture_evening/);
+  assert.doesNotMatch(indexSource, /statistics_data_backfill', \(\) => runNextStatisticsDataBackfill/);
+  assert.doesNotMatch(indexSource, /xlabs_interval_repair', \(\) => runXlabsIntervalRepairBatch/);
+  assert.doesNotMatch(indexSource, /xlabs_position_reconstruction', \(\) => runXlabsPositionReconstructionBatch/);
+  assert.match(indexSource, /official_daily_incremental/);
+  assert.match(indexSource, /xlabs_daily_incremental/);
+  assert.match(indexSource, /daysAhead: 7/);
+  assert.match(indexSource, /runHistoricalBackfillBatch\(env, job\.id\)/);
+  assert.match(indexSource, /runXlabsBackfillBatch\(env, job\.id\)/);
+
+  const extensionWorkflow = readFileSync(new URL('../.github/workflows/extend-production-history-2020-2023.yml', import.meta.url), 'utf8');
+  assert.doesNotMatch(extensionWorkflow, /^\s*schedule:\s*$/m);
+  assert.match(extensionWorkflow, /workflow_dispatch:/);
 });

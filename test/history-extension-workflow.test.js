@@ -14,10 +14,11 @@ test('history extension is explicit, bounded and main-only', () => {
   assert.match(workflow, /XLABS_JOB_ID: xlabsbackfill_xlabs-race-v1__historical-all__2020-09-08__2023-09-07/);
 });
 
-test('scheduled capacity guard stays idle until the manual authorization has created the official job', () => {
-  assert.match(workflow, /github\.event_name == 'schedule'/);
-  assert.match(workflow, /elif \[\[ "\$official_status" == "absent" \]\]; then/);
-  assert.match(workflow, /History extension has not been authorized yet; scheduled guard is idle/);
+test('history extension is manual-only and has no automatic schedule', () => {
+  assert.doesNotMatch(workflow, /^\s*schedule:\s*$/m);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.doesNotMatch(workflow, /github\.event_name == 'schedule'/);
+  assert.match(workflow, /MANUAL_RUN: 'true'/);
 });
 
 test('history extension checks real D1 file size and stops well below the paid-plan database ceiling', () => {

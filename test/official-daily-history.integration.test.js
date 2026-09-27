@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import worker from '../src/index.js';
+import { readFileSync } from 'node:fs';
 import { createTestEnv } from './helpers/d1.js';
 import {
   DAILY_OFFICIAL_LOOKBACK_DAYS,
@@ -52,29 +52,18 @@ test('automatic official history processes recent one-day jobs before the long h
   assert.equal(fourth.status, 'completed');
 });
 
-test('04:30 UTC scheduler creates official rolling jobs before the daily X-Labs job', async () => {
-  const { env, db } = createTestEnv();
-  const queued = [];
-  worker.scheduled({ cron: '30 4 * * *', scheduledTime: Date.parse('2099-04-11T04:30:00Z') }, env, {
-    waitUntil(promise) { queued.push(promise); }
-  });
-  await Promise.all(queued);
+test('morning scheduler pins official and X-Labs work to daily job ids only', () => {
+  const wrangler = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
+  assert.deepEqual(wrangler.triggers?.crons, ['15 5 * * *']);
 
-  const row = db.prepare(`
-    SELECT metadata_json
-    FROM import_runs
-    WHERE source_type = 'scheduled_orchestrator'
-    ORDER BY started_at DESC
-    LIMIT 1
-  `).get();
-  const metadata = JSON.parse(row.metadata_json);
-  assert.deepEqual(metadata.parts.map((part) => part.name), [
-    'official_daily_history_jobs',
-    'xlabs_daily_job'
-  ]);
-  assert.equal(metadata.parts[0].ok, true);
-  assert.equal(metadata.parts[0].result.lookbackDays, 3);
-  assert.deepEqual(metadata.parts[0].result.jobs.map((job) => job.start_date), ['2099-04-10', '2099-04-09', '2099-04-08']);
-  assert.equal(metadata.parts[1].ok, true);
-  assert.equal(metadata.parts[1].result.start_date, '2099-04-10');
+  const source = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+  const officialIndex = source.indexOf("official_daily_incremental");
+  const settlementIndex = source.indexOf("post_race_settlement");
+  const xlabsIndex = source.indexOf("xlabs_daily_incremental");
+  assert.ok(officialIndex >= 0);
+  assert.ok(settlementIndex > officialIndex);
+  assert.ok(xlabsIndex > settlementIndex);
+  assert.match(source, /runHistoricalBackfillBatch\(env, job\.id\)/);
+  assert.match(source, /runXlabsBackfillBatch\(env, job\.id\)/);
+  assert.doesNotMatch(source, /30 4 \* \* \*/);
 });

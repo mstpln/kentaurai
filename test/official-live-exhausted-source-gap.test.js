@@ -59,14 +59,12 @@ async function normalizeToCompletion(env) {
   return result;
 }
 
-test('an exhausted pre-fix missing-horse source is recoverable and normalizes to completion', async () => {
+test('an exhausted pre-fix missing-horse source is not rescanned automatically', async () => {
   const { env, db, objects } = createTestEnv();
   const sourceId = seedSource(db, objects);
   for (let index = 0; index < 3; index += 1) seedFailedAutoRun(db, index, sourceId, 'races[0].starts[1].horse.id is required');
-  assert.equal((await selectPendingOfficialGameSource(env)).id, sourceId);
-  assert.equal((await normalizeToCompletion(env)).status, 'completed_source');
-  assert.equal(db.prepare('SELECT quality_status FROM source_records WHERE id = ?').get(sourceId).quality_status, 'normalized_verified_subset');
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM race_entries WHERE horse_id IS NULL').get().n, 1);
+  assert.equal(await selectPendingOfficialGameSource(env), null);
+  assert.equal(db.prepare('SELECT quality_status FROM source_records WHERE id = ?').get(sourceId).quality_status, 'captured_unmapped');
 });
 
 test('an existing captured missing-horse source gap is selected directly for recovery', async () => {

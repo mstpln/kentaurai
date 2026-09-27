@@ -34,7 +34,6 @@ test('a deferred daily X-Labs job does not starve a ready historical job', async
   assert.equal(second.done, true);
 });
 
-
 test('exact-date X-Labs recovery reopens a completed daily job when a newly settled saved round adds eligible races', async () => {
   const { env, db } = createTestEnv();
   const date='2099-01-05';
