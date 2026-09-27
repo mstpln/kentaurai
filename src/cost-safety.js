@@ -92,11 +92,21 @@ export async function observeD1Operation(env, operation, action, thresholds = DE
 }
 
 export function createRunSafetyState(thresholds = DEFAULT_COST_SAFETY_THRESHOLDS) {
-  return { stopped: false, reason: null, thresholds };
+  return {
+    stopped: false,
+    reason: null,
+    thresholds,
+    metrics: { rowsRead: 0, rowsWritten: 0, durationMs: 0 }
+  };
 }
 
 export function applyRunSafetyResult(state, operation, observed) {
-  if (!state.stopped && observed?.safetyStop) {
+  const metrics = observed?.cost || observed?.metrics || {};
+  state.metrics.rowsRead += finite(metrics.rowsRead);
+  state.metrics.rowsWritten += finite(metrics.rowsWritten);
+  state.metrics.durationMs += finite(metrics.durationMs);
+  const cumulativeStop = exceedsCostSafety(state.metrics, state.thresholds);
+  if (!state.stopped && (observed?.safetyStop || cumulativeStop)) {
     state.stopped = true;
     state.reason = `abnormal_cost:${operation}`;
   }
