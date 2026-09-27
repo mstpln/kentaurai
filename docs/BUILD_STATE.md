@@ -4,7 +4,7 @@
 - Deep release review showed that Cloudflare Workers Builds was still connected to GitHub and produced a build on pushes to `main`. KentaurAI's contract is stricter: explicit merge/deploy approval should flow through exactly one production promotion path.
 - The release workflow now enforces the Cloudflare production Git trigger to `npx wrangler versions upload` before any production migration. Git-triggered builds may still create inactive Worker versions/check status, but they may not promote the live Worker.
 - `scripts/cloudflare-builds-policy.mjs` discovers the exact `kentaurai-api` Worker tag and the exact GitHub/`kentaurai` production trigger, fails closed on ambiguity, updates only the deploy command, then re-reads the trigger to verify the policy.
-- The Builds API token is never logged. The release uses an optional dedicated `CLOUDFLARE_BUILDS_API_TOKEN` when configured and otherwise attempts the existing `CLOUDFLARE_API_TOKEN`; missing permission fails the release before D1 migration or Worker deployment.
+- The Builds API token is never logged. Cloudflare Builds requires a user-scoped token with `Workers CI Write`; the release uses an optional dedicated `CLOUDFLARE_BUILDS_API_TOKEN` for trigger operations while the existing `CLOUDFLARE_API_TOKEN` performs Worker discovery/deployment. If the dedicated token is absent the existing token is tried for Builds too; missing permission fails the release before D1 migration or Worker deployment.
 - No Worker runtime code, D1 schema, R2 data, racing facts, analysis semantics or scheduled acquisition behavior changes in this hardening build.
 
 ## Broad cost/storage QA follow-up
