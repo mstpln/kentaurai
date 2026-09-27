@@ -39,6 +39,12 @@ import { appAuthConfigured, appPasswordMatches, createAppSessionCookie, hasValid
 import { htmlResponse, redirectResponse, renderAppPage, renderLoginPage } from './app-page-history.js';
 import { renderReferenceImportPage } from './app-reference-import.js';
 import { applyRunSafetyResult, createRunSafetyState, observeD1Operation } from './cost-safety.js';
+import {
+  executeRawCleanupBatch,
+  executeSnapshotCleanupBatch,
+  planRawCleanupBatch,
+  planSnapshotCleanupBatch
+} from './storage-cleanup-executor.js';
 
 const LIVE_MORNING_CRON = '15 5 * * *';
 const DAILY_LIVE_NORMALIZE_RUNS = 16;
@@ -344,6 +350,26 @@ async function handleFetch(request, env) {
   }
   if (request.method === 'GET' && path === '/v1/statistics/backfill/status') {
     return json(await getStatisticsDataBackfillStatus(env));
+  }
+  if (request.method === 'POST' && path === '/v1/storage-cleanup/snapshots/plan') {
+    const body = await readJson(request);
+    const observed = await observeD1Operation(env, 'storage_cleanup_snapshot_plan', (observedEnv) => planSnapshotCleanupBatch(observedEnv, body));
+    return json({ ...observed.value, cost: observed.metrics, safetyStop: observed.safetyStop });
+  }
+  if (request.method === 'POST' && path === '/v1/storage-cleanup/snapshots/execute') {
+    const body = await readJson(request);
+    const observed = await observeD1Operation(env, 'storage_cleanup_snapshot_execute', (observedEnv) => executeSnapshotCleanupBatch(observedEnv, body));
+    return json({ ...observed.value, cost: observed.metrics, safetyStop: observed.safetyStop });
+  }
+  if (request.method === 'POST' && path === '/v1/storage-cleanup/raw/plan') {
+    const body = await readJson(request);
+    const observed = await observeD1Operation(env, 'storage_cleanup_raw_plan', (observedEnv) => planRawCleanupBatch(observedEnv, body));
+    return json({ ...observed.value, cost: observed.metrics, safetyStop: observed.safetyStop });
+  }
+  if (request.method === 'POST' && path === '/v1/storage-cleanup/raw/execute') {
+    const body = await readJson(request);
+    const observed = await observeD1Operation(env, 'storage_cleanup_raw_execute', (observedEnv) => executeRawCleanupBatch(observedEnv, body));
+    return json({ ...observed.value, cost: observed.metrics, safetyStop: observed.safetyStop });
   }
   if (request.method === 'POST' && path === '/v1/learning/hypotheses') return json(await createHypothesis(env, await readJson(request)), 201);
   return json({ error: 'not_found' }, 404);

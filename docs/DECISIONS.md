@@ -343,3 +343,12 @@ A single race must not directly change model weights. Candidate learnings are re
 9. Normal app reads and analysis exports must reuse stored data/derived state wherever possible; user navigation must not trigger provider acquisition or hidden historical backfill.
 10. Cost safety takes precedence over background freshness: if bounded daily work cannot finish safely, remaining work waits for the next bounded run or explicit manual action rather than hot-looping.
 11. Settings treats retained multi-day historical jobs as intentionally paused while automatic history is disabled; a paused job must not create a stale/error badge merely because it is not being scheduled. Explicit failed jobs still require attention.
+
+
+## Destructive storage cleanup is explicit, bounded and plan-bound
+1. Storage cleanup has no scheduled entry point. Every batch requires ADMIN_TOKEN, an exact confirmation phrase and the token from the immediately matching bounded dry run.
+2. Snapshot cleanup removes only sequentially equal facts within the same logical partition. A later return to an older factual state remains a new change-point; null/value transitions remain changes.
+3. Snapshot observation rows are repointed to the retained predecessor in the same D1 transaction. A database constraint forces rollback unless the number of deleted snapshot rows equals the dry-run plan.
+4. Cleanup cursors are keyset-based, bounded and HMAC-signed. They preserve cross-page change-point state without repeatedly rescanning earlier rows and cannot be edited into a destructive plan.
+5. Raw-object cleanup derives candidates from indexed `source_records` metadata. It never deletes an object until the canonical object is verified, the bounded D1 rewrites succeed and a fresh indexed count confirms zero remaining references.
+6. Hash, extension, metadata, object-presence or reference conflicts stop the batch. The executor does not run VACUUM, backfills, repair jobs or unrelated collection.
