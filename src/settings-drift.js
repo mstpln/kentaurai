@@ -161,6 +161,12 @@ async function d1Usage(env, fetchImpl, cycle, now) {
   if (Array.isArray(data.errors) && data.errors.length) throw new Error(data.errors[0]?.message || 'Cloudflare analytics query failed');
   const account = data?.data?.viewer?.accounts?.[0];
   if (!account) throw new Error('Cloudflare analytics account is unavailable');
+  if (!Array.isArray(account.d1AnalyticsAdaptiveGroups) || !Array.isArray(account.d1StorageAdaptiveGroups)) {
+    throw new Error('Cloudflare D1 analytics datasets are unavailable');
+  }
+  if (!account.d1StorageAdaptiveGroups.length) {
+    throw new Error('Cloudflare D1 storage metric is unavailable');
+  }
   return {
     rowsRead: sumMetric(account.d1AnalyticsAdaptiveGroups, 'rowsRead'),
     rowsWritten: sumMetric(account.d1AnalyticsAdaptiveGroups, 'rowsWritten'),
