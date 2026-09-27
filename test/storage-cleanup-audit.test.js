@@ -44,7 +44,13 @@ test('cleanup integrity audit accepts direct and observation-backed source repre
   assert.equal(audit.ok, true);
   assert.equal(audit.families.length, 4);
   assert.ok(audit.families.every((family) => family.ok));
-  assert.deepEqual(audit.operations, { batchStatuses: {}, sessionStatuses: {} });
+  assert.deepEqual(audit.operations, {
+    batchStatuses: {},
+    sessionStatuses: {},
+    startedBatches: 0,
+    strandedRawBatches: 0,
+    ok: true
+  });
 });
 
 test('cleanup integrity audit detects missing, dangling and identity-mismatched provenance without exposing ids', async () => {
@@ -212,4 +218,22 @@ test('cleanup integrity audit detects source timestamp mismatches', async () => 
   assert.equal(audit.ok, false);
   assert.equal(profile.timestampMismatchRepresentations, 1);
   assert.equal(profile.ok, false);
+});
+
+
+test('cleanup integrity audit fails closed on stranded raw mutation state', async () => {
+  const { db, env } = createTestEnv();
+  db.prepare(`
+    INSERT INTO storage_cleanup_batches
+      (id,cleanup_kind,target,plan_token,expected_changes,actual_changes,status,legacy_key,canonical_key,object_verified)
+    VALUES ('stranded-batch','raw_object','synthetic_provider',?,1,1,'references_rewritten',
+            'raw/synthetic_provider/day/legacy.json','raw/synthetic_provider/canonical.json',1)
+  `).run('a'.repeat(64));
+
+  const audit = await auditStorageCleanupIntegrity(env);
+  assert.equal(audit.ok, false);
+  assert.equal(audit.operations.strandedRawBatches, 1);
+  assert.equal(audit.operations.ok, false);
+  assert.equal(JSON.stringify(audit).includes('legacy.json'), false);
+  assert.equal(JSON.stringify(audit).includes('canonical.json'), false);
 });
