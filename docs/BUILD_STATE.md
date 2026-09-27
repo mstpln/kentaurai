@@ -256,7 +256,7 @@ The external-analysis production release was accepted after:
 - Saved unresolved V85/V86 rounds now get durable post-race settlement jobs after the last known race start plus a 45-minute safety delay; older unresolved saved rounds are recovered immediately.
 - Settlement targets the exact eight already-linked race ids and therefore does not depend on the Swedish-only historical race-discovery path. This allows saved non-Swedish rounds to settle when the official ordinary-race endpoint supports those race ids.
 - Each checkpoint captures a fresh official race snapshot to private R2 and normalizes it through the existing verified ordinary-race result mapper. Missing/not-final results stay unknown and retry later; ambiguous/dead-heat winner state fails closed to manual review.
-- The minute scheduler processes at most three settlement checkpoints sequentially, then runs the existing deterministic post-race review. No model changes are made automatically.
+- The single morning orchestrator runs a bounded settlement batch; each settlement batch processes at most three checkpoints sequentially, then runs the existing deterministic post-race review. No model changes are made automatically.
 - Once all eight legs have exactly one factual winner, the round becomes naturally rightable in Spel and an exact-date `daily_v85_v86` X-Labs job is created/reopened for post-race enrichment. Settled saved rounds can provide that X-Labs prerequisite even when a calendar snapshot is unavailable.
 - Migration `0031_post_race_settlement.sql` adds only durable settlement orchestration state; factual results remain in the existing source-backed race tables.
 
@@ -309,7 +309,7 @@ The external-analysis production release was accepted after:
 ## Historical extension 2020-2023 candidate
 - Adds an explicitly authorized production history block for 2020-09-08 through 2023-09-07, extending the current roughly three-year baseline to roughly six years without changing statistics or analysis semantics.
 - The new workflow creates/resumes the existing official historical job first. The matching X-Labs historical job is created only after the official block is complete, preserving the existing official-first prerequisite.
-- The production minute scheduler remains the worker that advances bounded checkpoints; the GitHub workflow only authorizes/orchestrates the fixed block and checks capacity.
+- Long production-history extension is manual-only. The GitHub workflow authorizes/orchestrates the fixed block and checks capacity; the normal morning scheduler does not advance multi-day history jobs.
 - D1 capacity is read from Cloudflare's database metadata. The workflow warns at 8.00 GiB and stops the extension at 8.50 GiB, leaving headroom below the 10 GB per-database paid-plan limit.
 - The workflow refuses overlapping multi-day official or historical-all X-Labs jobs and can safely resume a failed fixed job after explicit manual authorization.
 - Settings exposes recent multi-day historical periods separately for each source so the existing 2023-2026 block and the new 2020-2023 block do not collapse into one ambiguous progress row.
