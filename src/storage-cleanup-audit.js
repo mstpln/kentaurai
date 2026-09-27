@@ -65,25 +65,35 @@ async function auditFamily(env, family, definition) {
   const observation = await env.DB.prepare(`
     SELECT
       SUM(CASE WHEN s.id IS NULL THEN 1 ELSE 0 END) AS dangling_observations,
-      SUM(CASE WHEN s.id IS NOT NULL AND NOT (${definition.identityPredicate}) THEN 1 ELSE 0 END) AS identity_mismatch_observations
+      SUM(CASE WHEN s.id IS NOT NULL AND NOT (${definition.identityPredicate}) THEN 1 ELSE 0 END) AS identity_mismatch_observations,
+      SUM(CASE WHEN sr.id IS NULL OR julianday(o.observed_at) IS NOT julianday(sr.fetched_at) THEN 1 ELSE 0 END) AS observation_time_mismatches
     FROM official_snapshot_observations o
     LEFT JOIN ${definition.table} s ON s.id=o.snapshot_id
+    LEFT JOIN source_records sr ON sr.id=o.source_record_id
     WHERE o.snapshot_family=?
   `).bind(family).first();
 
+  const directTimeline = await env.DB.prepare(`
+    SELECT COUNT(*) AS n
+    FROM ${definition.table} s
+    LEFT JOIN source_records sr ON sr.id=s.source_record_id
+    WHERE sr.id IS NULL OR julianday(s.observed_at) IS NOT julianday(sr.fetched_at)
+  `).first();
   const result = {
     family,
     mismatchedSources: number(representation?.mismatched_sources),
     missingRepresentations: number(representation?.missing_representations),
     excessRepresentations: number(representation?.excess_representations),
     danglingObservations: number(observation?.dangling_observations),
-    identityMismatchObservations: number(observation?.identity_mismatch_observations)
+    identityMismatchObservations: number(observation?.identity_mismatch_observations),
+    timestampMismatchRepresentations: number(observation?.observation_time_mismatches) + number(directTimeline?.n)
   };
   result.ok = result.mismatchedSources === 0
     && result.missingRepresentations === 0
     && result.excessRepresentations === 0
     && result.danglingObservations === 0
-    && result.identityMismatchObservations === 0;
+    && result.identityMismatchObservations === 0
+    && result.timestampMismatchRepresentations === 0;
   return result;
 }
 
