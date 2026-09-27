@@ -16,8 +16,16 @@ on:
         description: For execute, type exactly EXECUTE REVIEWED STORAGE CLEANUP
         required: false
         type: string
+      execution_scope:
+        description: Continue automatically until complete, or run one bounded pass
+        required: true
+        type: choice
+        options:
+          - until-complete
+          - bounded
+        default: until-complete
       max_batches:
-        description: Maximum bounded batches per cleanup family in this run
+        description: Bounded mode only - maximum batches per cleanup family
         required: true
         type: choice
         options:
@@ -25,10 +33,15 @@ on:
           - "50"
           - "100"
           - "250"
-        default: "50"
+        default: "250"
+      continuation_session:
+        description: Internal continuation session id - leave blank for a new manual run
+        required: false
+        type: string
 
 permissions:
   contents: read
+  actions: write
 
 concurrency:
   group: kentaurai-production-storage-cleanup
@@ -44,6 +57,8 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
       MODE: ${{ inputs.mode }}
       MAX_BATCHES: ${{ inputs.max_batches }}
+      RUN_UNTIL_COMPLETE: ${{ inputs.mode == 'execute' && inputs.execution_scope == 'until-complete' }}
+      CLEANUP_SESSION_ID: ${{ inputs.continuation_session }}
       D1_DATABASE_ID: d8189e0e-6127-4ef2-88cc-534cb2217340
       WORKER_NAME: kentaurai-api
 
@@ -133,11 +148,24 @@ jobs:
           echo "restore_timestamp=$restore_timestamp" >> "$GITHUB_OUTPUT"
           echo "Verified D1 Time Travel restore point at $restore_timestamp."
 
-      - name: Run bounded cleanup
+      - name: Run cleanup
         env:
           WORKER_URL: ${{ steps.worker.outputs.worker_url }}
           ADMIN_TOKEN: ${{ steps.cleanup_token.outputs.token }}
         run: node scripts/run-production-storage-cleanup.mjs
+
+      - name: Read continuation state
+        id: continuation
+        if: ${{ inputs.mode == 'execute' && inputs.execution_scope == 'until-complete' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s /tmp/storage-cleanup-result.json || { echo "::error::Cleanup continuation state is missing"; exit 1; }
+          jq -e '.sessionId and (.complete | type == "boolean") and (.continuationRequired | type == "boolean")' /tmp/storage-cleanup-result.json >/dev/null
+          echo "session_id=$(jq -r '.sessionId' /tmp/storage-cleanup-result.json)" >> "$GITHUB_OUTPUT"
+          echo "complete=$(jq -r '.complete' /tmp/storage-cleanup-result.json)" >> "$GITHUB_OUTPUT"
+          echo "continuation_required=$(jq -r '.continuationRequired' /tmp/storage-cleanup-result.json)" >> "$GITHUB_OUTPUT"
+          echo "continuation_count=$(jq -r '.continuationCount' /tmp/storage-cleanup-result.json)" >> "$GITHUB_OUTPUT"
 
       - name: Remove short-lived cleanup-only Worker token
         if: ${{ always() && steps.cleanup_token.outcome == 'success' }}
@@ -162,10 +190,35 @@ jobs:
         shell: bash
         run: |
           echo "Mode: $MODE"
-          echo "Maximum batches per family: $MAX_BATCHES"
+          echo "Execution scope: ${{ inputs.execution_scope }}"
           echo "D1 restore point: ${{ steps.restore.outputs.restore_timestamp }}"
           if [ "$MODE" = "dry-run" ]; then
             echo "No cleanup mutation was authorized."
+          elif [ "${{ inputs.execution_scope }}" = "until-complete" ]; then
+            echo "Cleanup session complete: ${{ steps.continuation.outputs.complete }}"
+            echo "Continuation number: ${{ steps.continuation.outputs.continuation_count }}"
           else
+            echo "Maximum batches per family: $MAX_BATCHES"
             echo "Execution used only reviewed, plan-bound, bounded cleanup routes."
           fi
+
+      - name: Queue automatic continuation
+        if: ${{ inputs.mode == 'execute' && inputs.execution_scope == 'until-complete' && steps.continuation.outputs.continuation_required == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SESSION_ID: ${{ steps.continuation.outputs.session_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload="$(jq -n --arg session "$SESSION_ID" '{
+            ref:"main",
+            inputs:{
+              mode:"execute",
+              confirmation:"EXECUTE REVIEWED STORAGE CLEANUP",
+              execution_scope:"until-complete",
+              max_batches:"250",
+              continuation_session:$session
+            }
+          }')"
+          curl --fail --silent --show-error             --request POST             --header "Authorization: Bearer $GH_TOKEN"             --header "Accept: application/vnd.github+json"             --header "X-GitHub-Api-Version: 2022-11-28"             "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/production-storage-cleanup.yml/dispatches"             --data "$payload"
+          echo "Queued the next bounded continuation automatically."
