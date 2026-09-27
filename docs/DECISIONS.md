@@ -329,3 +329,16 @@ A single race must not directly change model weights. Candidate learnings are re
 6. Scheduled live normalization must not claim a source owned by post-race settlement, and settlement-owned sources must not suppress unrelated regular live snapshots when choosing the latest normalizable source.
 7. Once all eight factual winners are stored, settlement reads the final game source only for closing market plus final payout/result facts; it does not rewrite participant identity through a second full-game normalization pass.
 8. Whole-game and chunked official normalization use the same identity precedence: canonical race + horse first, source start id as fallback, and known stored identity is never overwritten by a later remap.
+
+
+## Automatic maintenance cost-safety
+1. KentaurAI automatic maintenance runs once each morning, not every minute. The normal schedule is `05:15 UTC`.
+2. Upcoming official capture keeps a seven-day V85/V86 horizon so lower frequency does not reduce the normal upcoming-round workspace.
+3. Automatic live normalization may process only bounded pending current captures. Exhausted failed-import history is never rescanned as a fallback for idle current work.
+4. Automatic official result ingestion operates only on the rolling one-day daily jobs created for recent settled dates. Long multi-day historical jobs are never selected implicitly by cron.
+5. Automatic X-Labs ingestion operates only on the explicit `daily_v85_v86` job created for current incremental work. Historical-all X-Labs jobs remain explicit/manual operations.
+6. Multi-year history expansion has no recurring GitHub schedule. Starting or resuming such work requires explicit manual authorization.
+7. Statistics-history repair, X-Labs interval repair and X-Labs position reconstruction do not run as general recurring cron repair loops. They remain explicit/admin operations until a separately reviewed low-cost queue model exists.
+8. Existing stored history is preserved. Cost control must not delete verified racing facts or private raw provenance as a side effect.
+9. Normal app reads and analysis exports must reuse stored data/derived state wherever possible; user navigation must not trigger provider acquisition or hidden historical backfill.
+10. Cost safety takes precedence over background freshness: if bounded daily work cannot finish safely, remaining work waits for the next bounded run or explicit manual action rather than hot-looping.
