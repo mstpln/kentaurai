@@ -176,15 +176,24 @@ function classifyBillingRecord(record) {
   const description = String(record?.ChargeDescription || '').toLowerCase();
   const metricId = String(record?.x_BillableMetricId || '').toLowerCase();
   const combined = [family, service, description, metricId].filter(Boolean).join(' ');
-  if (combined.includes('d1')) {
-    if (/rows?\s*(read|reads)|read\s*rows?/.test(combined)) return 'd1_rows_read';
-    if (/rows?\s*(written|write|writes)|written\s*rows?|write\s*rows?/.test(combined)) return 'd1_rows_written';
-    if (/storage|gb[- ]?months?|database\s*storage/.test(combined)) return 'd1_storage';
+  const normalized = combined.replace(/[^a-z0-9]+/g, ' ').trim();
+  if (/\bd1\b/.test(normalized)) {
+    if (/\brows?\s+(read|reads)\b|\bread\s+rows?\b/.test(normalized)) return 'd1_rows_read';
+    if (/\brows?\s+(written|write|writes)\b|\bwritten\s+rows?\b|\bwrite\s+rows?\b/.test(normalized)) return 'd1_rows_written';
+    if (/\bstorage\b|\bgb\s+months?\b|\bdatabase\s+storage\b/.test(normalized)) return 'd1_storage';
   }
-  if (combined.includes('r2')) {
-    if (/class\s*a|class[_ -]?a/.test(combined)) return 'r2_class_a';
-    if (/class\s*b|class[_ -]?b/.test(combined)) return 'r2_class_b';
-    if (/storage/.test(combined) && !/infrequent|retrieval|catalog|sql/.test(combined)) return 'r2_storage';
+  if (/\br2\b/.test(normalized)) {
+    if (/\bclass\s+a\b/.test(normalized)) return 'r2_class_a';
+    if (/\bclass\s+b\b/.test(normalized)) return 'r2_class_b';
+    if (/\bstorage\b/.test(normalized) && !/\binfrequent\b|\bretrieval\b|\bcatalog\b|\bsql\b/.test(normalized)) return 'r2_storage';
+  }
+  return null;
+}
+
+function recordCost(record) {
+  for (const key of ['BilledCost', 'EffectiveCost', 'ContractedCost']) {
+    const value = record?.[key];
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value;
   }
   return null;
 }
@@ -194,24 +203,45 @@ function aggregateBillingMetrics(records) {
   for (const record of records || []) {
     const id = classifyBillingRecord(record);
     if (!id) continue;
-    const cost = record?.BilledCost;
+    const cost = recordCost(record);
     const currency = String(record?.BillingCurrency || '').trim().toUpperCase();
+    if (cost == null || !currency) continue;
+
     const quantity = record?.ConsumedQuantity;
     const unit = String(record?.ConsumedUnit || '').trim();
-    if (typeof cost !== 'number' || !Number.isFinite(cost) || cost < 0 || !currency) continue;
-    if (typeof quantity !== 'number' || !Number.isFinite(quantity) || quantity < 0 || !unit) continue;
+    const quantityValid = typeof quantity === 'number' && Number.isFinite(quantity) && quantity >= 0 && unit;
     const existing = totals.get(id);
-    if (existing && (existing.currency !== currency || existing.unit !== unit)) {
-      totals.set(id, { available:false, amount:null, currency:null, quantity:null, unit:null });
+
+    if (existing && existing.currency !== currency) {
+      totals.set(id, { available:false, amount:null, currency:null, quantity:null, unit:null, quantityAvailable:false });
       continue;
     }
     if (existing?.available === false) continue;
+
+    let quantityAvailable = Boolean(existing?.quantityAvailable);
+    let aggregatedQuantity = existing?.quantity ?? null;
+    let aggregatedUnit = existing?.unit ?? null;
+    if (quantityValid) {
+      if (quantityAvailable && aggregatedUnit !== unit) {
+        quantityAvailable = false;
+        aggregatedQuantity = null;
+        aggregatedUnit = null;
+      } else if (!quantityAvailable && aggregatedQuantity == null && aggregatedUnit == null) {
+        quantityAvailable = true;
+        aggregatedQuantity = quantity;
+        aggregatedUnit = unit;
+      } else if (quantityAvailable) {
+        aggregatedQuantity += quantity;
+      }
+    }
+
     totals.set(id, {
       available:true,
       amount:(existing?.amount || 0) + cost,
       currency,
-      quantity:(existing?.quantity || 0) + quantity,
-      unit
+      quantity:aggregatedQuantity,
+      unit:aggregatedUnit,
+      quantityAvailable
     });
   }
   return totals;
@@ -258,6 +288,22 @@ async function d1Usage(env, fetchImpl, cycle, now) {
   };
 }
 
+function d1FallbackCost(metricId, used) {
+  const numeric = verifiedNonNegativeNumber(used, metricId);
+  if (metricId === 'd1_rows_read') {
+    return { available:true, amount:(Math.max(0, numeric - CLOUDFLARE_USAGE_LIMITS.d1RowsRead) / 1_000_000) * 0.001, currency:'USD', source:'published_pricing' };
+  }
+  if (metricId === 'd1_rows_written') {
+    return { available:true, amount:(Math.max(0, numeric - CLOUDFLARE_USAGE_LIMITS.d1RowsWritten) / 1_000_000) * 1, currency:'USD', source:'published_pricing' };
+  }
+  return null;
+}
+
+function billingCostOrFallback(metricId, used, billingMetric) {
+  if (billingMetric?.available === true) return { ...billingMetric, source:'cloudflare_billing' };
+  return d1FallbackCost(metricId, used);
+}
+
 function usageMetric(id, label, used, limit, unit, rule, billingCost = null) {
   const numeric = verifiedNonNegativeNumber(used, id);
   return {
@@ -270,7 +316,8 @@ function usageMetric(id, label, used, limit, unit, rule, billingCost = null) {
     overLimit: limit > 0 ? numeric > limit : false,
     rule,
     billingCost: billingCost?.available === true ? billingCost.amount : null,
-    billingCurrency: billingCost?.available === true ? billingCost.currency : null
+    billingCurrency: billingCost?.available === true ? billingCost.currency : null,
+    billingCostSource: billingCost?.available === true ? (billingCost.source || 'cloudflare_billing') : null
   };
 }
 
@@ -299,24 +346,24 @@ export async function getCloudflareUsage(env, options = {}) {
     }
     const metrics = [
       usageMetric('d1_rows_read', 'D1 · Rows read', d1.rowsRead, CLOUDFLARE_USAGE_LIMITS.d1RowsRead, 'rows',
-        '25 miljarder ingår per billingperiod. Därefter debiteras överförbrukning.', billingByMetric.get('d1_rows_read')),
+        '25 miljarder ingår per billingperiod. Därefter debiteras överförbrukning.', billingCostOrFallback('d1_rows_read', d1.rowsRead, billingByMetric.get('d1_rows_read'))),
       usageMetric('d1_rows_written', 'D1 · Rows written', d1.rowsWritten, CLOUDFLARE_USAGE_LIMITS.d1RowsWritten, 'rows',
-        '50 miljoner ingår per billingperiod.', billingByMetric.get('d1_rows_written')),
+        '50 miljoner ingår per billingperiod.', billingCostOrFallback('d1_rows_written', d1.rowsWritten, billingByMetric.get('d1_rows_written'))),
       usageMetric('d1_storage', 'D1 · Lagring', d1.storageBytes, CLOUDFLARE_USAGE_LIMITS.d1StorageBytes, 'bytes',
         '5 GB ingår. Lagring över den inkluderade nivån debiteras.', billingByMetric.get('d1_storage'))
     ];
     const r2Storage = billingByMetric.get('r2_storage');
     const r2ClassA = billingByMetric.get('r2_class_a');
     const r2ClassB = billingByMetric.get('r2_class_b');
-    if (r2Storage?.available === true && /gb[- ]?months?/i.test(r2Storage.unit)) {
+    if (r2Storage?.available === true && r2Storage.quantityAvailable === true && /gb[- ]?months?/i.test(r2Storage.unit)) {
       metrics.push(usageMetric('r2_storage', 'R2 · Lagring', r2Storage.quantity, CLOUDFLARE_USAGE_LIMITS.r2StorageGbMonths, 'gb_months',
         '10 GB-månad ingår för Standard storage.', r2Storage));
     }
-    if (r2ClassA?.available === true) {
+    if (r2ClassA?.available === true && r2ClassA.quantityAvailable === true) {
       metrics.push(usageMetric('r2_class_a', 'R2 · Class A', r2ClassA.quantity, CLOUDFLARE_USAGE_LIMITS.r2ClassAOperations, 'requests',
         '1 miljon Class A-operationer ingår per månad.', r2ClassA));
     }
-    if (r2ClassB?.available === true) {
+    if (r2ClassB?.available === true && r2ClassB.quantityAvailable === true) {
       metrics.push(usageMetric('r2_class_b', 'R2 · Class B', r2ClassB.quantity, CLOUDFLARE_USAGE_LIMITS.r2ClassBOperations, 'requests',
         '10 miljoner Class B-operationer ingår per månad.', r2ClassB));
     }
