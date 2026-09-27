@@ -3,7 +3,7 @@
 - Settings is reorganized into **Drift / Data**. Drift contains the automatic-workflow master switch, Cloudflare account usage against included limits, current source/job health and recent activity. Data keeps database counts and the existing sanitized coverage report.
 - Migration `0049_automation_controls.sql` stores one durable `automatic_workflows` state. The active `worker-v078` scheduled entrypoint checks it before delegating any scheduled work; paused state exits immediately and a control-read failure fails closed. Manual app/admin actions remain available.
 - Cloudflare usage is read-only and account-wide so numerator and included-account limits refer to the same scope. D1 rows read/written use Cloudflare Analytics, D1 current storage sums account databases, R2 operations and Workers requests use account analytics, and billing metadata supplies the billing-cycle anchor plus exact billable metrics where available. Missing/ambiguous metrics are shown as unavailable rather than zero.
-- The runtime integration requires a least-privilege `CLOUDFLARE_USAGE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`; neither is committed or exposed to the browser. Until configured, Drift explicitly reports that Cloudflare usage is not connected.
+- The runtime integration requires a least-privilege `CLOUDFLARE_USAGE_API_TOKEN` and runtime `KENTAURAI_CLOUDFLARE_ACCOUNT_ID`; neither is committed or exposed to the browser. Until configured, Drift explicitly reports that Cloudflare usage is not connected.
 - This candidate does not alter racing facts, analysis/model semantics, historical cursors or private source payloads. It is not production-live until reviewed, merged and released with explicit authorization.
 
 ## Cloudflare single-promotion-path hardening candidate
