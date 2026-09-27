@@ -149,7 +149,16 @@ function aggregateR2Operations(rows) {
 }
 
 function metricRecordId(row) {
-  return String(row?.x_BillableMetricId || row?.x_BillableMetricName || row?.ChargeDescription || '').toLowerCase();
+  return [
+    row?.x_BillableMetricId,
+    row?.x_BillableMetricName,
+    row?.ChargeDescription,
+    row?.ServiceName
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function productFamilyName(row) {
+  return String(row?.x_ProductFamilyName || row?.ServiceFamilyName || '').toLowerCase();
 }
 
 function sumBillingMetric(rows, matcher) {
@@ -160,7 +169,7 @@ function sumBillingMetric(rows, matcher) {
 
 function findWorkersCpuMs(rows) {
   const candidates = (rows || []).filter((row) =>
-    String(row?.x_ProductFamilyName || '').toLowerCase() === 'workers'
+    productFamilyName(row) === 'workers'
     && /cpu/.test(metricRecordId(row))
   );
   if (!candidates.length) return null;
@@ -177,7 +186,7 @@ function findWorkersCpuMs(rows) {
 
 function findR2StorageGbMonth(rows) {
   const candidates = (rows || []).filter((row) =>
-    String(row?.x_ProductFamilyName || '').toLowerCase() === 'r2'
+    productFamilyName(row) === 'r2'
     && /storage/.test(metricRecordId(row))
   );
   if (!candidates.length) return null;
