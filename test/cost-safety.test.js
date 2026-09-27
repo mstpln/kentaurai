@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { applyRunSafetyResult, createRunSafetyState, observeD1Operation } from '../src/cost-safety.js';
 import { createTestEnv } from './helpers/d1.js';
 
@@ -73,4 +73,14 @@ test('cumulative morning cost safety stops after individually safe operations', 
   assert.equal(state.stopped, true);
   assert.equal(state.reason, 'abnormal_cost:second_part');
   assert.deepEqual(state.metrics, { rowsRead: 110, rowsWritten: 15, durationMs: 200 });
+});
+
+
+test('GitHub operational workflows contain no recurring schedule', () => {
+  const directory = new URL('../.github/workflows/', import.meta.url);
+  for (const name of readdirSync(directory).filter((value) => value.endsWith('.yml') || value.endsWith('.yaml'))) {
+    const workflow = readFileSync(new URL(name, directory), 'utf8');
+    assert.doesNotMatch(workflow, /^\s*schedule:\s*$/m, `${name} must remain non-scheduled`);
+    assert.doesNotMatch(workflow, /^\s*-\s*cron:\s*/m, `${name} must not add a GitHub cron`);
+  }
 });
