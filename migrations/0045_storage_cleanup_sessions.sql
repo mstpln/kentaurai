@@ -1,7 +1,7 @@
 CREATE TABLE storage_cleanup_sessions (
   id TEXT PRIMARY KEY,
   source_sha TEXT NOT NULL CHECK (length(source_sha) = 40),
-  status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','complete','expired')),
+  status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','complete','expired','exhausted')),
   continuation_count INTEGER NOT NULL DEFAULT 1 CHECK (continuation_count >= 1),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
