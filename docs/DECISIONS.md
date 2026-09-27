@@ -334,7 +334,7 @@ A single race must not directly change model weights. Candidate learnings are re
 ## Automatic maintenance cost-safety
 1. KentaurAI automatic maintenance runs once each morning, not every minute. The normal schedule is `05:15 UTC`.
 2. Upcoming official capture keeps a seven-day V85/V86 horizon so lower frequency does not reduce the normal upcoming-round workspace.
-3. Automatic live normalization may process only bounded pending current captures. Exhausted failed-import history is never rescanned as a fallback for idle current work.
+3. Automatic live normalization may process only bounded recent pending captures: today/upcoming plus at most the preceding three UTC dates needed for late catch-up. Older captured game history is outside automatic scope. The selection path must use dedicated pending-game and failed-normalization indexes rather than scanning accumulated source/import history.
 4. Automatic official result ingestion operates only on the rolling one-day daily jobs created for recent settled dates. Long multi-day historical jobs are never selected implicitly by cron.
 5. Automatic X-Labs ingestion operates only on explicit `daily_v85_v86` jobs for the previous three dates, newest first, within one fixed morning batch budget. This bounded catch-up window covers late-settled recent rounds without scanning history. Historical-all X-Labs jobs remain explicit/manual operations.
 6. Multi-year history expansion has no recurring GitHub schedule. Starting or resuming such work requires explicit manual authorization.
