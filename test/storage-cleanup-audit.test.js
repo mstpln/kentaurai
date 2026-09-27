@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/index.js';
 import { createTestEnv } from './helpers/d1.js';
-import { auditStorageCleanupIntegrity } from '../src/storage-cleanup-audit.js';
+import { auditStorageCleanupIntegrity, bindStorageCleanupIntegrityAudit } from '../src/storage-cleanup-audit.js';
 
 function addSource(db, id, fetchedAt) {
   db.prepare(`
@@ -97,4 +97,60 @@ test('cleanup integrity audit route is private and returns only sanitized aggreg
   assert.equal(body.ok, true);
   assert.equal(body.safetyStop, false);
   assert.ok(Array.isArray(body.families));
+});
+
+
+test('session-bound cleanup audit records only a verified matching running session', async () => {
+  const { db, env } = createTestEnv();
+  const sourceSha = 'a'.repeat(40);
+  const sessionId = '11111111-1111-4111-8111-111111111111';
+  db.prepare(`
+    INSERT INTO storage_cleanup_sessions
+      (id,source_sha,status,continuation_count,expires_at)
+    VALUES (?,?,'running',1,'2099-01-01T00:00:00.000Z')
+  `).run(sessionId, sourceSha);
+
+  const bound = await bindStorageCleanupIntegrityAudit(env, {
+    session_id: sessionId,
+    source_sha: sourceSha
+  });
+  assert.equal(bound.ok, true);
+  assert.equal(bound.auditVerified, true);
+  assert.equal(
+    db.prepare('SELECT source_sha FROM storage_cleanup_session_audits WHERE session_id=?').get(sessionId).source_sha,
+    sourceSha
+  );
+
+  await assert.rejects(
+    () => bindStorageCleanupIntegrityAudit(env, {
+      session_id: sessionId,
+      source_sha: 'b'.repeat(40)
+    }),
+    /source_sha changed/
+  );
+});
+
+test('session-bound cleanup audit does not mark a session when provenance integrity fails', async () => {
+  const { db, env } = createTestEnv();
+  const sourceSha = 'c'.repeat(40);
+  const sessionId = '22222222-2222-4222-8222-222222222222';
+  db.prepare(`
+    INSERT INTO storage_cleanup_sessions
+      (id,source_sha,status,continuation_count,expires_at)
+    VALUES (?,?,'running',1,'2099-01-01T00:00:00.000Z')
+  `).run(sessionId, sourceSha);
+
+  addSource(db, 'missing-audit-source', '2026-09-10T10:00:00Z');
+  addSync(db, 'missing-audit-source', 1);
+
+  const bound = await bindStorageCleanupIntegrityAudit(env, {
+    session_id: sessionId,
+    source_sha: sourceSha
+  });
+  assert.equal(bound.ok, false);
+  assert.equal(bound.auditVerified, false);
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS n FROM storage_cleanup_session_audits WHERE session_id=?').get(sessionId).n,
+    0
+  );
 });
