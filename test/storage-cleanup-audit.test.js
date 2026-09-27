@@ -194,3 +194,22 @@ test('session-bound cleanup audit route is private and persists verification', a
     1
   );
 });
+
+
+test('cleanup integrity audit detects source timestamp mismatches', async () => {
+  const { db, env } = createTestEnv();
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('time-horse','Time Horse')").run();
+  addSource(db, 'time-source', '2026-09-10T10:00:00Z');
+  addSync(db, 'time-source', 1);
+  db.prepare(`
+    INSERT INTO horse_profile_snapshots
+      (id,horse_id,observed_at,age_years,source_record_id)
+    VALUES ('time-snapshot','time-horse','2026-09-10T10:01:00Z',4,'time-source')
+  `).run();
+
+  const audit = await auditStorageCleanupIntegrity(env);
+  const profile = audit.families.find((family) => family.family === 'horse_profile');
+  assert.equal(audit.ok, false);
+  assert.equal(profile.timestampMismatchRepresentations, 1);
+  assert.equal(profile.ok, false);
+});
