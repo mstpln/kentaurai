@@ -3,9 +3,9 @@
 - The production cleanup execute run started during review was cancelled before completion; no automatic continuation was queued, the temporary cleanup credential was removed and the post-cancel Worker health check passed.
 - Deep review found that legacy duplicate snapshot rows created before `official_snapshot_observations` could lose source/as-of provenance when deleted. Cleanup now materializes the missing observation on the retained change-point before deletion and marks duplicate observations as `factual_changed=0`.
 - As-of readers now treat the original snapshot row as a base observation even after later identical source observations reuse it, so a later observation cannot erase the earlier historical state for an earlier cutoff.
-- Migration `0046_snapshot_observation_lookup_index.sql` adds the missing `(snapshot_family,snapshot_id,...)` access path used by snapshot reads and cleanup rewrites.
+- Migration `0046_snapshot_observation_lookup_index.sql` adds the missing `(snapshot_family,snapshot_id,...)` access path used by snapshot reads and cleanup rewrites. Migration `0047_storage_cleanup_session_audits.sql` binds a successful provenance audit to the exact cleanup session/source SHA so continuations cannot bypass a preflight they never passed.
 - D1 cost instrumentation now measures `.first()` reads through a metadata-returning equivalent instead of silently treating those reads as zero.
-- New cleanup runs perform a sanitized provenance-integrity audit before any new dry-run or execute session and fail closed on missing/dangling/mismatched snapshot representation.
+- New dry-runs perform a sanitized provenance-integrity audit before scanning. New execute sessions start first, then must persist a successful audit bound to that exact session/source SHA before any plan/execute request; verified continuations reuse only that persisted audit. Missing/dangling/mismatched representation fails closed.
 - Do not resume the cancelled production cleanup session. A later cleanup must start as a new manually authorized operation only after this follow-up is reviewed, merged, released and the integrity preflight passes.
 
 ## Scoped production cleanup session safety follow-up
@@ -113,7 +113,7 @@ Updated: 2026-09-27
 - Current deployed baseline before this QA follow-up is production release #149 on main head `2575bdf3cf8351ba9b25b270eca98a4e5f6704cd`.
 - Worker entrypoint is `src/worker-v078.js` with `ANALYSIS_WORKFLOW_MODE=v3`; the default mode serves the external-AI workflow while historical sealed-v3 artifacts remain read-compatible.
 - The latest production release completed successfully with full QA, Cloudflare validation, migration/schema/index verification, Worker deploy, `/health`, `/app/login` and private analysis/evidence route protection.
-- Production schema is current through migration `0045_storage_cleanup_sessions.sql`; migration `0046_snapshot_observation_lookup_index.sql` is part of the open QA follow-up.
+- Production schema is current through migration `0045_storage_cleanup_sessions.sql`; migrations `0046_snapshot_observation_lookup_index.sql` and `0047_storage_cleanup_session_audits.sql` are part of the open QA follow-up and are not production-active yet.
 - External Step 1/Step 2 analysis exchange, later system registration, audited external lineage, external-aware F1 replay/F2 post-race diagnostics and the private-app performance layer are production-live.
 - Historical official/X-Labs jobs keep their durable cursors. The external-analysis release did not reset, recreate or resume stopped historical work.
 
