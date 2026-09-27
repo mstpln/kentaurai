@@ -1,4 +1,5 @@
 ## Broad cost/storage QA follow-up
+- Automatic live normalization is restricted to the recent three-day recovery window and migration `0048_live_pending_cost_indexes.sql` adds narrow pending-game and failed-normalization indexes so old captured history is not scanned during the morning loop.
 - Cleanup workflow now refuses to run unless checked-out `main` exactly matches the latest successful production-release SHA, preventing a newer runner from controlling an older deployed Worker.
 - Integrity preflight also fails on unfinished `started` cleanup batches or raw rewrites that reached zero legacy D1 references without a verified legacy-object deletion, covering interruption/crash residue before another destructive session.
 - Cost observation of D1 `.first()` reads is bounded to one-row metadata-returning SQL instead of expanding point reads into full-result scans.
@@ -117,7 +118,7 @@ Updated: 2026-09-27
 - Current deployed baseline before this QA follow-up is production release #149 on main head `2575bdf3cf8351ba9b25b270eca98a4e5f6704cd`.
 - Worker entrypoint is `src/worker-v078.js` with `ANALYSIS_WORKFLOW_MODE=v3`; the default mode serves the external-AI workflow while historical sealed-v3 artifacts remain read-compatible.
 - The latest production release completed successfully with full QA, Cloudflare validation, migration/schema/index verification, Worker deploy, `/health`, `/app/login` and private analysis/evidence route protection.
-- Production schema is current through migration `0045_storage_cleanup_sessions.sql`; migrations `0046_snapshot_observation_lookup_index.sql` and `0047_storage_cleanup_session_audits.sql` are part of the open QA follow-up and are not production-active yet.
+- Production schema is current through migration `0045_storage_cleanup_sessions.sql`; migrations `0046_snapshot_observation_lookup_index.sql`, `0047_storage_cleanup_session_audits.sql` and `0048_live_pending_cost_indexes.sql` are part of the open QA follow-up and are not production-active yet.
 - External Step 1/Step 2 analysis exchange, later system registration, audited external lineage, external-aware F1 replay/F2 post-race diagnostics and the private-app performance layer are production-live.
 - Historical official/X-Labs jobs keep their durable cursors. The external-analysis release did not reset, recreate or resume stopped historical work.
 
