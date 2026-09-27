@@ -115,7 +115,8 @@ export function createTestEnv() {
     '../../migrations/0040_statistics_data_backfill_v1.sql',
     '../../migrations/0041_statistics_data_backfill_state_v2.sql',
     '../../migrations/0042_cost_storage_safety_v1.sql',
-    '../../migrations/0043_storage_cleanup_executor_v1.sql'
+    '../../migrations/0043_storage_cleanup_executor_v1.sql',
+    '../../migrations/0044_storage_cleanup_resume_state.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }
