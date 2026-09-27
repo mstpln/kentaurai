@@ -426,10 +426,10 @@ async function recordCompletedRace(env, job, leaseToken, reused) {
 async function selectAutomaticJob(env) {
   return env.DB.prepare(`
     SELECT * FROM xlabs_backfill_jobs
-    WHERE status = 'running'
-      AND scope = 'daily_v85_v86'
-      AND (retry_after IS NULL OR retry_after <= ?)
-    ORDER BY next_date DESC, created_at
+    WHERE status = 'running' AND (retry_after IS NULL OR retry_after <= ?)
+    ORDER BY CASE scope WHEN 'daily_v85_v86' THEN 0 ELSE 1 END,
+             CASE scope WHEN 'daily_v85_v86' THEN next_date ELSE NULL END DESC,
+             created_at
     LIMIT 1
   `).bind(new Date().toISOString()).first();
 }
