@@ -87,3 +87,15 @@ test('an exhausted unrelated validation failure remains suppressed', async () =>
   for (let index = 0; index < 3; index += 1) seedFailedAutoRun(db, index, sourceId, 'official game status is unsupported');
   assert.equal(await selectPendingOfficialGameSource(env), null);
 });
+
+
+test('an old pending game source is outside automatic normalization scope', async () => {
+  const { env, db } = createTestEnv();
+  db.prepare(`INSERT INTO source_records
+    (id, source_type, external_id, source_url, fetched_at, raw_object_key, content_hash, quality_status, metadata_json)
+    VALUES ('src_old_pending', 'official_provider', 'game:V85_2000-01-01_7_1', 'https://example.invalid',
+      '2000-01-01T05:15:00Z', 'raw/official_provider/old.json', 'old-hash', 'captured_unmapped', ?)`)
+    .run(JSON.stringify({ kind: 'game', identity: 'V85_2000-01-01_7_1' }));
+
+  assert.equal(await selectPendingOfficialGameSource(env), null);
+});
