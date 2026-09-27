@@ -130,6 +130,30 @@ test('Cloudflare usage uses verified API values and never starts from zero estim
   assert.equal(calls.length, 2);
 });
 
+
+test('Cloudflare usage refuses to guess when active subscription billing anchors disagree', async () => {
+  const { env } = createTestEnv();
+  env.CLOUDFLARE_ACCOUNT_ID = 'account-synthetic';
+  env.CLOUDFLARE_USAGE_API_TOKEN = 'usage-token-synthetic';
+  const fetchImpl = async (url) => {
+    if (String(url).endsWith('/billable-usage/info')) {
+      return new Response(JSON.stringify({
+        success:true,
+        result:{ subscriptions:[
+          { id:'a', billing_cycle_anchor_timestamp:'2026-09-12T00:00:00Z', start_timestamp:'2026-09-12T00:00:00Z' },
+          { id:'b', billing_cycle_anchor_timestamp:'2026-09-20T00:00:00Z', start_timestamp:'2026-09-20T00:00:00Z' }
+        ] }
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    throw new Error('GraphQL must not be called for ambiguous billing anchors');
+  };
+  const usage = await getCloudflareUsage(env, { fetchImpl, now:'2026-09-27T18:00:00Z' });
+  assert.equal(usage.configured, true);
+  assert.equal(usage.available, false);
+  assert.equal(usage.reason, 'cloudflare_usage_unavailable');
+  assert.deepEqual(usage.metrics, []);
+});
+
 test('Cloudflare usage fails visibly instead of fabricating values when read-only access is absent', async () => {
   const { env } = createTestEnv();
   const usage = await getCloudflareUsage(env);
