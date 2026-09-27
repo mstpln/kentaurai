@@ -119,9 +119,9 @@ test('Cloudflare usage uses verified API values and never starts from zero estim
       return new Response(JSON.stringify({
         success:true,
         result:[
-          { ServiceFamilyName:'D1', ServiceName:'D1 Rows Read', BilledCost:1.25, BillingCurrency:'USD', ConsumedQuantity:20_000_000_000, ConsumedUnit:'Count' },
-          { ServiceFamilyName:'D1', ServiceName:'D1 Rows Read', BilledCost:0.50, BillingCurrency:'USD', ConsumedQuantity:7_000_000_000, ConsumedUnit:'Count' },
-          { ServiceFamilyName:'D1', ServiceName:'D1 Rows Written', BilledCost:0, BillingCurrency:'USD', ConsumedQuantity:1_000_000, ConsumedUnit:'Count' },
+          { x_BillableMetricId:'d1_rows_read', BilledCost:1.25, BillingCurrency:'USD', ConsumedQuantity:20_000_000_000, ConsumedUnit:'Count' },
+          { x_BillableMetricId:'d1_rows_read', ContractedCost:0.50, BillingCurrency:'USD', ConsumedQuantity:7_000_000_000, ConsumedUnit:'Count' },
+          { x_BillableMetricId:'d1_rows_written', BilledCost:0, BillingCurrency:'USD', ConsumedQuantity:1_000_000, ConsumedUnit:'Count' },
           { ServiceFamilyName:'D1', ServiceName:'D1 Storage', BilledCost:0.75, BillingCurrency:'USD', ConsumedQuantity:4.7, ConsumedUnit:'GB-months' },
           { ServiceFamilyName:'Workers', ServiceName:'Workers Standard Requests', BilledCost:9.99, BillingCurrency:'USD' }
         ]
@@ -140,10 +140,12 @@ test('Cloudflare usage uses verified API values and never starts from zero estim
   assert.equal(reads.overLimit, true);
   assert.equal(reads.billingCost, 1.75);
   assert.equal(reads.billingCurrency, 'USD');
+  assert.equal(reads.billingCostSource, 'cloudflare_billing');
   assert.equal(writes.used, 1_000_000);
   assert.equal(writes.overLimit, false);
   assert.equal(writes.billingCost, 0);
   assert.equal(writes.billingCurrency, 'USD');
+  assert.equal(writes.billingCostSource, 'cloudflare_billing');
   assert.equal(storage.used, 4_700_000_000);
   assert.equal(storage.overLimit, false);
   assert.equal(storage.billingCost, 0.75);
@@ -228,8 +230,55 @@ test('Cloudflare usage keeps verified progress visible when per-metric billing c
   const usage = await getCloudflareUsage(env, { fetchImpl, now:'2026-09-27T18:00:00Z' });
   assert.equal(usage.configured, true);
   assert.equal(usage.additional.billingCostAvailable, false);
-  assert.equal(usage.metrics.find((item) => item.id === 'd1_rows_read').used, 10);
-  assert.equal(usage.metrics.find((item) => item.id === 'd1_rows_read').billingCost, null);
+  const reads = usage.metrics.find((item) => item.id === 'd1_rows_read');
+  const writes = usage.metrics.find((item) => item.id === 'd1_rows_written');
+  assert.equal(reads.used, 10);
+  assert.equal(reads.billingCost, 0);
+  assert.equal(reads.billingCurrency, 'USD');
+  assert.equal(reads.billingCostSource, 'published_pricing');
+  assert.equal(writes.billingCost, 0);
+  assert.equal(writes.billingCostSource, 'published_pricing');
+});
+
+test('D1 rows read shows verified published-pricing overage when Cloudflare omits cost fields', async () => {
+  const { env } = createTestEnv();
+  env.CLOUDFLARE_ACCOUNT_ID = 'account-synthetic';
+  env.CLOUDFLARE_USAGE_API_TOKEN = 'usage-token-synthetic';
+  const fetchImpl = async (url) => {
+    if (String(url).endsWith('/billable-usage/info')) {
+      return new Response(JSON.stringify({
+        success:true,
+        result:{ subscriptions:[{ id:'a', billing_cycle_anchor_timestamp:'2026-09-12T00:00:00Z', start_timestamp:'2026-09-12T00:00:00Z' }] }
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    if (String(url).endsWith('/graphql')) {
+      return new Response(JSON.stringify({
+        data:{ viewer:{ accounts:[{
+          d1AnalyticsAdaptiveGroups:[{ sum:{ rowsRead:27_000_000_000, rowsWritten:55_000_000 } }],
+          d1StorageAdaptiveGroups:[{ dimensions:{ date:'2026-09-27', databaseId:'db-a' }, max:{ databaseSizeBytes:100 } }]
+        }] } }
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    if (String(url).includes('/billable-usage?')) {
+      return new Response(JSON.stringify({
+        success:true,
+        result:[
+          { x_BillableMetricId:'d1_rows_read', BillingCurrency:'USD', ConsumedQuantity:27_000_000_000, ConsumedUnit:'Count' },
+          { x_BillableMetricId:'d1_rows_written', BillingCurrency:'USD', ConsumedQuantity:55_000_000, ConsumedUnit:'Count' }
+        ]
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    throw new Error('unexpected URL');
+  };
+  const usage = await getCloudflareUsage(env, { fetchImpl, now:'2026-09-27T18:00:00Z' });
+  const reads = usage.metrics.find((item) => item.id === 'd1_rows_read');
+  const writes = usage.metrics.find((item) => item.id === 'd1_rows_written');
+  assert.equal(reads.billingCost, 2);
+  assert.equal(reads.billingCurrency, 'USD');
+  assert.equal(reads.billingCostSource, 'published_pricing');
+  assert.equal(writes.billingCost, 5);
+  assert.equal(writes.billingCurrency, 'USD');
+  assert.equal(writes.billingCostSource, 'published_pricing');
 });
 
 test('Cloudflare usage does not turn missing analytics datasets into zero usage', async () => {
