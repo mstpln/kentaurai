@@ -42,7 +42,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-      KENTAURAI_ADMIN_TOKEN: ${{ secrets.KENTAURAI_ADMIN_TOKEN }}
+      KENTAURAI_ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN || secrets.KENTAURAI_ADMIN_TOKEN }}
       MODE: ${{ inputs.mode }}
       MAX_BATCHES: ${{ inputs.max_batches }}
       D1_DATABASE_ID: d8189e0e-6127-4ef2-88cc-534cb2217340
@@ -72,7 +72,7 @@ jobs:
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::CLOUDFLARE_API_TOKEN is not configured"; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::CLOUDFLARE_ACCOUNT_ID is not configured"; exit 1; }
-          test -n "$KENTAURAI_ADMIN_TOKEN" || { echo "::error::GitHub Actions secret KENTAURAI_ADMIN_TOKEN is not configured"; exit 1; }
+          test -n "$KENTAURAI_ADMIN_TOKEN" || { echo "::error::Neither GitHub Actions secret ADMIN_TOKEN nor KENTAURAI_ADMIN_TOKEN is configured"; exit 1; }
           echo "::add-mask::$CLOUDFLARE_API_TOKEN"
           echo "::add-mask::$KENTAURAI_ADMIN_TOKEN"
 
@@ -111,7 +111,7 @@ jobs:
       - name: Run bounded cleanup
         env:
           WORKER_URL: ${{ steps.worker.outputs.worker_url }}
-          ADMIN_TOKEN: ${{ secrets.KENTAURAI_ADMIN_TOKEN }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN || secrets.KENTAURAI_ADMIN_TOKEN }}
         run: node scripts/run-production-storage-cleanup.mjs
 
       - name: Verify production health after cleanup run
