@@ -1,14 +1,21 @@
-## Emergency Cloudflare cost-safety candidate
-- Branch: `codex/emergency-cost-stop` / PR #271.
+## Post-cost-safety follow-up candidate
+- Branch: `codex/post-cost-safety-followups`.
+- Production release #138 already has the emergency cost stop live: one `05:15 UTC` Worker cron, no minute cron, no scheduled multi-year history extension and no exhausted failed-import fallback scan.
+- This follow-up keeps X-Labs automatic work bounded but expands the explicit daily catch-up set from only yesterday to the previous three dates, newest first, so late-settled recent rounds are not stranded.
+- The shared X-Labs morning budget remains fixed; `historical_all` jobs are still never selected implicitly.
+- Settings now treats multi-day historical jobs that remain stored as `running` after automatic history was intentionally disabled as **Pausad**, not stale/failed. Failed historical jobs still surface as action-required, and daily retry failures still surface as errors.
+- README/live-state documentation is corrected to the deployed release #138 and the single-morning-schedule architecture.
+- No migration, private payload, historical deletion or production mutation is part of this candidate.
+
+## Emergency Cloudflare cost-safety production live
+- PR #271 was merged and production release #138 deployed successfully.
 - Cloudflare D1 query analytics identified the exhausted live-import recovery scan as the dominant current read path; the automatic fallback scan over failed import history is removed.
-- Worker scheduling is reduced from the minute orchestrator plus separate daily jobs to one bounded morning schedule at `05:15 UTC`.
-- Morning live capture preserves the seven-day upcoming V85/V86 horizon; captured live normalization is bounded and stops on idle.
-- Daily official result ingestion is limited to the existing one-day rolling jobs and is called by explicit daily job id, so a long multi-day historical job cannot be picked up by the automatic scheduler.
-- Daily X-Labs ingestion is likewise called by explicit `daily_v85_v86` job id; `historical_all` jobs remain available only through explicit/manual execution.
+- Worker scheduling is one bounded morning schedule at `05:15 UTC`; stale unsupported cron invocations are ignored without D1 work.
+- Morning live capture preserves the seven-day upcoming V85/V86 horizon.
+- Daily official result ingestion uses explicit one-day job ids, so long multi-day historical jobs cannot be picked up by the automatic scheduler.
 - Automatic statistics-history repair, X-Labs interval repair and X-Labs position-reconstruction loops are removed from cron execution. Their admin/manual routes remain available.
 - The GitHub 2020-2023 history-extension workflow has no schedule and requires explicit workflow dispatch confirmation.
-- Existing historical data is preserved. No migration deletes or rewrites historical facts, and no private payload is committed.
-- This candidate is not production-active until reviewed, explicitly authorized for merge and released.
+- Existing historical data is preserved.
 
 ## Track physical profile candidate
 - Branch: `feat/track-physical-profile-v1`.
@@ -61,7 +68,7 @@ Updated: 2026-09-27
 - Worker: `kentaurai-api`.
 - D1: `kentaurai`.
 - R2: `kentaurai-raw`.
-- Current deployed main head is `f69678ca5dbc7bcaddb6f8e8b830dc2e8c93223c`.
+- Current deployed main head is `98a964d53d6632af17fc2dceec2a30a683b45be5`.
 - Worker entrypoint is `src/worker-v078.js` with `ANALYSIS_WORKFLOW_MODE=v3`; the default mode serves the external-AI workflow while historical sealed-v3 artifacts remain read-compatible.
 - The latest production release completed successfully with full QA, Cloudflare validation, migration/schema/index verification, Worker deploy, `/health`, `/app/login` and private analysis/evidence route protection.
 - Production schema is current through migration `0041_statistics_data_backfill_state_v2.sql`.
@@ -78,7 +85,7 @@ Updated: 2026-09-27
 - Post-deadline registration remains allowed for bookkeeping but is marked `post_race_recovery` / `manual_review_required`. F1/F2 can diagnose it but exclude it from automatic promotion evidence.
 - Verified Step 2 reads enforce both observation/published timestamps and source-record availability at the cutoff. Missing market percentages stay null.
 - F1 and F2 understand the external lineage directly; they do not fabricate sealed Step 1/decision/optimizer parents. If an external run exists for a round, stale sealed-v3 system lineage is not selected as the current F1/F2 target.
-- The currently deployed baseline is production release #137 on main head `f69678ca5dbc7bcaddb6f8e8b830dc2e8c93223c`.
+- The currently deployed baseline is production release #138 on main head `98a964d53d6632af17fc2dceec2a30a683b45be5`.
 
 ## External evidence workflow production live
 - The Analys workspace flow is Step 1 blind analysis -> Step 2 market analysis only -> Step 3 interviews/external horse statistics -> Step 4 user/AI system dialogue -> Step 5 separate external-evidence registration -> Step 6 separate system registration.
