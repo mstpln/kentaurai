@@ -119,7 +119,7 @@ Updated: 2026-09-27
 - Current deployed baseline before this QA follow-up is production release #149 on main head `2575bdf3cf8351ba9b25b270eca98a4e5f6704cd`.
 - Worker entrypoint is `src/worker-v078.js` with `ANALYSIS_WORKFLOW_MODE=v3`; the default mode serves the external-AI workflow while historical sealed-v3 artifacts remain read-compatible.
 - The latest production release completed successfully with full QA, Cloudflare validation, migration/schema/index verification, Worker deploy, `/health`, `/app/login` and private analysis/evidence route protection.
-- Production schema is current through migration `0045_storage_cleanup_sessions.sql`; migrations `0046_snapshot_observation_lookup_index.sql`, `0047_storage_cleanup_session_audits.sql` and `0048_live_pending_cost_indexes.sql` are part of the open QA follow-up and are not production-active yet.
+- The production baseline before this QA follow-up is schema migration `0045_storage_cleanup_sessions.sql`. This follow-up's release contract applies and verifies migrations `0046_snapshot_observation_lookup_index.sql`, `0047_storage_cleanup_session_audits.sql` and `0048_live_pending_cost_indexes.sql`; a successful production release advances the deployed schema through `0048`.
 - External Step 1/Step 2 analysis exchange, later system registration, audited external lineage, external-aware F1 replay/F2 post-race diagnostics and the private-app performance layer are production-live.
 - Historical official/X-Labs jobs keep their durable cursors. The external-analysis release did not reset, recreate or resume stopped historical work.
 
@@ -412,12 +412,12 @@ The external-analysis production release was accepted after:
 - Durable per-round coverage remains the operational cache for registered historical V85/V86 systems; canonical racing, market, analysis, system and Form facts remain in their existing tables.
 - Post-race settlement remains the owner of winners/final-game acquisition. Statistics may only repair closing market from the already archived final official game source.
 - Migration `0041_statistics_data_backfill_state_v2.sql` separates lifecycle work state from metric state, adds due-time scheduling, leases, retry metadata and input fingerprints, and schedules existing rows for one safe source-of-truth re-audit.
-- The minute step selects one due round rather than only globally `pending` rows. Waiting facts are rechecked at a bounded cadence, transient failures back off exponentially, terminal rows are low-frequency re-audited, and one bad round cannot hot-loop/starve the queue.
+- The explicit/admin statistics-backfill step selects one due round rather than only globally `pending` rows. Waiting facts retain bounded due times, transient failures back off exponentially, terminal rows are low-frequency re-audit candidates, and one bad round cannot hot-loop/starve an operator-triggered batch.
 - Form and closing-market terminal decisions are metric-level and input-aware. Unchanged deterministic failures are not replayed; changed verified input can reopen that metric. A terminal Form decision does not block later results/final-market/payout refresh.
 - Historical Form/Form-rank still requires exact audited Step 1 pack/fingerprint lineage or the verified legacy eight-leg snapshot fallback. Step 1 `as_of` and generation time must be within the verified pre-race cutoff, and generation/legacy analysis creation may not occur after the registered system.
 - KentaurAI rank, ABCD and spike history are audited only from canonical stored pre-race/system facts. Missing historical AI judgments remain unavailable; malformed historical system invariants are surfaced for review rather than rewritten.
 - Passive audits do not increase `attempt_count`; only actual Form/market repair work does. Aggregate status output separates waiting/retryable/manual-review/legitimate-gap states without exposing private round identities.
-- Existing stale rows recover through the migration + scheduled re-audit path; no destructive reset or manual production SQL rewrite is part of the design.
+- Existing stale rows recover through the migration plus the explicit bounded re-audit path; there is no recurring statistics-repair scheduler, destructive reset or manual production SQL rewrite in the design.
 
 
 ## Historical official structural source-gap resilience
