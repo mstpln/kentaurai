@@ -100,6 +100,8 @@ export function isNonPromotingTrigger(trigger) {
 export async function enforceCloudflareBuildsPolicy({
   fetchImpl = globalThis.fetch,
   token,
+  workerToken = token,
+  buildsToken = token,
   accountId,
   workerName = DEFAULT_WORKER_NAME,
   repoName = DEFAULT_REPO_NAME,
@@ -107,7 +109,8 @@ export async function enforceCloudflareBuildsPolicy({
   mode = 'check'
 } = {}) {
   if (typeof fetchImpl !== 'function') throw new Error('fetch implementation is required');
-  const apiToken = requireValue(token, 'Cloudflare Builds API token');
+  const workerApiToken = requireValue(workerToken, 'Cloudflare Workers API token');
+  const buildsApiToken = requireValue(buildsToken, 'Cloudflare Builds API token');
   const account = requireValue(accountId, 'Cloudflare account id');
   if (!['check', 'apply'].includes(mode)) throw new Error('mode must be check or apply');
 
@@ -115,12 +118,12 @@ export async function enforceCloudflareBuildsPolicy({
   const scripts = await cloudflareRequest(
     fetchImpl,
     `${base}/workers/scripts`,
-    apiToken
+    workerApiToken
   );
   const worker = selectWorkerScript(scripts, workerName);
 
   const triggerUrl = `${base}/builds/workers/${encodeURIComponent(worker.tag)}/triggers`;
-  const triggers = await cloudflareRequest(fetchImpl, triggerUrl, apiToken);
+  const triggers = await cloudflareRequest(fetchImpl, triggerUrl, buildsApiToken);
   const productionTrigger = selectProductionTrigger(triggers, { repoName, productionBranch });
 
   if (isNonPromotingTrigger(productionTrigger)) {
@@ -142,14 +145,14 @@ export async function enforceCloudflareBuildsPolicy({
   await cloudflareRequest(
     fetchImpl,
     `${base}/builds/triggers/${encodeURIComponent(triggerUuid)}`,
-    apiToken,
+    buildsApiToken,
     {
       method: 'PATCH',
       body: JSON.stringify({ deploy_command: NON_PROMOTING_DEPLOY_COMMAND })
     }
   );
 
-  const verifiedTriggers = await cloudflareRequest(fetchImpl, triggerUrl, apiToken);
+  const verifiedTriggers = await cloudflareRequest(fetchImpl, triggerUrl, buildsApiToken);
   const verifiedTrigger = selectProductionTrigger(verifiedTriggers, { repoName, productionBranch });
   if (!isNonPromotingTrigger(verifiedTrigger)) {
     throw new Error('Cloudflare production Git trigger did not retain the non-promoting deploy command');
@@ -171,7 +174,8 @@ async function main() {
   if (!mode) throw new Error('usage: node scripts/cloudflare-builds-policy.mjs [--check|--apply]');
 
   const result = await enforceCloudflareBuildsPolicy({
-    token: process.env.CLOUDFLARE_BUILDS_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN,
+    workerToken: process.env.CLOUDFLARE_API_TOKEN,
+    buildsToken: process.env.CLOUDFLARE_BUILDS_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN,
     accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
     workerName: process.env.CLOUDFLARE_WORKER_NAME || DEFAULT_WORKER_NAME,
     repoName: process.env.CLOUDFLARE_REPO_NAME || DEFAULT_REPO_NAME,
