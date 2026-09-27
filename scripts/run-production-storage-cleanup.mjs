@@ -135,6 +135,7 @@ async function runRawCleanup(initialCursor = null, alreadyComplete = false, sess
   let canonicalCreated = 0;
   let legacyDeleted = 0;
   let conflicts = 0;
+  let confirmedComplete = false;
   const warnings = new Set();
   const batchLimit = RUN_UNTIL_COMPLETE ? Number.MAX_SAFE_INTEGER : MAX_BATCHES;
 
@@ -176,13 +177,16 @@ async function runRawCleanup(initialCursor = null, alreadyComplete = false, sess
     }
 
     const complete = cursor === null && Number(plan.referenceRewrites || 0) === 0;
-    if (complete) break;
+    if (complete) {
+      confirmedComplete = true;
+      break;
+    }
     if (RUN_UNTIL_COMPLETE && batches % CHECKPOINT_EVERY === 0 && cursor) {
       await checkpoint(sessionId, 'raw_object', cursor, false);
     }
   }
 
-  const complete = cursor === null && rewritesPlanned === rewritesDone;
+  const complete = confirmedComplete;
   if (RUN_UNTIL_COMPLETE) {
     if (complete) await checkpoint(sessionId, 'raw_object', null, true);
     else if (cursor) await checkpoint(sessionId, 'raw_object', cursor, false);
