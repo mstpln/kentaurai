@@ -1,6 +1,6 @@
 ## Cloudflare single-promotion-path hardening candidate
 - Branch: `fix/cloudflare-build-promotion-gate`.
-- Production release #150 is the current reviewed baseline on main head `0b8024ff43343b9507c06ffdabe3f948a2a70e02`, with production schema verified through migration `0048_live_pending_cost_indexes.sql`.
+- Baseline before this candidate is production release #150 on main head `0b8024ff43343b9507c06ffdabe3f948a2a70e02`, with production schema verified through migration `0048_live_pending_cost_indexes.sql`.
 - Deep release review showed that Cloudflare Workers Builds was still connected to GitHub and produced a build on pushes to `main`. KentaurAI's contract is stricter: explicit merge/deploy approval should flow through exactly one production promotion path.
 - The release workflow now enforces the Cloudflare production Git trigger to `npx wrangler versions upload` before any production migration. Git-triggered builds may still create inactive Worker versions/check status, but they may not promote the live Worker.
 - `scripts/cloudflare-builds-policy.mjs` discovers the exact `kentaurai-api` Worker tag and the exact GitHub/`kentaurai` production trigger, fails closed on ambiguity, updates only the deploy command, then re-reads the trigger to verify the policy.
@@ -125,7 +125,7 @@ Updated: 2026-09-27
 - Worker: `kentaurai-api`.
 - D1: `kentaurai`.
 - R2: `kentaurai-raw`.
-- Current reviewed production baseline is release #150 on main head `0b8024ff43343b9507c06ffdabe3f948a2a70e02`.
+- Current reviewed production baseline is the latest successful production-release workflow on `main`; this candidate started from release #150 / `0b8024ff43343b9507c06ffdabe3f948a2a70e02`.
 - Worker entrypoint is `src/worker-v078.js` with `ANALYSIS_WORKFLOW_MODE=v3`; the default mode serves the external-AI workflow while historical sealed-v3 artifacts remain read-compatible.
 - The latest production release completed successfully with full QA, Cloudflare validation, migration/schema/index verification, Worker deploy, `/health`, `/app/login` and private analysis/evidence route protection.
 - Production schema is verified through migration `0048_live_pending_cost_indexes.sql`, including the snapshot-observation lookup, cleanup-session audit binding and bounded live-normalization indexes.
