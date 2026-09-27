@@ -22,17 +22,24 @@ test('manual production storage cleanup workflow stays gated, resumable and boun
   assert.match(workflow, /Queue controlled continuation/);
   assert.match(workflow, /actions\/workflows\/production-storage-cleanup\.yml\/dispatches/);
   assert.match(workflow, /actions: write/);
+  assert.match(workflow, /continuation_session:/);
+  assert.match(workflow, /CLEANUP_SESSION_ID:/);
+  assert.match(workflow, /cleanup_session_id/);
   assert.match(workflow, /Verify production health after cleanup run[\s\S]*always\(\) && steps\.worker\.outcome == 'success'/);
 
   assert.match(runner, /DRY_RUN_MAX_BATCHES > 250/);
   assert.match(runner, /while \(MODE === 'execute' \|\| runPages < DRY_RUN_MAX_BATCHES\)/);
   assert.match(runner, /while \(MODE === 'execute' \|\| runBatches < DRY_RUN_MAX_BATCHES\)/);
-  assert.match(runner, /storage-cleanup\/state/);
+  assert.match(runner, /storage-cleanup\/session\/start/);
+  assert.match(runner, /storage-cleanup\/session\/checkpoint/);
+  assert.match(runner, /GITHUB_SHA/);
+  assert.match(runner, /continuation limit reached before completion/);
   assert.match(runner, /deadlineReached\(\)/);
   assert.match(runner, /limit: 25/);
   assert.match(runner, /safetyStop === true/);
   assert.match(runner, /execution count differed from its dry-run plan/);
   assert.match(runner, /response\.status === 401/);
   assert.match(runner, /attempt <= 15/);
+  assert.doesNotMatch(runner, /storage-cleanup\/state/);
   assert.doesNotMatch(runner, /historical_all|backfill|repair/i);
 });

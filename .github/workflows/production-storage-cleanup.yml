@@ -26,6 +26,10 @@ on:
           - "100"
           - "250"
         default: "50"
+      continuation_session:
+        description: Internal continuation session id - leave blank for a new manual cleanup
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -46,6 +50,7 @@ jobs:
       MODE: ${{ inputs.mode }}
       DRY_RUN_MAX_BATCHES: ${{ inputs.dry_run_max_batches }}
       CLEANUP_SOFT_DEADLINE_MS: "2100000"
+      CLEANUP_SESSION_ID: ${{ inputs.continuation_session }}
       D1_DATABASE_ID: d8189e0e-6127-4ef2-88cc-534cb2217340
       WORKER_NAME: kentaurai-api
 
@@ -176,13 +181,14 @@ jobs:
           exit 1
 
       - name: Queue controlled continuation
-        if: ${{ success() && env.MODE == 'execute' && steps.cleanup.outputs.cleanup_complete == 'false' && steps.cleanup.outputs.progress_made == 'true' }}
+        if: ${{ success() && env.MODE == 'execute' && steps.cleanup.outputs.cleanup_complete == 'false' && steps.cleanup.outputs.progress_made == 'true' && steps.cleanup.outputs.cleanup_session_id != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
+          CLEANUP_SESSION_ID: ${{ steps.cleanup.outputs.cleanup_session_id }}
         shell: bash
         run: |
           set -euo pipefail
-          payload="$(jq -nc '{ref:"main",inputs:{mode:"execute",confirmation:"EXECUTE REVIEWED STORAGE CLEANUP",dry_run_max_batches:"50"}}')"
+          payload="$(jq -nc --arg session "$CLEANUP_SESSION_ID" '{ref:"main",inputs:{mode:"execute",confirmation:"EXECUTE REVIEWED STORAGE CLEANUP",dry_run_max_batches:"50",continuation_session:$session}}')"
           curl --fail --silent --show-error \
             --request POST \
             --header "Authorization: Bearer $GH_TOKEN" \
@@ -190,7 +196,7 @@ jobs:
             --header "X-GitHub-Api-Version: 2022-11-28" \
             "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/production-storage-cleanup.yml/dispatches" \
             --data "$payload"
-          echo "Queued the next resumable cleanup run."
+          echo "Queued the next source-bound cleanup continuation."
 
       - name: Cleanup summary
         if: ${{ always() }}
@@ -205,6 +211,7 @@ jobs:
             echo "Cleanup completed across all snapshot families and raw storage."
           elif [ "${{ steps.cleanup.outputs.progress_made }}" = "true" ]; then
             echo "Cleanup checkpointed safely and a controlled continuation was queued."
+            echo "Continuation number: ${{ steps.cleanup.outputs.continuation_count }}"
           else
             echo "Cleanup did not complete and no continuation was queued."
           fi
