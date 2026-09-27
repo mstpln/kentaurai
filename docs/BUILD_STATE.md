@@ -1,3 +1,10 @@
+## Automatic production storage cleanup continuation candidate
+- Branch: `codex/storage-cleanup-until-complete`.
+- One manual execute start can now continue automatically across bounded GitHub Actions runs until all four snapshot families and R2 raw-object cleanup report complete.
+- Progress is persisted in D1 by signed cleanup cursor per target, so continuations resume instead of rescanning from the beginning.
+- Each workflow run keeps the existing plan-token, restore-point, cost-safety, auth, conflict and health gates and uses an approximately 32-minute cleanup budget before queuing the next continuation.
+- Continuations are capped and expire; a code SHA change stops the session instead of continuing under different cleanup code.
+
 ## Ephemeral production cleanup authentication candidate
 - Branch: `codex/ephemeral-cleanup-auth`.
 - The manual storage-cleanup workflow no longer requires a duplicated GitHub copy of the Worker `ADMIN_TOKEN`.
