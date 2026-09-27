@@ -129,8 +129,23 @@ const D1_USAGE_QUERY = `query KentaurAiD1Usage($accountTag: string!, $start: Dat
   }
 }`;
 
+function verifiedNonNegativeNumber(value, label) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new Error(`Cloudflare ${label} metric is unavailable`);
+  }
+  return value;
+}
+
 function sumMetric(groups, key) {
-  return (groups || []).reduce((sum, group) => sum + Math.max(0, Number(group?.sum?.[key] || 0)), 0);
+  let total = 0;
+  for (const group of groups || []) {
+    if (!group?.sum || !Object.prototype.hasOwnProperty.call(group.sum, key)) {
+      throw new Error(`Cloudflare D1 ${key} metric is unavailable`);
+    }
+    total += verifiedNonNegativeNumber(group.sum[key], `D1 ${key}`);
+  }
+  if (!Number.isFinite(total)) throw new Error(`Cloudflare D1 ${key} metric is unavailable`);
+  return total;
 }
 
 function currentD1Storage(groups) {
@@ -138,10 +153,18 @@ function currentD1Storage(groups) {
   for (const group of groups || []) {
     const databaseId = String(group?.dimensions?.databaseId || '');
     const date = String(group?.dimensions?.date || '');
-    if (!databaseId || !date || latestByDatabase.has(databaseId)) continue;
-    latestByDatabase.set(databaseId, Math.max(0, Number(group?.max?.databaseSizeBytes || 0)));
+    if (!databaseId || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      throw new Error('Cloudflare D1 storage dimensions are unavailable');
+    }
+    const value = verifiedNonNegativeNumber(group?.max?.databaseSizeBytes, 'D1 storage');
+    const existing = latestByDatabase.get(databaseId);
+    if (!existing || date > existing.date) {
+      latestByDatabase.set(databaseId, { date, value });
+    } else if (date === existing.date && value > existing.value) {
+      latestByDatabase.set(databaseId, { date, value });
+    }
   }
-  return [...latestByDatabase.values()].reduce((sum, value) => sum + value, 0);
+  return [...latestByDatabase.values()].reduce((sum, item) => sum + item.value, 0);
 }
 
 async function d1Usage(env, fetchImpl, cycle, now) {
@@ -175,7 +198,7 @@ async function d1Usage(env, fetchImpl, cycle, now) {
 }
 
 function usageMetric(id, label, used, limit, unit, rule) {
-  const numeric = Math.max(0, Number(used || 0));
+  const numeric = verifiedNonNegativeNumber(used, id);
   return {
     id,
     label,
