@@ -202,7 +202,7 @@ export async function executeSnapshotCleanupBatch(env, options = {}) {
       candidate.retainId
     ));
     statements.push(env.DB.prepare(`
-      UPDATE official_snapshot_observations SET snapshot_id=?
+      UPDATE official_snapshot_observations SET snapshot_id=?,factual_changed=0
       WHERE snapshot_family=? AND snapshot_id=?
     `).bind(candidate.retainId, plan.family, candidate.removeId));
   }
