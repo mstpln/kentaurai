@@ -164,7 +164,7 @@ test('settings alert endpoints are private and opening settings can acknowledge 
       processed_races,reused_races,unavailable_dates,unavailable_races,
       consecutive_errors,last_error,last_run_at,retry_after
     ) VALUES (
-      'settings-alert-job','historical_all','2026-09-01','2026-09-10','2026-09-05',0,
+      'settings-alert-job','daily_v85_v86','2099-01-01','2099-01-01','2099-01-01',0,
       'running',5,20,0,0,0,1,'Synthetic transient failure',
       '2099-01-01T00:00:00Z','2099-01-01T00:05:00Z'
     )
