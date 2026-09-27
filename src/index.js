@@ -1,4 +1,4 @@
-import { requireAdmin } from './auth.js';
+import { requireAdmin, requireStorageCleanupAdmin } from './auth.js';
 import { archiveRawPayload } from './raw.js';
 import { importEditorial } from './import/editorial.js';
 import { importReferenceRound } from './import/reference-round-safe.js';
@@ -216,7 +216,9 @@ async function handleFetch(request, env) {
   if (path === '/') return redirectResponse('/app');
   if (path.startsWith('/app')) return handleApp(request, env, url);
   if (path.startsWith('/v1/')) {
-    const denied = requireAdmin(request, env);
+    const denied = path.startsWith('/v1/storage-cleanup/')
+      ? requireStorageCleanupAdmin(request, env)
+      : requireAdmin(request, env);
     if (denied) return denied;
   }
   if (request.method === 'GET' && path.startsWith('/v1/rounds/')) {

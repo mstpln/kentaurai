@@ -42,7 +42,6 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-      KENTAURAI_ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN || secrets.KENTAURAI_ADMIN_TOKEN }}
       MODE: ${{ inputs.mode }}
       MAX_BATCHES: ${{ inputs.max_batches }}
       D1_DATABASE_ID: d8189e0e-6127-4ef2-88cc-534cb2217340
@@ -72,9 +71,17 @@ jobs:
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::CLOUDFLARE_API_TOKEN is not configured"; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::CLOUDFLARE_ACCOUNT_ID is not configured"; exit 1; }
-          test -n "$KENTAURAI_ADMIN_TOKEN" || { echo "::error::Neither GitHub Actions secret ADMIN_TOKEN nor KENTAURAI_ADMIN_TOKEN is configured"; exit 1; }
           echo "::add-mask::$CLOUDFLARE_API_TOKEN"
-          echo "::add-mask::$KENTAURAI_ADMIN_TOKEN"
+
+      - name: Create short-lived cleanup-only Worker token
+        id: cleanup_token
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup_token="$(node -e "console.log(Date.now()+'.'+require('crypto').randomBytes(32).toString('hex'))")"
+          echo "::add-mask::$cleanup_token"
+          echo "token=$cleanup_token" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$cleanup_token" | npx --yes wrangler@4.114.0 secret put STORAGE_CLEANUP_TOKEN --name "$WORKER_NAME"
 
       - name: Resolve and verify production Worker URL
         id: worker
@@ -111,8 +118,17 @@ jobs:
       - name: Run bounded cleanup
         env:
           WORKER_URL: ${{ steps.worker.outputs.worker_url }}
-          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN || secrets.KENTAURAI_ADMIN_TOKEN }}
+          ADMIN_TOKEN: ${{ steps.cleanup_token.outputs.token }}
         run: node scripts/run-production-storage-cleanup.mjs
+
+      - name: Remove short-lived cleanup-only Worker token
+        if: ${{ always() && steps.cleanup_token.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if npx --yes wrangler@4.114.0 secret list --name "$WORKER_NAME" --format json | jq -e '.[] | select(.name == "STORAGE_CLEANUP_TOKEN")' >/dev/null; then
+            printf 'y\n' | npx --yes wrangler@4.114.0 secret delete STORAGE_CLEANUP_TOKEN --name "$WORKER_NAME"
+          fi
 
       - name: Verify production health after cleanup run
         env:
