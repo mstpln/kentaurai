@@ -2,7 +2,7 @@
 - Branch: `feat/settings-drift-usage-control`.
 - Settings is reorganized into **Drift** and **Data**. Drift owns automatic-workflow control, Cloudflare D1 usage, source/job status and recent activity; Data keeps stored counts and the sanitized coverage export.
 - Migration `0049_runtime_controls.sql` adds the persisted `automatic_workflows_enabled` control, enabled by default.
-- The outer production worker checks the control before entering the scheduled worker chain. The scheduled orchestrator also rechecks it before each morning part; a newly paused switch therefore stops subsequent automatic work, while an operation already in flight is allowed to finish. Control-read failures fail closed.
+- The outer production worker checks the control before entering the scheduled worker chain. The scheduled orchestrator also rechecks it before each morning part, and legacy scheduled wrapper side-jobs recheck it before their own work; a newly paused switch therefore stops subsequent automatic work, while an operation already in flight is allowed to finish. Control-read failures fail closed.
 - Cloudflare is the billing-usage source of truth. D1 rows read/written and storage are queried from Cloudflare analytics for the billing period derived from Cloudflare billing metadata. Missing API access produces an unavailable state rather than a zero or estimated value.
 - Runtime Cloudflare usage requires `CLOUDFLARE_ACCOUNT_ID` plus a dedicated read-only `CLOUDFLARE_USAGE_API_TOKEN` with Account Analytics Read and Billing Read. Neither value is committed.
 - Production entrypoint candidate is `src/worker-v079.js`. Production release verifies migration 0049 before promotion.
