@@ -29,7 +29,7 @@ export function enhanceSettingsDriftHtml(html) {
 (function(){
 const button=document.getElementById('settingsButton');if(!button)return;
 function fmtDateTime(value){if(!value)return '—';const d=new Date(value);if(Number.isNaN(d.getTime()))return '—';return new Intl.DateTimeFormat('sv-SE',{dateStyle:'short',timeStyle:'short'}).format(d)}
-function fmtDate(value){if(!value)return '—';const d=new Date(value);if(Number.isNaN(d.getTime()))return '—';return new Intl.DateTimeFormat('sv-SE',{day:'numeric',month:'short',year:'numeric'}).format(d)}
+function fmtDate(value){if(!value)return '—';const d=new Date(value);if(Number.isNaN(d.getTime()))return '—';return new Intl.DateTimeFormat('sv-SE',{day:'numeric',month:'short',year:'numeric'}).format(d)}\nfunction fmtBillingEnd(value){if(!value)return '—';const d=new Date(value);if(Number.isNaN(d.getTime()))return '—';d.setUTCDate(d.getUTCDate()-1);return fmtDate(d.toISOString())}
 function fmtMetric(m){const n=Number(m.used||0);if(m.unit==='bytes')return (n/1e9).toLocaleString('sv-SE',{maximumFractionDigits:2})+' GB';if(n>=1e9)return (n/1e9).toLocaleString('sv-SE',{maximumFractionDigits:2})+' md';if(n>=1e6)return (n/1e6).toLocaleString('sv-SE',{maximumFractionDigits:2})+' mn';return n.toLocaleString('sv-SE')}
 function fmtLimit(m){const n=Number(m.limit||0);if(m.unit==='bytes')return (n/1e9).toLocaleString('sv-SE',{maximumFractionDigits:1})+' GB';if(n>=1e9)return (n/1e9).toLocaleString('sv-SE',{maximumFractionDigits:1})+' md';if(n>=1e6)return (n/1e6).toLocaleString('sv-SE',{maximumFractionDigits:1})+' mn';return n.toLocaleString('sv-SE')}
 function statusText(status){return ({working:'Fungerar',success:'Klar',warning:'Fel upptäckt',error:'Fel upptäckt',running:'Pågår',never_run:'Ingen körning ännu',waiting:'Väntar',completed:'Klar',error_retrying:'Fel upptäckt',action_required:'Åtgärd krävs',paused:'Pausad'})[status]||status||'Okänd'}
@@ -47,7 +47,7 @@ async function renderDrift(){
  app.innerHTML=heading('Inställningar','Hantera system, kostnad och data')+'<div class="settings-layout">'+settingsTabs('drift')+'<div class="skeleton"></div></div>';bindTabs();
  try{
   const [d,s]=await Promise.all([api('/settings/drift'),api('/settings/status')]);if(!state.settingsOpen||state.settingsTab!=='drift')return;
-  const a=d.automation||{};const cf=d.cloudflare||{};const period=cf.billingPeriod?fmtDate(cf.billingPeriod.start)+' – '+fmtDate(cf.billingPeriod.end):'Billingperiod ej tillgänglig';
+  const a=d.automation||{};const cf=d.cloudflare||{};const period=cf.billingPeriod?fmtDate(cf.billingPeriod.start)+' – '+fmtBillingEnd(cf.billingPeriod.end):'Billingperiod ej tillgänglig';
   const budgetBad=(cf.metrics||[]).some(m=>m.overLimit);
   app.innerHTML=heading('Inställningar','Hantera system, kostnad och data')+'<div class="settings-layout">'+settingsTabs('drift')+
    '<div class="settings-drift-summary"><div class="settings-drift-summary-cell"><div class="settings-drift-summary-label">Systemstatus</div><div class="settings-drift-summary-value '+(budgetBad?'bad':'good')+'">'+(budgetBad?'Budget överskriden':'Inom inkluderade nivåer')+'</div></div><div class="settings-drift-summary-cell"><div class="settings-drift-summary-label">Automatiska jobb</div><div class="settings-drift-summary-value '+(a.enabled?'good':'')+'">'+(a.enabled?'Aktiva':'Pausade')+'</div></div><div class="settings-drift-summary-cell"><div class="settings-drift-summary-label">Nästa körning</div><div class="settings-drift-summary-value">'+(a.enabled?'07:15':'Pausad')+'</div></div></div>'+
