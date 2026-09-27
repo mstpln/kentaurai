@@ -28,7 +28,7 @@ Drift är standardfliken. Den visar:
 
 Master-switchen är den enda avsiktliga operativa mutationen i Drift. När den är pausad stoppar den det schemalagda Worker-flödet innan automatisk datainsamling/bearbetning delegeras. Vanlig appanvändning och manuellt initierade funktioner fortsätter att fungera. Om kontrollstatus inte kan läsas stoppar schemalagd automatik fail-closed.
 
-Cloudflare-progressen hämtas server-side från Cloudflare och startar därför från det verkliga konto-/billingperiodläget, inte från noll. En separat least-privilege `CLOUDFLARE_USAGE_API_TOKEN` och `CLOUDFLARE_ACCOUNT_ID` krävs i Worker-miljön. Om de saknas visas användningen som ej ansluten; inga nollvärden eller uppskattade kostnadsstaplar fabriceras.
+Cloudflare-progressen hämtas server-side från Cloudflare och startar därför från det verkliga konto-/billingperiodläget, inte från noll. En separat least-privilege `CLOUDFLARE_USAGE_API_TOKEN` och runtime-binding `KENTAURAI_CLOUDFLARE_ACCOUNT_ID` krävs i Worker-miljön. Om de saknas visas användningen som ej ansluten; inga nollvärden eller uppskattade kostnadsstaplar fabriceras.
 
 ## Data
 
