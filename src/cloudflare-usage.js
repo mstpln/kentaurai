@@ -272,6 +272,7 @@ async function allD1DatabaseBytes(fetchImpl, accountId, token) {
 
   let total = 0;
   const uuids = databases.map((database) => String(database?.uuid || '').trim()).filter(Boolean);
+  if (uuids.length !== databases.length) throw new Error('Cloudflare D1 database list returned an entry without uuid');
   for (let index = 0; index < uuids.length; index += 25) {
     const details = await Promise.all(uuids.slice(index, index + 25).map((databaseId) =>
       cloudflareGet(
