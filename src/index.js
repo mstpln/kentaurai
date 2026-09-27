@@ -370,10 +370,15 @@ async function runLiveNormalizationMorning(env) {
 async function runDailyOfficialIncremental(env, scheduledTime) {
   const jobs = await ensureDailyOfficialHistoryJobs(env, scheduledTime);
   const batches = [];
-  for (let index = 0; index < DAILY_OFFICIAL_BATCH_RUNS; index += 1) {
-    const batch = await runHistoricalBackfillBatch(env);
-    batches.push(batch);
-    if (!batch || batch.status === 'idle') break;
+  let remaining = DAILY_OFFICIAL_BATCH_RUNS;
+  for (const job of jobs.jobs || []) {
+    while (remaining > 0) {
+      const batch = await runHistoricalBackfillBatch(env, job.id);
+      batches.push(batch);
+      remaining -= 1;
+      if (!batch || batch.done || batch.status !== 'running') break;
+    }
+    if (remaining <= 0) break;
   }
   return { jobs, batchCount: batches.length, maxBatches: DAILY_OFFICIAL_BATCH_RUNS, batches };
 }
@@ -382,9 +387,9 @@ async function runDailyXlabsIncremental(env, scheduledTime) {
   const job = await ensureDailyXlabsJob(env, scheduledTime);
   const batches = [];
   for (let index = 0; index < DAILY_XLABS_BATCH_RUNS; index += 1) {
-    const batch = await runXlabsBackfillBatch(env);
+    const batch = await runXlabsBackfillBatch(env, job.id);
     batches.push(batch);
-    if (!batch || batch.status === 'idle') break;
+    if (!batch || batch.done || batch.status !== 'running') break;
   }
   return { job, batchCount: batches.length, maxBatches: DAILY_XLABS_BATCH_RUNS, batches };
 }
