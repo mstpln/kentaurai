@@ -22,6 +22,7 @@ test('manual production storage cleanup workflow stays gated, resumable and boun
   assert.match(workflow, /Queue controlled continuation/);
   assert.match(workflow, /actions\/workflows\/production-storage-cleanup\.yml\/dispatches/);
   assert.match(workflow, /actions: write/);
+  assert.match(workflow, /Verify production health after cleanup run[\s\S]*always\(\) && steps\.worker\.outcome == 'success'/);
 
   assert.match(runner, /DRY_RUN_MAX_BATCHES > 250/);
   assert.match(runner, /while \(MODE === 'execute' \|\| runPages < DRY_RUN_MAX_BATCHES\)/);
