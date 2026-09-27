@@ -83,6 +83,33 @@ test('snapshot executor removes only sequential repeats and rewires provenance a
   );
 });
 
+test('snapshot cleanup ignores rows from failed source syncs', async () => {
+  const { db, env } = createTestEnv();
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('horse-failed-cleanup','Failed Cleanup Horse')").run();
+  for (const [sourceId, snapshotId, observedAt, status] of [
+    ['cleanup-complete','cleanup-complete-snapshot','2026-09-10T10:00:00Z','complete'],
+    ['cleanup-failed','cleanup-failed-snapshot','2026-09-11T10:00:00Z','failed']
+  ]) {
+    addSource(db, sourceId, observedAt);
+    db.prepare(`
+      INSERT INTO official_snapshot_source_sync
+        (source_record_id,status,horse_profile_count,error_message)
+      VALUES (?,?,1,?)
+    `).run(sourceId, status, status === 'failed' ? 'synthetic failure' : null);
+    db.prepare(`
+      INSERT INTO horse_profile_snapshots
+        (id,horse_id,observed_at,age_years,source_record_id)
+      VALUES (?,'horse-failed-cleanup',?,4,?)
+    `).run(snapshotId, observedAt, sourceId);
+  }
+
+  const plan = await planSnapshotCleanupBatch(env, { family: 'horse_profile', limit: 25 });
+  assert.equal(plan.rowsScanned, 1);
+  assert.equal(plan.rowsRetained, 1);
+  assert.equal(plan.rowsRemovable, 0);
+  assert.equal(plan.nextCursor, null);
+});
+
 test('snapshot cleanup preserves legacy source/as-of provenance when duplicate rows predate observation storage', async () => {
   const { db, env } = createTestEnv();
   db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('horse-legacy','Legacy Horse')").run();
