@@ -10,20 +10,27 @@ if (!Number.isInteger(MAX_BATCHES) || MAX_BATCHES < 1 || MAX_BATCHES > 250) thro
 if (!WORKER_URL || !ADMIN_TOKEN) throw new Error('WORKER_URL and ADMIN_TOKEN are required');
 
 async function post(path, body) {
-  const response = await fetch(WORKER_URL + path, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${ADMIN_TOKEN}`,
-      'content-type': 'application/json'
-    },
-    body: JSON.stringify(body)
-  });
-  const text = await response.text();
-  let data;
-  try { data = JSON.parse(text); } catch { throw new Error(`${path} returned non-JSON HTTP ${response.status}`); }
-  if (!response.ok) throw new Error(`${path} failed with HTTP ${response.status}: ${String(data?.error || 'unknown_error').slice(0, 160)}`);
-  if (data?.safetyStop === true) throw new Error(`${path} tripped the D1 cost-safety stop`);
-  return data;
+  for (let attempt = 1; attempt <= 15; attempt += 1) {
+    const response = await fetch(WORKER_URL + path, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${ADMIN_TOKEN}`,
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+    const text = await response.text();
+    let data;
+    try { data = JSON.parse(text); } catch { throw new Error(`${path} returned non-JSON HTTP ${response.status}`); }
+    if (response.status === 401 && attempt < 15) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      continue;
+    }
+    if (!response.ok) throw new Error(`${path} failed with HTTP ${response.status}: ${String(data?.error || 'unknown_error').slice(0, 160)}`);
+    if (data?.safetyStop === true) throw new Error(`${path} tripped the D1 cost-safety stop`);
+    return data;
+  }
+  throw new Error(`${path} authentication did not stabilize within 30 seconds`);
 }
 
 function safeWarnings(value) {
