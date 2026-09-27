@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 
 import { renderAppPage } from '../src/app-page-settings.js';
 
-test('primary Analysis workspace owns the approved external analysis workflow while Settings is data-only', () => {
+test('primary Analysis owns the approved external workflow while Settings is split into Drift and Data', () => {
   const html = renderAppPage();
 
   assert.match(html, /window\.__kentauraiAnalysis=\{render:renderAnalysis\}/);
@@ -30,7 +30,17 @@ test('primary Analysis workspace owns the approved external analysis workflow wh
   assert.match(html, /\/app\/api\/settings\/system-import-prompt\?provider=/);
   assert.match(html, /\/app\/api\/settings\/system-import\?round_id=/);
 
-  assert.match(html, /heading\('Inställningar','Hantera data och uppdateringar'\)/);
+  assert.match(html, /heading\('Inställningar','Hantera system, kostnad och data'\)/);
+  assert.match(html, /data-settings-mode="drift"/);
+  assert.match(html, /data-settings-mode="data"/);
+  assert.match(html, /Cloudflare-användning/);
+  assert.match(html, /Automatiska jobb/);
+  assert.match(html, /Jobbstatus/);
+  assert.match(html, /Senaste aktivitet/);
+  assert.match(html, /settings-usage-progress-fill/);
+  assert.match(html, /settings-usage-progress-fill '+\(over\?'over':''\)/);
+  assert.match(html, /\/app\/api\/settings\/automation/);
+  assert.match(html, /\/app\/api\/settings\/cloudflare-usage/);
   assert.match(html, /settingsAlertBadge/);
   assert.match(html, /settings-source-grid/);
   assert.match(html, /Historisk import/);
