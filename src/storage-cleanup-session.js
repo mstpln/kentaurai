@@ -89,21 +89,25 @@ async function loadTargets(env, id) {
   }));
 }
 
-async function markExpired(env, id) {
+async function markStopped(env, id, status) {
+  if (!['expired','exhausted'].includes(status)) throw new Error('invalid cleanup stop status');
   await env.DB.prepare(`
     UPDATE storage_cleanup_sessions
-    SET status='expired',updated_at=CURRENT_TIMESTAMP
+    SET status=?,updated_at=CURRENT_TIMESTAMP
     WHERE id=? AND status='running'
-  `).bind(id).run();
+  `).bind(status, id).run();
 }
 
 async function resumeRunningSession(env, session) {
   if (expired(session)) {
-    await markExpired(env, session.id);
+    await markStopped(env, session.id, 'expired');
     throw new Error('cleanup session expired; start a new session');
   }
   const count = Number(session.continuation_count || 0);
-  if (count >= MAX_CONTINUATIONS) throw new Error('cleanup session continuation limit reached');
+  if (count >= MAX_CONTINUATIONS) {
+    await markStopped(env, session.id, 'exhausted');
+    throw new Error('cleanup session continuation limit reached');
+  }
   await env.DB.prepare(`
     UPDATE storage_cleanup_sessions
     SET continuation_count=continuation_count+1,updated_at=CURRENT_TIMESTAMP
@@ -157,14 +161,19 @@ export async function startOrResumeStorageCleanupSession(env, options = {}) {
     if (!session) throw new Error('cleanup session not found');
     if (session.source_sha !== sourceSha) throw new Error('cleanup session source_sha changed; start a new session');
     if (session.status === 'expired' || expired(session)) {
-      if (session.status === 'running') await markExpired(env, session.id);
+      if (session.status === 'running') await markStopped(env, session.id, 'expired');
       throw new Error('cleanup session expired; start a new session');
     }
+    if (session.status === 'exhausted') throw new Error('cleanup session continuation limit reached');
     if (session.status === 'running') session = await resumeRunningSession(env, session);
   } else {
     session = await loadRunningForSource(env, sourceSha);
     if (session && expired(session)) {
-      await markExpired(env, session.id);
+      await markStopped(env, session.id, 'expired');
+      session = null;
+    }
+    if (session && Number(session.continuation_count || 0) >= MAX_CONTINUATIONS) {
+      await markStopped(env, session.id, 'exhausted');
       session = null;
     }
     if (session) session = await resumeRunningSession(env, session);
@@ -186,9 +195,10 @@ export async function checkpointStorageCleanupSession(env, options = {}) {
   if (!session) throw new Error('cleanup session not found');
   if (session.source_sha !== sourceSha) throw new Error('cleanup session source_sha changed; start a new session');
   if (session.status === 'expired' || expired(session)) {
-    if (session.status === 'running') await markExpired(env, session.id);
+    if (session.status === 'running') await markStopped(env, session.id, 'expired');
     throw new Error('cleanup session expired; start a new session');
   }
+  if (session.status === 'exhausted') throw new Error('cleanup session continuation limit reached');
   if (session.status === 'complete') {
     return { sessionId, target, complete: true, sessionComplete: true };
   }
