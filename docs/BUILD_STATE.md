@@ -1,3 +1,12 @@
+## Cloudflare single-promotion-path hardening candidate
+- Branch: `fix/cloudflare-build-promotion-gate`.
+- Production release #150 is the current reviewed baseline on main head `0b8024ff43343b9507c06ffdabe3f948a2a70e02`, with production schema verified through migration `0048_live_pending_cost_indexes.sql`.
+- Deep release review showed that Cloudflare Workers Builds was still connected to GitHub and produced a build on pushes to `main`. KentaurAI's contract is stricter: explicit merge/deploy approval should flow through exactly one production promotion path.
+- The release workflow now enforces the Cloudflare production Git trigger to `npx wrangler versions upload` before any production migration. Git-triggered builds may still create inactive Worker versions/check status, but they may not promote the live Worker.
+- `scripts/cloudflare-builds-policy.mjs` discovers the exact `kentaurai-api` Worker tag and the exact GitHub/`kentaurai` production trigger, fails closed on ambiguity, updates only the deploy command, then re-reads the trigger to verify the policy.
+- The Builds API token is never logged. The release uses an optional dedicated `CLOUDFLARE_BUILDS_API_TOKEN` when configured and otherwise attempts the existing `CLOUDFLARE_API_TOKEN`; missing permission fails the release before D1 migration or Worker deployment.
+- No Worker runtime code, D1 schema, R2 data, racing facts, analysis semantics or scheduled acquisition behavior changes in this hardening build.
+
 ## Broad cost/storage QA follow-up
 - The cleanup runner now records cumulative D1 rows read/written across its API requests and stops without automatic continuation at 1,000,000 reads or 100,000 writes in one run; this prevents a pathologically expensive scan from being repeated by run-until-complete chaining.
 - Automatic live normalization is restricted to the recent three-day recovery window and migration `0048_live_pending_cost_indexes.sql` adds narrow pending-game and failed-normalization indexes so old captured history is not scanned during the morning loop.
@@ -116,10 +125,10 @@ Updated: 2026-09-27
 - Worker: `kentaurai-api`.
 - D1: `kentaurai`.
 - R2: `kentaurai-raw`.
-- Current deployed baseline before this QA follow-up is production release #149 on main head `2575bdf3cf8351ba9b25b270eca98a4e5f6704cd`.
+- Current reviewed production baseline is release #150 on main head `0b8024ff43343b9507c06ffdabe3f948a2a70e02`.
 - Worker entrypoint is `src/worker-v078.js` with `ANALYSIS_WORKFLOW_MODE=v3`; the default mode serves the external-AI workflow while historical sealed-v3 artifacts remain read-compatible.
 - The latest production release completed successfully with full QA, Cloudflare validation, migration/schema/index verification, Worker deploy, `/health`, `/app/login` and private analysis/evidence route protection.
-- The production baseline before this QA follow-up is schema migration `0045_storage_cleanup_sessions.sql`. This follow-up's release contract applies and verifies migrations `0046_snapshot_observation_lookup_index.sql`, `0047_storage_cleanup_session_audits.sql` and `0048_live_pending_cost_indexes.sql`; a successful production release advances the deployed schema through `0048`.
+- Production schema is verified through migration `0048_live_pending_cost_indexes.sql`, including the snapshot-observation lookup, cleanup-session audit binding and bounded live-normalization indexes.
 - External Step 1/Step 2 analysis exchange, later system registration, audited external lineage, external-aware F1 replay/F2 post-race diagnostics and the private-app performance layer are production-live.
 - Historical official/X-Labs jobs keep their durable cursors. The external-analysis release did not reset, recreate or resume stopped historical work.
 
