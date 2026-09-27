@@ -217,3 +217,16 @@ test('runtime controls stay outside structured data exports', () => {
   const source = readFileSync(new URL('../src/settings-data.js', import.meta.url), 'utf8');
   assert.match(source, /EXCLUDED_TABLES = new Set\(\['d1_migrations', 'runtime_controls'\]\)/);
 });
+
+test('all scheduled wrapper side jobs recheck the persisted automation switch', () => {
+  const snapshotWrapper = readFileSync(new URL('../src/worker-v066.js', import.meta.url), 'utf8');
+  const startPointWrapper = readFileSync(new URL('../src/worker-v064.js', import.meta.url), 'utf8');
+  const pwaWrapper = readFileSync(new URL('../src/worker-pwa.js', import.meta.url), 'utf8');
+
+  assert.match(snapshotWrapper, /getAutomationControl\(env\)/);
+  assert.match(snapshotWrapper, /if \(!control\.enabled\) return result;/);
+  assert.match(startPointWrapper, /getAutomationControl\(env\)/);
+  assert.match(startPointWrapper, /if \(!control\.enabled\) return result;/);
+  assert.match(pwaWrapper, /getAutomationControl\(env\)/);
+  assert.match(pwaWrapper, /if \(control\.enabled\) await runNextPostRaceReview\(env\)/);
+});
