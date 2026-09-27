@@ -53,10 +53,12 @@ jobs:
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_USAGE_API_TOKEN: ${{ secrets.CLOUDFLARE_USAGE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN" || { echo 'CLOUDFLARE_API_TOKEN is not configured'; exit 1; }
+          test -n "$CLOUDFLARE_USAGE_API_TOKEN" || { echo 'CLOUDFLARE_USAGE_API_TOKEN is not configured'; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'CLOUDFLARE_ACCOUNT_ID is not configured'; exit 1; }
 
       - name: Enforce single production promotion path
@@ -187,6 +189,10 @@ jobs:
           grep -q 'idx_source_records_live_game_pending' /tmp/storage-cleanup-session-schema-check.txt
           grep -q 'idx_import_runs_live_normalize_failures' /tmp/storage-cleanup-session-schema-check.txt
 
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT id,enabled,updated_at,updated_via FROM automation_controls LIMIT 0; SELECT name FROM sqlite_master WHERE type='table' AND name='automation_controls'; SELECT name FROM d1_migrations WHERE name='0049_automation_controls.sql';" > /tmp/automation-controls-schema-check.txt
+          grep -q 'automation_controls' /tmp/automation-controls-schema-check.txt
+          grep -q '0049_automation_controls.sql' /tmp/automation-controls-schema-check.txt
+
           grep -q 'idx_races_track_date' /tmp/migration-check.txt
           grep -q 'idx_odds_entry_time' /tmp/migration-check.txt
           grep -q 'idx_equipment_entry' /tmp/migration-check.txt
@@ -224,10 +230,19 @@ jobs:
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_USAGE_API_TOKEN: ${{ secrets.CLOUDFLARE_USAGE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          KENTAURAI_CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          npm run deploy 2>&1 | tee /tmp/kentaurai-deploy.log
+          secrets_file="/tmp/kentaurai-runtime-secrets.json"
+          trap 'rm -f "$secrets_file"' EXIT
+          umask 077
+          jq -n \
+            --arg usage "$CLOUDFLARE_USAGE_API_TOKEN" \
+            --arg account "$KENTAURAI_CLOUDFLARE_ACCOUNT_ID" \
+            '{CLOUDFLARE_USAGE_API_TOKEN:$usage,KENTAURAI_CLOUDFLARE_ACCOUNT_ID:$account}' > "$secrets_file"
+          npx --yes wrangler@4.114.0 deploy --secrets-file "$secrets_file" 2>&1 | tee /tmp/kentaurai-deploy.log
           worker_url="$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' /tmp/kentaurai-deploy.log | tail -n 1)"
           test -n "$worker_url" || { echo 'Could not determine workers.dev URL from Wrangler output'; exit 1; }
           echo "worker_url=$worker_url" >> "$GITHUB_OUTPUT"
@@ -269,6 +284,8 @@ jobs:
           for path in \
             '/app/api/settings/status' \
             '/app/api/settings/alerts' \
+            '/app/api/settings/automation' \
+            '/app/api/settings/cloudflare-usage' \
             '/app/api/settings/analysis-prompt?provider=anthropic' \
             '/app/api/settings/analysis-method-prompt?step=1' \
             '/app/api/settings/export?provider=anthropic&stage=pre_market' \
@@ -322,6 +339,10 @@ jobs:
           test "$status" = '401' || { echo "Expected /app/api/settings/alerts/acknowledge to return 401 without authorization, got $status"; cat /tmp/private-response.json; exit 1; }
           grep -q 'unauthorized' /tmp/private-response.json
 
+          status="$(curl --silent --show-error --request POST --header 'content-type: application/json' --data '{"enabled":false}' --output /tmp/private-response.json --write-out '%{http_code}' "$WORKER_URL/app/api/settings/automation")"
+          test "$status" = '401' || { echo "Expected /app/api/settings/automation POST to return 401 without authorization, got $status"; cat /tmp/private-response.json; exit 1; }
+          grep -q 'unauthorized' /tmp/private-response.json
+
           status="$(curl --silent --show-error --request POST --header 'content-type: application/json' --data '{"tracks":[]}' --output /tmp/private-response.json --write-out '%{http_code}' "$WORKER_URL/v1/admin/tracks/profile-enrichment")"
           test "$status" = '401' || { echo "Expected /v1/admin/tracks/profile-enrichment to return 401 without authorization, got $status"; cat /tmp/private-response.json; exit 1; }
           grep -q 'unauthorized' /tmp/private-response.json
@@ -333,4 +354,4 @@ jobs:
         run: |
           echo 'KentaurAI v0.6.0 production release completed.'
           echo "Worker: $WORKER_URL"
-          echo 'Required production schema through migration 0048, bounded live-normalization cost indexes, cleanup-session audit binding, cleanup-session storage and snapshot-observation lookup index, Settings alert acknowledgement storage, track physical-profile and Bananalys read-index storage, X-Labs interval repair state, external analysis lineage/evidence storage, external F1/F2 evidence integration, worker-v078 runtime, controlled legacy boundary, exact app version, health, login and private route checks passed.'
+          echo 'Required production schema through migration 0049, bounded live-normalization cost indexes, cleanup-session audit binding, cleanup-session storage and snapshot-observation lookup index, Settings alert acknowledgement storage, track physical-profile and Bananalys read-index storage, X-Labs interval repair state, external analysis lineage/evidence storage, external F1/F2 evidence integration, worker-v078 runtime, controlled legacy boundary, exact app version, health, login and private route checks passed.'

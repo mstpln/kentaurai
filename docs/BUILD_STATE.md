@@ -1,3 +1,11 @@
+## Settings Drift / Cloudflare usage-control candidate
+- Branch: `codex/settings-drift-usage-controls`, based on production main `f84a2c95e6e93d9989ad0207e6b53ec0248a010d`.
+- Settings is reorganized into **Drift / Data**. Drift contains the automatic-workflow master switch, Cloudflare account usage against included limits, current source/job health and recent activity. Data keeps database counts and the existing sanitized coverage report.
+- Migration `0049_automation_controls.sql` stores one durable `automatic_workflows` state. The active `worker-v078` scheduled entrypoint checks it before delegating any scheduled work; paused state exits immediately and a control-read failure fails closed. Manual app/admin actions remain available.
+- Cloudflare usage is read-only and account-wide so numerator and included-account limits refer to the same scope. D1 rows read/written use Cloudflare Analytics, D1 current storage sums account databases, R2 operations and Workers requests use account analytics, and billing metadata supplies the billing-cycle anchor plus exact billable metrics where available. Missing/ambiguous metrics are shown as unavailable rather than zero.
+- The runtime integration requires a least-privilege `CLOUDFLARE_USAGE_API_TOKEN` and runtime `KENTAURAI_CLOUDFLARE_ACCOUNT_ID`; neither is committed or exposed to the browser. Until configured, Drift explicitly reports that Cloudflare usage is not connected.
+- This candidate does not alter racing facts, analysis/model semantics, historical cursors or private source payloads. It is not production-live until reviewed, merged and released with explicit authorization.
+
 ## Cloudflare single-promotion-path hardening candidate
 - Branch: `fix/cloudflare-build-promotion-gate`.
 - Baseline before this candidate is production release #150 on main head `0b8024ff43343b9507c06ffdabe3f948a2a70e02`, with production schema verified through migration `0048_live_pending_cost_indexes.sql`.
@@ -110,7 +118,7 @@
 - The selected top-navigation design is the full-width segmented selector with shared border, subtle active background and warm accent underline.
 - The Statistik selector is restricted to those four workspace/list views and must not appear in Settings, Analys, Trend, Spel or entity/track detail views.
 - Analys uses the Phosphor **Magnifying Glass** icon and owns the existing external-AI workflow previously shown under the Settings AI tab.
-- Settings is data-only and has no redundant single Data tab.
+- The earlier single Data-only Settings layout is superseded by the current Drift/Data operational layout; Analys remains a separate primary workspace.
 - Spel uses the Phosphor **Currency Circle Dollar** icon.
 - Bottom navigation is rebalanced for four equal responsive items with a modest bar height and compact active state.
 - Entity lists, detail pages, statistics tabs, track pages, Spel tabs, search and all underlying data/API behavior remain unchanged.

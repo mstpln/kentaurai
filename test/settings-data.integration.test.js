@@ -41,7 +41,7 @@ async function sessionCookie(env) {
   return (await createAppSessionCookie(env)).split(';')[0];
 }
 
-test('settings routes are private and settings UI includes the six-step AI workflow', async () => {
+test('settings routes are private and UI includes Analys plus Drift/Data Settings', async () => {
   const { env } = createTestEnv();
   env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
 
@@ -68,9 +68,13 @@ test('settings routes are private and settings UI includes the six-step AI workf
   assert.match(html, /Registrera extern statistik & intervjuer/);
   assert.match(html, /Registrera system/);
   assert.match(html, /Hämta importunderlag/);
+  assert.match(html, /data-settings-mode="drift"/);
+  assert.match(html, /data-settings-mode="data"/);
+  assert.match(html, /Automatiska jobb/);
+  assert.match(html, /Cloudflare-användning/);
+  assert.match(html, /Jobbstatus/);
+  assert.match(html, /Senaste aktivitet/);
   assert.match(html, /Datamängd/);
-  assert.match(html, /Senaste körningar/);
-  assert.match(html, /Datakällor/);
 });
 
 test('settings status reports useful data counts, workflow output and source health', async () => {
