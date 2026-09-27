@@ -38,6 +38,35 @@ function insertOfficialHistorical(db, overrides = {}) {
   );
 }
 
+function insertOfficialDaily(db, overrides = {}) {
+  const row = {
+    id: 'official-daily',
+    start_date: '2099-09-20',
+    end_date: '2099-09-20',
+    next_date: '2099-09-20',
+    next_race_index: 1,
+    status: 'running',
+    processed_dates: 0,
+    processed_races: 3,
+    reused_races: 1,
+    consecutive_errors: 0,
+    last_error: null,
+    last_run_at: '2099-09-21T19:59:00Z',
+    lease_until: null,
+    ...overrides
+  };
+  db.prepare(`
+    INSERT INTO historical_backfill_jobs (
+      id,start_date,end_date,next_date,next_race_index,status,processed_dates,
+      processed_races,reused_races,consecutive_errors,last_error,last_run_at,lease_until
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    row.id,row.start_date,row.end_date,row.next_date,row.next_race_index,row.status,
+    row.processed_dates,row.processed_races,row.reused_races,row.consecutive_errors,
+    row.last_error,row.last_run_at,row.lease_until
+  );
+}
+
 function insertXlabsHistorical(db, overrides = {}) {
   const row = {
     id: 'xlabs-history',
@@ -161,6 +190,26 @@ test('intentionally paused official history does not raise a stale or retry aler
   assert.equal(official.processing.stale, false);
   assert.equal(official.issue, null);
   assert.equal(result.alerts.length, 0);
+});
+
+test('official daily retry error remains a red alert while long history stays paused', async () => {
+  const { env, db } = createTestEnv();
+  insertOfficialHistorical(db);
+  insertOfficialDaily(db, {
+    consecutive_errors: 1,
+    last_error: 'Synthetic daily official source failure',
+    lease_until: '2099-09-21T20:05:00Z'
+  });
+
+  const result = await getSettingsSourceHealth(env, { now: NOW });
+  const official = result.sources.find((source) => source.id === 'official');
+
+  assert.equal(official.status, 'error_retrying');
+  assert.equal(official.processing.status, 'paused');
+  assert.equal(official.processing.paused, true);
+  assert.equal(official.issue.label, 'Fel upptäckt · nytt försök pågår');
+  assert.match(official.issue.error, /daily official source failure/);
+  assert.equal(result.alerts.length, 1);
 });
 
 test('X-Labs daily retry error remains a red alert while historical work stays paused', async () => {
