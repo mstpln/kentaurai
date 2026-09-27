@@ -154,6 +154,7 @@ export async function selectPendingOfficialGameSource(env) {
     SELECT sr.id, sr.external_id, sr.fetched_at
     FROM source_records sr
     WHERE sr.source_type = 'official_provider'
+      AND sr.quality_status IN ('captured_unmapped','captured_source_gap')
       AND (
         sr.quality_status = 'captured_unmapped'
         OR (
