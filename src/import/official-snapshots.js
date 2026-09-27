@@ -472,16 +472,26 @@ export async function getOfficialHorseSnapshotsAsOf(env, horseIds, asOf) {
 
   for (const group of chunks(ids)) {
     const { results: profiles } = await env.DB.prepare(`
-      WITH ranked AS (
-        SELECT hps.*, COALESCE(oso.observed_at,hps.observed_at) AS effective_observed_at,
-          COALESCE(oso.source_record_id,hps.source_record_id) AS effective_source_record_id,
-          ROW_NUMBER() OVER (PARTITION BY hps.horse_id ORDER BY julianday(COALESCE(oso.observed_at,hps.observed_at)) DESC, hps.id DESC) AS rn
+      WITH base AS (
+        SELECT hps.*
         FROM horse_profile_snapshots hps
-        LEFT JOIN official_snapshot_observations oso ON oso.snapshot_family='horse_profile' AND oso.snapshot_id=hps.id
-        JOIN official_snapshot_source_sync os ON os.source_record_id = COALESCE(oso.source_record_id,hps.source_record_id) AND os.status = 'complete'
-        JOIN source_records sr ON sr.id = COALESCE(oso.source_record_id,hps.source_record_id)
         WHERE hps.horse_id IN (${placeholders(group)})
-          AND julianday(COALESCE(oso.observed_at,hps.observed_at)) <= julianday(?)
+      ), events AS (
+        SELECT base.*, base.observed_at AS effective_observed_at, base.source_record_id AS effective_source_record_id
+        FROM base
+        UNION ALL
+        SELECT base.*, oso.observed_at AS effective_observed_at, oso.source_record_id AS effective_source_record_id
+        FROM base
+        JOIN official_snapshot_observations oso
+          ON oso.snapshot_family='horse_profile' AND oso.snapshot_id=base.id
+        WHERE NOT (oso.source_record_id=base.source_record_id AND oso.observed_at=base.observed_at)
+      ), ranked AS (
+        SELECT events.*,
+          ROW_NUMBER() OVER (PARTITION BY events.horse_id ORDER BY julianday(events.effective_observed_at) DESC, events.id DESC) AS rn
+        FROM events
+        JOIN official_snapshot_source_sync os ON os.source_record_id=events.effective_source_record_id AND os.status='complete'
+        JOIN source_records sr ON sr.id=events.effective_source_record_id
+        WHERE julianday(events.effective_observed_at) <= julianday(?)
           AND julianday(sr.fetched_at) <= julianday(?)
       ) SELECT * FROM ranked WHERE rn = 1
     `).bind(...group, cutoff, cutoff).all();
@@ -494,16 +504,26 @@ export async function getOfficialHorseSnapshotsAsOf(env, horseIds, asOf) {
   const scope = `year:${year}`;
   for (const group of chunks(ids)) {
     const { results: stats } = await env.DB.prepare(`
-      WITH ranked AS (
-        SELECT hss.*, COALESCE(oso.observed_at,hss.observed_at) AS effective_observed_at,
-          COALESCE(oso.source_record_id,hss.source_record_id) AS effective_source_record_id,
-          ROW_NUMBER() OVER (PARTITION BY hss.horse_id, hss.snapshot_scope ORDER BY julianday(COALESCE(oso.observed_at,hss.observed_at)) DESC, hss.id DESC) AS rn
+      WITH base AS (
+        SELECT hss.*
         FROM horse_stat_snapshots hss
-        LEFT JOIN official_snapshot_observations oso ON oso.snapshot_family='horse_stat' AND oso.snapshot_id=hss.id
-        JOIN official_snapshot_source_sync os ON os.source_record_id = COALESCE(oso.source_record_id,hss.source_record_id) AND os.status = 'complete'
-        JOIN source_records sr ON sr.id = COALESCE(oso.source_record_id,hss.source_record_id)
         WHERE hss.horse_id IN (${placeholders(group)}) AND hss.snapshot_scope IN ('life', ?)
-          AND julianday(COALESCE(oso.observed_at,hss.observed_at)) <= julianday(?)
+      ), events AS (
+        SELECT base.*, base.observed_at AS effective_observed_at, base.source_record_id AS effective_source_record_id
+        FROM base
+        UNION ALL
+        SELECT base.*, oso.observed_at AS effective_observed_at, oso.source_record_id AS effective_source_record_id
+        FROM base
+        JOIN official_snapshot_observations oso
+          ON oso.snapshot_family='horse_stat' AND oso.snapshot_id=base.id
+        WHERE NOT (oso.source_record_id=base.source_record_id AND oso.observed_at=base.observed_at)
+      ), ranked AS (
+        SELECT events.*,
+          ROW_NUMBER() OVER (PARTITION BY events.horse_id,events.snapshot_scope ORDER BY julianday(events.effective_observed_at) DESC, events.id DESC) AS rn
+        FROM events
+        JOIN official_snapshot_source_sync os ON os.source_record_id=events.effective_source_record_id AND os.status='complete'
+        JOIN source_records sr ON sr.id=events.effective_source_record_id
+        WHERE julianday(events.effective_observed_at) <= julianday(?)
           AND julianday(sr.fetched_at) <= julianday(?)
       ) SELECT * FROM ranked WHERE rn = 1
     `).bind(...group, scope, cutoff, cutoff).all();
@@ -515,16 +535,26 @@ export async function getOfficialHorseSnapshotsAsOf(env, horseIds, asOf) {
 
   for (const group of chunks(ids)) {
     const { results: records } = await env.DB.prepare(`
-      WITH ranked AS (
-        SELECT hrs.*, COALESCE(oso.observed_at,hrs.observed_at) AS effective_observed_at,
-          COALESCE(oso.source_record_id,hrs.source_record_id) AS effective_source_record_id,
-          ROW_NUMBER() OVER (PARTITION BY hrs.horse_id ORDER BY julianday(COALESCE(oso.observed_at,hrs.observed_at)) DESC, hrs.id DESC) AS rn
+      WITH base AS (
+        SELECT hrs.*
         FROM horse_record_snapshots hrs
-        LEFT JOIN official_snapshot_observations oso ON oso.snapshot_family='horse_record' AND oso.snapshot_id=hrs.id
-        JOIN official_snapshot_source_sync os ON os.source_record_id = COALESCE(oso.source_record_id,hrs.source_record_id) AND os.status = 'complete'
-        JOIN source_records sr ON sr.id = COALESCE(oso.source_record_id,hrs.source_record_id)
-        WHERE hrs.horse_id IN (${placeholders(group)}) AND hrs.record_scope = 'current'
-          AND julianday(COALESCE(oso.observed_at,hrs.observed_at)) <= julianday(?)
+        WHERE hrs.horse_id IN (${placeholders(group)}) AND hrs.record_scope='current'
+      ), events AS (
+        SELECT base.*, base.observed_at AS effective_observed_at, base.source_record_id AS effective_source_record_id
+        FROM base
+        UNION ALL
+        SELECT base.*, oso.observed_at AS effective_observed_at, oso.source_record_id AS effective_source_record_id
+        FROM base
+        JOIN official_snapshot_observations oso
+          ON oso.snapshot_family='horse_record' AND oso.snapshot_id=base.id
+        WHERE NOT (oso.source_record_id=base.source_record_id AND oso.observed_at=base.observed_at)
+      ), ranked AS (
+        SELECT events.*,
+          ROW_NUMBER() OVER (PARTITION BY events.horse_id ORDER BY julianday(events.effective_observed_at) DESC, events.id DESC) AS rn
+        FROM events
+        JOIN official_snapshot_source_sync os ON os.source_record_id=events.effective_source_record_id AND os.status='complete'
+        JOIN source_records sr ON sr.id=events.effective_source_record_id
+        WHERE julianday(events.effective_observed_at) <= julianday(?)
           AND julianday(sr.fetched_at) <= julianday(?)
       ) SELECT * FROM ranked WHERE rn = 1
     `).bind(...group, cutoff, cutoff).all();
@@ -572,16 +602,26 @@ export async function getOfficialPersonAnnualSnapshotsAsOf(env, personType, pers
   const out = new Map(ids.map((id) => [id, null]));
   for (const group of chunks(ids)) {
     const { results } = await env.DB.prepare(`
-      WITH ranked AS (
-        SELECT pss.*, COALESCE(oso.observed_at,pss.observed_at) AS effective_observed_at,
-          COALESCE(oso.source_record_id,pss.source_record_id) AS effective_source_record_id,
-          ROW_NUMBER() OVER (PARTITION BY pss.person_id ORDER BY julianday(COALESCE(oso.observed_at,pss.observed_at)) DESC, pss.id DESC) AS rn
+      WITH base AS (
+        SELECT pss.*
         FROM person_stat_snapshots pss
-        LEFT JOIN official_snapshot_observations oso ON oso.snapshot_family='person_stat' AND oso.snapshot_id=pss.id
-        JOIN official_snapshot_source_sync os ON os.source_record_id = COALESCE(oso.source_record_id,pss.source_record_id) AND os.status = 'complete'
-        JOIN source_records sr ON sr.id = COALESCE(oso.source_record_id,pss.source_record_id)
-        WHERE pss.person_type = ? AND pss.person_id IN (${placeholders(group)}) AND pss.stat_year = ?
-          AND julianday(COALESCE(oso.observed_at,pss.observed_at)) <= julianday(?)
+        WHERE pss.person_type=? AND pss.person_id IN (${placeholders(group)}) AND pss.stat_year=?
+      ), events AS (
+        SELECT base.*, base.observed_at AS effective_observed_at, base.source_record_id AS effective_source_record_id
+        FROM base
+        UNION ALL
+        SELECT base.*, oso.observed_at AS effective_observed_at, oso.source_record_id AS effective_source_record_id
+        FROM base
+        JOIN official_snapshot_observations oso
+          ON oso.snapshot_family='person_stat' AND oso.snapshot_id=base.id
+        WHERE NOT (oso.source_record_id=base.source_record_id AND oso.observed_at=base.observed_at)
+      ), ranked AS (
+        SELECT events.*,
+          ROW_NUMBER() OVER (PARTITION BY events.person_id ORDER BY julianday(events.effective_observed_at) DESC, events.id DESC) AS rn
+        FROM events
+        JOIN official_snapshot_source_sync os ON os.source_record_id=events.effective_source_record_id AND os.status='complete'
+        JOIN source_records sr ON sr.id=events.effective_source_record_id
+        WHERE julianday(events.effective_observed_at) <= julianday(?)
           AND julianday(sr.fetched_at) <= julianday(?)
       ) SELECT * FROM ranked WHERE rn = 1
     `).bind(personType, ...group, year, cutoff, cutoff).all();
