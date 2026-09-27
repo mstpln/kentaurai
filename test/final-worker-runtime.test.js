@@ -35,7 +35,7 @@ async function authenticatedAppHtml() {
   return response.text();
 }
 
-test('F4 actual Wrangler worker runs the canonical external-analysis Analys workspace and data-only Settings', async () => {
+test('F4 actual Wrangler worker runs canonical Analys plus Drift/Data Settings', async () => {
   const html = await authenticatedAppHtml();
   const script = extractScript(html, 'kentaurai-settings-script');
 
@@ -68,7 +68,7 @@ test('F4 actual Wrangler worker runs the canonical external-analysis Analys work
 
   const context = vm.createContext({
     app,
-    state: { page: 'start', settingsTab: 'data', settingsOpen: false, detail: null, gameDetail: null, gameSystemId: null },
+    state: { page: 'start', settingsTab: 'drift', settingsOpen: false, detail: null, gameDetail: null, gameSystemId: null },
     document: {
       getElementById(id) { return elements.get(id) || null; },
       querySelectorAll() { return []; },
@@ -80,13 +80,32 @@ test('F4 actual Wrangler worker runs the canonical external-analysis Analys work
     navigator: { clipboard: { async writeText(value) { copied.push(value); } } },
     fetch: async (url) => {
       requested.push(String(url));
+      if (String(url) === '/app/api/settings/cloudflare-usage') {
+        return {
+          ok: true,
+          async json() { return { configured:false, reason:'missing_usage_token' }; }
+        };
+      }
+      if (String(url) === '/app/api/settings/alerts') {
+        return {
+          ok: true,
+          async json() { return { hasUnacknowledged:false }; }
+        };
+      }
+      if (String(url) === '/app/api/settings/alerts/acknowledge') {
+        return {
+          ok: true,
+          async json() { return { acknowledgedCount:0 }; }
+        };
+      }
       return {
         ok: true,
         async json() { return { prompt: `synthetic prompt for ${url}` }; }
       };
     },
     api: async (path) => {
-      if (path === '/settings/status') return { appVersion: '0.6.0' };
+      if (path === '/settings/status') return { appVersion: '0.6.0', counts:{}, recentRuns:[], sources:[] };
+      if (path === '/settings/automation') return { enabled:true, nextRunAt:'2099-09-28T05:15:00.000Z', cron:'15 5 * * *' };
       if (path.startsWith('/settings/external-rounds?scope=')) {
         return { rounds: [{ id: 'synthetic-round', gameType: 'V85', roundDate: '2099-09-20', hasRecordedSystem: false }] };
       }
@@ -109,9 +128,12 @@ test('F4 actual Wrangler worker runs the canonical external-analysis Analys work
   elements.get('settingsButton').onclick();
   await new Promise((resolve) => setImmediate(resolve));
   assert.match(app.innerHTML, /Inställningar/);
-  assert.match(app.innerHTML, /Hantera data och uppdateringar/);
+  assert.match(app.innerHTML, /Hantera system, kostnad och data/);
+  assert.match(app.innerHTML, /Drift/);
+  assert.match(app.innerHTML, /Cloudflare-användning/);
+  assert.match(app.innerHTML, /Automatiska jobb/);
   assert.doesNotMatch(app.innerHTML, /Analysera omgång/);
-  assert.equal(context.state.settingsTab, 'data');
+  assert.equal(context.state.settingsTab, 'drift');
 
   assert.equal(typeof context.window.__kentauraiAnalysis?.render, 'function');
   context.window.__kentauraiAnalysis.render();
