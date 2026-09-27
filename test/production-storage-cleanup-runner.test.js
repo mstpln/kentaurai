@@ -26,10 +26,28 @@ test('execute runner continues beyond 250 batches and checkpoints one source-bou
   );
   let snapshotPlans = 0;
   let startCalls = 0;
+  let auditCalls = 0;
 
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://127.0.0.1');
+      if (req.method === 'GET' && url.pathname === '/v1/storage-cleanup/audit') {
+        auditCalls += 1;
+        json(res, {
+          ok: true,
+          families: ['horse_profile','horse_stat','horse_record','person_stat'].map((family) => ({
+            family,
+            mismatchedSources: 0,
+            missingRepresentations: 0,
+            excessRepresentations: 0,
+            danglingObservations: 0,
+            identityMismatchObservations: 0,
+            ok: true
+          })),
+          safetyStop: false
+        });
+        return;
+      }
       if (req.method === 'POST' && url.pathname === '/v1/storage-cleanup/session/start') {
         const body = await readBody(req);
         startCalls += 1;
@@ -133,6 +151,7 @@ test('execute runner continues beyond 250 batches and checkpoints one source-bou
   await once(server, 'close');
 
   assert.equal(code, 0, stderr);
+  assert.equal(auditCalls, 1);
   assert.equal(startCalls, 1);
   assert.ok(snapshotPlans > 250, `expected >250 snapshot plans, saw ${snapshotPlans}`);
   assert.ok([...targets.values()].every((target) => target.complete));
