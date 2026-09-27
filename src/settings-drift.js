@@ -3,7 +3,10 @@ const AUTOMATION_KEY = 'automatic_workflows_enabled';
 export const CLOUDFLARE_USAGE_LIMITS = Object.freeze({
   d1RowsRead: 25_000_000_000,
   d1RowsWritten: 50_000_000,
-  d1StorageBytes: 5_000_000_000
+  d1StorageBytes: 5_000_000_000,
+  r2StorageGbMonths: 10,
+  r2ClassAOperations: 1_000_000,
+  r2ClassBOperations: 10_000_000
 });
 
 function nowIso(now = new Date()) {
@@ -167,6 +170,64 @@ function currentD1Storage(groups) {
   return [...latestByDatabase.values()].reduce((sum, item) => sum + item.value, 0);
 }
 
+function classifyBillingRecord(record) {
+  const family = String(record?.ServiceFamilyName || record?.x_ProductFamilyName || '').toLowerCase();
+  const service = String(record?.ServiceName || record?.x_BillableMetricName || '').toLowerCase();
+  const description = String(record?.ChargeDescription || '').toLowerCase();
+  const metricId = String(record?.x_BillableMetricId || '').toLowerCase();
+  const combined = [family, service, description, metricId].filter(Boolean).join(' ');
+  if (combined.includes('d1')) {
+    if (/rows?\s*(read|reads)|read\s*rows?/.test(combined)) return 'd1_rows_read';
+    if (/rows?\s*(written|write|writes)|written\s*rows?|write\s*rows?/.test(combined)) return 'd1_rows_written';
+    if (/storage|gb[- ]?months?|database\s*storage/.test(combined)) return 'd1_storage';
+  }
+  if (combined.includes('r2')) {
+    if (/class\s*a|class[_ -]?a/.test(combined)) return 'r2_class_a';
+    if (/class\s*b|class[_ -]?b/.test(combined)) return 'r2_class_b';
+    if (/storage/.test(combined) && !/infrequent|retrieval|catalog|sql/.test(combined)) return 'r2_storage';
+  }
+  return null;
+}
+
+function aggregateBillingMetrics(records) {
+  const totals = new Map();
+  for (const record of records || []) {
+    const id = classifyBillingRecord(record);
+    if (!id) continue;
+    const cost = record?.BilledCost;
+    const currency = String(record?.BillingCurrency || '').trim().toUpperCase();
+    const quantity = record?.ConsumedQuantity;
+    const unit = String(record?.ConsumedUnit || '').trim();
+    if (typeof cost !== 'number' || !Number.isFinite(cost) || cost < 0 || !currency) continue;
+    if (typeof quantity !== 'number' || !Number.isFinite(quantity) || quantity < 0 || !unit) continue;
+    const existing = totals.get(id);
+    if (existing && (existing.currency !== currency || existing.unit !== unit)) {
+      totals.set(id, { available:false, amount:null, currency:null, quantity:null, unit:null });
+      continue;
+    }
+    if (existing?.available === false) continue;
+    totals.set(id, {
+      available:true,
+      amount:(existing?.amount || 0) + cost,
+      currency,
+      quantity:(existing?.quantity || 0) + quantity,
+      unit
+    });
+  }
+  return totals;
+}
+
+async function billingMetrics(env, fetchImpl, cycle, now) {
+  const accountId = String(env.CLOUDFLARE_ACCOUNT_ID || '').trim();
+  const token = String(env.CLOUDFLARE_USAGE_API_TOKEN || '').trim();
+  const url = new URL(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/billable-usage`);
+  url.searchParams.set('from', dateKey(cycle.start));
+  url.searchParams.set('to', dateKey(now));
+  const data = await cloudflareJson(fetchImpl, url.toString(), token);
+  if (!Array.isArray(data?.result)) throw new Error('Cloudflare billable usage records are unavailable');
+  return aggregateBillingMetrics(data.result);
+}
+
 async function d1Usage(env, fetchImpl, cycle, now) {
   const accountId = String(env.CLOUDFLARE_ACCOUNT_ID || '').trim();
   const token = String(env.CLOUDFLARE_USAGE_API_TOKEN || '').trim();
@@ -197,7 +258,7 @@ async function d1Usage(env, fetchImpl, cycle, now) {
   };
 }
 
-function usageMetric(id, label, used, limit, unit, rule) {
+function usageMetric(id, label, used, limit, unit, rule, billingCost = null) {
   const numeric = verifiedNonNegativeNumber(used, id);
   return {
     id,
@@ -207,7 +268,9 @@ function usageMetric(id, label, used, limit, unit, rule) {
     unit,
     percent: limit > 0 ? (numeric / limit) * 100 : null,
     overLimit: limit > 0 ? numeric > limit : false,
-    rule
+    rule,
+    billingCost: billingCost?.available === true ? billingCost.amount : null,
+    billingCurrency: billingCost?.available === true ? billingCost.currency : null
   };
 }
 
@@ -227,20 +290,44 @@ export async function getCloudflareUsage(env, options = {}) {
   try {
     const cycle = await billingCycle(env, fetchImpl, now);
     const d1 = await d1Usage(env, fetchImpl, cycle, now);
+    let billingByMetric = new Map();
+    let billingCostAvailable = true;
+    try {
+      billingByMetric = await billingMetrics(env, fetchImpl, cycle, now);
+    } catch {
+      billingCostAvailable = false;
+    }
+    const metrics = [
+      usageMetric('d1_rows_read', 'D1 · Rows read', d1.rowsRead, CLOUDFLARE_USAGE_LIMITS.d1RowsRead, 'rows',
+        '25 miljarder ingår per billingperiod. Därefter debiteras överförbrukning.', billingByMetric.get('d1_rows_read')),
+      usageMetric('d1_rows_written', 'D1 · Rows written', d1.rowsWritten, CLOUDFLARE_USAGE_LIMITS.d1RowsWritten, 'rows',
+        '50 miljoner ingår per billingperiod.', billingByMetric.get('d1_rows_written')),
+      usageMetric('d1_storage', 'D1 · Lagring', d1.storageBytes, CLOUDFLARE_USAGE_LIMITS.d1StorageBytes, 'bytes',
+        '5 GB ingår. Lagring över den inkluderade nivån debiteras.', billingByMetric.get('d1_storage'))
+    ];
+    const r2Storage = billingByMetric.get('r2_storage');
+    const r2ClassA = billingByMetric.get('r2_class_a');
+    const r2ClassB = billingByMetric.get('r2_class_b');
+    if (r2Storage?.available === true && /gb[- ]?months?/i.test(r2Storage.unit)) {
+      metrics.push(usageMetric('r2_storage', 'R2 · Lagring', r2Storage.quantity, CLOUDFLARE_USAGE_LIMITS.r2StorageGbMonths, 'gb_months',
+        '10 GB-månad ingår för Standard storage.', r2Storage));
+    }
+    if (r2ClassA?.available === true) {
+      metrics.push(usageMetric('r2_class_a', 'R2 · Class A', r2ClassA.quantity, CLOUDFLARE_USAGE_LIMITS.r2ClassAOperations, 'requests',
+        '1 miljon Class A-operationer ingår per månad.', r2ClassA));
+    }
+    if (r2ClassB?.available === true) {
+      metrics.push(usageMetric('r2_class_b', 'R2 · Class B', r2ClassB.quantity, CLOUDFLARE_USAGE_LIMITS.r2ClassBOperations, 'requests',
+        '10 miljoner Class B-operationer ingår per månad.', r2ClassB));
+    }
     return {
       configured: true,
       fetchedAt: nowIso(now),
       billingPeriod: cycle,
-      metrics: [
-        usageMetric('d1_rows_read', 'D1 · Rows read', d1.rowsRead, CLOUDFLARE_USAGE_LIMITS.d1RowsRead, 'rows',
-          '25 miljarder ingår per billingperiod. Därefter debiteras överförbrukning.'),
-        usageMetric('d1_rows_written', 'D1 · Rows written', d1.rowsWritten, CLOUDFLARE_USAGE_LIMITS.d1RowsWritten, 'rows',
-          '50 miljoner ingår per billingperiod.'),
-        usageMetric('d1_storage', 'D1 · Lagring', d1.storageBytes, CLOUDFLARE_USAGE_LIMITS.d1StorageBytes, 'bytes',
-          '5 GB ingår. Lagring över den inkluderade nivån debiteras.')
-      ],
+      metrics,
       additional: {
-        r2AndWorkers: 'planned_from_cloudflare_billing_usage'
+        billingCostAvailable,
+        r2Available: Boolean(r2Storage?.available || r2ClassA?.available || r2ClassB?.available)
       }
     };
   } catch (error) {

@@ -112,6 +112,21 @@ test('Cloudflare usage uses verified API values and never starts from zero estim
         }
       }), { status:200, headers:{ 'content-type':'application/json' } });
     }
+    if (String(url).includes('/billable-usage?')) {
+      const parsed = new URL(String(url));
+      assert.equal(parsed.searchParams.get('from'), '2026-09-12');
+      assert.equal(parsed.searchParams.get('to'), '2026-09-27');
+      return new Response(JSON.stringify({
+        success:true,
+        result:[
+          { ServiceFamilyName:'D1', ServiceName:'D1 Rows Read', BilledCost:1.25, BillingCurrency:'USD', ConsumedQuantity:20_000_000_000, ConsumedUnit:'Count' },
+          { ServiceFamilyName:'D1', ServiceName:'D1 Rows Read', BilledCost:0.50, BillingCurrency:'USD', ConsumedQuantity:7_000_000_000, ConsumedUnit:'Count' },
+          { ServiceFamilyName:'D1', ServiceName:'D1 Rows Written', BilledCost:0, BillingCurrency:'USD', ConsumedQuantity:1_000_000, ConsumedUnit:'Count' },
+          { ServiceFamilyName:'D1', ServiceName:'D1 Storage', BilledCost:0.75, BillingCurrency:'USD', ConsumedQuantity:4.7, ConsumedUnit:'GB-months' },
+          { ServiceFamilyName:'Workers', ServiceName:'Workers Standard Requests', BilledCost:9.99, BillingCurrency:'USD' }
+        ]
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
     throw new Error('unexpected Cloudflare URL '+url);
   };
 
@@ -123,14 +138,99 @@ test('Cloudflare usage uses verified API values and never starts from zero estim
   const storage = usage.metrics.find((item) => item.id === 'd1_storage');
   assert.equal(reads.used, 27_000_000_000);
   assert.equal(reads.overLimit, true);
+  assert.equal(reads.billingCost, 1.75);
+  assert.equal(reads.billingCurrency, 'USD');
   assert.equal(writes.used, 1_000_000);
   assert.equal(writes.overLimit, false);
+  assert.equal(writes.billingCost, 0);
+  assert.equal(writes.billingCurrency, 'USD');
   assert.equal(storage.used, 4_700_000_000);
   assert.equal(storage.overLimit, false);
-  assert.equal(calls.length, 2);
+  assert.equal(storage.billingCost, 0.75);
+  assert.equal(storage.billingCurrency, 'USD');
+  assert.equal(usage.additional.billingCostAvailable, true);
+  assert.equal(calls.length, 3);
 });
 
 
+
+test('Cloudflare usage adds R2 storage and operation progress with matching billed cost', async () => {
+  const { env } = createTestEnv();
+  env.CLOUDFLARE_ACCOUNT_ID = 'account-synthetic';
+  env.CLOUDFLARE_USAGE_API_TOKEN = 'usage-token-synthetic';
+  const fetchImpl = async (url, options = {}) => {
+    if (String(url).endsWith('/billable-usage/info')) {
+      return new Response(JSON.stringify({
+        success:true,
+        result:{ subscriptions:[{ id:'a', billing_cycle_anchor_timestamp:'2026-09-12T00:00:00Z', start_timestamp:'2026-09-12T00:00:00Z' }] }
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    if (String(url).endsWith('/graphql')) {
+      return new Response(JSON.stringify({
+        data:{ viewer:{ accounts:[{
+          d1AnalyticsAdaptiveGroups:[{ sum:{ rowsRead:10, rowsWritten:2 } }],
+          d1StorageAdaptiveGroups:[{ dimensions:{ date:'2026-09-27', databaseId:'db-a' }, max:{ databaseSizeBytes:100 } }]
+        }] } }
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    if (String(url).includes('/billable-usage?')) {
+      return new Response(JSON.stringify({
+        success:true,
+        result:[
+          { ServiceFamilyName:'R2', ServiceName:'R2 Data Storage', BilledCost:0.12, BillingCurrency:'USD', ConsumedQuantity:2.02, ConsumedUnit:'GB-months' },
+          { ServiceFamilyName:'R2', ServiceName:'R2 Storage Class A Operations', BilledCost:0.03, BillingCurrency:'USD', ConsumedQuantity:1500, ConsumedUnit:'Count' },
+          { ServiceFamilyName:'R2', ServiceName:'R2 Storage Class B Operations', BilledCost:0.01, BillingCurrency:'USD', ConsumedQuantity:5400, ConsumedUnit:'Count' }
+        ]
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    throw new Error('unexpected URL');
+  };
+  const usage = await getCloudflareUsage(env, { fetchImpl, now:'2026-09-27T18:00:00Z' });
+  assert.equal(usage.additional.r2Available, true);
+  const storage = usage.metrics.find((item) => item.id === 'r2_storage');
+  const classA = usage.metrics.find((item) => item.id === 'r2_class_a');
+  const classB = usage.metrics.find((item) => item.id === 'r2_class_b');
+  assert.equal(storage.used, 2.02);
+  assert.equal(storage.limit, 10);
+  assert.equal(storage.billingCost, 0.12);
+  assert.equal(classA.used, 1500);
+  assert.equal(classA.limit, 1_000_000);
+  assert.equal(classA.billingCost, 0.03);
+  assert.equal(classB.used, 5400);
+  assert.equal(classB.limit, 10_000_000);
+  assert.equal(classB.billingCost, 0.01);
+});
+
+test('Cloudflare usage keeps verified progress visible when per-metric billing cost cannot be read', async () => {
+  const { env } = createTestEnv();
+  env.CLOUDFLARE_ACCOUNT_ID = 'account-synthetic';
+  env.CLOUDFLARE_USAGE_API_TOKEN = 'usage-token-synthetic';
+  const fetchImpl = async (url) => {
+    if (String(url).endsWith('/billable-usage/info')) {
+      return new Response(JSON.stringify({
+        success:true,
+        result:{ subscriptions:[{ id:'a', billing_cycle_anchor_timestamp:'2026-09-12T00:00:00Z', start_timestamp:'2026-09-12T00:00:00Z' }] }
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    if (String(url).endsWith('/graphql')) {
+      return new Response(JSON.stringify({
+        data:{ viewer:{ accounts:[{
+          d1AnalyticsAdaptiveGroups:[{ sum:{ rowsRead:10, rowsWritten:2 } }],
+          d1StorageAdaptiveGroups:[{ dimensions:{ date:'2026-09-27', databaseId:'db-a' }, max:{ databaseSizeBytes:100 } }]
+        }] } }
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    if (String(url).includes('/billable-usage?')) {
+      return new Response(JSON.stringify({ success:false, errors:[{ message:'billing temporarily unavailable' }] }), { status:503, headers:{ 'content-type':'application/json' } });
+    }
+    throw new Error('unexpected URL');
+  };
+  const usage = await getCloudflareUsage(env, { fetchImpl, now:'2026-09-27T18:00:00Z' });
+  assert.equal(usage.configured, true);
+  assert.equal(usage.additional.billingCostAvailable, false);
+  assert.equal(usage.metrics.find((item) => item.id === 'd1_rows_read').used, 10);
+  assert.equal(usage.metrics.find((item) => item.id === 'd1_rows_read').billingCost, null);
+});
 
 test('Cloudflare usage does not turn missing analytics datasets into zero usage', async () => {
   const { env } = createTestEnv();
@@ -261,6 +361,19 @@ test('scheduled orchestrator rechecks persisted automation control before every 
   assert.match(source, /async function nonCritical\(name, action\) \{\s*if \(!\(await automationAllowed\(name\)\)\) return;/);
   assert.match(source, /automationStopReason = 'automatic_workflows_paused'/);
   assert.match(source, /automationStopReason = 'automation_control_unavailable'/);
+});
+
+test('usage UI renders verified per-metric cost in the right-aligned card header', () => {
+  const source = readFileSync(new URL('../src/settings-drift-ui.js', import.meta.url), 'utf8');
+  assert.match(source, /settings-usage-cost/);
+  assert.match(source, /fmtBillingCost\(m\)/);
+  assert.match(source, /billingCost/);
+  assert.match(source, /billingCurrency/);
+  assert.match(source, /settings-usage-meta/);
+  const backend = readFileSync(new URL('../src/settings-drift.js', import.meta.url), 'utf8');
+  assert.match(backend, /R2 · Lagring/);
+  assert.match(backend, /R2 · Class A/);
+  assert.match(backend, /R2 · Class B/);
 });
 
 test('billing period UI renders the exclusive cycle end as the previous inclusive date', () => {
