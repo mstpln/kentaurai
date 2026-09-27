@@ -1,10 +1,6 @@
 const API_ROOT = 'https://api.cloudflare.com/client/v4';
 const GRAPHQL_URL = `${API_ROOT}/graphql`;
 
-const D1_DATABASE_ID = 'd8189e0e-6127-4ef2-88cc-534cb2217340';
-const R2_BUCKET_NAME = 'kentaurai-raw';
-const WORKER_SCRIPT_NAME = 'kentaurai-api';
-
 export const CLOUDFLARE_INCLUDED_USAGE = Object.freeze({
   d1RowsRead: 25_000_000_000,
   d1RowsWritten: 50_000_000,
@@ -83,17 +79,14 @@ export function currentBillingPeriod(anchorValue, nowValue = new Date()) {
 function activeBillingAnchor(info, now) {
   const subscriptions = info?.result?.subscriptions || [];
   const nowMs = now.getTime();
-  const active = subscriptions.filter((item) => {
+  const anchors = [...new Set(subscriptions.filter((item) => {
     const start = Date.parse(item.start_timestamp || item.billing_cycle_anchor_timestamp || '');
     const end = item.end_timestamp ? Date.parse(item.end_timestamp) : Infinity;
     return Number.isFinite(start) && start <= nowMs && end > nowMs;
-  });
-  if (active.length !== 1) {
-    throw new Error(active.length ? 'multiple active Cloudflare usage subscriptions' : 'no active Cloudflare usage subscription');
-  }
-  const anchor = active[0].billing_cycle_anchor_timestamp;
-  if (!anchor) throw new Error('Cloudflare billing cycle anchor is unavailable');
-  return anchor;
+  }).map((item) => item.billing_cycle_anchor_timestamp).filter(Boolean))];
+  if (!anchors.length) throw new Error('no active Cloudflare usage subscription with billing cycle anchor');
+  if (anchors.length > 1) throw new Error('Cloudflare active subscriptions have different billing cycle anchors');
+  return anchors[0];
 }
 
 function dayString(iso) {
@@ -215,8 +208,6 @@ query KentaurAICloudflareUsage(
   $endDate: Date
   $startTime: Time
   $endTime: Time
-  $bucketName: string
-  $scriptName: string
 ) {
   viewer {
     accounts(filter: { accountTag: $accountTag }) {
@@ -231,28 +222,14 @@ query KentaurAICloudflareUsage(
         filter: {
           datetime_geq: $startTime
           datetime_leq: $endTime
-          bucketName: $bucketName
         }
       ) {
         sum { requests }
         dimensions { actionType }
       }
-      r2StorageAdaptiveGroups(
-        limit: 1
-        filter: {
-          datetime_geq: $startTime
-          datetime_leq: $endTime
-          bucketName: $bucketName
-        }
-        orderBy: [datetime_DESC]
-      ) {
-        max { payloadSize metadataSize objectCount }
-        dimensions { datetime }
-      }
       workersInvocationsAdaptive(
         limit: 1
         filter: {
-          scriptName: $scriptName
           datetime_geq: $startTime
           datetime_leq: $endTime
         }
@@ -263,6 +240,26 @@ query KentaurAICloudflareUsage(
   }
 }
 `;
+
+async function allD1DatabaseBytes(fetchImpl, accountId, token) {
+  let page = 1;
+  let total = 0;
+  for (;;) {
+    const body = await cloudflareGet(
+      fetchImpl,
+      `${API_ROOT}/accounts/${encodeURIComponent(accountId)}/d1/database?page=${page}&per_page=100`,
+      token,
+      'Cloudflare D1 database list'
+    );
+    const databases = body?.result || [];
+    total += databases.reduce((sum, database) => sum + numberOrZero(database?.file_size), 0);
+    const totalPages = Number(body?.result_info?.total_pages || 1);
+    if (!Number.isFinite(totalPages) || page >= totalPages || !databases.length) break;
+    page += 1;
+    if (page > 100) throw new Error('Cloudflare D1 database list exceeded pagination safety limit');
+  }
+  return total;
+}
 
 export async function getCloudflareUsageOverview(env, options = {}) {
   const token = String(env?.CLOUDFLARE_USAGE_API_TOKEN || '').trim();
@@ -288,22 +285,15 @@ export async function getCloudflareUsageOverview(env, options = {}) {
   const endInclusive = endInclusiveIso(period.end);
   const usageTo = now.getTime() < Date.parse(period.end) ? now.toISOString() : endInclusive;
 
-  const [analytics, d1Details, billable] = await Promise.all([
+  const [analytics, d1StorageBytes, billable] = await Promise.all([
     cloudflareGraphql(fetchImpl, token, ANALYTICS_QUERY, {
       accountTag: accountId,
       startDate: dayString(period.start),
       endDate: dayString(usageTo),
       startTime: period.start,
-      endTime: usageTo,
-      bucketName: R2_BUCKET_NAME,
-      scriptName: WORKER_SCRIPT_NAME
+      endTime: usageTo
     }),
-    cloudflareGet(
-      fetchImpl,
-      `${API_ROOT}/accounts/${encodeURIComponent(accountId)}/d1/database/${D1_DATABASE_ID}?fields=file_size,name,uuid`,
-      token,
-      'Cloudflare D1 database details'
-    ),
+    allD1DatabaseBytes(fetchImpl, accountId, token),
     cloudflareGet(
       fetchImpl,
       `${API_ROOT}/accounts/${encodeURIComponent(accountId)}/billable-usage?from=${encodeURIComponent(dayString(period.start))}&to=${encodeURIComponent(dayString(usageTo))}`,
@@ -317,14 +307,11 @@ export async function getCloudflareUsageOverview(env, options = {}) {
 
   const d1 = account.d1AnalyticsAdaptiveGroups?.[0]?.sum || {};
   const r2Ops = aggregateR2Operations(account.r2OperationsAdaptiveGroups || []);
-  const r2Storage = account.r2StorageAdaptiveGroups?.[0] || null;
   const workers = account.workersInvocationsAdaptive?.[0]?.sum || {};
   const billingRows = billable?.result || [];
   const workersCpuMs = findWorkersCpuMs(billingRows);
   const r2StorageGbMonth = findR2StorageGbMonth(billingRows);
   const cost = billingCost(billingRows);
-  const d1StorageBytes = numberOrZero(d1Details?.result?.file_size);
-  const currentR2Bytes = numberOrZero(r2Storage?.max?.payloadSize) + numberOrZero(r2Storage?.max?.metadataSize);
 
   return {
     configured: true,
@@ -336,7 +323,7 @@ export async function getCloudflareUsageOverview(env, options = {}) {
       rowsWritten: progress(d1.rowsWritten, CLOUDFLARE_INCLUDED_USAGE.d1RowsWritten),
       storage: {
         ...progress(d1StorageBytes, CLOUDFLARE_INCLUDED_USAGE.d1StorageBytes),
-        scope: 'kentaurai_database',
+        scope: 'cloudflare_account',
         accountIncludedLimit: true
       }
     },
@@ -346,17 +333,14 @@ export async function getCloudflareUsageOverview(env, options = {}) {
       freeOperations: r2Ops.free,
       unclassifiedOperations: r2Ops.other,
       storage: r2StorageGbMonth == null ? {
-        value: currentR2Bytes,
-        unit: 'bytes_current',
+        value: null,
         included: CLOUDFLARE_INCLUDED_USAGE.r2StorageGbMonth,
-        exactBillingProgress: false,
-        objectCount: numberOrZero(r2Storage?.max?.objectCount)
+        unit: 'gb_month',
+        exactBillingProgress: false
       } : {
         ...progress(r2StorageGbMonth, CLOUDFLARE_INCLUDED_USAGE.r2StorageGbMonth),
         unit: 'gb_month',
-        exactBillingProgress: true,
-        currentBytes: currentR2Bytes,
-        objectCount: numberOrZero(r2Storage?.max?.objectCount)
+        exactBillingProgress: true
       }
     },
     workers: {
