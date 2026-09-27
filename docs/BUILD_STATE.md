@@ -1,3 +1,19 @@
+## Broad cost/storage QA follow-up
+- The cleanup runner now records cumulative D1 rows read/written across its API requests and stops without automatic continuation at 1,000,000 reads or 100,000 writes in one run; this prevents a pathologically expensive scan from being repeated by run-until-complete chaining.
+- Automatic live normalization is restricted to the recent three-day recovery window and migration `0048_live_pending_cost_indexes.sql` adds narrow pending-game and failed-normalization indexes so old captured history is not scanned during the morning loop.
+- Cleanup workflow now refuses to run unless checked-out `main` exactly matches the latest successful production-release SHA, preventing a newer runner from controlling an older deployed Worker.
+- Integrity preflight also fails on unfinished `started` cleanup batches or raw rewrites that reached zero legacy D1 references without a verified legacy-object deletion, covering interruption/crash residue before another destructive session.
+- Cost observation of D1 `.first()` reads is bounded to one-row metadata-returning SQL instead of expanding point reads into full-result scans.
+- Settings evaluates the three most recent automatic daily jobs per source, so a newer healthy day cannot hide an older failure still inside the bounded catch-up window.
+- Branch: `fix/storage-cleanup-legacy-provenance` / PR #284.
+- The production cleanup execute run started during review was cancelled before completion; no automatic continuation was queued, the temporary cleanup credential was removed and the post-cancel Worker health check passed.
+- Deep review found that legacy duplicate snapshot rows created before `official_snapshot_observations` could lose source/as-of provenance when deleted. Cleanup now materializes the missing observation on the retained change-point before deletion and marks duplicate observations as `factual_changed=0`.
+- As-of readers now treat the original snapshot row as a base observation even after later identical source observations reuse it, so a later observation cannot erase the earlier historical state for an earlier cutoff.
+- Migration `0046_snapshot_observation_lookup_index.sql` adds the missing `(snapshot_family,snapshot_id,...)` access path used by snapshot reads and cleanup rewrites. Migration `0047_storage_cleanup_session_audits.sql` binds a successful provenance audit to the exact cleanup session/source SHA so continuations cannot bypass a preflight they never passed.
+- D1 cost instrumentation now measures `.first()` reads through a metadata-returning equivalent instead of silently treating those reads as zero.
+- New dry-runs perform a sanitized provenance-integrity audit before scanning. New execute sessions start first, then must persist a successful audit bound to that exact session/source SHA before any plan/execute request; verified continuations reuse only that persisted audit. Missing/dangling/mismatched representation fails closed.
+- Do not resume the cancelled production cleanup session. A later cleanup must start as a new manually authorized operation only after this follow-up is reviewed, merged, released and the integrity preflight passes.
+
 ## Scoped production cleanup session safety follow-up
 - Branch: `fix/storage-cleanup-session-safety`.
 - The run-until-complete workflow now stores progress inside an explicit cleanup session rather than permanent per-target global state.
@@ -100,10 +116,10 @@ Updated: 2026-09-27
 - Worker: `kentaurai-api`.
 - D1: `kentaurai`.
 - R2: `kentaurai-raw`.
-- Current deployed main head is `98a964d53d6632af17fc2dceec2a30a683b45be5`.
+- Current deployed baseline before this QA follow-up is production release #149 on main head `2575bdf3cf8351ba9b25b270eca98a4e5f6704cd`.
 - Worker entrypoint is `src/worker-v078.js` with `ANALYSIS_WORKFLOW_MODE=v3`; the default mode serves the external-AI workflow while historical sealed-v3 artifacts remain read-compatible.
 - The latest production release completed successfully with full QA, Cloudflare validation, migration/schema/index verification, Worker deploy, `/health`, `/app/login` and private analysis/evidence route protection.
-- Production schema is current through migration `0041_statistics_data_backfill_state_v2.sql`.
+- The production baseline before this QA follow-up is schema migration `0045_storage_cleanup_sessions.sql`. This follow-up's release contract applies and verifies migrations `0046_snapshot_observation_lookup_index.sql`, `0047_storage_cleanup_session_audits.sql` and `0048_live_pending_cost_indexes.sql`; a successful production release advances the deployed schema through `0048`.
 - External Step 1/Step 2 analysis exchange, later system registration, audited external lineage, external-aware F1 replay/F2 post-race diagnostics and the private-app performance layer are production-live.
 - Historical official/X-Labs jobs keep their durable cursors. The external-analysis release did not reset, recreate or resume stopped historical work.
 
@@ -117,7 +133,7 @@ Updated: 2026-09-27
 - Post-deadline registration remains allowed for bookkeeping but is marked `post_race_recovery` / `manual_review_required`. F1/F2 can diagnose it but exclude it from automatic promotion evidence.
 - Verified Step 2 reads enforce both observation/published timestamps and source-record availability at the cutoff. Missing market percentages stay null.
 - F1 and F2 understand the external lineage directly; they do not fabricate sealed Step 1/decision/optimizer parents. If an external run exists for a round, stale sealed-v3 system lineage is not selected as the current F1/F2 target.
-- The currently deployed baseline is production release #138 on main head `98a964d53d6632af17fc2dceec2a30a683b45be5`.
+- The external-analysis workflow remains active in the current production baseline; the cost/storage QA follow-up does not change analysis semantics.
 
 ## External evidence workflow production live
 - The Analys workspace flow is Step 1 blind analysis -> Step 2 market analysis only -> Step 3 interviews/external horse statistics -> Step 4 user/AI system dialogue -> Step 5 separate external-evidence registration -> Step 6 separate system registration.
@@ -246,7 +262,7 @@ The external-analysis production release was accepted after:
 - Saved unresolved V85/V86 rounds now get durable post-race settlement jobs after the last known race start plus a 45-minute safety delay; older unresolved saved rounds are recovered immediately.
 - Settlement targets the exact eight already-linked race ids and therefore does not depend on the Swedish-only historical race-discovery path. This allows saved non-Swedish rounds to settle when the official ordinary-race endpoint supports those race ids.
 - Each checkpoint captures a fresh official race snapshot to private R2 and normalizes it through the existing verified ordinary-race result mapper. Missing/not-final results stay unknown and retry later; ambiguous/dead-heat winner state fails closed to manual review.
-- The minute scheduler processes at most three settlement checkpoints sequentially, then runs the existing deterministic post-race review. No model changes are made automatically.
+- The single morning orchestrator runs a bounded settlement batch; each settlement batch processes at most three checkpoints sequentially, then runs the existing deterministic post-race review. No model changes are made automatically.
 - Once all eight legs have exactly one factual winner, the round becomes naturally rightable in Spel and an exact-date `daily_v85_v86` X-Labs job is created/reopened for post-race enrichment. Settled saved rounds can provide that X-Labs prerequisite even when a calendar snapshot is unavailable.
 - Migration `0031_post_race_settlement.sql` adds only durable settlement orchestration state; factual results remain in the existing source-backed race tables.
 
@@ -299,7 +315,7 @@ The external-analysis production release was accepted after:
 ## Historical extension 2020-2023 candidate
 - Adds an explicitly authorized production history block for 2020-09-08 through 2023-09-07, extending the current roughly three-year baseline to roughly six years without changing statistics or analysis semantics.
 - The new workflow creates/resumes the existing official historical job first. The matching X-Labs historical job is created only after the official block is complete, preserving the existing official-first prerequisite.
-- The production minute scheduler remains the worker that advances bounded checkpoints; the GitHub workflow only authorizes/orchestrates the fixed block and checks capacity.
+- Long production-history extension is manual-only. The GitHub workflow authorizes/orchestrates the fixed block and checks capacity; the normal morning scheduler does not advance multi-day history jobs.
 - D1 capacity is read from Cloudflare's database metadata. The workflow warns at 8.00 GiB and stops the extension at 8.50 GiB, leaving headroom below the 10 GB per-database paid-plan limit.
 - The workflow refuses overlapping multi-day official or historical-all X-Labs jobs and can safely resume a failed fixed job after explicit manual authorization.
 - Settings exposes recent multi-day historical periods separately for each source so the existing 2023-2026 block and the new 2020-2023 block do not collapse into one ambiguous progress row.
@@ -396,12 +412,12 @@ The external-analysis production release was accepted after:
 - Durable per-round coverage remains the operational cache for registered historical V85/V86 systems; canonical racing, market, analysis, system and Form facts remain in their existing tables.
 - Post-race settlement remains the owner of winners/final-game acquisition. Statistics may only repair closing market from the already archived final official game source.
 - Migration `0041_statistics_data_backfill_state_v2.sql` separates lifecycle work state from metric state, adds due-time scheduling, leases, retry metadata and input fingerprints, and schedules existing rows for one safe source-of-truth re-audit.
-- The minute step selects one due round rather than only globally `pending` rows. Waiting facts are rechecked at a bounded cadence, transient failures back off exponentially, terminal rows are low-frequency re-audited, and one bad round cannot hot-loop/starve the queue.
+- The explicit/admin statistics-backfill step selects one due round rather than only globally `pending` rows. Waiting facts retain bounded due times, transient failures back off exponentially, terminal rows are low-frequency re-audit candidates, and one bad round cannot hot-loop/starve an operator-triggered batch.
 - Form and closing-market terminal decisions are metric-level and input-aware. Unchanged deterministic failures are not replayed; changed verified input can reopen that metric. A terminal Form decision does not block later results/final-market/payout refresh.
 - Historical Form/Form-rank still requires exact audited Step 1 pack/fingerprint lineage or the verified legacy eight-leg snapshot fallback. Step 1 `as_of` and generation time must be within the verified pre-race cutoff, and generation/legacy analysis creation may not occur after the registered system.
 - KentaurAI rank, ABCD and spike history are audited only from canonical stored pre-race/system facts. Missing historical AI judgments remain unavailable; malformed historical system invariants are surfaced for review rather than rewritten.
 - Passive audits do not increase `attempt_count`; only actual Form/market repair work does. Aggregate status output separates waiting/retryable/manual-review/legitimate-gap states without exposing private round identities.
-- Existing stale rows recover through the migration + scheduled re-audit path; no destructive reset or manual production SQL rewrite is part of the design.
+- Existing stale rows recover through the migration plus the explicit bounded re-audit path; there is no recurring statistics-repair scheduler, destructive reset or manual production SQL rewrite in the design.
 
 
 ## Historical official structural source-gap resilience

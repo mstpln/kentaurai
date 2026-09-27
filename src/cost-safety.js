@@ -18,19 +18,59 @@ function addMeta(target, meta) {
   target.d1DurationMs += finite(meta.duration);
 }
 
-function wrapStatement(statement, metrics) {
+function firstResult(result, columnName) {
+  const row = result?.results?.[0] ?? null;
+  if (row == null) return null;
+  if (columnName === undefined) return row;
+  if (!Object.prototype.hasOwnProperty.call(row, columnName)) {
+    throw new Error(`D1_ERROR: column not found: ${columnName}`);
+  }
+  return row[columnName];
+}
+
+function firstWithMetaSql(sql) {
+  const normalized = String(sql || '').trim().replace(/;+\s*$/, '');
+  if (!/^(SELECT|WITH)\b/i.test(normalized)) return null;
+  return `SELECT * FROM (${normalized}) AS __kentaurai_first LIMIT 1`;
+}
+
+function wrapStatement(statement, metrics, context = {}) {
   const wrapper = {
     bind(...values) {
-      return wrapStatement(statement.bind(...values), metrics);
+      return wrapStatement(statement.bind(...values), metrics, { ...context, bindings: values });
     }
   };
   wrapper[RAW_STATEMENT] = statement;
-  for (const method of ['all', 'run', 'first', 'raw']) {
+  for (const method of ['all', 'run', 'raw']) {
     if (typeof statement?.[method] !== 'function') continue;
     wrapper[method] = async (...args) => {
       const result = await statement[method](...args);
       addMeta(metrics, result?.meta);
       return result;
+    };
+  }
+  if (typeof statement?.first === 'function') {
+    wrapper.first = async (columnName) => {
+      const limitedSql = context.db && context.sql ? firstWithMetaSql(context.sql) : null;
+      if (limitedSql && typeof context.db.prepare === 'function') {
+        let prepared = context.db.prepare(limitedSql);
+        if (context.bindings?.length) prepared = prepared.bind(...context.bindings);
+        const result = await prepared.all();
+        addMeta(metrics, result?.meta);
+        return firstResult(result, columnName);
+      }
+      if (typeof statement.run === 'function') {
+        const result = await statement.run();
+        addMeta(metrics, result?.meta);
+        return firstResult(result, columnName);
+      }
+      const row = await statement.first();
+      if (row != null) metrics.rowsRead += 1;
+      if (columnName === undefined || row == null) return row;
+      if (!Object.prototype.hasOwnProperty.call(row, columnName)) {
+        throw new Error(`D1_ERROR: column not found: ${columnName}`);
+      }
+      return row[columnName];
     };
   }
   return wrapper;
@@ -39,7 +79,7 @@ function wrapStatement(statement, metrics) {
 function instrumentDb(db, metrics) {
   return new Proxy(db, {
     get(target, property) {
-      if (property === 'prepare') return (sql) => wrapStatement(target.prepare(sql), metrics);
+      if (property === 'prepare') return (sql) => wrapStatement(target.prepare(sql), metrics, { db: target, sql, bindings: [] });
       if (property === 'batch' && typeof target.batch === 'function') {
         return async (statements) => {
           const result = await target.batch(statements.map((statement) => statement?.[RAW_STATEMENT] || statement));
@@ -79,11 +119,21 @@ export async function observeD1Operation(env, operation, action, thresholds = DE
 }
 
 export function createRunSafetyState(thresholds = DEFAULT_COST_SAFETY_THRESHOLDS) {
-  return { stopped: false, reason: null, thresholds };
+  return {
+    stopped: false,
+    reason: null,
+    thresholds,
+    metrics: { rowsRead: 0, rowsWritten: 0, durationMs: 0 }
+  };
 }
 
 export function applyRunSafetyResult(state, operation, observed) {
-  if (!state.stopped && observed?.safetyStop) {
+  const metrics = observed?.cost || observed?.metrics || {};
+  state.metrics.rowsRead += finite(metrics.rowsRead);
+  state.metrics.rowsWritten += finite(metrics.rowsWritten);
+  state.metrics.durationMs += finite(metrics.durationMs);
+  const cumulativeStop = exceedsCostSafety(state.metrics, state.thresholds);
+  if (!state.stopped && (observed?.safetyStop || cumulativeStop)) {
     state.stopped = true;
     state.reason = `abnormal_cost:${operation}`;
   }

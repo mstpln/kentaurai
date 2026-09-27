@@ -87,3 +87,54 @@ test('an exhausted unrelated validation failure remains suppressed', async () =>
   for (let index = 0; index < 3; index += 1) seedFailedAutoRun(db, index, sourceId, 'official game status is unsupported');
   assert.equal(await selectPendingOfficialGameSource(env), null);
 });
+
+
+test('an old pending game source is outside automatic normalization scope', async () => {
+  const { env, db } = createTestEnv();
+  db.prepare(`INSERT INTO source_records
+    (id, source_type, external_id, source_url, fetched_at, raw_object_key, content_hash, quality_status, metadata_json)
+    VALUES ('src_old_pending', 'official_provider', 'game:V85_2000-01-01_7_1', 'https://example.invalid',
+      '2000-01-01T05:15:00Z', 'raw/official_provider/old.json', 'old-hash', 'captured_unmapped', ?)`)
+    .run(JSON.stringify({ kind: 'game', identity: 'V85_2000-01-01_7_1' }));
+
+  assert.equal(await selectPendingOfficialGameSource(env), null);
+});
+
+
+test('live pending selection uses the dedicated cost indexes', () => {
+  const { db } = createTestEnv();
+  const plan = db.prepare(`
+    EXPLAIN QUERY PLAN
+    SELECT sr.id, sr.external_id, sr.fetched_at
+    FROM source_records sr
+    WHERE sr.source_type = 'official_provider'
+      AND sr.quality_status IN ('captured_unmapped','captured_source_gap')
+      AND (
+        sr.quality_status = 'captured_unmapped'
+        OR (
+          sr.quality_status = 'captured_source_gap'
+          AND json_extract(sr.metadata_json, '$.sourceGap.code') = 'missing_horse_identity'
+        )
+      )
+      AND substr(sr.external_id,1,9) IN ('game:V85_','game:V86_')
+      AND substr(sr.external_id,10,10) >= date('now','-3 day')
+      AND (
+        sr.quality_status = 'captured_source_gap'
+        OR (
+          SELECT COUNT(*)
+          FROM import_runs ir
+          WHERE ir.source_type = 'official_live_normalize_auto'
+            AND ir.status = 'failed'
+            AND json_extract(ir.metadata_json, '$.sourceRecordId') = sr.id
+        ) < 3
+      )
+    ORDER BY
+      CASE WHEN substr(sr.external_id,10,10) >= date('now') THEN 0 ELSE 1 END,
+      sr.fetched_at DESC,
+      sr.id DESC
+    LIMIT 1
+  `).all();
+  const details = plan.map((row) => String(row.detail || '')).join('\n');
+  assert.match(details, /idx_source_records_live_game_pending/);
+  assert.match(details, /idx_import_runs_live_normalize_failures/);
+});

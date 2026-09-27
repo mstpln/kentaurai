@@ -46,6 +46,7 @@ import {
   planSnapshotCleanupBatch
 } from './storage-cleanup-executor.js';
 import { checkpointStorageCleanupSession, startOrResumeStorageCleanupSession } from './storage-cleanup-session.js';
+import { auditStorageCleanupIntegrity, bindStorageCleanupIntegrityAudit } from './storage-cleanup-audit.js';
 
 const LIVE_MORNING_CRON = '15 5 * * *';
 const DAILY_LIVE_NORMALIZE_RUNS = 16;
@@ -357,6 +358,15 @@ async function handleFetch(request, env) {
   if (request.method === 'GET' && path === '/v1/statistics/backfill/status') {
     return json(await getStatisticsDataBackfillStatus(env));
   }
+  if (request.method === 'GET' && path === '/v1/storage-cleanup/audit') {
+    const observed = await observeD1Operation(env, 'storage_cleanup_integrity_audit', (observedEnv) => auditStorageCleanupIntegrity(observedEnv));
+    return json({ ...observed.value, cost: observed.metrics, safetyStop: observed.safetyStop });
+  }
+  if (request.method === 'POST' && path === '/v1/storage-cleanup/session/audit') {
+    const body = await readJson(request);
+    const observed = await observeD1Operation(env, 'storage_cleanup_session_integrity_audit', (observedEnv) => bindStorageCleanupIntegrityAudit(observedEnv, body));
+    return json({ ...observed.value, cost: observed.metrics, safetyStop: observed.safetyStop });
+  }
   if (request.method === 'POST' && path === '/v1/storage-cleanup/session/start') {
     const body = await readJson(request);
     const observed = await observeD1Operation(env, 'storage_cleanup_session_start', (observedEnv) => startOrResumeStorageCleanupSession(observedEnv, body));
@@ -429,15 +439,34 @@ async function runDailyOfficialIncremental(env, scheduledTime) {
   let batchCount = 0;
   let remaining = DAILY_OFFICIAL_BATCH_RUNS;
   let finalStatus = 'idle';
-  for (const job of jobs.jobs || []) {
-    while (remaining > 0) {
-      const batch = await runHistoricalBackfillBatch(env, job.id);
-      batchCount += 1;
-      remaining -= 1;
-      finalStatus = batch?.status || 'unknown';
-      if (!batch || batch.done || batch.status !== 'running') break;
+  const failures = [];
+  const active = new Set(
+    (jobs.jobs || []).filter((job) => job.status === 'running').map((job) => job.id)
+  );
+
+  while (remaining > 0 && active.size > 0) {
+    let attempted = false;
+    for (const job of jobs.jobs || []) {
+      if (remaining <= 0) break;
+      if (!active.has(job.id)) continue;
+      attempted = true;
+      try {
+        const batch = await runHistoricalBackfillBatch(env, job.id);
+        batchCount += 1;
+        remaining -= 1;
+        finalStatus = batch?.status || 'unknown';
+        if (!batch || batch.done || batch.status !== 'running') active.delete(job.id);
+      } catch (error) {
+        batchCount += 1;
+        remaining -= 1;
+        active.delete(job.id);
+        failures.push(error);
+      }
     }
-    if (remaining <= 0) break;
+    if (!attempted) break;
+  }
+  if (failures.length) {
+    throw new Error(`${failures.length} bounded official daily batch(es) failed`);
   }
   return {
     lookbackDays: jobs.lookbackDays,
@@ -456,15 +485,25 @@ async function runDailyXlabsIncremental(env, scheduledTime) {
   let batchCount = 0;
   let finalStatus = 'idle';
   const processedJobIds = [];
+  const failures = [];
   let remaining = DAILY_XLABS_BATCH_RUNS;
 
   for (const job of recent.jobs || []) {
     if (remaining <= 0) break;
-    const batch = await runXlabsBackfillBatch(env, job.id);
-    batchCount += 1;
-    remaining -= 1;
-    finalStatus = batch?.status || 'unknown';
-    processedJobIds.push(job.id);
+    try {
+      const batch = await runXlabsBackfillBatch(env, job.id);
+      batchCount += 1;
+      remaining -= 1;
+      finalStatus = batch?.status || 'unknown';
+      processedJobIds.push(job.id);
+    } catch (error) {
+      batchCount += 1;
+      remaining -= 1;
+      failures.push(error);
+    }
+  }
+  if (failures.length) {
+    throw new Error(`${failures.length} bounded X-Labs daily batch(es) failed`);
   }
 
   return {

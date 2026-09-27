@@ -1,4 +1,5 @@
 const HISTORICAL_STALE_MS = 15 * 60 * 1000;
+const DAILY_AUTOMATIC_STALE_MS = 30 * 60 * 60 * 1000;
 const RUN_STALE_MS = 30 * 60 * 1000;
 const MAX_AUTOMATIC_ERRORS = 3;
 const HISTORICAL_AUTOMATIC_ENABLED = false;
@@ -29,7 +30,7 @@ function daysInclusive(startDate, endDate) {
   return Math.floor((end - start) / 86400000) + 1;
 }
 
-function historicalProcessing(job, nowMs, { automaticEnabled = true } = {}) {
+function historicalProcessing(job, nowMs, { automaticEnabled = true, staleAfterMs = HISTORICAL_STALE_MS } = {}) {
   if (!job) {
     return {
       status: 'never_run',
@@ -68,7 +69,7 @@ function historicalProcessing(job, nowMs, { automaticEnabled = true } = {}) {
     && automaticEnabled
     && !retryScheduled
     && lastActivityMs !== null
-    && nowMs - lastActivityMs > HISTORICAL_STALE_MS;
+    && nowMs - lastActivityMs > staleAfterMs;
 
   let status = 'running';
   if (completed) status = 'completed';
@@ -226,8 +227,23 @@ function visibleHistoricalJobs(jobs, nowMs) {
   }));
 }
 
-async function latestDailyXlabs(env) {
-  return env.DB.prepare(`
+async function recentDailyOfficialJobs(env) {
+  const { results = [] } = await env.DB.prepare(`
+    SELECT id, start_date, end_date, next_date, next_race_index, status,
+           processed_dates, processed_races, reused_races, consecutive_errors,
+           last_error, last_run_at,
+           CASE WHEN consecutive_errors > 0 THEN lease_until ELSE NULL END AS retry_after,
+           created_at, updated_at
+    FROM historical_backfill_jobs
+    WHERE start_date = end_date
+    ORDER BY end_date DESC, datetime(created_at) DESC, id DESC
+    LIMIT 3
+  `).all();
+  return results;
+}
+
+async function recentDailyXlabsJobs(env) {
+  const { results = [] } = await env.DB.prepare(`
     SELECT id, start_date, end_date, next_date, next_race_index, status,
            processed_dates, processed_races, reused_races, unavailable_dates,
            unavailable_races, consecutive_errors, last_error, last_run_at,
@@ -235,8 +251,9 @@ async function latestDailyXlabs(env) {
     FROM xlabs_backfill_jobs
     WHERE scope = 'daily_v85_v86'
     ORDER BY end_date DESC, datetime(created_at) DESC, id DESC
-    LIMIT 1
-  `).first();
+    LIMIT 3
+  `).all();
+  return results;
 }
 
 async function latestRun(env, sourceType) {
@@ -269,7 +286,7 @@ function sourceCard({ id, historicalJob, historicalJobs = [], historicalProcessi
   }
 
   for (const { job, scope } of supportingJobs) {
-    const processing = historicalProcessing(job, nowMs);
+    const processing = historicalProcessing(job, nowMs, { staleAfterMs: DAILY_AUTOMATIC_STALE_MS });
     const issue = jobIssue(id, job, processing, nowMs, scope);
     if (issue) issues.push(issue);
   }
@@ -321,7 +338,8 @@ export async function getSettingsSourceHealth(env, options = {}) {
   const [
     officialHistoricalJobs,
     xlabsHistoricalJobs,
-    xlabsDaily,
+    officialDailyJobs,
+    xlabsDailyJobs,
     officialCapture,
     officialNormalize,
     officialFallback,
@@ -329,7 +347,8 @@ export async function getSettingsSourceHealth(env, options = {}) {
   ] = await Promise.all([
     historicalOfficialJobs(env),
     historicalXlabsJobs(env),
-    latestDailyXlabs(env),
+    recentDailyOfficialJobs(env),
+    recentDailyXlabsJobs(env),
     latestRun(env, 'official_live_scheduled_capture'),
     latestRun(env, 'official_live_normalize_auto'),
     latestFamilyRun(env, 'official'),
@@ -346,6 +365,7 @@ export async function getSettingsSourceHealth(env, options = {}) {
     historicalJob: officialHistorical,
     historicalJobs: officialHistoricalJobs,
     historicalProcessingState: officialProcessing,
+    supportingJobs: officialDailyJobs.map((job) => ({ job, scope: 'daily' })),
     runs: [officialCapture, officialNormalize].filter(Boolean),
     fallbackRun: officialFallback,
     nowMs
@@ -356,7 +376,7 @@ export async function getSettingsSourceHealth(env, options = {}) {
     historicalJob: xlabsHistorical,
     historicalJobs: xlabsHistoricalJobs,
     historicalProcessingState: xlabsProcessing,
-    supportingJobs: xlabsDaily ? [{ job: xlabsDaily, scope: 'daily' }] : [],
+    supportingJobs: xlabsDailyJobs.map((job) => ({ job, scope: 'daily' })),
     fallbackRun: xlabsFallback,
     nowMs
   });
@@ -419,5 +439,6 @@ export async function acknowledgeSettingsAlerts(env) {
 export const SETTINGS_SOURCE_HEALTH_LIMITS = {
   historicalStaleMs: HISTORICAL_STALE_MS,
   runStaleMs: RUN_STALE_MS,
-  maxAutomaticErrors: MAX_AUTOMATIC_ERRORS
+  maxAutomaticErrors: MAX_AUTOMATIC_ERRORS,
+  dailyAutomaticStaleMs: DAILY_AUTOMATIC_STALE_MS
 };

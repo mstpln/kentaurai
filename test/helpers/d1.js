@@ -50,7 +50,11 @@ class StatementAdapter {
     return { success: true, meta: { changes: Number(result.changes ?? 0), last_row_id: result.lastInsertRowid == null ? null : Number(result.lastInsertRowid) } };
   }
   async first() { this.markExecution('firsts'); return this.db.prepare(this.sql).get(...this.args) ?? null; }
-  async all() { this.markExecution('alls'); return { results: this.db.prepare(this.sql).all(...this.args) }; }
+  async all() {
+    this.markExecution('alls');
+    const results = this.db.prepare(this.sql).all(...this.args);
+    return { results, meta: { rows_read: results.length, rows_written: 0, duration: 0 } };
+  }
 }
 
 class D1Adapter {
@@ -117,7 +121,10 @@ export function createTestEnv() {
     '../../migrations/0042_cost_storage_safety_v1.sql',
     '../../migrations/0043_storage_cleanup_executor_v1.sql',
     '../../migrations/0044_storage_cleanup_resume_state.sql',
-    '../../migrations/0045_storage_cleanup_sessions.sql'
+    '../../migrations/0045_storage_cleanup_sessions.sql',
+    '../../migrations/0046_snapshot_observation_lookup_index.sql',
+    '../../migrations/0047_storage_cleanup_session_audits.sql',
+    '../../migrations/0048_live_pending_cost_indexes.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }

@@ -9,6 +9,7 @@ import {
   planSnapshotCleanupBatch
 } from '../src/storage-cleanup-executor.js';
 import worker from '../src/index.js';
+import { getOfficialHorseSnapshotsAsOf } from '../src/import/official-snapshots.js';
 
 function addSource(db, id, fetchedAt, rawObjectKey = id, contentHash = null, sourceType = 'official_provider') {
   db.prepare(`
@@ -16,6 +17,14 @@ function addSource(db, id, fetchedAt, rawObjectKey = id, contentHash = null, sou
       (id,source_type,external_id,fetched_at,raw_object_key,content_hash,quality_status)
     VALUES (?,?,?,?,?,?, 'test')
   `).run(id, sourceType, id, fetchedAt, rawObjectKey, contentHash);
+}
+
+function markSnapshotSourceComplete(db, sourceId) {
+  db.prepare(`
+    INSERT INTO official_snapshot_source_sync
+      (source_record_id,status)
+    VALUES (?,'complete')
+  `).run(sourceId);
 }
 
 async function sha256(value) {
@@ -32,6 +41,7 @@ test('snapshot executor removes only sequential repeats and rewires provenance a
     const snapshotId = `snapshot-${index}`;
     const observedAt = `2026-09-${String(10 + index).padStart(2, '0')}T10:00:00Z`;
     addSource(db, id, observedAt);
+    markSnapshotSourceComplete(db, id);
     db.prepare(`INSERT INTO horse_profile_snapshots
       (id,horse_id,observed_at,age_years,source_record_id) VALUES (?,'horse-cleanup',?,?,?)`)
       .run(snapshotId, observedAt, facts[index], id);
@@ -58,6 +68,10 @@ test('snapshot executor removes only sequential repeats and rewires provenance a
     [4, 5, 4]
   );
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM official_snapshot_observations').get().n, 6);
+  assert.deepEqual(
+    db.prepare('SELECT factual_changed FROM official_snapshot_observations ORDER BY observed_at').all().map((row) => row.factual_changed),
+    [1, 0, 0, 1, 0, 1]
+  );
   assert.equal(db.prepare(`
     SELECT COUNT(*) AS n FROM official_snapshot_observations o
     LEFT JOIN horse_profile_snapshots s ON s.id=o.snapshot_id
@@ -68,6 +82,131 @@ test('snapshot executor removes only sequential repeats and rewires provenance a
     { expected_changes: 3, actual_changes: 3, status: 'complete' }
   );
 });
+
+test('snapshot cleanup ignores rows from failed source syncs', async () => {
+  const { db, env } = createTestEnv();
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('horse-failed-cleanup','Failed Cleanup Horse')").run();
+  for (const [sourceId, snapshotId, observedAt, status] of [
+    ['cleanup-complete','cleanup-complete-snapshot','2026-09-10T10:00:00Z','complete'],
+    ['cleanup-failed','cleanup-failed-snapshot','2026-09-11T10:00:00Z','failed']
+  ]) {
+    addSource(db, sourceId, observedAt);
+    db.prepare(`
+      INSERT INTO official_snapshot_source_sync
+        (source_record_id,status,horse_profile_count,error_message)
+      VALUES (?,?,1,?)
+    `).run(sourceId, status, status === 'failed' ? 'synthetic failure' : null);
+    db.prepare(`
+      INSERT INTO horse_profile_snapshots
+        (id,horse_id,observed_at,age_years,source_record_id)
+      VALUES (?,'horse-failed-cleanup',?,4,?)
+    `).run(snapshotId, observedAt, sourceId);
+  }
+
+  const plan = await planSnapshotCleanupBatch(env, { family: 'horse_profile', limit: 25 });
+  assert.equal(plan.rowsScanned, 1);
+  assert.equal(plan.rowsRetained, 1);
+  assert.equal(plan.rowsRemovable, 0);
+  assert.equal(plan.nextCursor, null);
+});
+
+test('failed snapshot rows do not block dedupe across complete sources', async () => {
+  const { db, env } = createTestEnv();
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('horse-failed-gap','Failed Gap Horse')").run();
+  const rows = [
+    ['gap-source-a','gap-snapshot-a','2026-09-10T10:00:00Z',4,'complete'],
+    ['gap-source-b','gap-snapshot-b','2026-09-11T10:00:00Z',5,'failed'],
+    ['gap-source-c','gap-snapshot-c','2026-09-12T10:00:00Z',4,'complete']
+  ];
+  for (const [sourceId,snapshotId,observedAt,age,status] of rows) {
+    addSource(db, sourceId, observedAt);
+    db.prepare(`
+      INSERT INTO official_snapshot_source_sync
+        (source_record_id,status,horse_profile_count,error_message)
+      VALUES (?,?,1,?)
+    `).run(sourceId, status, status === 'failed' ? 'synthetic failure' : null);
+    db.prepare(`
+      INSERT INTO horse_profile_snapshots
+        (id,horse_id,observed_at,age_years,source_record_id)
+      VALUES (?,'horse-failed-gap',?,?,?)
+    `).run(snapshotId, observedAt, age, sourceId);
+  }
+
+  const plan = await planSnapshotCleanupBatch(env, { family: 'horse_profile', limit: 25 });
+  assert.equal(plan.rowsScanned, 2);
+  assert.equal(plan.rowsRemovable, 1);
+
+  const result = await executeSnapshotCleanupBatch(env, {
+    family: 'horse_profile',
+    limit: 25,
+    planToken: plan.planToken,
+    confirmation: CLEANUP_CONFIRMATION
+  });
+  assert.equal(result.rowsRemoved, 1);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS n FROM horse_profile_snapshots WHERE source_record_id='gap-source-c'").get().n,
+    0
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS n FROM horse_profile_snapshots WHERE source_record_id='gap-source-b'").get().n,
+    1
+  );
+});
+
+test('snapshot cleanup preserves legacy source/as-of provenance when duplicate rows predate observation storage', async () => {
+  const { db, env } = createTestEnv();
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('horse-legacy','Legacy Horse')").run();
+
+  for (const [sourceId, snapshotId, observedAt] of [
+    ['legacy-source-a','legacy-snapshot-a','2026-09-10T10:00:00Z'],
+    ['legacy-source-b','legacy-snapshot-b','2026-09-11T10:00:00Z']
+  ]) {
+    addSource(db, sourceId, observedAt);
+    db.prepare(`
+      INSERT INTO official_snapshot_source_sync
+        (source_record_id,status,horse_profile_count)
+      VALUES (?,'complete',1)
+    `).run(sourceId);
+    db.prepare(`
+      INSERT INTO horse_profile_snapshots
+        (id,horse_id,observed_at,age_years,source_record_id)
+      VALUES (?,'horse-legacy',?,4,?)
+    `).run(snapshotId, observedAt, sourceId);
+  }
+
+  let current = await getOfficialHorseSnapshotsAsOf(env, ['horse-legacy'], '2026-09-11T12:00:00Z');
+  assert.equal(current.get('horse-legacy').age.sourceRecordId, 'legacy-source-b');
+
+  const plan = await planSnapshotCleanupBatch(env, { family: 'horse_profile', limit: 25 });
+  assert.equal(plan.rowsRemovable, 1);
+
+  const result = await executeSnapshotCleanupBatch(env, {
+    family: 'horse_profile',
+    limit: 25,
+    planToken: plan.planToken,
+    confirmation: CLEANUP_CONFIRMATION
+  });
+  assert.equal(result.rowsRemoved, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM horse_profile_snapshots').get().n, 1);
+
+  const observation = db.prepare(`
+    SELECT source_record_id,observed_at,snapshot_id,factual_changed
+    FROM official_snapshot_observations
+    WHERE source_record_id='legacy-source-b' AND snapshot_family='horse_profile'
+  `).get();
+  assert.deepEqual({ ...observation }, {
+    source_record_id: 'legacy-source-b',
+    observed_at: '2026-09-11T10:00:00Z',
+    snapshot_id: 'legacy-snapshot-a',
+    factual_changed: 0
+  });
+
+  current = await getOfficialHorseSnapshotsAsOf(env, ['horse-legacy'], '2026-09-11T12:00:00Z');
+  assert.equal(current.get('horse-legacy').age.years, 4);
+  assert.equal(current.get('horse-legacy').age.sourceRecordId, 'legacy-source-b');
+  assert.equal(current.get('horse-legacy').age.observedAt, '2026-09-11T10:00:00Z');
+});
+
 
 test('storage cleanup routes fail closed behind ADMIN_TOKEN', async () => {
   const request = (authorization) => new Request('https://example.invalid/v1/storage-cleanup/snapshots/execute', {
@@ -87,6 +226,7 @@ test('snapshot executor preserves A-B-A and null-value-null change points', asyn
     const id = `change-source-${index}`;
     const observedAt = `2026-08-${String(10 + index).padStart(2, '0')}T10:00:00Z`;
     addSource(db, id, observedAt);
+    markSnapshotSourceComplete(db, id);
     db.prepare(`INSERT INTO horse_profile_snapshots
       (id,horse_id,observed_at,age_years,source_record_id) VALUES (?,'horse-changes',?,?,?)`)
       .run(`change-snapshot-${index}`, observedAt, facts[index], id);
@@ -103,6 +243,7 @@ test('snapshot execution rejects a stale or unconfirmed plan without mutation', 
     const id = `safe-source-${index}`;
     const observedAt = `2026-07-${10 + index}T10:00:00Z`;
     addSource(db, id, observedAt);
+    markSnapshotSourceComplete(db, id);
     db.prepare(`INSERT INTO horse_profile_snapshots
       (id,horse_id,observed_at,age_years,source_record_id) VALUES (?,'horse-safe',?,4,?)`)
       .run(`safe-snapshot-${index}`, observedAt, id);
@@ -121,6 +262,7 @@ test('snapshot cursor preserves sequential comparison across a bounded page boun
     const id = `page-source-${String(index).padStart(2, '0')}`;
     const observedAt = `2026-06-${String(index + 1).padStart(2, '0')}T10:00:00Z`;
     addSource(db, id, observedAt);
+    markSnapshotSourceComplete(db, id);
     db.prepare(`INSERT INTO horse_profile_snapshots
       (id,horse_id,observed_at,age_years,source_record_id) VALUES (?,'horse-page',?,?,?)`)
       .run(`page-snapshot-${index}`, observedAt, index === 25 ? 24 : index, id);
@@ -191,8 +333,18 @@ test('raw executor stops before mutation on hash mismatch or canonical conflict'
   assert.ok(await env.RAW_BUCKET.head(legacyKey));
 
   objects.set(canonicalKey, {
+    body,
+    options: { customMetadata: { contentHash: hash, sourceType: 'wrong_provider' } }
+  });
+  plan = await planRawCleanupBatch(env, { sourceType: 'synthetic_provider', limit: 25 });
+  await assert.rejects(() => executeRawCleanupBatch(env, {
+    sourceType: 'synthetic_provider', limit: 25, planToken: plan.planToken, confirmation: CLEANUP_CONFIRMATION
+  }), /metadata\/hash conflict/);
+  assert.ok(await env.RAW_BUCKET.head(legacyKey));
+
+  objects.set(canonicalKey, {
     body: 'x'.repeat(body.length),
-    options: { customMetadata: { contentHash: hash } }
+    options: { customMetadata: { contentHash: hash, sourceType: 'synthetic_provider' } }
   });
   plan = await planRawCleanupBatch(env, { sourceType: 'synthetic_provider', limit: 25 });
   await assert.rejects(() => executeRawCleanupBatch(env, {

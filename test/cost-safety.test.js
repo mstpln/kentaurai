@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { applyRunSafetyResult, createRunSafetyState, observeD1Operation } from '../src/cost-safety.js';
 import { createTestEnv } from './helpers/d1.js';
 
@@ -40,4 +40,70 @@ test('production config preserves exactly the single morning cron', () => {
   const config = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
   const crons = [...config.matchAll(/"(\d+\s+\d+\s+\*\s+\*\s+\*)"/g)].map((match) => match[1]);
   assert.deepEqual(crons, ['15 5 * * *']);
+});
+
+
+test('cost observer counts reads performed through D1 first()', async () => {
+  const { env } = createTestEnv();
+  await env.DB.prepare("INSERT INTO horses (id,canonical_name) VALUES ('first-a','First A')").run();
+  await env.DB.prepare("INSERT INTO horses (id,canonical_name) VALUES ('first-b','First B')").run();
+
+  const observed = await observeD1Operation(env, 'synthetic_first', async (observedEnv) => {
+    return observedEnv.DB.prepare('SELECT id,canonical_name FROM horses ORDER BY id').first();
+  }, { rowsRead: 0, rowsWritten: 100, durationMs: 10000 });
+
+  assert.equal(observed.value.id, 'first-a');
+  assert.equal(observed.metrics.rowsRead, 1);
+  assert.equal(observed.safetyStop, true);
+});
+
+
+test('cumulative morning cost safety stops after individually safe operations', () => {
+  const state = createRunSafetyState({ rowsRead: 100, rowsWritten: 100, durationMs: 1000 });
+  applyRunSafetyResult(state, 'first_part', {
+    safetyStop: false,
+    cost: { rowsRead: 60, rowsWritten: 10, durationMs: 100 }
+  });
+  assert.equal(state.stopped, false);
+
+  applyRunSafetyResult(state, 'second_part', {
+    safetyStop: false,
+    cost: { rowsRead: 50, rowsWritten: 5, durationMs: 100 }
+  });
+  assert.equal(state.stopped, true);
+  assert.equal(state.reason, 'abnormal_cost:second_part');
+  assert.deepEqual(state.metrics, { rowsRead: 110, rowsWritten: 15, durationMs: 200 });
+});
+
+
+test('GitHub operational workflows contain no recurring schedule', () => {
+  const directory = new URL('../.github/workflows/', import.meta.url);
+  for (const name of readdirSync(directory).filter((value) => value.endsWith('.yml') || value.endsWith('.yaml'))) {
+    const workflow = readFileSync(new URL(name, directory), 'utf8');
+    assert.doesNotMatch(workflow, /^\s*schedule:\s*$/m, `${name} must remain non-scheduled`);
+    assert.doesNotMatch(workflow, /^\s*-\s*cron:\s*/m, `${name} must not add a GitHub cron`);
+  }
+});
+
+
+test('cost observer preserves first(column) semantics without reading the full result set', async () => {
+  const { env } = createTestEnv();
+  for (const id of ['first-c','first-d','first-e']) {
+    await env.DB.prepare('INSERT INTO horses (id,canonical_name) VALUES (?,?)').bind(id, id).run();
+  }
+
+  const observed = await observeD1Operation(env, 'synthetic_first_column', async (observedEnv) => {
+    return observedEnv.DB.prepare('SELECT id,canonical_name FROM horses ORDER BY id').first('canonical_name');
+  }, { rowsRead: 10, rowsWritten: 100, durationMs: 10000 });
+
+  assert.equal(observed.value, 'first-c');
+  assert.equal(observed.metrics.rowsRead, 1);
+  assert.equal(observed.safetyStop, false);
+
+  await assert.rejects(
+    () => observeD1Operation(env, 'synthetic_first_missing_column', (observedEnv) =>
+      observedEnv.DB.prepare('SELECT id FROM horses ORDER BY id').first('missing_column')
+    ),
+    /column not found/
+  );
 });

@@ -52,7 +52,16 @@ export async function archiveRawSnapshot(env, {
 
   if (env.RAW_BUCKET) {
     const existingObject = typeof env.RAW_BUCKET.head === 'function' ? await env.RAW_BUCKET.head(objectKey) : null;
-    if (!existingObject) {
+    if (existingObject) {
+      const expectedBytes = new TextEncoder().encode(rawBody).byteLength;
+      if (
+        existingObject.customMetadata?.contentHash !== hash
+        || existingObject.customMetadata?.sourceType !== normalizedSourceType
+        || (Number.isFinite(existingObject.size) && existingObject.size !== expectedBytes)
+      ) {
+        throw new Error('canonical raw object metadata or size conflict');
+      }
+    } else {
       await env.RAW_BUCKET.put(objectKey, rawBody, {
         httpMetadata: { contentType },
         customMetadata: { sourceType: normalizedSourceType, contentHash: hash, contentType }

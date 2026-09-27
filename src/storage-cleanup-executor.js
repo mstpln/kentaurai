@@ -78,6 +78,24 @@ function snapshotOrderTuple(family, row, columns) {
   return columns.map((column) => snapshotOrderValue(family, row, column));
 }
 
+function snapshotObservationIdentity(family, row) {
+  if (family === 'horse_profile') {
+    return { entityKey: row.horse_id, scopeKey: 'profile' };
+  }
+  if (family === 'horse_stat') {
+    return { entityKey: row.horse_id, scopeKey: row.snapshot_scope };
+  }
+  if (family === 'horse_record') {
+    const scope = row.record_scope === 'year' ? `year:${row.stat_year}` : row.record_scope;
+    return { entityKey: row.horse_id, scopeKey: `${scope}:${row.record_ordinal}` };
+  }
+  if (family === 'person_stat') {
+    return { entityKey: `${row.person_type}:${row.person_id}`, scopeKey: String(row.stat_year) };
+  }
+  throw new Error('unsupported snapshot family');
+}
+
+
 async function detailedSnapshotPlan(env, { family, limit, cursor = null }) {
   if (!env?.DB) throw new Error('DB is not configured');
   const definition = SNAPSHOT_FAMILIES[String(family || '')];
@@ -85,7 +103,7 @@ async function detailedSnapshotPlan(env, { family, limit, cursor = null }) {
   const rowLimit = boundedCleanupLimit(limit, MAX_BATCH);
   const partition = [...definition.entity, ...definition.scope];
   const decoded = await decodeCursor(env, cursor, `snapshot:${family}`);
-  let sql = `SELECT * FROM ${definition.table}`;
+  let sql = `SELECT snapshot.* FROM ${definition.table} snapshot\n    JOIN official_snapshot_source_sync source_sync\n      ON source_sync.source_record_id=snapshot.source_record_id AND source_sync.status='complete'`;
   let bindings = [];
   if (decoded) {
     if (!Array.isArray(decoded.order) || decoded.order.length !== partition.length + 2) throw new Error('cleanup cursor is invalid');
@@ -107,7 +125,15 @@ async function detailedSnapshotPlan(env, { family, limit, cursor = null }) {
     const partitionKey = snapshotPartitionKey(row, partition);
     const facts = snapshotTuple(row, definition.facts);
     if (partitionKey === priorPartition && snapshotFactsEqual(facts, priorFacts)) {
-      candidates.push({ removeId: row.id, retainId: retainedId });
+      const observation = snapshotObservationIdentity(family, row);
+      candidates.push({
+        removeId: row.id,
+        retainId: retainedId,
+        sourceRecordId: row.source_record_id,
+        observedAt: row.observed_at,
+        entityKey: observation.entityKey,
+        scopeKey: observation.scopeKey
+      });
     } else {
       rowsRetained += 1;
       priorPartition = partitionKey;
@@ -164,7 +190,19 @@ export async function executeSnapshotCleanupBatch(env, options = {}) {
   `).bind(batchId, plan.family, plan.planToken, plan.candidates.length)];
   for (const candidate of plan.candidates) {
     statements.push(env.DB.prepare(`
-      UPDATE official_snapshot_observations SET snapshot_id=?
+      INSERT OR IGNORE INTO official_snapshot_observations
+        (source_record_id,snapshot_family,entity_key,scope_key,observed_at,snapshot_id,factual_changed)
+      VALUES (?,?,?,?,?,?,0)
+    `).bind(
+      candidate.sourceRecordId,
+      plan.family,
+      candidate.entityKey,
+      candidate.scopeKey,
+      candidate.observedAt,
+      candidate.retainId
+    ));
+    statements.push(env.DB.prepare(`
+      UPDATE official_snapshot_observations SET snapshot_id=?,factual_changed=0
       WHERE snapshot_family=? AND snapshot_id=?
     `).bind(candidate.retainId, plan.family, candidate.removeId));
   }
@@ -174,11 +212,20 @@ export async function executeSnapshotCleanupBatch(env, options = {}) {
   const sameFacts = plan.definition.facts.map((column) => `prior.${column} IS doomed.${column}`).join(' AND ');
   const betweenSameFacts = plan.definition.facts.map((column) => `between_row.${column} IS doomed.${column}`).join(' AND ');
   const candidateGuards = plan.candidates.map(() => `(
-    doomed.id=? AND EXISTS (
+    doomed.id=?
+    AND EXISTS (
+      SELECT 1 FROM official_snapshot_source_sync doomed_sync
+      WHERE doomed_sync.source_record_id=doomed.source_record_id AND doomed_sync.status='complete'
+    )
+    AND EXISTS (
       SELECT 1 FROM ${plan.definition.table} prior
+      JOIN official_snapshot_source_sync prior_sync
+        ON prior_sync.source_record_id=prior.source_record_id AND prior_sync.status='complete'
       WHERE prior.id=? AND ${samePartition} AND ${sameFacts}
         AND NOT EXISTS (
           SELECT 1 FROM ${plan.definition.table} between_row
+          JOIN official_snapshot_source_sync between_sync
+            ON between_sync.source_record_id=between_row.source_record_id AND between_sync.status='complete'
           WHERE ${betweenPartition}
             AND (julianday(between_row.observed_at),between_row.id) > (julianday(prior.observed_at),prior.id)
             AND (julianday(between_row.observed_at),between_row.id) < (julianday(doomed.observed_at),doomed.id)
@@ -316,8 +363,10 @@ async function objectBytes(object) {
   throw new Error('legacy R2 object body is unreadable');
 }
 
-function verifiedCanonicalHead(head, hash, legacyHead) {
-  if (head?.customMetadata?.contentHash !== hash) throw new Error('canonical R2 object metadata/hash conflict');
+function verifiedCanonicalHead(head, hash, sourceType, legacyHead) {
+  if (head?.customMetadata?.contentHash !== hash || head?.customMetadata?.sourceType !== sourceType) {
+    throw new Error('canonical R2 object metadata/hash conflict');
+  }
   if (Number.isFinite(head.size) && Number.isFinite(legacyHead?.size) && head.size !== legacyHead.size) {
     throw new Error('canonical R2 object size conflict');
   }
@@ -373,7 +422,7 @@ export async function executeRawCleanupBatch(env, options = {}) {
     canonicalHead = await env.RAW_BUCKET.head(selected.canonicalKey);
     canonicalObjectsCreated = 1;
   }
-  verifiedCanonicalHead(canonicalHead, selected.hash, legacyHead);
+  verifiedCanonicalHead(canonicalHead, selected.hash, selected.row.source_type, legacyHead);
   const batchId = crypto.randomUUID();
   const ids = plan.references.map((row) => row.id);
   if (ids.length > 0) {

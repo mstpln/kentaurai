@@ -52,6 +52,32 @@ test('automatic official history processes recent one-day jobs before the long h
   assert.equal(fourth.status, 'completed');
 });
 
+test('morning official budget is shared across all recent daily jobs', () => {
+  const source = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+  const start = source.indexOf('async function runDailyOfficialIncremental');
+  const end = source.indexOf('async function runDailyXlabsIncremental', start);
+  assert.ok(start >= 0 && end > start);
+  const body = source.slice(start, end);
+  assert.match(body, /const active = new Set/);
+  assert.match(body, /while \(remaining > 0 && active\.size > 0\)/);
+  assert.match(body, /for \(const job of jobs\.jobs \|\| \[\]\)/);
+  assert.doesNotMatch(body, /for \(const job of jobs\.jobs \|\| \[\]\) \{\s*while \(remaining > 0\)/);
+});
+
+test('morning daily jobs isolate a failure to its own bounded date', () => {
+  const source = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+  const officialStart = source.indexOf('async function runDailyOfficialIncremental');
+  const xlabsStart = source.indexOf('async function runDailyXlabsIncremental');
+  const scheduledStart = source.indexOf('export async function handleScheduled');
+  assert.ok(officialStart >= 0 && xlabsStart > officialStart && scheduledStart > xlabsStart);
+  const officialBody = source.slice(officialStart, xlabsStart);
+  const xlabsBody = source.slice(xlabsStart, scheduledStart);
+  assert.match(officialBody, /catch \(error\)[\s\S]*active\.delete\(job\.id\)[\s\S]*failures\.push\(error\)/);
+  assert.match(officialBody, /bounded official daily batch\(es\) failed/);
+  assert.match(xlabsBody, /catch \(error\)[\s\S]*failures\.push\(error\)/);
+  assert.match(xlabsBody, /bounded X-Labs daily batch\(es\) failed/);
+});
+
 test('morning scheduler pins official and X-Labs work to daily job ids only', () => {
   const wrangler = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
   assert.deepEqual(wrangler.triggers?.crons, ['15 5 * * *']);
