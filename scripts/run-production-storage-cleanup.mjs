@@ -3,6 +3,8 @@ import { appendFileSync } from 'node:fs';
 const MODE = process.env.MODE;
 const DRY_RUN_MAX_BATCHES = Number(process.env.DRY_RUN_MAX_BATCHES || 50);
 const SOFT_DEADLINE_MS = Number(process.env.CLEANUP_SOFT_DEADLINE_MS || 38 * 60 * 1000);
+const RUN_MAX_ROWS_READ = Number(process.env.CLEANUP_RUN_MAX_ROWS_READ || 1_000_000);
+const RUN_MAX_ROWS_WRITTEN = Number(process.env.CLEANUP_RUN_MAX_ROWS_WRITTEN || 100_000);
 const DEADLINE_RESERVE_MS = 2 * 60 * 1000;
 const WORKER_URL = process.env.WORKER_URL;
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
@@ -13,6 +15,7 @@ const FAMILIES = ['horse_profile', 'horse_stat', 'horse_record', 'person_stat'];
 const TARGETS = [...FAMILIES, 'raw_object'];
 const startedAt = Date.now();
 const deadlineAt = startedAt + SOFT_DEADLINE_MS;
+const runCost = { rowsRead: 0, rowsWritten: 0, d1DurationMs: 0, requestCount: 0 };
 
 if (!['dry-run', 'execute'].includes(MODE)) throw new Error('MODE must be dry-run or execute');
 if (!Number.isInteger(DRY_RUN_MAX_BATCHES) || DRY_RUN_MAX_BATCHES < 1 || DRY_RUN_MAX_BATCHES > 250) {
@@ -21,6 +24,12 @@ if (!Number.isInteger(DRY_RUN_MAX_BATCHES) || DRY_RUN_MAX_BATCHES < 1 || DRY_RUN
 if (!Number.isFinite(SOFT_DEADLINE_MS) || SOFT_DEADLINE_MS < 5 * 60 * 1000 || SOFT_DEADLINE_MS > 40 * 60 * 1000) {
   throw new Error('CLEANUP_SOFT_DEADLINE_MS must be between 5 and 40 minutes');
 }
+if (!Number.isInteger(RUN_MAX_ROWS_READ) || RUN_MAX_ROWS_READ < 100_000 || RUN_MAX_ROWS_READ > 10_000_000) {
+  throw new Error('CLEANUP_RUN_MAX_ROWS_READ must be between 100000 and 10000000');
+}
+if (!Number.isInteger(RUN_MAX_ROWS_WRITTEN) || RUN_MAX_ROWS_WRITTEN < 10_000 || RUN_MAX_ROWS_WRITTEN > 1_000_000) {
+  throw new Error('CLEANUP_RUN_MAX_ROWS_WRITTEN must be between 10000 and 1000000');
+}
 if (!WORKER_URL || !ADMIN_TOKEN) throw new Error('WORKER_URL and ADMIN_TOKEN are required');
 if (MODE === 'execute' && !/^[a-f0-9]{40}$/.test(SOURCE_SHA)) {
   throw new Error('execute mode requires the exact GITHUB_SHA');
@@ -28,6 +37,18 @@ if (MODE === 'execute' && !/^[a-f0-9]{40}$/.test(SOURCE_SHA)) {
 
 function deadlineReached() {
   return MODE === 'execute' && Date.now() + DEADLINE_RESERVE_MS >= deadlineAt;
+}
+
+function addRunCost(cost) {
+  if (!cost || typeof cost !== 'object') return;
+  runCost.rowsRead += Math.max(0, Number(cost.rowsRead || 0));
+  runCost.rowsWritten += Math.max(0, Number(cost.rowsWritten || 0));
+  runCost.d1DurationMs += Math.max(0, Number(cost.d1DurationMs || 0));
+  runCost.requestCount += 1;
+}
+
+function costBudgetReached() {
+  return runCost.rowsRead > RUN_MAX_ROWS_READ || runCost.rowsWritten > RUN_MAX_ROWS_WRITTEN;
 }
 
 async function request(path, { method = 'GET', body = null } = {}) {
@@ -48,6 +69,7 @@ async function request(path, { method = 'GET', body = null } = {}) {
       continue;
     }
     if (!response.ok) throw new Error(`${path} failed with HTTP ${response.status}: ${String(data?.error || 'unknown_error').slice(0, 160)}`);
+    addRunCost(data?.cost);
     if (data?.safetyStop === true) throw new Error(`${path} tripped the D1 cost-safety stop`);
     return data;
   }
@@ -156,12 +178,20 @@ async function runSnapshotFamily(family, initialState, session) {
       logSnapshot(family, runPages, scanned, removable, removed, false, warnings, true);
       return { target: family, complete: false, progressMade: runPages > 0 };
     }
+    if (costBudgetReached()) {
+      logSnapshot(family, runPages, scanned, removable, removed, false, warnings);
+      return { target: family, complete: false, progressMade: runPages > 0, stoppedForCost: true };
+    }
 
     const plan = await post('/v1/storage-cleanup/snapshots/plan', { family, limit: 25, cursor });
     runPages += 1;
     scanned += Number(plan.rowsScanned || 0);
     removable += Number(plan.rowsRemovable || 0);
     for (const warning of safeWarnings(plan.warnings)) warnings.add(warning);
+    if (costBudgetReached()) {
+      logSnapshot(family, runPages, scanned, removable, removed, false, warnings);
+      return { target: family, complete: false, progressMade: runPages > 0, stoppedForCost: true };
+    }
 
     if (MODE === 'execute' && Number(plan.rowsRemovable || 0) > 0) {
       const result = await post('/v1/storage-cleanup/snapshots/execute', {
@@ -231,6 +261,10 @@ async function runRawCleanup(initialState, session) {
       logRaw(runBatches, scanned, rewritesPlanned, rewritesDone, canonicalCreated, legacyDeleted, conflicts, false, warnings, true);
       return { target: 'raw_object', complete: false, progressMade: runBatches > 0 };
     }
+    if (costBudgetReached()) {
+      logRaw(runBatches, scanned, rewritesPlanned, rewritesDone, canonicalCreated, legacyDeleted, conflicts, false, warnings);
+      return { target: 'raw_object', complete: false, progressMade: runBatches > 0, stoppedForCost: true };
+    }
 
     const plan = await post('/v1/storage-cleanup/raw/plan', { limit: 25, cursor });
     runBatches += 1;
@@ -238,6 +272,10 @@ async function runRawCleanup(initialState, session) {
     rewritesPlanned += Number(plan.referenceRewrites || 0);
     conflicts += Number(plan.conflictsSkipped || 0);
     for (const warning of safeWarnings(plan.warnings)) warnings.add(warning);
+    if (costBudgetReached()) {
+      logRaw(runBatches, scanned, rewritesPlanned, rewritesDone, canonicalCreated, legacyDeleted, conflicts, false, warnings);
+      return { target: 'raw_object', complete: false, progressMade: runBatches > 0, stoppedForCost: true };
+    }
 
     if (MODE === 'dry-run') {
       if (Number(plan.referenceRewrites || 0) > 0) break;
@@ -295,18 +333,21 @@ const completeTargets = new Set(
   [...targetState.entries()].filter(([, state]) => state.complete).map(([target]) => target)
 );
 let progressMade = false;
+let stoppedForCost = false;
 
 for (const family of FAMILIES) {
   const result = await runSnapshotFamily(family, targetState.get(family), session);
   if (result.complete) completeTargets.add(family);
   progressMade ||= result.progressMade;
-  if (!result.complete && deadlineReached()) break;
+  stoppedForCost ||= result.stoppedForCost === true;
+  if (!result.complete && (deadlineReached() || stoppedForCost)) break;
 }
 
-if (!deadlineReached()) {
+if (!deadlineReached() && !stoppedForCost) {
   const rawResult = await runRawCleanup(targetState.get('raw_object'), session);
   if (rawResult.complete) completeTargets.add('raw_object');
   progressMade ||= rawResult.progressMade;
+  stoppedForCost ||= rawResult.stoppedForCost === true;
 }
 
 const allComplete = MODE === 'execute'
@@ -320,7 +361,9 @@ if (MODE === 'execute') {
     complete: allComplete,
     progressMade,
     continuationCount: Number(session?.continuationCount || 0),
-    stoppedForDeadline: !allComplete && deadlineReached()
+    stoppedForDeadline: !allComplete && deadlineReached(),
+    stoppedForCost,
+    cost: runCost
   }));
 
   if (!allComplete && Number(session?.continuationCount || 0) >= Number(session?.maxContinuations || 0)) {
@@ -331,6 +374,7 @@ if (MODE === 'execute') {
 if (process.env.GITHUB_OUTPUT) {
   appendFileSync(process.env.GITHUB_OUTPUT, `cleanup_complete=${MODE === 'execute' && allComplete ? 'true' : 'false'}\n`);
   appendFileSync(process.env.GITHUB_OUTPUT, `progress_made=${progressMade ? 'true' : 'false'}\n`);
+  appendFileSync(process.env.GITHUB_OUTPUT, `cost_budget_stop=${stoppedForCost ? 'true' : 'false'}\n`);
   if (MODE === 'execute' && session?.sessionId) {
     appendFileSync(process.env.GITHUB_OUTPUT, `cleanup_session_id=${session.sessionId}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `continuation_count=${Number(session.continuationCount || 0)}\n`);
