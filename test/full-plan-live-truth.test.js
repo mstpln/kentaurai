@@ -32,8 +32,8 @@ test('live-state documentation contains no pre-cutover candidate markers', () =>
   assert.doesNotMatch(serialized, /worker-v075/i);
   assert.match(files.readme, /latest successful reviewed production release is the currently deployed baseline/i);
   assert.match(files.readme, /production entrypoint is `src\/worker-v078\.js`/i);
-  assert.match(files.buildState, /production baseline before this QA follow-up is schema migration `0045_storage_cleanup_sessions\.sql`/i);
-  assert.match(files.buildState, /successful production release advances the deployed schema through `0048`/i);
+  assert.match(files.buildState, /production schema is verified through migration `0048_live_pending_cost_indexes\.sql`/i);
+  assert.match(files.buildState, /current reviewed production baseline is the latest successful production-release workflow on `main`/i);
   assert.match(files.buildState, /External analysis workflow production live/i);
   assert.match(files.buildState, /External evidence workflow production live/i);
   assert.match(files.buildState, /latest production release completed successfully/i);
