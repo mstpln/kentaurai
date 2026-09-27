@@ -54,7 +54,7 @@ function insertXlabsHistorical(db, overrides = {}) {
     unavailable_races: 3,
     consecutive_errors: 0,
     last_error: null,
-    last_run_at: '2099-09-21T19:59:00Z',
+    last_run_at: '2099-09-21T19:00:00Z',
     retry_after: null,
     ...overrides
   };
