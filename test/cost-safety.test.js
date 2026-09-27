@@ -56,3 +56,21 @@ test('cost observer counts reads performed through D1 first()', async () => {
   assert.equal(observed.metrics.rowsRead, 2);
   assert.equal(observed.safetyStop, true);
 });
+
+
+test('cumulative morning cost safety stops after individually safe operations', () => {
+  const state = createRunSafetyState({ rowsRead: 100, rowsWritten: 100, durationMs: 1000 });
+  applyRunSafetyResult(state, 'first_part', {
+    safetyStop: false,
+    cost: { rowsRead: 60, rowsWritten: 10, durationMs: 100 }
+  });
+  assert.equal(state.stopped, false);
+
+  applyRunSafetyResult(state, 'second_part', {
+    safetyStop: false,
+    cost: { rowsRead: 50, rowsWritten: 5, durationMs: 100 }
+  });
+  assert.equal(state.stopped, true);
+  assert.equal(state.reason, 'abnormal_cost:second_part');
+  assert.deepEqual(state.metrics, { rowsRead: 110, rowsWritten: 15, durationMs: 200 });
+});
