@@ -1,6 +1,6 @@
-# Inställningar: AI och Data
+# Inställningar: Drift och Data
 
-KentaurAI har en privat inställningsyta som nås via kugghjulet på inloggade sidor. Den normala analysvägen efter F4 är v3 och kräver ingen utvecklarkonsol eller manuell JSON-redigering.
+KentaurAI har en privat inställningsyta som nås via kugghjulet på inloggade sidor. Analysflödet ligger i den separata primära ytan **Analys**. Inställningar har två flikar: **Drift** och **Data**.
 
 ## AI
 
@@ -18,12 +18,23 @@ Aktuell standardpolicy för huvudsystemet är 150-250 SEK. Om fler rader inte ö
 ### Legacy
 Historiska v1/v2-analyser och system får fortfarande läsas. Nya gamla combined/declared-unsealed analyser kan inte skapas när ANALYSIS_WORKFLOW_MODE=v3. legacy_v2 är endast ett kontrollerat rollback-läge och aktiveras aldrig automatiskt.
 
+## Drift
+
+Drift är standardfliken. Den visar:
+- en master-switch för automatiska KentaurAI-jobb,
+- Cloudflare-användning mot inkluderade gränser och faktisk billingperiod,
+- status för officiell data/X-Labs,
+- senaste registrerade aktivitet.
+
+Master-switchen är den enda avsiktliga operativa mutationen i Drift. När den är pausad stoppar den det schemalagda Worker-flödet innan automatisk datainsamling/bearbetning delegeras. Vanlig appanvändning och manuellt initierade funktioner fortsätter att fungera. Om kontrollstatus inte kan läsas stoppar schemalagd automatik fail-closed.
+
+Cloudflare-progressen hämtas server-side från Cloudflare och startar därför från det verkliga konto-/billingperiodläget, inte från noll. En separat least-privilege `CLOUDFLARE_USAGE_API_TOKEN` och `CLOUDFLARE_ACCOUNT_ID` krävs i Worker-miljön. Om de saknas visas användningen som ej ansluten; inga nollvärden eller uppskattade kostnadsstaplar fabriceras.
+
 ## Data
 
-### Datatäckning och drift
-Data-fliken visar Coverage v2 i läsbar form, inklusive täckning för nästa omgång och sanerad status för officiell historik/X-Labs-jobb. Full datatäckningsrapport kan hämtas via den privata app-sessionen.
+Data-fliken visar Datamängd och den befintliga sanerade datatäckningsrapporten. Full rapport kan hämtas via den privata app-sessionen.
 
-Driftinformationen är skrivskyddad i appen. Råpayloads, privata R2-objektnycklar, råa feltexter, hemligheter och ADMIN_TOKEN visas inte. Att återuppta eller ändra historiska jobb görs endast via det separata administratörsflödet.
+Råpayloads, privata R2-objektnycklar, råa feltexter, hemligheter och ADMIN_TOKEN visas inte. Att återuppta eller ändra historiska jobb görs endast via det separata administratörsflödet.
 
 ## Säkerhet
 Alla app-routes kräver giltig privat session via APP_PASSWORD. Operativa /v1/*-routes använder separat ADMIN_TOKEN. Den privata appen exponerar aldrig administratörstoken och svar använder no-store där relevant.
