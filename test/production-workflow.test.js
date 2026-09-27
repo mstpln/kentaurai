@@ -49,6 +49,7 @@ test('production release verifies required migrations and private observability 
   assert.match(releaseWorkflow, /0045_storage_cleanup_sessions\.sql/);
   assert.match(releaseWorkflow, /0046_snapshot_observation_lookup_index\.sql/);
   assert.match(releaseWorkflow, /0047_storage_cleanup_session_audits\.sql/);
+  assert.match(releaseWorkflow, /0048_live_pending_cost_indexes\.sql/);
   assert.match(releaseWorkflow, /SELECT name FROM sqlite_master WHERE type='table' AND name IN \('storage_cleanup_sessions','storage_cleanup_session_targets','storage_cleanup_session_audits'\)/);
   assert.match(releaseWorkflow, /storage_cleanup_sessions/);
   assert.match(releaseWorkflow, /storage_cleanup_session_targets/);
@@ -56,6 +57,8 @@ test('production release verifies required migrations and private observability 
   assert.match(releaseWorkflow, /idx_storage_cleanup_sessions_one_running_source/);
   assert.match(releaseWorkflow, /idx_official_snapshot_observations_snapshot_lookup/);
   assert.match(releaseWorkflow, /idx_storage_cleanup_session_audits_source/);
+  assert.match(releaseWorkflow, /idx_source_records_live_game_pending/);
+  assert.match(releaseWorkflow, /idx_import_runs_live_normalize_failures/);
   assert.match(releaseWorkflow, /\/app\/api\/settings\/status/);
   assert.match(releaseWorkflow, /\/app\/api\/settings\/alerts'/);
   assert.match(releaseWorkflow, /\/app\/api\/settings\/alerts\/acknowledge/);
