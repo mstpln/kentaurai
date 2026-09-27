@@ -108,6 +108,18 @@ function sameFact(left, right) {
   return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
 }
 
+function sameColumns(row, values) {
+  return Object.entries(values).every(([column, value]) => Object.is(row?.[column] ?? null, value ?? null));
+}
+
+async function recordSnapshotObservation(env, source, family, entityKey, scopeKey, snapshotId, factualChanged) {
+  await env.DB.prepare(`
+    INSERT OR IGNORE INTO official_snapshot_observations
+      (source_record_id,snapshot_family,entity_key,scope_key,observed_at,snapshot_id,factual_changed)
+    VALUES (?,?,?,?,?,?,?)
+  `).bind(source.id, family, entityKey, scopeKey, source.fetched_at, snapshotId, factualChanged ? 1 : 0).run();
+}
+
 function collectUnique(map, key, fact, label) {
   const prior = map.get(key);
   if (prior && !sameFact(prior, fact)) throw new Error(`official source contains conflicting ${label} values for ${key}`);
@@ -192,51 +204,119 @@ async function mappedId(env, table, idColumn, externalId) {
 }
 
 async function insertHorseProfile(env, source, horseId, fact) {
-  return env.DB.prepare(`
+  const previous = await env.DB.prepare(`
+    SELECT id,age_years FROM horse_profile_snapshots
+    WHERE horse_id=? AND julianday(observed_at)<=julianday(?)
+    ORDER BY julianday(observed_at) DESC,id DESC LIMIT 1
+  `).bind(horseId, source.fetched_at).first();
+  if (previous && sameColumns(previous, { age_years: fact.ageYears })) {
+    await recordSnapshotObservation(env, source, 'horse_profile', horseId, 'profile', previous.id, false);
+    return { inserted: false, snapshotId: previous.id };
+  }
+  const snapshotId = stableId('horse-profile-snapshot', horseId, source.id);
+  await env.DB.prepare(`
     INSERT OR IGNORE INTO horse_profile_snapshots
       (id, horse_id, observed_at, age_years, source_record_id, quality_status)
     VALUES (?, ?, ?, ?, ?, ?)
-  `).bind(stableId('horse-profile-snapshot', horseId, source.id), horseId, source.fetched_at, fact.ageYears, source.id, SNAPSHOT_QUALITY).run();
+  `).bind(snapshotId, horseId, source.fetched_at, fact.ageYears, source.id, SNAPSHOT_QUALITY).run();
+  await recordSnapshotObservation(env, source, 'horse_profile', horseId, 'profile', snapshotId, true);
+  return { inserted: true, snapshotId };
 }
 
 async function insertHorseStat(env, source, horseId, fact) {
-  return env.DB.prepare(`
+  const previous = await env.DB.prepare(`
+    SELECT id,stat_year,starts,earnings_raw,wins,seconds,thirds,win_percentage_raw,place_percentage_raw,earnings_per_start_raw,start_points
+    FROM horse_stat_snapshots
+    WHERE horse_id=? AND snapshot_scope=? AND julianday(observed_at)<=julianday(?)
+    ORDER BY julianday(observed_at) DESC,id DESC LIMIT 1
+  `).bind(horseId, fact.snapshotScope, source.fetched_at).first();
+  const values = {
+    stat_year: fact.statYear, starts: fact.starts, earnings_raw: fact.earningsRaw, wins: fact.wins,
+    seconds: fact.seconds, thirds: fact.thirds, win_percentage_raw: fact.winPercentageRaw,
+    place_percentage_raw: fact.placePercentageRaw, earnings_per_start_raw: fact.earningsPerStartRaw,
+    start_points: fact.startPoints
+  };
+  if (previous && sameColumns(previous, values)) {
+    await recordSnapshotObservation(env, source, 'horse_stat', horseId, fact.snapshotScope, previous.id, false);
+    return { inserted: false, snapshotId: previous.id };
+  }
+  const snapshotId = stableId('horse-stat-snapshot', horseId, source.id, fact.snapshotScope);
+  await env.DB.prepare(`
     INSERT OR IGNORE INTO horse_stat_snapshots
       (id, horse_id, observed_at, snapshot_scope, stat_year, starts, earnings_raw, wins, seconds, thirds,
        win_percentage_raw, place_percentage_raw, earnings_per_start_raw, start_points, source_record_id, quality_status)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
-    stableId('horse-stat-snapshot', horseId, source.id, fact.snapshotScope), horseId, source.fetched_at,
+    snapshotId, horseId, source.fetched_at,
     fact.snapshotScope, fact.statYear, fact.starts, fact.earningsRaw, fact.wins, fact.seconds, fact.thirds,
     fact.winPercentageRaw, fact.placePercentageRaw, fact.earningsPerStartRaw, fact.startPoints, source.id, SNAPSHOT_QUALITY
   ).run();
+  await recordSnapshotObservation(env, source, 'horse_stat', horseId, fact.snapshotScope, snapshotId, true);
+  return { inserted: true, snapshotId };
 }
 
 async function insertHorseRecord(env, source, horseId, fact) {
   const scopeKey = fact.recordScope === 'year' ? `year:${fact.statYear}` : fact.recordScope;
-  return env.DB.prepare(`
+  const comparisonScope = `${scopeKey}:${fact.ordinal}`;
+  const previous = await env.DB.prepare(`
+    SELECT id,code,start_method,distance_group,time_minutes,time_seconds,time_tenths,place
+    FROM horse_record_snapshots
+    WHERE horse_id=? AND record_scope=? AND stat_year IS ? AND record_ordinal=?
+      AND julianday(observed_at)<=julianday(?)
+    ORDER BY julianday(observed_at) DESC,id DESC LIMIT 1
+  `).bind(horseId, fact.recordScope, fact.statYear, fact.ordinal, source.fetched_at).first();
+  const values = {
+    code: fact.code, start_method: fact.startMethod, distance_group: fact.distanceGroup,
+    time_minutes: fact.timeMinutes, time_seconds: fact.timeSeconds, time_tenths: fact.timeTenths, place: fact.place
+  };
+  if (previous && sameColumns(previous, values)) {
+    await recordSnapshotObservation(env, source, 'horse_record', horseId, comparisonScope, previous.id, false);
+    return { inserted: false, snapshotId: previous.id };
+  }
+  const snapshotId = stableId('horse-record-snapshot', horseId, source.id, scopeKey, fact.ordinal);
+  await env.DB.prepare(`
     INSERT OR IGNORE INTO horse_record_snapshots
       (id, horse_id, observed_at, record_scope, stat_year, record_ordinal, code, start_method, distance_group,
        time_minutes, time_seconds, time_tenths, place, source_record_id, quality_status)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
-    stableId('horse-record-snapshot', horseId, source.id, scopeKey, fact.ordinal), horseId, source.fetched_at,
+    snapshotId, horseId, source.fetched_at,
     fact.recordScope, fact.statYear, fact.ordinal, fact.code, fact.startMethod, fact.distanceGroup,
     fact.timeMinutes, fact.timeSeconds, fact.timeTenths, fact.place, source.id, SNAPSHOT_QUALITY
   ).run();
+  await recordSnapshotObservation(env, source, 'horse_record', horseId, comparisonScope, snapshotId, true);
+  return { inserted: true, snapshotId };
 }
 
 async function insertPersonStat(env, source, personId, fact) {
-  return env.DB.prepare(`
+  const entityKey = `${fact.personType}:${personId}`;
+  const previous = await env.DB.prepare(`
+    SELECT id,starts,earnings_raw,wins,seconds,thirds,win_percentage_raw
+    FROM person_stat_snapshots
+    WHERE person_type=? AND person_id=? AND stat_year=? AND julianday(observed_at)<=julianday(?)
+    ORDER BY julianday(observed_at) DESC,id DESC LIMIT 1
+  `).bind(fact.personType, personId, fact.statYear, source.fetched_at).first();
+  const values = {
+    starts: fact.starts, earnings_raw: fact.earningsRaw, wins: fact.wins, seconds: fact.seconds,
+    thirds: fact.thirds, win_percentage_raw: fact.winPercentageRaw
+  };
+  if (previous && sameColumns(previous, values)) {
+    await recordSnapshotObservation(env, source, 'person_stat', entityKey, String(fact.statYear), previous.id, false);
+    return { inserted: false, snapshotId: previous.id };
+  }
+  const snapshotId = stableId('person-stat-snapshot', fact.personType, personId, source.id, fact.statYear);
+  await env.DB.prepare(`
     INSERT OR IGNORE INTO person_stat_snapshots
       (id, person_type, person_id, observed_at, stat_year, starts, earnings_raw, wins, seconds, thirds,
        win_percentage_raw, source_record_id, quality_status)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
-    stableId('person-stat-snapshot', fact.personType, personId, source.id, fact.statYear), fact.personType, personId,
+    snapshotId, fact.personType, personId,
     source.fetched_at, fact.statYear, fact.starts, fact.earningsRaw, fact.wins, fact.seconds, fact.thirds,
     fact.winPercentageRaw, source.id, SNAPSHOT_QUALITY
   ).run();
+  await recordSnapshotObservation(env, source, 'person_stat', entityKey, String(fact.statYear), snapshotId, true);
+  return { inserted: true, snapshotId };
 }
 
 async function markSource(env, sourceRecordId, status, counts, errorMessage = null) {
@@ -374,8 +454,8 @@ function statFromRow(row) {
     placePercentageRaw: row.place_percentage_raw == null ? null : Number(row.place_percentage_raw),
     earningsPerStartRaw: row.earnings_per_start_raw == null ? null : Number(row.earnings_per_start_raw),
     startPoints: row.start_points == null ? null : Number(row.start_points),
-    observedAt: row.observed_at,
-    sourceRecordId: row.source_record_id
+    observedAt: row.effective_observed_at || row.observed_at,
+    sourceRecordId: row.effective_source_record_id || row.source_record_id
   };
 }
 
@@ -393,17 +473,21 @@ export async function getOfficialHorseSnapshotsAsOf(env, horseIds, asOf) {
   for (const group of chunks(ids)) {
     const { results: profiles } = await env.DB.prepare(`
       WITH ranked AS (
-        SELECT hps.*, ROW_NUMBER() OVER (PARTITION BY hps.horse_id ORDER BY julianday(hps.observed_at) DESC, hps.id DESC) AS rn
+        SELECT hps.*, COALESCE(oso.observed_at,hps.observed_at) AS effective_observed_at,
+          COALESCE(oso.source_record_id,hps.source_record_id) AS effective_source_record_id,
+          ROW_NUMBER() OVER (PARTITION BY hps.horse_id ORDER BY julianday(COALESCE(oso.observed_at,hps.observed_at)) DESC, hps.id DESC) AS rn
         FROM horse_profile_snapshots hps
-        JOIN official_snapshot_source_sync os ON os.source_record_id = hps.source_record_id AND os.status = 'complete'
-        JOIN source_records sr ON sr.id = hps.source_record_id
+        LEFT JOIN official_snapshot_observations oso ON oso.snapshot_family='horse_profile' AND oso.snapshot_id=hps.id
+        JOIN official_snapshot_source_sync os ON os.source_record_id = COALESCE(oso.source_record_id,hps.source_record_id) AND os.status = 'complete'
+        JOIN source_records sr ON sr.id = COALESCE(oso.source_record_id,hps.source_record_id)
         WHERE hps.horse_id IN (${placeholders(group)})
-          AND julianday(hps.observed_at) <= julianday(?)
+          AND julianday(COALESCE(oso.observed_at,hps.observed_at)) <= julianday(?)
           AND julianday(sr.fetched_at) <= julianday(?)
       ) SELECT * FROM ranked WHERE rn = 1
     `).bind(...group, cutoff, cutoff).all();
     for (const row of profiles) result.get(row.horse_id).age = {
-      years: row.age_years == null ? null : Number(row.age_years), observedAt: row.observed_at, sourceRecordId: row.source_record_id
+      years: row.age_years == null ? null : Number(row.age_years), observedAt: row.effective_observed_at || row.observed_at,
+      sourceRecordId: row.effective_source_record_id || row.source_record_id
     };
   }
 
@@ -411,12 +495,15 @@ export async function getOfficialHorseSnapshotsAsOf(env, horseIds, asOf) {
   for (const group of chunks(ids)) {
     const { results: stats } = await env.DB.prepare(`
       WITH ranked AS (
-        SELECT hss.*, ROW_NUMBER() OVER (PARTITION BY hss.horse_id, hss.snapshot_scope ORDER BY julianday(hss.observed_at) DESC, hss.id DESC) AS rn
+        SELECT hss.*, COALESCE(oso.observed_at,hss.observed_at) AS effective_observed_at,
+          COALESCE(oso.source_record_id,hss.source_record_id) AS effective_source_record_id,
+          ROW_NUMBER() OVER (PARTITION BY hss.horse_id, hss.snapshot_scope ORDER BY julianday(COALESCE(oso.observed_at,hss.observed_at)) DESC, hss.id DESC) AS rn
         FROM horse_stat_snapshots hss
-        JOIN official_snapshot_source_sync os ON os.source_record_id = hss.source_record_id AND os.status = 'complete'
-        JOIN source_records sr ON sr.id = hss.source_record_id
+        LEFT JOIN official_snapshot_observations oso ON oso.snapshot_family='horse_stat' AND oso.snapshot_id=hss.id
+        JOIN official_snapshot_source_sync os ON os.source_record_id = COALESCE(oso.source_record_id,hss.source_record_id) AND os.status = 'complete'
+        JOIN source_records sr ON sr.id = COALESCE(oso.source_record_id,hss.source_record_id)
         WHERE hss.horse_id IN (${placeholders(group)}) AND hss.snapshot_scope IN ('life', ?)
-          AND julianday(hss.observed_at) <= julianday(?)
+          AND julianday(COALESCE(oso.observed_at,hss.observed_at)) <= julianday(?)
           AND julianday(sr.fetched_at) <= julianday(?)
       ) SELECT * FROM ranked WHERE rn = 1
     `).bind(...group, scope, cutoff, cutoff).all();
@@ -429,19 +516,23 @@ export async function getOfficialHorseSnapshotsAsOf(env, horseIds, asOf) {
   for (const group of chunks(ids)) {
     const { results: records } = await env.DB.prepare(`
       WITH ranked AS (
-        SELECT hrs.*, ROW_NUMBER() OVER (PARTITION BY hrs.horse_id ORDER BY julianday(hrs.observed_at) DESC, hrs.id DESC) AS rn
+        SELECT hrs.*, COALESCE(oso.observed_at,hrs.observed_at) AS effective_observed_at,
+          COALESCE(oso.source_record_id,hrs.source_record_id) AS effective_source_record_id,
+          ROW_NUMBER() OVER (PARTITION BY hrs.horse_id ORDER BY julianday(COALESCE(oso.observed_at,hrs.observed_at)) DESC, hrs.id DESC) AS rn
         FROM horse_record_snapshots hrs
-        JOIN official_snapshot_source_sync os ON os.source_record_id = hrs.source_record_id AND os.status = 'complete'
-        JOIN source_records sr ON sr.id = hrs.source_record_id
+        LEFT JOIN official_snapshot_observations oso ON oso.snapshot_family='horse_record' AND oso.snapshot_id=hrs.id
+        JOIN official_snapshot_source_sync os ON os.source_record_id = COALESCE(oso.source_record_id,hrs.source_record_id) AND os.status = 'complete'
+        JOIN source_records sr ON sr.id = COALESCE(oso.source_record_id,hrs.source_record_id)
         WHERE hrs.horse_id IN (${placeholders(group)}) AND hrs.record_scope = 'current'
-          AND julianday(hrs.observed_at) <= julianday(?)
+          AND julianday(COALESCE(oso.observed_at,hrs.observed_at)) <= julianday(?)
           AND julianday(sr.fetched_at) <= julianday(?)
       ) SELECT * FROM ranked WHERE rn = 1
     `).bind(...group, cutoff, cutoff).all();
     for (const row of records) result.get(row.horse_id).currentRecord = {
       code: row.code || null, startMethod: row.start_method || null, distanceGroup: row.distance_group || null,
       time: { minutes: row.time_minutes == null ? null : Number(row.time_minutes), seconds: row.time_seconds == null ? null : Number(row.time_seconds), tenths: row.time_tenths == null ? null : Number(row.time_tenths) },
-      place: row.place == null ? null : Number(row.place), observedAt: row.observed_at, sourceRecordId: row.source_record_id
+      place: row.place == null ? null : Number(row.place), observedAt: row.effective_observed_at || row.observed_at,
+      sourceRecordId: row.effective_source_record_id || row.source_record_id
     };
   }
 
@@ -482,12 +573,15 @@ export async function getOfficialPersonAnnualSnapshotsAsOf(env, personType, pers
   for (const group of chunks(ids)) {
     const { results } = await env.DB.prepare(`
       WITH ranked AS (
-        SELECT pss.*, ROW_NUMBER() OVER (PARTITION BY pss.person_id ORDER BY julianday(pss.observed_at) DESC, pss.id DESC) AS rn
+        SELECT pss.*, COALESCE(oso.observed_at,pss.observed_at) AS effective_observed_at,
+          COALESCE(oso.source_record_id,pss.source_record_id) AS effective_source_record_id,
+          ROW_NUMBER() OVER (PARTITION BY pss.person_id ORDER BY julianday(COALESCE(oso.observed_at,pss.observed_at)) DESC, pss.id DESC) AS rn
         FROM person_stat_snapshots pss
-        JOIN official_snapshot_source_sync os ON os.source_record_id = pss.source_record_id AND os.status = 'complete'
-        JOIN source_records sr ON sr.id = pss.source_record_id
+        LEFT JOIN official_snapshot_observations oso ON oso.snapshot_family='person_stat' AND oso.snapshot_id=pss.id
+        JOIN official_snapshot_source_sync os ON os.source_record_id = COALESCE(oso.source_record_id,pss.source_record_id) AND os.status = 'complete'
+        JOIN source_records sr ON sr.id = COALESCE(oso.source_record_id,pss.source_record_id)
         WHERE pss.person_type = ? AND pss.person_id IN (${placeholders(group)}) AND pss.stat_year = ?
-          AND julianday(pss.observed_at) <= julianday(?)
+          AND julianday(COALESCE(oso.observed_at,pss.observed_at)) <= julianday(?)
           AND julianday(sr.fetched_at) <= julianday(?)
       ) SELECT * FROM ranked WHERE rn = 1
     `).bind(personType, ...group, year, cutoff, cutoff).all();
@@ -495,7 +589,8 @@ export async function getOfficialPersonAnnualSnapshotsAsOf(env, personType, pers
       starts: row.starts == null ? null : Number(row.starts), earningsRaw: row.earnings_raw == null ? null : Number(row.earnings_raw),
       wins: row.wins == null ? null : Number(row.wins), seconds: row.seconds == null ? null : Number(row.seconds),
       thirds: row.thirds == null ? null : Number(row.thirds), winPercentageRaw: row.win_percentage_raw == null ? null : Number(row.win_percentage_raw),
-      statYear: Number(row.stat_year), observedAt: row.observed_at, sourceRecordId: row.source_record_id
+      statYear: Number(row.stat_year), observedAt: row.effective_observed_at || row.observed_at,
+      sourceRecordId: row.effective_source_record_id || row.source_record_id
     });
   }
   return out;

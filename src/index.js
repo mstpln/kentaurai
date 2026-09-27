@@ -38,6 +38,7 @@ import { getGameHistorySummary } from './routes/game-summary.js';
 import { appAuthConfigured, appPasswordMatches, createAppSessionCookie, hasValidAppSession } from './app-auth.js';
 import { htmlResponse, redirectResponse, renderAppPage, renderLoginPage } from './app-page-history.js';
 import { renderReferenceImportPage } from './app-reference-import.js';
+import { applyRunSafetyResult, createRunSafetyState, observeD1Operation } from './cost-safety.js';
 
 const LIVE_MORNING_CRON = '15 5 * * *';
 const DAILY_LIVE_NORMALIZE_RUNS = 16;
@@ -348,13 +349,18 @@ async function handleFetch(request, env) {
   return json({ error: 'not_found' }, 404);
 }
 
-async function runScheduledPart(name, fn) {
+async function runScheduledPart(name, env, fn) {
   try {
-    return { name, ok: true, result: await fn() };
+    const observed = await observeD1Operation(env, `morning_cron:${name}`, fn);
+    return { name, ok: true, result: observed.value, cost: observed.metrics, safetyStop: observed.safetyStop };
   } catch (error) {
     console.error(error);
-    return { name, ok: false, error: String(error.message).slice(0, 1000) };
+    return { name, ok: false, error: String(error.message).slice(0, 1000), cost: error.costSafety?.metrics || null, safetyStop: Boolean(error.costSafety?.safetyStop) };
   }
+}
+
+function skippedScheduledPart(name, reason) {
+  return { name, ok: true, skipped: true, reason };
 }
 
 async function runLiveNormalizationMorning(env) {
@@ -375,6 +381,9 @@ async function runLiveNormalizationMorning(env) {
 
 async function runDailyOfficialIncremental(env, scheduledTime) {
   const jobs = await ensureDailyOfficialHistoryJobs(env, scheduledTime);
+  if (!Number.isInteger(jobs.lookbackDays) || jobs.lookbackDays < 1 || jobs.lookbackDays > 14) {
+    throw new Error('automatic official history lookback is outside the bounded daily range');
+  }
   let batchCount = 0;
   let remaining = DAILY_OFFICIAL_BATCH_RUNS;
   let finalStatus = 'idle';
@@ -399,6 +408,9 @@ async function runDailyOfficialIncremental(env, scheduledTime) {
 
 async function runDailyXlabsIncremental(env, scheduledTime) {
   const recent = await ensureRecentDailyXlabsJobs(env, scheduledTime, 3);
+  if (recent.lookbackDays !== 3 || (recent.jobs || []).some((job) => job.scope !== 'daily_v85_v86')) {
+    throw new Error('automatic X-Labs work must use the bounded daily_v85_v86 scope');
+  }
   let batchCount = 0;
   let finalStatus = 'idle';
   const processedJobIds = [];
@@ -423,7 +435,7 @@ async function runDailyXlabsIncremental(env, scheduledTime) {
   };
 }
 
-async function handleScheduled(controller, env) {
+export async function handleScheduled(controller, env) {
   if (controller.cron !== LIVE_MORNING_CRON) {
     return { skipped: true, reason: 'unsupported_cron', cron: controller.cron };
   }
@@ -432,15 +444,32 @@ async function handleScheduled(controller, env) {
   const startedAt = new Date().toISOString();
   const id = `cron_${crypto.randomUUID()}`;
   const parts = [];
+  const safety = createRunSafetyState();
 
-  parts.push(await runScheduledPart('live_capture_morning', () => captureUpcomingOfficialGames(env, controller.scheduledTime, {
+  async function critical(name, action) {
+    const part = await runScheduledPart(name, env, (observedEnv) => action(observedEnv));
+    parts.push(part);
+    applyRunSafetyResult(safety, name, part);
+  }
+
+  async function nonCritical(name, action) {
+    if (safety.stopped) {
+      parts.push(skippedScheduledPart(name, safety.reason));
+      return;
+    }
+    const part = await runScheduledPart(name, env, (observedEnv) => action(observedEnv));
+    parts.push(part);
+    applyRunSafetyResult(safety, name, part);
+  }
+
+  await critical('live_capture_morning', (observedEnv) => captureUpcomingOfficialGames(observedEnv, controller.scheduledTime, {
     includeToday: true,
     daysAhead: 7
-  })));
-  parts.push(await runScheduledPart('live_normalize_morning', () => runLiveNormalizationMorning(env)));
-  parts.push(await runScheduledPart('official_daily_incremental', () => runDailyOfficialIncremental(env, controller.scheduledTime)));
-  parts.push(await runScheduledPart('post_race_settlement', () => runPostRaceSettlementBatch(env)));
-  parts.push(await runScheduledPart('xlabs_daily_incremental', () => runDailyXlabsIncremental(env, controller.scheduledTime)));
+  }));
+  await critical('live_normalize_morning', (observedEnv) => runLiveNormalizationMorning(observedEnv));
+  await nonCritical('official_daily_incremental', (observedEnv) => runDailyOfficialIncremental(observedEnv, controller.scheduledTime));
+  await critical('post_race_settlement', (observedEnv) => runPostRaceSettlementBatch(observedEnv));
+  await nonCritical('xlabs_daily_incremental', (observedEnv) => runDailyXlabsIncremental(observedEnv, controller.scheduledTime));
 
   const failures = parts.filter((part) => !part.ok);
   await env.DB.prepare(`
@@ -454,8 +483,9 @@ async function handleScheduled(controller, env) {
     failures.length ? 'failed' : 'success',
     failures.length,
     failures.length ? JSON.stringify(failures.map(({ name, error }) => ({ name, error }))) : null,
-    JSON.stringify({ cron: controller.cron, scheduledAt, parts })
+    JSON.stringify({ cron: controller.cron, scheduledAt, safety, parts })
   ).run();
+  return { skipped: false, parts, safety };
 }
 
 export default {
