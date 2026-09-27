@@ -121,3 +121,48 @@ export async function auditStorageCleanupIntegrity(env) {
     operations
   };
 }
+
+
+function normalizeSessionId(value) {
+  const id = String(value || '');
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
+    throw new Error('valid cleanup session_id is required');
+  }
+  return id;
+}
+
+function normalizeSha(value) {
+  const sha = String(value || '');
+  if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error('valid source_sha is required');
+  return sha;
+}
+
+export async function bindStorageCleanupIntegrityAudit(env, options = {}) {
+  if (!env?.DB) throw new Error('DB is not configured');
+  const sessionId = normalizeSessionId(options.session_id);
+  const sourceSha = normalizeSha(options.source_sha);
+  const session = await env.DB.prepare(`
+    SELECT id,source_sha,status,expires_at
+    FROM storage_cleanup_sessions
+    WHERE id=?
+    LIMIT 1
+  `).bind(sessionId).first();
+  if (!session) throw new Error('cleanup session not found');
+  if (session.source_sha !== sourceSha) throw new Error('cleanup session source_sha changed; start a new session');
+  if (session.status !== 'running') throw new Error('cleanup session is not running');
+  const expiry = Date.parse(String(session.expires_at || ''));
+  if (!Number.isFinite(expiry) || expiry <= Date.now()) throw new Error('cleanup session expired; start a new session');
+
+  const audit = await auditStorageCleanupIntegrity(env);
+  if (!audit.ok) return { ...audit, sessionId, auditVerified: false };
+
+  await env.DB.prepare(`
+    INSERT INTO storage_cleanup_session_audits(session_id,source_sha,verified_at)
+    VALUES (?,?,CURRENT_TIMESTAMP)
+    ON CONFLICT(session_id) DO UPDATE SET
+      source_sha=excluded.source_sha,
+      verified_at=CURRENT_TIMESTAMP
+  `).bind(sessionId, sourceSha).run();
+
+  return { ...audit, sessionId, auditVerified: true };
+}
