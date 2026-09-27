@@ -264,7 +264,7 @@ async function allD1DatabaseBytes(fetchImpl, accountId, token) {
 
 export async function getCloudflareUsageOverview(env, options = {}) {
   const token = String(env?.CLOUDFLARE_USAGE_API_TOKEN || '').trim();
-  const accountId = String(env?.CLOUDFLARE_ACCOUNT_ID || '').trim();
+  const accountId = String(env?.KENTAURAI_CLOUDFLARE_ACCOUNT_ID || '').trim();
   const now = options.now instanceof Date ? options.now : new Date(options.now || Date.now());
   const fetchImpl = options.fetchImpl || fetch;
 
