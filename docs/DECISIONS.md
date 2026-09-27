@@ -343,6 +343,7 @@ A single race must not directly change model weights. Candidate learnings are re
 9. Normal app reads and analysis exports must reuse stored data/derived state wherever possible; user navigation must not trigger provider acquisition or hidden historical backfill.
 10. Cost safety takes precedence over background freshness: if bounded daily work cannot finish safely, remaining work waits for the next bounded run or explicit manual action rather than hot-looping.
 11. Settings treats retained multi-day historical jobs as intentionally paused while automatic history is disabled; a paused job must not create a stale/error badge merely because it is not being scheduled. Explicit failed jobs still require attention.
+12. D1 cost observability must account for point reads as well as list/batch operations. When a D1 convenience method does not expose execution metadata, the observed path must use a semantically equivalent metadata-returning query rather than silently recording zero reads.
 
 
 ## Destructive storage cleanup is explicit, bounded and plan-bound
@@ -352,6 +353,10 @@ A single race must not directly change model weights. Candidate learnings are re
 4. Cleanup cursors are keyset-based, bounded and HMAC-signed. They preserve cross-page change-point state without repeatedly rescanning earlier rows and cannot be edited into a destructive plan.
 5. Raw-object cleanup derives candidates from indexed `source_records` metadata. It never deletes an object until the canonical object is verified, the bounded D1 rewrites succeed and a fresh indexed count confirms zero remaining references.
 6. Hash, extension, metadata, object-presence or reference conflicts stop the batch. The executor does not run VACUUM, backfills, repair jobs or unrelated collection.
+7. A snapshot source is represented by either its original snapshot row or an observation row on the retained change-point. Cleanup must preserve that representation for legacy pre-observation sources before deleting a duplicate row.
+8. As-of reads always include the original snapshot row as a base event even when later identical observations reuse it. A later observation must never hide an earlier verified state from an earlier cutoff.
+9. When a duplicate observation is rewired to a retained change-point, `factual_changed` is false. Rewiring provenance is not itself a factual change.
+10. Snapshot observation reads and cleanup rewrites require an indexed `snapshot_family + snapshot_id` access path; production release verification must fail if that index is missing.
 
 
 ## Production cleanup is manually initiated through GitHub Actions
@@ -365,3 +370,4 @@ A single race must not directly change model weights. Candidate learnings are re
 8. A running cleanup session is bound to the exact source commit, expires after 24 hours and may span at most 48 workflow runs. A changed source commit, expired session or exhausted continuation limit fails closed and requires a new manual decision.
 9. Only one running cleanup session may exist for the same source commit. A retry of an interrupted run resumes that session instead of creating competing cursor state.
 10. The additive migration `0044_storage_cleanup_resume_state.sql` is retained for migration-history integrity but its global state is superseded by the session-scoped `0045_storage_cleanup_sessions.sql` runtime contract.
+11. Every new manual dry-run or execute session must pass a sanitized snapshot-provenance integrity audit before planning begins. Missing source representations, dangling observation links, identity mismatches or abnormal audit cost fail closed. Controlled continuations of the same already-audited source-bound session do not repeat the full audit.
