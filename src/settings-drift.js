@@ -374,10 +374,8 @@ export async function getCloudflareUsage(env, options = {}) {
   }
   try {
     const cycle = await billingCycle(env, fetchImpl, now);
-    const [d1, r2] = await Promise.all([
-      d1Usage(env, fetchImpl, cycle, now),
-      r2Usage(env, fetchImpl, cycle, now)
-    ]);
+    const d1 = await d1Usage(env, fetchImpl, cycle, now);
+    const r2 = await r2Usage(env, fetchImpl, cycle, now).catch(() => null);
     let costByMetric = new Map();
     let billingCostAvailable = true;
     try {
@@ -385,27 +383,32 @@ export async function getCloudflareUsage(env, options = {}) {
     } catch {
       billingCostAvailable = false;
     }
-    return {
-      configured: true,
-      fetchedAt: nowIso(now),
-      billingPeriod: cycle,
-      metrics: [
-        usageMetric('d1_rows_read', 'D1 · Rows read', d1.rowsRead, CLOUDFLARE_USAGE_LIMITS.d1RowsRead, 'rows',
-          '25 miljarder ingår per billingperiod. Därefter debiteras överförbrukning.', costByMetric.get('d1_rows_read')),
-        usageMetric('d1_rows_written', 'D1 · Rows written', d1.rowsWritten, CLOUDFLARE_USAGE_LIMITS.d1RowsWritten, 'rows',
-          '50 miljoner ingår per billingperiod.', costByMetric.get('d1_rows_written')),
-        usageMetric('d1_storage', 'D1 · Lagring', d1.storageBytes, CLOUDFLARE_USAGE_LIMITS.d1StorageBytes, 'bytes',
-          '5 GB ingår. Lagring över den inkluderade nivån debiteras.', costByMetric.get('d1_storage')),
+    const metrics = [
+      usageMetric('d1_rows_read', 'D1 · Rows read', d1.rowsRead, CLOUDFLARE_USAGE_LIMITS.d1RowsRead, 'rows',
+        '25 miljarder ingår per billingperiod. Därefter debiteras överförbrukning.', costByMetric.get('d1_rows_read')),
+      usageMetric('d1_rows_written', 'D1 · Rows written', d1.rowsWritten, CLOUDFLARE_USAGE_LIMITS.d1RowsWritten, 'rows',
+        '50 miljoner ingår per billingperiod.', costByMetric.get('d1_rows_written')),
+      usageMetric('d1_storage', 'D1 · Lagring', d1.storageBytes, CLOUDFLARE_USAGE_LIMITS.d1StorageBytes, 'bytes',
+        '5 GB ingår. Lagring över den inkluderade nivån debiteras.', costByMetric.get('d1_storage'))
+    ];
+    if (r2) {
+      metrics.push(
         usageMetric('r2_storage', 'R2 · Lagring', r2.storageBytes, CLOUDFLARE_USAGE_LIMITS.r2StorageBytes, 'bytes',
           '10 GB-månad ingår för Standard storage.', costByMetric.get('r2_storage')),
         usageMetric('r2_class_a', 'R2 · Class A', r2.classAOperations, CLOUDFLARE_USAGE_LIMITS.r2ClassAOperations, 'requests',
           '1 miljon Class A-operationer ingår per månad.', costByMetric.get('r2_class_a')),
         usageMetric('r2_class_b', 'R2 · Class B', r2.classBOperations, CLOUDFLARE_USAGE_LIMITS.r2ClassBOperations, 'requests',
           '10 miljoner Class B-operationer ingår per månad.', costByMetric.get('r2_class_b'))
-      ],
+      );
+    }
+    return {
+      configured: true,
+      fetchedAt: nowIso(now),
+      billingPeriod: cycle,
+      metrics,
       additional: {
         billingCostAvailable,
-        r2AndWorkers: 'planned_from_cloudflare_billing_usage'
+        r2Available: Boolean(r2)
       }
     };
   } catch (error) {
