@@ -229,3 +229,39 @@ test('raw executor keeps the legacy object until every bounded reference batch i
   assert.equal(result.legacyObjectsDeleted, 1);
   assert.equal(await env.RAW_BUCKET.head(legacyKey), null);
 });
+
+
+test('raw executor keeps cursor on active page so later legacy groups are not skipped', async () => {
+  const { db, env, objects } = createTestEnv();
+  const bodyA = 'group-a';
+  const bodyB = 'group-b';
+  const hashA = await sha256(bodyA);
+  const hashB = await sha256(bodyB);
+  const legacyA = `raw/synthetic_provider/day/${hashA}.bin`;
+  const legacyB = `raw/synthetic_provider/day/${hashB}.bin`;
+  objects.set(legacyA, { body: bodyA, options: {} });
+  objects.set(legacyB, { body: bodyB, options: {} });
+  addSource(db, 'group-a-source', '2026-04-01T10:00:00Z', legacyA, hashA, 'synthetic_provider');
+  addSource(db, 'group-b-source', '2026-04-02T10:00:00Z', legacyB, hashB, 'synthetic_provider');
+
+  let cursor = null;
+  for (let i = 0; i < 4; i += 1) {
+    const plan = await planRawCleanupBatch(env, { sourceType: 'synthetic_provider', limit: 25, cursor });
+    if (plan.referenceRewrites > 0) {
+      const result = await executeRawCleanupBatch(env, {
+        sourceType: 'synthetic_provider',
+        limit: 25,
+        cursor,
+        planToken: plan.planToken,
+        confirmation: CLEANUP_CONFIRMATION
+      });
+      cursor = result.nextCursor;
+    } else {
+      cursor = plan.nextCursor;
+    }
+    if (!cursor && plan.referenceRewrites === 0) break;
+  }
+
+  assert.equal(await env.RAW_BUCKET.head(legacyA), null);
+  assert.equal(await env.RAW_BUCKET.head(legacyB), null);
+});
