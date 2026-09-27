@@ -60,6 +60,25 @@ function safeWarnings(value) {
   return Array.isArray(value) ? value.map(String).slice(0, 20) : [];
 }
 
+async function verifyIntegrityBeforeCleanup() {
+  if (MODE === 'execute' && CLEANUP_SESSION_ID) return;
+  const audit = await request('/v1/storage-cleanup/audit');
+  if (audit?.ok !== true) throw new Error('storage cleanup integrity audit failed; refusing cleanup');
+  console.log(JSON.stringify({
+    cleanup: 'integrity_audit',
+    mode: MODE,
+    ok: true,
+    families: (audit.families || []).map((family) => ({
+      family: family.family,
+      mismatchedSources: Number(family.mismatchedSources || 0),
+      missingRepresentations: Number(family.missingRepresentations || 0),
+      excessRepresentations: Number(family.excessRepresentations || 0),
+      danglingObservations: Number(family.danglingObservations || 0),
+      identityMismatchObservations: Number(family.identityMismatchObservations || 0)
+    }))
+  }));
+}
+
 async function startSession() {
   if (MODE !== 'execute') return null;
   return post('/v1/storage-cleanup/session/start', {
@@ -241,6 +260,7 @@ async function runRawCleanup(initialState, session) {
   return { target: 'raw_object', complete: confirmedComplete, progressMade: runBatches > 0 };
 }
 
+await verifyIntegrityBeforeCleanup();
 const session = await startSession();
 const targetState = new Map(
   (session?.targets || TARGETS.map((target) => ({ target, cursor: null, complete: false })))
