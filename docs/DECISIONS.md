@@ -344,6 +344,7 @@ A single race must not directly change model weights. Candidate learnings are re
 10. Cost safety takes precedence over background freshness: if bounded daily work cannot finish safely, remaining work waits for the next bounded run or explicit manual action rather than hot-looping.
 11. Settings treats retained multi-day historical jobs as intentionally paused while automatic history is disabled; a paused job must not create a stale/error badge merely because it is not being scheduled. Explicit failed jobs still require attention.
 12. D1 cost observability must account for point reads as well as list/batch operations. When a D1 convenience method does not expose execution metadata, the observed path must use a semantically equivalent metadata-returning query rather than silently recording zero reads.
+13. Cumulative morning D1 read/write/time metrics are part of the run-local circuit breaker. Several individually sub-threshold automatic operations must not evade the safety limit merely by splitting work across stages; once the cumulative budget is exceeded, later non-critical work is skipped.
 
 
 ## Destructive storage cleanup is explicit, bounded and plan-bound
