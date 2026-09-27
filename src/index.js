@@ -405,15 +405,12 @@ async function runDailyXlabsIncremental(env, scheduledTime) {
   let remaining = DAILY_XLABS_BATCH_RUNS;
 
   for (const job of recent.jobs || []) {
-    while (remaining > 0) {
-      const batch = await runXlabsBackfillBatch(env, job.id);
-      batchCount += 1;
-      remaining -= 1;
-      finalStatus = batch?.status || 'unknown';
-      if (!processedJobIds.includes(job.id)) processedJobIds.push(job.id);
-      if (!batch || batch.done || batch.status !== 'running') break;
-    }
     if (remaining <= 0) break;
+    const batch = await runXlabsBackfillBatch(env, job.id);
+    batchCount += 1;
+    remaining -= 1;
+    finalStatus = batch?.status || 'unknown';
+    processedJobIds.push(job.id);
   }
 
   return {
