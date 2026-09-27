@@ -11,7 +11,7 @@ import {
 
 const DATE = '2099-01-02';
 
-test('automatic X-Labs work never falls through to historical backfill', async () => {
+test('a deferred daily X-Labs job does not starve a ready historical job', async () => {
   const { env, db } = createTestEnv();
   const daily = await ensureDailyXlabsJob(env, '2099-01-03T04:30:00.000Z');
   const historical = await startXlabsBackfill(env, DATE, DATE);
@@ -27,15 +27,12 @@ test('automatic X-Labs work never falls through to historical backfill', async (
   assert.equal(first.reason, 'calendar_missing');
   assert.ok(first.retryAfter);
 
-  const automatic = await runXlabsBackfillStep(env);
-  assert.equal(automatic.status, 'idle');
-  assert.equal(automatic.done, true);
-
-  const manual = await runXlabsBackfillStep(env, historical.id);
-  assert.equal(manual.jobId, historical.id);
-  assert.equal(manual.scope, 'historical_all');
+  const second = await runXlabsBackfillStep(env);
+  assert.equal(second.jobId, historical.id);
+  assert.equal(second.scope, 'historical_all');
+  assert.equal(second.status, 'completed');
+  assert.equal(second.done, true);
 });
-
 
 test('exact-date X-Labs recovery reopens a completed daily job when a newly settled saved round adds eligible races', async () => {
   const { env, db } = createTestEnv();
