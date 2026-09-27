@@ -109,6 +109,31 @@ test('apply mode converts the production Git trigger to version upload and verif
   assert.equal(calls.at(-1).method, 'GET');
 });
 
+test('uses the Worker token only for script discovery and the Builds token for trigger operations', async () => {
+  const authorizations = [];
+  const fetchImpl = async (url, options = {}) => {
+    authorizations.push({ url, authorization: options.headers?.authorization });
+    if (url.endsWith('/workers/scripts')) {
+      return jsonResponse([{ id: 'kentaurai-api', tag: 'kentaurai-tag' }]);
+    }
+    if (url.endsWith('/builds/workers/kentaurai-tag/triggers')) {
+      return jsonResponse([productionTrigger(NON_PROMOTING_DEPLOY_COMMAND)]);
+    }
+    throw new Error(`unexpected request: ${url}`);
+  };
+
+  await enforceCloudflareBuildsPolicy({
+    fetchImpl,
+    workerToken: 'worker-token',
+    buildsToken: 'builds-token',
+    accountId: 'synthetic-account',
+    mode: 'check'
+  });
+
+  assert.equal(authorizations[0].authorization, 'Bearer worker-token');
+  assert.equal(authorizations[1].authorization, 'Bearer builds-token');
+});
+
 test('already compliant production Git trigger is a no-op', async () => {
   const calls = [];
   const fetchImpl = async (url, options = {}) => {
