@@ -149,10 +149,74 @@ test('Cloudflare usage uses verified API values and never starts from zero estim
   assert.equal(storage.billingCost, 0.75);
   assert.equal(storage.billingCurrency, 'USD');
   assert.equal(usage.additional.billingCostAvailable, true);
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 4);
 });
 
 
+
+test('Cloudflare usage adds R2 storage and operation progress with matching billed cost', async () => {
+  const { env } = createTestEnv();
+  env.CLOUDFLARE_ACCOUNT_ID = 'account-synthetic';
+  env.CLOUDFLARE_USAGE_API_TOKEN = 'usage-token-synthetic';
+  const fetchImpl = async (url, options = {}) => {
+    if (String(url).endsWith('/billable-usage/info')) {
+      return new Response(JSON.stringify({
+        success:true,
+        result:{ subscriptions:[{ id:'a', billing_cycle_anchor_timestamp:'2026-09-12T00:00:00Z', start_timestamp:'2026-09-12T00:00:00Z' }] }
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    if (String(url).endsWith('/graphql')) {
+      const body = JSON.parse(options.body);
+      if (String(body.query).includes('KentaurAiR2Usage')) {
+        return new Response(JSON.stringify({
+          data:{ viewer:{ accounts:[{
+            r2OperationsAdaptiveGroups:[
+              { dimensions:{ actionType:'PutObject' }, sum:{ requests:1200 } },
+              { dimensions:{ actionType:'ListObjects' }, sum:{ requests:300 } },
+              { dimensions:{ actionType:'GetObject' }, sum:{ requests:5400 } },
+              { dimensions:{ actionType:'DeleteObject' }, sum:{ requests:99 } }
+            ],
+            r2StorageAdaptiveGroups:[
+              { dimensions:{ datetime:'2026-09-27T12:00:00Z', bucketName:'kentaurai-raw' }, max:{ payloadSize:2_000_000_000, metadataSize:20_000_000 } },
+              { dimensions:{ datetime:'2026-09-26T12:00:00Z', bucketName:'kentaurai-raw' }, max:{ payloadSize:1_500_000_000, metadataSize:15_000_000 } }
+            ]
+          }] } }
+        }), { status:200, headers:{ 'content-type':'application/json' } });
+      }
+      return new Response(JSON.stringify({
+        data:{ viewer:{ accounts:[{
+          d1AnalyticsAdaptiveGroups:[{ sum:{ rowsRead:10, rowsWritten:2 } }],
+          d1StorageAdaptiveGroups:[{ dimensions:{ date:'2026-09-27', databaseId:'db-a' }, max:{ databaseSizeBytes:100 } }]
+        }] } }
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    if (String(url).includes('/billable-usage?')) {
+      return new Response(JSON.stringify({
+        success:true,
+        result:[
+          { ServiceFamilyName:'R2', ServiceName:'R2 Data Storage', BilledCost:0.12, BillingCurrency:'USD' },
+          { ServiceFamilyName:'R2', ServiceName:'R2 Storage Class A Operations', BilledCost:0.03, BillingCurrency:'USD' },
+          { ServiceFamilyName:'R2', ServiceName:'R2 Storage Class B Operations', BilledCost:0.01, BillingCurrency:'USD' }
+        ]
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    throw new Error('unexpected URL');
+  };
+  const usage = await getCloudflareUsage(env, { fetchImpl, now:'2026-09-27T18:00:00Z' });
+  assert.equal(usage.additional.r2Available, true);
+  const storage = usage.metrics.find((item) => item.id === 'r2_storage');
+  const classA = usage.metrics.find((item) => item.id === 'r2_class_a');
+  const classB = usage.metrics.find((item) => item.id === 'r2_class_b');
+  assert.equal(storage.used, 2_020_000_000);
+  assert.equal(storage.limit, 10_000_000_000);
+  assert.equal(storage.billingCost, 0.12);
+  assert.equal(classA.used, 1500);
+  assert.equal(classA.limit, 1_000_000);
+  assert.equal(classA.billingCost, 0.03);
+  assert.equal(classB.used, 5400);
+  assert.equal(classB.limit, 10_000_000);
+  assert.equal(classB.billingCost, 0.01);
+});
 
 test('Cloudflare usage keeps verified progress visible when per-metric billing cost cannot be read', async () => {
   const { env } = createTestEnv();
@@ -323,6 +387,9 @@ test('usage UI renders verified per-metric cost in the right-aligned card header
   assert.match(source, /billingCost/);
   assert.match(source, /billingCurrency/);
   assert.match(source, /settings-usage-meta/);
+  assert.match(source, /R2 · Lagring/);
+  assert.match(source, /R2 · Class A/);
+  assert.match(source, /R2 · Class B/);
 });
 
 test('billing period UI renders the exclusive cycle end as the previous inclusive date', () => {
