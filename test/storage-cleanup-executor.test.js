@@ -221,6 +221,10 @@ test('raw executor keeps the legacy object until every bounded reference batch i
   assert.ok(await env.RAW_BUCKET.head(legacyKey));
   cursor = result.nextCursor;
   plan = await planRawCleanupBatch(env, { sourceType: 'synthetic_provider', limit: 25, cursor });
+  if (plan.referenceRewrites === 0 && plan.nextCursor) {
+    cursor = plan.nextCursor;
+    plan = await planRawCleanupBatch(env, { sourceType: 'synthetic_provider', limit: 25, cursor });
+  }
   result = await executeRawCleanupBatch(env, {
     sourceType: 'synthetic_provider', limit: 25, cursor,
     planToken: plan.planToken, confirmation: CLEANUP_CONFIRMATION
