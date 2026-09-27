@@ -22,6 +22,9 @@ test('manual production storage cleanup workflow stays gated, resumable and boun
   assert.match(workflow, /Queue controlled continuation/);
   assert.match(workflow, /actions\/workflows\/production-storage-cleanup\.yml\/dispatches/);
   assert.match(workflow, /actions: write/);
+  assert.match(workflow, /Require exact deployed main/);
+  assert.match(workflow, /production-release-v060\.yml\/runs\?branch=main&status=success&per_page=1/);
+  assert.match(workflow, /deployed_sha.*GITHUB_SHA/s);
   assert.match(workflow, /continuation_session:/);
   assert.match(workflow, /CLEANUP_SESSION_ID:/);
   assert.match(workflow, /cleanup_session_id/);
