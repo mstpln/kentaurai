@@ -266,8 +266,7 @@ async function estimateRecentRunD1Usage(env, cycle, dailyUsage) {
         estimatedReadCostUsd:readCostUsd,
         estimatedWriteCostUsd:writeCostUsd,
         allocationShare:share,
-        sameDayRunCount:runs.length,
-        basis: runActivityWeight(run) > 1 ? 'registered_activity' : 'duration_or_equal_fallback'
+        sameDayRunCount:runs.length
       };
     }
   }
@@ -481,7 +480,7 @@ export async function getCloudflareUsage(env, options = {}) {
         billingCostAvailable,
         r2Available: Boolean(r2Storage?.available || r2ClassA?.available || r2ClassB?.available)
       },
-      _dailyUsage: d1.dailyUsage
+      ...(options.includeDailyUsage ? { _dailyUsage:d1.dailyUsage } : {})
     };
   } catch (error) {
     return {
@@ -498,7 +497,7 @@ export async function getCloudflareUsage(env, options = {}) {
 export async function getDriftOverview(env, options = {}) {
   const [automation, cloudflare] = await Promise.all([
     getAutomationControl(env),
-    getCloudflareUsage(env, options)
+    getCloudflareUsage(env, { ...options, includeDailyUsage:true })
   ]);
   let recentRunEstimates = {};
   if (cloudflare?.configured && cloudflare.available !== false && cloudflare.billingPeriod && Array.isArray(cloudflare._dailyUsage)) {
@@ -509,7 +508,7 @@ export async function getDriftOverview(env, options = {}) {
     automation,
     cloudflare,
     recentRunEstimates,
-    usageEstimateNote:'Beräknad fördelning av dagens verifierade Cloudflare D1-usage mellan registrerade workflows. Detta är en uppskattning, inte exakt per-query-mätning.',
+    usageEstimateNote:'Beräknad fördelning av den dagens verifierade Cloudflare D1-usage mellan registrerade workflows. Detta är en uppskattning, inte exakt per-query-mätning.',
     schedule: {
       cron: '15 5 * * *',
       timeZone: 'Europe/Stockholm'
