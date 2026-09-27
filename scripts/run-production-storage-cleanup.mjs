@@ -60,14 +60,12 @@ function safeWarnings(value) {
   return Array.isArray(value) ? value.map(String).slice(0, 20) : [];
 }
 
-async function verifyIntegrityBeforeCleanup() {
-  if (MODE === 'execute' && CLEANUP_SESSION_ID) return;
-  const audit = await request('/v1/storage-cleanup/audit');
-  if (audit?.ok !== true) throw new Error('storage cleanup integrity audit failed; refusing cleanup');
+function logIntegrityAudit(audit, { sessionBound = false } = {}) {
   console.log(JSON.stringify({
     cleanup: 'integrity_audit',
     mode: MODE,
     ok: true,
+    sessionBound,
     families: (audit.families || []).map((family) => ({
       family: family.family,
       mismatchedSources: Number(family.mismatchedSources || 0),
@@ -77,6 +75,26 @@ async function verifyIntegrityBeforeCleanup() {
       identityMismatchObservations: Number(family.identityMismatchObservations || 0)
     }))
   }));
+}
+
+async function verifyDryRunIntegrity() {
+  if (MODE !== 'dry-run') return;
+  const audit = await request('/v1/storage-cleanup/audit');
+  if (audit?.ok !== true) throw new Error('storage cleanup integrity audit failed; refusing cleanup');
+  logIntegrityAudit(audit);
+}
+
+async function verifyExecuteSessionIntegrity(session) {
+  if (MODE !== 'execute') return;
+  if (session?.auditVerified === true) return;
+  const audit = await post('/v1/storage-cleanup/session/audit', {
+    session_id: session.sessionId,
+    source_sha: SOURCE_SHA
+  });
+  if (audit?.ok !== true || audit?.auditVerified !== true) {
+    throw new Error('storage cleanup session integrity audit failed; refusing cleanup');
+  }
+  logIntegrityAudit(audit, { sessionBound: true });
 }
 
 async function startSession() {
@@ -260,8 +278,9 @@ async function runRawCleanup(initialState, session) {
   return { target: 'raw_object', complete: confirmedComplete, progressMade: runBatches > 0 };
 }
 
-await verifyIntegrityBeforeCleanup();
+await verifyDryRunIntegrity();
 const session = await startSession();
+await verifyExecuteSessionIntegrity(session);
 const targetState = new Map(
   (session?.targets || TARGETS.map((target) => ({ target, cursor: null, complete: false })))
     .map((state) => [state.target, state])
