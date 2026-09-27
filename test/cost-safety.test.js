@@ -41,3 +41,18 @@ test('production config preserves exactly the single morning cron', () => {
   const crons = [...config.matchAll(/"(\d+\s+\d+\s+\*\s+\*\s+\*)"/g)].map((match) => match[1]);
   assert.deepEqual(crons, ['15 5 * * *']);
 });
+
+
+test('cost observer counts reads performed through D1 first()', async () => {
+  const { env } = createTestEnv();
+  await env.DB.prepare("INSERT INTO horses (id,canonical_name) VALUES ('first-a','First A')").run();
+  await env.DB.prepare("INSERT INTO horses (id,canonical_name) VALUES ('first-b','First B')").run();
+
+  const observed = await observeD1Operation(env, 'synthetic_first', async (observedEnv) => {
+    return observedEnv.DB.prepare('SELECT id,canonical_name FROM horses ORDER BY id').first();
+  }, { rowsRead: 1, rowsWritten: 100, durationMs: 10000 });
+
+  assert.equal(observed.value.id, 'first-a');
+  assert.equal(observed.metrics.rowsRead, 2);
+  assert.equal(observed.safetyStop, true);
+});
