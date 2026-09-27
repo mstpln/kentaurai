@@ -29,7 +29,7 @@ Drift är den operativa kontrollpanelen. Den visar:
 - datakällornas jobbstatus,
 - de senaste registrerade aktiviteterna.
 
-Switchen **Automatiska jobb** är en verklig runtime-kontroll. När den är avstängd avslutas nya schemalagda körningar före datainsamling/bearbetning. Den kontrolleras även mellan morgonkörningens delar, så en paus som görs medan en körning redan pågår stoppar efterföljande delar. En SQL/API-operation som redan har startat avbryts inte mitt i operationen. Om kontrollen inte kan läsas failar schemalagd automation stängt. Vanlig appanvändning och uttryckligen manuella funktioner påverkas inte.
+Switchen **Automatiska jobb** är en verklig runtime-kontroll. När den är avstängd avslutas nya schemalagda körningar före datainsamling/bearbetning. Den kontrolleras även mellan morgonkörningens delar och före äldre schemalagda sidjobb, så en paus som görs medan en körning redan pågår stoppar efterföljande automatiskt arbete. En SQL/API-operation som redan har startat avbryts inte mitt i operationen. Om kontrollen inte kan läsas failar schemalagd automation stängt. Vanlig appanvändning och uttryckligen manuella funktioner påverkas inte.
 
 Cloudflare är source of truth för progress bars. KentaurAI ska inte räkna upp billingvärden från noll eller ersätta saknad Cloudflare-data med uppskattningar. D1 rows read/written hämtas från Cloudflares GraphQL Analytics API och D1 storage från D1 analytics; billingperioden härleds från Cloudflares billing metadata. Värdena visas rött först när den inkluderade nivån är passerad, annars grönt.
 
