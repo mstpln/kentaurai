@@ -11,6 +11,7 @@ const decisions = readFileSync(new URL('../docs/DECISIONS.md', import.meta.url),
 const buildState = readFileSync(new URL('../docs/BUILD_STATE.md', import.meta.url), 'utf8');
 const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
 const runbook = readFileSync(new URL('../docs/V3_CUTOVER_RUNBOOK.md', import.meta.url), 'utf8');
+const driftWorker = readFileSync(new URL('../src/worker-v079.js', import.meta.url), 'utf8');
 const upcomingWorker = readFileSync(new URL('../src/worker-v078.js', import.meta.url), 'utf8');
 
 test('F4 authoritative game config supplies current V85/V86 line prices and fails closed when missing', () => {
@@ -23,8 +24,9 @@ test('F4 authoritative game config supplies current V85/V86 line prices and fail
   assert.throws(() => canonicalOptimizerPolicyForGameType({}, 'V85'), /V85_LINE_PRICE_SEK is not configured/);
 });
 
-test('repository default keeps F4 v3 mode behind the worker-v078 app layer wrapping worker-v077', () => {
-  assert.match(wrangler, /"main": "\.\/src\/worker-v078\.js"/);
+test('repository default keeps F4 v3 mode behind worker-v079 wrapping the existing v078/v077 app chain', () => {
+  assert.match(wrangler, /"main": "\.\/src\/worker-v079\.js"/);
+  assert.match(driftWorker, /import worker from '\.\/worker-v078\.js'/);
   assert.match(upcomingWorker, /import worker from '\.\/worker-v077\.js'/);
   assert.match(wrangler, /"ANALYSIS_WORKFLOW_MODE": "v3"/);
 });
@@ -60,5 +62,5 @@ test('F4 runbook preserves controlled release source, rollback and no-backfill b
   assert.match(runbook, /source_main.*application merge commit/i);
   assert.match(runbook, /ANALYSIS_WORKFLOW_MODE=legacy_v2/);
   assert.match(runbook, /no historical replay\/backfill reset or resume/i);
-  assert.match(runbook, /Worker v078/i);
+  assert.match(runbook, /Worker v079/i);
 });
