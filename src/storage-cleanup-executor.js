@@ -103,7 +103,7 @@ async function detailedSnapshotPlan(env, { family, limit, cursor = null }) {
   const rowLimit = boundedCleanupLimit(limit, MAX_BATCH);
   const partition = [...definition.entity, ...definition.scope];
   const decoded = await decodeCursor(env, cursor, `snapshot:${family}`);
-  let sql = `SELECT * FROM ${definition.table}`;
+  let sql = `SELECT snapshot.* FROM ${definition.table} snapshot\n    JOIN official_snapshot_source_sync source_sync\n      ON source_sync.source_record_id=snapshot.source_record_id AND source_sync.status='complete'`;
   let bindings = [];
   if (decoded) {
     if (!Array.isArray(decoded.order) || decoded.order.length !== partition.length + 2) throw new Error('cleanup cursor is invalid');
