@@ -71,6 +71,40 @@ function insertXlabsHistorical(db, overrides = {}) {
   );
 }
 
+
+function insertXlabsDaily(db, overrides = {}) {
+  const row = {
+    id: 'xlabs-daily',
+    scope: 'daily_v85_v86',
+    start_date: '2099-09-20',
+    end_date: '2099-09-20',
+    next_date: '2099-09-20',
+    next_race_index: 1,
+    status: 'running',
+    processed_dates: 5,
+    processed_races: 80,
+    reused_races: 2,
+    unavailable_dates: 1,
+    unavailable_races: 3,
+    consecutive_errors: 0,
+    last_error: null,
+    last_run_at: '2099-09-21T19:59:00Z',
+    retry_after: null,
+    ...overrides
+  };
+  db.prepare(`
+    INSERT INTO xlabs_backfill_jobs (
+      id,scope,start_date,end_date,next_date,next_race_index,status,processed_dates,
+      processed_races,reused_races,unavailable_dates,unavailable_races,
+      consecutive_errors,last_error,last_run_at,retry_after
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    row.id,row.scope,row.start_date,row.end_date,row.next_date,row.next_race_index,row.status,
+    row.processed_dates,row.processed_races,row.reused_races,row.unavailable_dates,
+    row.unavailable_races,row.consecutive_errors,row.last_error,row.last_run_at,row.retry_after
+  );
+}
+
 test('persistent historical jobs drive source health and date progress without recent import rows', async () => {
   const { env, db } = createTestEnv();
   insertOfficialHistorical(db);
@@ -80,7 +114,8 @@ test('persistent historical jobs drive source health and date progress without r
   const xlabs = result.sources.find((source) => source.id === 'xlabs');
 
   assert.equal(official.status, 'working');
-  assert.equal(official.processing.status, 'running');
+  assert.equal(official.processing.status, 'paused');
+  assert.equal(official.processing.paused, true);
   assert.equal(official.processing.totalDates, 10);
   assert.equal(official.processing.processedDates, 5);
   assert.equal(official.processing.remainingDates, 5);
@@ -90,7 +125,7 @@ test('persistent historical jobs drive source health and date progress without r
   assert.equal(xlabs.processing.status, 'never_run');
 });
 
-test('official retry delay remains an automatic retry instead of becoming stale action-required', async () => {
+test('intentionally paused official history does not raise a stale or retry alert', async () => {
   const { env, db } = createTestEnv();
   insertOfficialHistorical(db, {
     consecutive_errors: 1,
@@ -106,15 +141,18 @@ test('official retry delay remains an automatic retry instead of becoming stale 
   const result = await getSettingsSourceHealth(env, { now: NOW });
   const official = result.sources.find((source) => source.id === 'official');
 
-  assert.equal(official.status, 'error_retrying');
-  assert.equal(official.processing.status, 'running');
+  assert.equal(official.status, 'working');
+  assert.equal(official.processing.status, 'paused');
+  assert.equal(official.processing.paused, true);
   assert.equal(official.processing.stale, false);
-  assert.equal(official.issue.label, 'Fel upptäckt · nytt försök pågår');
+  assert.equal(official.issue, null);
+  assert.equal(result.alerts.length, 0);
 });
 
-test('X-Labs retry error is red-alert health while historical processing remains running', async () => {
+test('X-Labs daily retry error remains a red alert while historical work stays paused', async () => {
   const { env, db } = createTestEnv();
-  insertXlabsHistorical(db, {
+  insertXlabsHistorical(db);
+  insertXlabsDaily(db, {
     consecutive_errors: 1,
     last_error: 'Synthetic transient source failure',
     retry_after: '2099-09-21T20:05:00Z'
@@ -124,7 +162,8 @@ test('X-Labs retry error is red-alert health while historical processing remains
   const xlabs = result.sources.find((source) => source.id === 'xlabs');
 
   assert.equal(xlabs.status, 'error_retrying');
-  assert.equal(xlabs.processing.status, 'running');
+  assert.equal(xlabs.processing.status, 'paused');
+  assert.equal(xlabs.processing.paused, true);
   assert.equal(xlabs.issue.label, 'Fel upptäckt · nytt försök pågår');
   assert.match(xlabs.issue.error, /Synthetic transient/);
   assert.equal(result.alerts.length, 1);
@@ -132,7 +171,7 @@ test('X-Labs retry error is red-alert health while historical processing remains
 
 test('acknowledgement hides the badge for the same incident and escalation creates a new badge', async () => {
   const { env, db } = createTestEnv();
-  insertXlabsHistorical(db, {
+  insertXlabsDaily(db, {
     consecutive_errors: 1,
     last_error: 'Synthetic retry failure',
     retry_after: '2099-09-21T20:05:00Z'
@@ -151,7 +190,7 @@ test('acknowledgement hides the badge for the same incident and escalation creat
     UPDATE xlabs_backfill_jobs
     SET consecutive_errors=2,last_error='Synthetic retry failure again',
         last_run_at='2099-09-21T20:01:00Z',retry_after='2099-09-21T20:06:00Z'
-    WHERE id='xlabs-history'
+    WHERE id='xlabs-daily'
   `).run();
   alert = await getSettingsAlertState(env);
   assert.equal(alert.hasUnacknowledged, false);
@@ -160,7 +199,7 @@ test('acknowledgement hides the badge for the same incident and escalation creat
     UPDATE xlabs_backfill_jobs
     SET status='failed',consecutive_errors=3,last_error='Synthetic terminal failure',
         last_run_at='2099-09-21T20:02:00Z'
-    WHERE id='xlabs-history'
+    WHERE id='xlabs-daily'
   `).run();
   alert = await getSettingsAlertState(env);
   assert.equal(alert.hasUnacknowledged, true);
@@ -169,7 +208,7 @@ test('acknowledgement hides the badge for the same incident and escalation creat
 
 test('resolved incidents clear acknowledgement state so a later same-checkpoint error is new', async () => {
   const { env, db } = createTestEnv();
-  insertXlabsHistorical(db, {
+  insertXlabsDaily(db, {
     consecutive_errors: 1,
     last_error: 'Synthetic first incident',
     retry_after: '2099-09-21T20:05:00Z'
@@ -179,7 +218,7 @@ test('resolved incidents clear acknowledgement state so a later same-checkpoint 
   db.prepare(`
     UPDATE xlabs_backfill_jobs
     SET consecutive_errors=0,last_error=NULL,retry_after=NULL,last_run_at='2099-09-21T20:03:00Z'
-    WHERE id='xlabs-history'
+    WHERE id='xlabs-daily'
   `).run();
   let alert = await getSettingsAlertState(env);
   assert.equal(alert.hasActiveAlerts, false);
@@ -189,7 +228,7 @@ test('resolved incidents clear acknowledgement state so a later same-checkpoint 
     UPDATE xlabs_backfill_jobs
     SET consecutive_errors=1,last_error='Synthetic second incident',
         retry_after='2099-09-21T20:10:00Z',last_run_at='2099-09-21T20:04:00Z'
-    WHERE id='xlabs-history'
+    WHERE id='xlabs-daily'
   `).run();
   alert = await getSettingsAlertState(env);
   assert.equal(alert.hasUnacknowledged, true);
@@ -198,10 +237,11 @@ test('resolved incidents clear acknowledgement state so a later same-checkpoint 
 test('recovering one incident clears only its acknowledgement while another alert remains active', async () => {
   const { env, db } = createTestEnv();
   insertOfficialHistorical(db, {
-    consecutive_errors: 1,
-    last_error: 'Synthetic official retry failure'
+    status: 'failed',
+    consecutive_errors: 3,
+    last_error: 'Synthetic official terminal failure'
   });
-  insertXlabsHistorical(db, {
+  insertXlabsDaily(db, {
     consecutive_errors: 1,
     last_error: 'Synthetic X-Labs retry failure',
     retry_after: '2099-09-21T20:05:00Z'
@@ -215,7 +255,7 @@ test('recovering one incident clears only its acknowledgement while another aler
 
   db.prepare(`
     UPDATE historical_backfill_jobs
-    SET consecutive_errors=0,last_error=NULL,last_run_at='2099-09-21T20:03:00Z'
+    SET status='completed',consecutive_errors=0,last_error=NULL,last_run_at='2099-09-21T20:03:00Z'
     WHERE id='official-history'
   `).run();
   alert = await getSettingsAlertState(env);
@@ -225,7 +265,7 @@ test('recovering one incident clears only its acknowledgement while another aler
 
   db.prepare(`
     UPDATE historical_backfill_jobs
-    SET consecutive_errors=1,last_error='Synthetic later official incident',
+    SET status='failed',consecutive_errors=3,last_error='Synthetic later official incident',
         last_run_at='2099-09-21T20:04:00Z'
     WHERE id='official-history'
   `).run();
@@ -282,12 +322,12 @@ test('multiple historical periods stay visible as separate Settings jobs', async
   const result = await getSettingsSourceHealth(env, { now: NOW });
   const official = result.sources.find((source) => source.id === 'official');
 
-  assert.equal(official.processing.status, 'running');
+  assert.equal(official.processing.status, 'paused');
   assert.equal(official.historicalJobs.length, 2);
   assert.deepEqual(
     official.historicalJobs.map((job) => [job.startDate, job.endDate, job.processing.status]),
     [
-      ['2020-09-08', '2023-09-07', 'running'],
+      ['2020-09-08', '2023-09-07', 'paused'],
       ['2023-09-08', '2026-09-07', 'completed']
     ]
   );
