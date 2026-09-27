@@ -94,18 +94,19 @@ jobs:
           jq -e '.ok == true and .service == "kentaurai-api"' /tmp/health.json >/dev/null
           echo "worker_url=$worker_url" >> "$GITHUB_OUTPUT"
 
-      - name: Capture D1 Time Travel restore bookmark
+      - name: Capture D1 Time Travel restore point
         id: restore
         shell: bash
         run: |
           set -euo pipefail
+          restore_timestamp="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           url="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/$D1_DATABASE_ID/time_travel/bookmark"
-          curl --fail --silent --show-error             --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN"             "$url" > /tmp/d1-bookmark.json
+          curl --fail --silent --show-error --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$url" > /tmp/d1-bookmark.json
           jq -e '.success == true and (.result.bookmark | type == "string") and (.result.bookmark | length > 0)' /tmp/d1-bookmark.json >/dev/null
           bookmark="$(jq -r '.result.bookmark' /tmp/d1-bookmark.json)"
           echo "::add-mask::$bookmark"
-          echo "bookmark=$bookmark" >> "$GITHUB_OUTPUT"
-          echo "Verified a current D1 Time Travel restore bookmark."
+          echo "restore_timestamp=$restore_timestamp" >> "$GITHUB_OUTPUT"
+          echo "Verified D1 Time Travel restore point at $restore_timestamp."
 
       - name: Run bounded cleanup
         env:
@@ -128,7 +129,7 @@ jobs:
         run: |
           echo "Mode: $MODE"
           echo "Maximum batches per family: $MAX_BATCHES"
-          echo "D1 restore bookmark: verified and retained in masked workflow output"
+          echo "D1 restore point: ${{ steps.restore.outputs.restore_timestamp }}"
           if [ "$MODE" = "dry-run" ]; then
             echo "No cleanup mutation was authorized."
           else
