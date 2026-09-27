@@ -20,10 +20,10 @@ F4 makes the sealed v3 workflow the normal KentaurAI analysis path while preserv
 
 ## Controlled production release
 1. Run full QA before any production action.
-2. Validate Cloudflare configuration.
+2. Validate Cloudflare configuration, including the dedicated read-only usage credential. The release must prove Billing + D1 analytics access before any production migration and must not print the token value.
 3. Apply only pending migrations. The current Settings Drift release adds migration `0049_runtime_controls.sql`; release verification must confirm it before Worker promotion.
 4. Verify the required production schema through migration `0049_runtime_controls.sql` without exposing production rows.
-5. Deploy Worker v079; it must preserve the delegated worker-v078/worker-v077/worker-v076 v3/rollback semantics.
+5. Deploy Worker v079 with `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_USAGE_API_TOKEN` uploaded as secret-text runtime bindings in the same reviewed deployment; verify binding names/types after deploy without exposing values. It must preserve the delegated worker-v078/worker-v077/worker-v076 v3/rollback semantics.
 6. Verify `/health` returns service/version plus `analysisWorkflow: "v3"`, the F4 cutover version and `legacyAnalysisCreationEnabled: false`.
 7. Verify `/app/login`.
 8. Verify all v3 private routes remain protected, including the F4 self-contained Step 2 bundle.

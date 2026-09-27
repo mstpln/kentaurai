@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 const workflow = readFileSync(new URL('../.github/workflows/production-d1-migrations.yml', import.meta.url), 'utf8');
 const releaseWorkflow = readFileSync(new URL('../.github/workflows/production-release-v060.yml', import.meta.url), 'utf8');
 const buildsPolicy = readFileSync(new URL('../scripts/cloudflare-builds-policy.mjs', import.meta.url), 'utf8');
+const wrangler = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
 
 test('production migration workflow is manual and main-only', () => {
   assert.match(workflow, /workflow_dispatch:/);
@@ -58,6 +59,26 @@ test('production release disables direct Cloudflare Git promotion before migrati
   assert.match(buildsPolicy, /single_release_promotion_path_v1/);
   assert.match(buildsPolicy, /builds\/workers\/.*\/triggers/);
   assert.match(buildsPolicy, /builds\/triggers\/.*PATCH|method: 'PATCH'/s);
+});
+
+test('production release validates and deploys Cloudflare usage runtime secrets without logging values', () => {
+  const validate = releaseWorkflow.indexOf('Validate read-only Cloudflare usage access');
+  const migrate = releaseWorkflow.indexOf('Apply pending production migrations');
+  const deploy = releaseWorkflow.indexOf('Deploy Worker');
+  const verifyBindings = releaseWorkflow.indexOf('Verify deployed usage secret bindings');
+  assert.ok(validate >= 0, 'usage credential validation step missing');
+  assert.ok(migrate >= 0, 'migration step missing');
+  assert.ok(deploy >= 0, 'deploy step missing');
+  assert.ok(verifyBindings >= 0, 'usage binding verification step missing');
+  assert.ok(validate < migrate, 'usage credentials must be validated before production migration');
+  assert.ok(deploy < verifyBindings, 'runtime binding verification must follow deployment');
+  assert.match(releaseWorkflow, /secrets\.CLOUDFLARE_USAGE_API_TOKEN/);
+  assert.match(releaseWorkflow, /--secrets-file "\$runtime_secrets_file"/);
+  assert.match(releaseWorkflow, /workers\/scripts\/kentaurai-api\/secrets\/\$secret_name/);
+  assert.match(releaseWorkflow, /d\?\.result\?\.type!==['"]secret_text['"]/);
+  assert.doesNotMatch(releaseWorkflow, /echo\s+["']?\$CLOUDFLARE_USAGE_API_TOKEN/);
+  assert.doesNotMatch(releaseWorkflow, /cat\s+["']?\$runtime_secrets_file/);
+  assert.match(wrangler, /"secrets"\s*:\s*\{[\s\S]*"required"\s*:\s*\[[\s\S]*"CLOUDFLARE_ACCOUNT_ID"[\s\S]*"CLOUDFLARE_USAGE_API_TOKEN"[\s\S]*\][\s\S]*\}/);
 });
 
 test('production release verifies required migrations and private observability routes', () => {
