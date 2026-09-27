@@ -158,6 +158,7 @@ jobs:
           fi
 
       - name: Verify production health after cleanup run
+        if: ${{ always() && steps.worker.outcome == 'success' }}
         env:
           WORKER_URL: ${{ steps.worker.outputs.worker_url }}
         shell: bash
