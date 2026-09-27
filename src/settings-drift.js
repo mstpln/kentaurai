@@ -229,7 +229,6 @@ export async function getDriftOverview(env, options = {}) {
     cloudflare,
     schedule: {
       cron: '15 5 * * *',
-      localLabel: '07:15',
       timeZone: 'Europe/Stockholm'
     }
   };
