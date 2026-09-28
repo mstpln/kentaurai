@@ -14,8 +14,7 @@ test('final aligned app uses four primary workspaces and keeps entity browsing g
   assert.match(html, /statisticsCategoryNav/);
   assert.match(html, /\['trainers','Tränare'\],\['horses','Hästar'\],\['drivers','Kuskar'\],\['tracks','Bana'\]/);
   assert.match(html, /M12 21s6-5\.2 6-11/);
-  assert.match(html, /M214\.86,180\.12a8,8,0,0,1-11,2\.74/);
-  assert.doesNotMatch(html, /M229\.66,218\.34l-50\.07-50\.06/);
+  assert.match(html, /const ANALYSIS_NAV_ICON=.*M214\.86,180\.12a8,8,0,0,1-11,2\.74/);
   assert.match(html, /STATISTICS_PAGES\.includes\(state\.page\)&&!state\.settingsOpen&&!state\.detail&&!state\.trackDetail/);
 });
 
