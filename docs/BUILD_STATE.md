@@ -120,7 +120,7 @@
 - Statistik uses the Phosphor **Table** icon and groups **Tränare / Hästar / Kuskar / Bana** under one four-way selector above the workspace heading.
 - The selected top-navigation design is the full-width segmented selector with shared border, subtle active background and warm accent underline.
 - The Statistik selector is restricted to those four workspace/list views and must not appear in Settings, Analys, Trend, Spel or entity/track detail views.
-- Analys uses the Phosphor **Magnifying Glass** icon and owns the existing external-AI workflow previously shown under the Settings AI tab.
+- Analys uses the Phosphor **Asterisk** icon (Regular) and owns the existing external-AI workflow previously shown under the Settings AI tab.
 - Settings is data-only and has no redundant single Data tab.
 - Spel uses the Phosphor **Currency Circle Dollar** icon.
 - Bottom navigation is rebalanced for four equal responsive items with a modest bar height and compact active state.
