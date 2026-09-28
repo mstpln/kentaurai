@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=8cb28e78b2f5a570f88fba6f97c99731f0e2e08d
-release_nonce=2026-09-27-pr292-workflow-d1-estimates
+source_main=933c16a1025b0e36ad60b930f3f72b31f4322eac
+release_nonce=2026-09-28-pr293-r2-storage-progress
