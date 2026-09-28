@@ -4,7 +4,7 @@ export const CLOUDFLARE_USAGE_LIMITS = Object.freeze({
   d1RowsRead: 25_000_000_000,
   d1RowsWritten: 50_000_000,
   d1StorageBytes: 5_000_000_000,
-  r2StorageGbMonths: 10,
+  r2StorageBytes: 10_000_000_000,
   r2ClassAOperations: 1_000_000,
   r2ClassBOperations: 10_000_000
 });
@@ -111,7 +111,14 @@ async function billingCycle(env, fetchImpl, now) {
   return cycle;
 }
 
-const D1_USAGE_QUERY = `query KentaurAiD1Usage($accountTag: string!, $start: Date, $end: Date) {
+const D1_USAGE_QUERY = `query KentaurAiUsage(
+  $accountTag: string!,
+  $start: Date,
+  $end: Date,
+  $r2Start: Time!,
+  $r2End: Time!,
+  $r2BucketName: string!
+) {
   viewer {
     accounts(filter: { accountTag: $accountTag }) {
       d1AnalyticsAdaptiveGroups(
@@ -128,6 +135,18 @@ const D1_USAGE_QUERY = `query KentaurAiD1Usage($accountTag: string!, $start: Dat
       ) {
         max { databaseSizeBytes }
         dimensions { date databaseId }
+      }
+      r2StorageAdaptiveGroups(
+        limit: 10000
+        filter: {
+          datetime_geq: $r2Start
+          datetime_leq: $r2End
+          bucketName: $r2BucketName
+        }
+        orderBy: [datetime_DESC]
+      ) {
+        max { payloadSize metadataSize }
+        dimensions { datetime }
       }
     }
   }
@@ -169,6 +188,22 @@ function currentD1Storage(groups) {
     }
   }
   return [...latestByDatabase.values()].reduce((sum, item) => sum + item.value, 0);
+}
+
+function currentR2Storage(groups) {
+  let latest = null;
+  for (const group of groups || []) {
+    const observedAt = String(group?.dimensions?.datetime || '');
+    const observedMs = Date.parse(observedAt);
+    if (!Number.isFinite(observedMs)) continue;
+    const payloadBytes = verifiedNonNegativeNumber(group?.max?.payloadSize, 'R2 payload storage');
+    const metadataBytes = verifiedNonNegativeNumber(group?.max?.metadataSize, 'R2 metadata storage');
+    const bytes = payloadBytes + metadataBytes;
+    if (!latest || observedMs > latest.observedMs || (observedMs === latest.observedMs && bytes > latest.bytes)) {
+      latest = { bytes, observedAt, observedMs };
+    }
+  }
+  return latest ? { bytes:latest.bytes, observedAt:latest.observedAt } : null;
 }
 
 function dailyD1Usage(groups) {
@@ -371,7 +406,10 @@ async function d1Usage(env, fetchImpl, cycle, now) {
       variables: {
         accountTag: accountId,
         start: dateKey(cycle.start),
-        end: dateKey(now)
+        end: dateKey(now),
+        r2Start: cycle.start,
+        r2End: now.toISOString(),
+        r2BucketName: 'kentaurai-raw'
       }
     })
   });
@@ -384,11 +422,16 @@ async function d1Usage(env, fetchImpl, cycle, now) {
   if (!account.d1StorageAdaptiveGroups.length) {
     throw new Error('Cloudflare D1 storage metric is unavailable');
   }
+  const r2Storage = Array.isArray(account.r2StorageAdaptiveGroups)
+    ? currentR2Storage(account.r2StorageAdaptiveGroups)
+    : null;
   return {
     rowsRead: sumMetric(account.d1AnalyticsAdaptiveGroups, 'rowsRead'),
     rowsWritten: sumMetric(account.d1AnalyticsAdaptiveGroups, 'rowsWritten'),
     storageBytes: currentD1Storage(account.d1StorageAdaptiveGroups),
-    dailyUsage: dailyD1Usage(account.d1AnalyticsAdaptiveGroups)
+    dailyUsage: dailyD1Usage(account.d1AnalyticsAdaptiveGroups),
+    r2StorageBytes: r2Storage?.bytes ?? null,
+    r2StorageObservedAt: r2Storage?.observedAt ?? null
   };
 }
 
@@ -459,9 +502,12 @@ export async function getCloudflareUsage(env, options = {}) {
     const r2Storage = billingByMetric.get('r2_storage');
     const r2ClassA = billingByMetric.get('r2_class_a');
     const r2ClassB = billingByMetric.get('r2_class_b');
-    if (r2Storage?.available === true && r2Storage.quantityAvailable === true && /gb[- ]?months?/i.test(r2Storage.unit)) {
-      metrics.push(usageMetric('r2_storage', 'R2 · Lagring', r2Storage.quantity, CLOUDFLARE_USAGE_LIMITS.r2StorageGbMonths, 'gb_months',
-        '10 GB-månad ingår för Standard storage.', r2Storage));
+    if (typeof d1.r2StorageBytes === 'number' && Number.isFinite(d1.r2StorageBytes) && d1.r2StorageBytes >= 0) {
+      metrics.push({
+        ...usageMetric('r2_storage', 'R2 · Lagring', d1.r2StorageBytes, CLOUDFLARE_USAGE_LIMITS.r2StorageBytes, 'bytes',
+          'Baren visar aktuell lagrad mängd mot 10 GB. Kostnaden till höger kommer från Cloudflares billingperiod.', r2Storage),
+        observedAt:d1.r2StorageObservedAt
+      });
     }
     if (r2ClassA?.available === true && r2ClassA.quantityAvailable === true) {
       metrics.push(usageMetric('r2_class_a', 'R2 · Class A', r2ClassA.quantity, CLOUDFLARE_USAGE_LIMITS.r2ClassAOperations, 'requests',
@@ -478,7 +524,7 @@ export async function getCloudflareUsage(env, options = {}) {
       metrics,
       additional: {
         billingCostAvailable,
-        r2Available: Boolean(r2Storage?.available || r2ClassA?.available || r2ClassB?.available)
+        r2Available: Boolean(d1.r2StorageBytes != null || r2Storage?.available || r2ClassA?.available || r2ClassB?.available)
       },
       ...(options.includeDailyUsage ? { _dailyUsage:d1.dailyUsage } : {})
     };
