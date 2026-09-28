@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=933c16a1025b0e36ad60b930f3f72b31f4322eac
-release_nonce=2026-09-28-pr293-r2-storage-progress
+source_main=b09114e88123ca00272aff573c64bc4efd57befd
+release_nonce=2026-09-28-pr294-analysis-asterisk-icon
