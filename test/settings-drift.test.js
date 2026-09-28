@@ -169,10 +169,18 @@ test('Cloudflare usage adds R2 storage and operation progress with matching bill
       }), { status:200, headers:{ 'content-type':'application/json' } });
     }
     if (String(url).endsWith('/graphql')) {
+      const body = JSON.parse(options.body);
+      assert.equal(body.variables.r2BucketName, 'kentaurai-raw');
+      assert.equal(body.variables.r2Start, '2026-09-12T00:00:00.000Z');
+      assert.equal(body.variables.r2End, '2026-09-27T18:00:00.000Z');
       return new Response(JSON.stringify({
         data:{ viewer:{ accounts:[{
           d1AnalyticsAdaptiveGroups:[{ sum:{ rowsRead:10, rowsWritten:2 } }],
-          d1StorageAdaptiveGroups:[{ dimensions:{ date:'2026-09-27', databaseId:'db-a' }, max:{ databaseSizeBytes:100 } }]
+          d1StorageAdaptiveGroups:[{ dimensions:{ date:'2026-09-27', databaseId:'db-a' }, max:{ databaseSizeBytes:100 } }],
+          r2StorageAdaptiveGroups:[
+            { dimensions:{ datetime:'2026-09-26T18:00:00Z' }, max:{ payloadSize:3_000_000_000, metadataSize:100_000_000 } },
+            { dimensions:{ datetime:'2026-09-27T17:55:00Z' }, max:{ payloadSize:4_500_000_000, metadataSize:200_000_000 } }
+          ]
         }] } }
       }), { status:200, headers:{ 'content-type':'application/json' } });
     }
@@ -193,8 +201,12 @@ test('Cloudflare usage adds R2 storage and operation progress with matching bill
   const storage = usage.metrics.find((item) => item.id === 'r2_storage');
   const classA = usage.metrics.find((item) => item.id === 'r2_class_a');
   const classB = usage.metrics.find((item) => item.id === 'r2_class_b');
-  assert.equal(storage.used, 2.02);
-  assert.equal(storage.limit, 10);
+  assert.equal(storage.used, 4_700_000_000);
+  assert.equal(storage.limit, 10_000_000_000);
+  assert.equal(storage.unit, 'bytes');
+  assert.equal(storage.percent, 47);
+  assert.equal(storage.observedAt, '2026-09-27T17:55:00Z');
+  assert.match(storage.rule, /aktuell lagrad mängd/i);
   assert.equal(storage.billingCost, 0.12);
   assert.equal(classA.used, 1500);
   assert.equal(classA.limit, 1_000_000);
@@ -482,6 +494,17 @@ test('usage UI renders verified per-metric cost in the right-aligned card header
   assert.match(backend, /R2 · Lagring/);
   assert.match(backend, /R2 · Class A/);
   assert.match(backend, /R2 · Class B/);
+});
+
+test('usage progress colors are green below 80, orange from 80 to below 100, and red from 100', () => {
+  const source = readFileSync(new URL('../src/settings-drift-ui.js', import.meta.url), 'utf8');
+  assert.match(source, /if\(n>=100\)return 'danger';if\(n>=80\)return 'warning';return 'ok'/);
+  assert.match(source, /settings-usage-percent\.ok/);
+  assert.match(source, /settings-usage-percent\.warning/);
+  assert.match(source, /settings-usage-percent\.danger/);
+  assert.match(source, /settings-usage-progress-fill\.ok/);
+  assert.match(source, /settings-usage-progress-fill\.warning/);
+  assert.match(source, /settings-usage-progress-fill\.danger/);
 });
 
 test('recent activity UI is expandable and shows approximate D1 reads, writes and USD cost', () => {
