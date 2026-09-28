@@ -73,7 +73,10 @@ test('production release validates and deploys Cloudflare usage runtime secrets 
   assert.ok(validate < migrate, 'usage credentials must be validated before production migration');
   assert.ok(deploy < verifyBindings, 'runtime binding verification must follow deployment');
   assert.match(releaseWorkflow, /secrets\.CLOUDFLARE_USAGE_API_TOKEN/);
-  assert.match(releaseWorkflow, /KentaurAiUsageCredentialProbe\(\\\$accountTag: string!, \\\$date: Date\)/);
+  assert.match(releaseWorkflow, /KentaurAiUsageCredentialProbe\(\\\$accountTag: string!, \\\$date: Date, \\\$startTime: Time!, \\\$endTime: Time!, \\\$r2BucketName: string!\)/);
+  assert.match(releaseWorkflow, /r2StorageAdaptiveGroups/);
+  assert.match(releaseWorkflow, /payloadSize metadataSize/);
+  assert.match(releaseWorkflow, /r2BucketName:'kentaurai-raw'/);
   assert.match(releaseWorkflow, /billable-usage"/);
   assert.match(releaseWorkflow, /--secrets-file "\$runtime_secrets_file"/);
   assert.match(releaseWorkflow, /workers\/scripts\/kentaurai-api\/secrets\/\$secret_name/);
