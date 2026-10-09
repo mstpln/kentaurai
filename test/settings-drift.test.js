@@ -368,18 +368,23 @@ test('Cloudflare Query Insights is database-scoped and exposes read-heavy SQL di
     if (String(url).endsWith('/graphql')) {
       const body = JSON.parse(options.body);
       assert.equal(body.variables.databaseId, 'd8189e0e-6127-4ef2-88cc-534cb2217340');
-      assert.match(body.query, /d1QueriesAdaptiveGroups/);
-      assert.match(body.query, /sum_rowsRead_DESC/);
+      if (/d1QueriesAdaptiveGroups/.test(body.query)) {
+        assert.match(body.query, /sum_rowsRead_DESC/);
+        assert.doesNotMatch(body.query, /avg\s*\{\s*rowsRead/);
+        return new Response(JSON.stringify({
+          data:{ viewer:{ accounts:[{
+            d1QueriesAdaptiveGroups:[{
+              count:4,
+              sum:{ rowsRead:1000, rowsReturned:4, rowsWritten:0, queryDurationMs:32 },
+              dimensions:{ query:'SELECT  id   FROM horses WHERE id = ?', databaseId:body.variables.databaseId }
+            }]
+          }] } }
+        }), { status:200, headers:{ 'content-type':'application/json' } });
+      }
       return new Response(JSON.stringify({
         data:{ viewer:{ accounts:[{
           d1AnalyticsAdaptiveGroups:[{ dimensions:{ date:'2026-09-27', databaseId:body.variables.databaseId }, sum:{ rowsRead:1000, rowsWritten:5 } }],
-          d1StorageAdaptiveGroups:[{ dimensions:{ date:'2026-09-27', databaseId:body.variables.databaseId }, max:{ databaseSizeBytes:1000 } }],
-          d1QueriesAdaptiveGroups:[{
-            count:4,
-            avg:{ rowsRead:250, rowsReturned:1, rowsWritten:0, queryDurationMs:8 },
-            sum:{ rowsRead:1000, rowsReturned:4, rowsWritten:0, queryDurationMs:32 },
-            dimensions:{ query:'SELECT  id   FROM horses WHERE id = ?', databaseId:body.variables.databaseId }
-          }]
+          d1StorageAdaptiveGroups:[{ dimensions:{ date:'2026-09-27', databaseId:body.variables.databaseId }, max:{ databaseSizeBytes:1000 } }]
         }] } }
       }), { status:200, headers:{ 'content-type':'application/json' } });
     }
@@ -396,6 +401,40 @@ test('Cloudflare Query Insights is database-scoped and exposes read-heavy SQL di
   assert.equal(usage.queryInsights[0].totalRowsRead, 1000);
   assert.equal(usage.queryInsights[0].avgRowsRead, 250);
   assert.equal(usage.queryInsights[0].queryEfficiency, 0.004);
+});
+
+test('Cloudflare Query Insights failure does not hide verified core D1 usage', async () => {
+  const { env } = createTestEnv();
+  env.CLOUDFLARE_ACCOUNT_ID = 'account-synthetic';
+  env.CLOUDFLARE_USAGE_API_TOKEN = 'usage-token-synthetic';
+  const fetchImpl = async (url, options = {}) => {
+    if (String(url).endsWith('/billable-usage/info')) {
+      return new Response(JSON.stringify({
+        success:true,
+        result:{ subscriptions:[{ id:'a', billing_cycle_anchor_timestamp:'2026-09-12T00:00:00Z', start_timestamp:'2026-09-12T00:00:00Z' }] }
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    if (String(url).endsWith('/graphql')) {
+      const body = JSON.parse(options.body);
+      if (/d1QueriesAdaptiveGroups/.test(body.query)) {
+        return new Response(JSON.stringify({ errors:[{ message:'synthetic insights unavailable' }] }), { status:200, headers:{ 'content-type':'application/json' } });
+      }
+      return new Response(JSON.stringify({
+        data:{ viewer:{ accounts:[{
+          d1AnalyticsAdaptiveGroups:[{ dimensions:{ date:'2026-09-27', databaseId:body.variables.databaseId }, sum:{ rowsRead:1000, rowsWritten:5 } }],
+          d1StorageAdaptiveGroups:[{ dimensions:{ date:'2026-09-27', databaseId:body.variables.databaseId }, max:{ databaseSizeBytes:1000 } }]
+        }] } }
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    if (String(url).includes('/billable-usage?')) {
+      return new Response(JSON.stringify({ success:true, result:[] }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    throw new Error('unexpected URL');
+  };
+  const usage = await getCloudflareUsage(env, { fetchImpl, now:'2026-09-27T18:00:00Z' });
+  assert.equal(usage.configured, true);
+  assert.equal(usage.metrics.find((item) => item.id === 'd1_rows_read').used, 1000);
+  assert.deepEqual(usage.queryInsights, []);
 });
 
 test('Cloudflare usage does not turn missing analytics datasets into zero usage', async () => {
