@@ -102,6 +102,15 @@ test('scheduled capture archives tomorrow calendar and V86 while evening exclude
   const run = db.prepare(`SELECT status, error_count FROM import_runs WHERE source_type = 'official_live_scheduled_capture'`).get();
   assert.equal(run.status, 'success');
   assert.equal(run.error_count, 0);
+  const state = db.prepare(`
+    SELECT external_id,next_cursor,status,failure_count
+    FROM official_live_normalization_state
+    WHERE source_record_id=(SELECT id FROM source_records WHERE external_id=?)
+  `).get(`game:${GAME_ID}`);
+  assert.equal(state.external_id, `game:${GAME_ID}`);
+  assert.equal(state.next_cursor, 0);
+  assert.equal(state.status, 'running');
+  assert.equal(state.failure_count, 0);
 });
 
 test('pending normalizer ignores calendar-only captures', async () => {
