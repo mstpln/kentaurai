@@ -78,11 +78,25 @@ export function buildStorageCleanupRepresentationAuditSql(family) {
 }
 
 async function auditFamily(env, family, definition) {
-  const representation = await env.DB.prepare(
-    buildStorageCleanupRepresentationAuditSql(family)
-  ).bind(family).first();
+  // Each query returns one aggregate row. Preserve its provider-reported read
+  // cost so a failed dry-run identifies the costly check without exposing IDs.
+  const readCostByCheck = {};
+  async function scalar(check, sql, bindings = []) {
+    let statement = env.DB.prepare(sql);
+    if (bindings.length) statement = statement.bind(...bindings);
+    const response = await statement.all();
+    const read = Number(response?.meta?.rows_read);
+    readCostByCheck[check] = Number.isFinite(read) && read >= 0 ? read : null;
+    return response?.results?.[0] || null;
+  }
 
-  const observation = await env.DB.prepare(`
+  const representation = await scalar(
+    'representations',
+    buildStorageCleanupRepresentationAuditSql(family),
+    [family]
+  );
+
+  const observation = await scalar('observations', `
     SELECT
       SUM(CASE WHEN s.id IS NULL THEN 1 ELSE 0 END) AS dangling_observations,
       SUM(CASE WHEN s.id IS NOT NULL AND NOT (${definition.identityPredicate}) THEN 1 ELSE 0 END) AS identity_mismatch_observations,
@@ -91,14 +105,14 @@ async function auditFamily(env, family, definition) {
     LEFT JOIN ${definition.table} s ON s.id=o.snapshot_id
     LEFT JOIN source_records sr ON sr.id=o.source_record_id
     WHERE o.snapshot_family=?
-  `).bind(family).first();
+  `, [family]);
 
-  const directTimeline = await env.DB.prepare(`
+  const directTimeline = await scalar('direct_timeline', `
     SELECT COUNT(*) AS n
     FROM ${definition.table} s
     LEFT JOIN source_records sr ON sr.id=s.source_record_id
     WHERE sr.id IS NULL OR julianday(s.observed_at) IS NOT julianday(sr.fetched_at)
-  `).first();
+  `);
   const result = {
     family,
     mismatchedSources: number(representation?.mismatched_sources),
@@ -106,7 +120,8 @@ async function auditFamily(env, family, definition) {
     excessRepresentations: number(representation?.excess_representations),
     danglingObservations: number(observation?.dangling_observations),
     identityMismatchObservations: number(observation?.identity_mismatch_observations),
-    timestampMismatchRepresentations: number(observation?.observation_time_mismatches) + number(directTimeline?.n)
+    timestampMismatchRepresentations: number(observation?.observation_time_mismatches) + number(directTimeline?.n),
+    readCostByCheck
   };
   result.ok = result.mismatchedSources === 0
     && result.missingRepresentations === 0
