@@ -162,6 +162,40 @@ test('pending live normalization uses the newest snapshot and prioritizes a not-
   assert.equal(selected.external_id, `game:${newGame}`);
 });
 
+test('a recoverable source-gap snapshot is attempted at most once automatically', async () => {
+  const { env, db } = createTestEnv();
+  const sourceRecordId = 'src_live_source_gap_once';
+  db.prepare(`
+    INSERT INTO source_records
+      (id, source_type, external_id, fetched_at, quality_status, metadata_json)
+    VALUES (?, 'official_provider', 'game:V86_2099-01-16_999_3', '2099-01-15T17:15:00.000Z',
+      'captured_source_gap', '{"sourceGap":{"code":"missing_horse_identity"}}')
+  `).run(sourceRecordId);
+
+  assert.equal((await selectPendingOfficialGameSource(env))?.id, sourceRecordId, 'legacy source gaps without operational state remain eligible once');
+
+  db.prepare(`
+    INSERT INTO official_live_normalization_state
+      (source_record_id, external_id, next_cursor, status, failure_count)
+    VALUES (?, 'game:V86_2099-01-16_999_3', 0, 'source_gap', 0)
+  `).run(sourceRecordId);
+
+  assert.equal(await selectPendingOfficialGameSource(env), null, 'the same static source gap must not be reselected in the same or later automatic run');
+
+  db.prepare(`
+    INSERT INTO source_records
+      (id, source_type, external_id, fetched_at, quality_status, metadata_json)
+    VALUES ('src_live_source_gap_new_capture', 'official_provider', 'game:V86_2099-01-16_999_3',
+      '2099-01-15T18:15:00.000Z', 'captured_source_gap',
+      '{"sourceGap":{"code":"missing_horse_identity"}}')
+  `).run();
+  assert.equal(
+    (await selectPendingOfficialGameSource(env))?.id,
+    'src_live_source_gap_new_capture',
+    'a newly captured source for the same game remains independently eligible'
+  );
+});
+
 test('live normalization migrates legacy audit checkpoints once into compact operational state', async () => {
   const { env, db } = createTestEnv();
   const sourceRecordId = 'src_live_progress';

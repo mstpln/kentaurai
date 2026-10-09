@@ -46,6 +46,24 @@ test('outer worker kill switch blocks the full scheduled chain before automatic 
   assert.equal(d1Metrics.firsts, before.firsts + 1);
 });
 
+test('production worker ignores the retired minute cron without any overlay side job', async () => {
+  const { env, d1Metrics } = createTestEnv();
+  const before = { ...d1Metrics };
+  const queued = [];
+  const result = await worker.scheduled({
+    cron:'* * * * *',
+    scheduledTime:Date.parse('2099-01-15T05:15:00Z')
+  }, env, {
+    waitUntil(promise) { queued.push(promise); }
+  });
+  await Promise.all(queued);
+
+  assert.deepEqual(result, { skipped:true, reason:'unsupported_cron', cron:'* * * * *' });
+  assert.equal(d1Metrics.runs, before.runs);
+  assert.equal(d1Metrics.alls, before.alls);
+  assert.equal(d1Metrics.firsts, before.firsts + 1, 'only the outer automation switch may read D1');
+});
+
 test('settings automation route is private and controls the real scheduled switch', async () => {
   const { env } = createTestEnv();
   env.APP_PASSWORD = 'synthetic-app-password-with-high-entropy';
@@ -623,10 +641,14 @@ test('runtime controls stay outside structured data exports', () => {
 test('legacy worker overlays no longer own scheduled data side jobs', () => {
   const snapshotWrapper = readFileSync(new URL('../src/worker-v066.js', import.meta.url), 'utf8');
   const startPointWrapper = readFileSync(new URL('../src/worker-v064.js', import.meta.url), 'utf8');
+  const pwaWrapper = readFileSync(new URL('../src/worker-pwa.js', import.meta.url), 'utf8');
   const scheduler = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
 
   assert.doesNotMatch(snapshotWrapper, /syncOnePendingOfficialSnapshotSource|getAutomationControl/);
   assert.doesNotMatch(startPointWrapper, /syncOnePendingHorseStartPointSource|getAutomationControl/);
+  assert.doesNotMatch(pwaWrapper, /BACKFILL_CRON|getAutomationControl/);
+  assert.doesNotMatch(pwaWrapper, /controller\.cron[\s\S]*runNextPostRaceReview/);
+  assert.match(pwaWrapper, /async scheduled\(controller, env, ctx\) \{\s*return worker\.scheduled\(controller, env, ctx\);\s*\}/);
   assert.match(scheduler, /recent_start_points_promotion/);
   assert.match(scheduler, /recent_official_snapshot_promotion/);
   assert.match(scheduler, /minFetchedAt: recentPromotionCutoff/);

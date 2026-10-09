@@ -73,7 +73,13 @@ test('production release validates and deploys Cloudflare usage runtime secrets 
   assert.ok(validate < migrate, 'usage credentials must be validated before production migration');
   assert.ok(deploy < verifyBindings, 'runtime binding verification must follow deployment');
   assert.match(releaseWorkflow, /secrets\.CLOUDFLARE_USAGE_API_TOKEN/);
-  assert.match(releaseWorkflow, /KentaurAiUsageCredentialProbe\(\\\$accountTag: string!, \\\$date: Date, \\\$startTime: Time!, \\\$endTime: Time!, \\\$r2BucketName: string!\)/);
+  assert.match(releaseWorkflow, /KentaurAiUsageCredentialProbe\(\\\$accountTag: string!, \\\$databaseId: string!, \\\$date: Date, \\\$startTime: Time!, \\\$endTime: Time!, \\\$r2BucketName: string!\)/);
+  assert.match(releaseWorkflow, /D1_DATABASE_ID: d8189e0e-6127-4ef2-88cc-534cb2217340/);
+  assert.match(releaseWorkflow, /d1AnalyticsAdaptiveGroups\(limit: 1, filter: \{ date_geq: \\\$date, date_leq: \\\$date, databaseId: \\\$databaseId \}\)/);
+  assert.match(releaseWorkflow, /d1StorageAdaptiveGroups\(limit: 1, filter: \{ date_geq: \\\$date, date_leq: \\\$date, databaseId: \\\$databaseId \}\)/);
+  assert.match(releaseWorkflow, /databaseId:process\.env\.D1_DATABASE_ID/);
+  assert.match(releaseWorkflow, /Array\.isArray\(a\.d1AnalyticsAdaptiveGroups\)/);
+  assert.match(releaseWorkflow, /Array\.isArray\(a\.d1StorageAdaptiveGroups\)/);
   assert.match(releaseWorkflow, /r2StorageAdaptiveGroups/);
   assert.match(releaseWorkflow, /payloadSize metadataSize/);
   assert.match(releaseWorkflow, /r2BucketName:'kentaurai-raw'/);
