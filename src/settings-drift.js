@@ -138,16 +138,6 @@ const D1_USAGE_QUERY = `query KentaurAiUsage(
         max { databaseSizeBytes }
         dimensions { date databaseId }
       }
-      d1QueriesAdaptiveGroups(
-        limit: 20
-        filter: { date_geq: $start, date_leq: $end, databaseId: $databaseId }
-        orderBy: [sum_rowsRead_DESC]
-      ) {
-        count
-        avg { rowsRead rowsReturned rowsWritten queryDurationMs }
-        sum { rowsRead rowsReturned rowsWritten queryDurationMs }
-        dimensions { query databaseId }
-      }
       r2StorageAdaptiveGroups(
         limit: 10000
         filter: {
@@ -159,6 +149,27 @@ const D1_USAGE_QUERY = `query KentaurAiUsage(
       ) {
         max { payloadSize metadataSize }
         dimensions { datetime }
+      }
+    }
+  }
+}`;
+
+const D1_QUERY_INSIGHTS_QUERY = `query KentaurAiQueryInsights(
+  $accountTag: string!,
+  $databaseId: string!,
+  $start: Date,
+  $end: Date
+) {
+  viewer {
+    accounts(filter: { accountTag: $accountTag }) {
+      d1QueriesAdaptiveGroups(
+        limit: 20
+        filter: { date_geq: $start, date_leq: $end, databaseId: $databaseId }
+        orderBy: [sum_rowsRead_DESC]
+      ) {
+        count
+        sum { rowsRead rowsReturned rowsWritten queryDurationMs }
+        dimensions { query databaseId }
       }
     }
   }
@@ -462,6 +473,28 @@ async function recentMorningStageCosts(env) {
   });
 }
 
+async function loadD1QueryInsights(fetchImpl, token, accountId, cycle, now) {
+  try {
+    const data = await cloudflareJson(fetchImpl, 'https://api.cloudflare.com/client/v4/graphql', token, {
+      method:'POST',
+      body: JSON.stringify({
+        query: D1_QUERY_INSIGHTS_QUERY,
+        variables: {
+          accountTag: accountId,
+          databaseId: KENTAURAI_D1_DATABASE_ID,
+          start: dateKey(cycle.start),
+          end: dateKey(now)
+        }
+      })
+    });
+    if (Array.isArray(data.errors) && data.errors.length) return [];
+    const groups = data?.data?.viewer?.accounts?.[0]?.d1QueriesAdaptiveGroups;
+    return Array.isArray(groups) ? d1QueryInsights(groups) : [];
+  } catch {
+    return [];
+  }
+}
+
 async function d1Usage(env, fetchImpl, cycle, now) {
   const accountId = String(env.CLOUDFLARE_ACCOUNT_ID || '').trim();
   const token = String(env.CLOUDFLARE_USAGE_API_TOKEN || '').trim();
@@ -492,12 +525,13 @@ async function d1Usage(env, fetchImpl, cycle, now) {
   const r2Storage = Array.isArray(account.r2StorageAdaptiveGroups)
     ? currentR2Storage(account.r2StorageAdaptiveGroups)
     : null;
+  const queryInsights = await loadD1QueryInsights(fetchImpl, token, accountId, cycle, now);
   return {
     rowsRead: sumMetric(account.d1AnalyticsAdaptiveGroups, 'rowsRead'),
     rowsWritten: sumMetric(account.d1AnalyticsAdaptiveGroups, 'rowsWritten'),
     storageBytes: currentD1Storage(account.d1StorageAdaptiveGroups),
     dailyUsage: dailyD1Usage(account.d1AnalyticsAdaptiveGroups),
-    queryInsights: Array.isArray(account.d1QueriesAdaptiveGroups) ? d1QueryInsights(account.d1QueriesAdaptiveGroups) : [],
+    queryInsights,
     r2StorageBytes: r2Storage?.bytes ?? null,
     r2StorageObservedAt: r2Storage?.observedAt ?? null
   };
