@@ -214,13 +214,16 @@ test('automatic official snapshot promotion ignores old normalized backlog outsi
   seedEntities(db);
   addSource(db, 'snapshot-old-backlog', '2026-09-01T10:00:00Z', 'snapshot-old-backlog');
   addSource(db, 'snapshot-recent', '2026-09-12T10:00:00Z', 'snapshot-recent');
+  addSource(db, 'snapshot-recent-newer', '2026-09-13T10:00:00Z', 'snapshot-recent-newer');
   await putPayload(env, 'snapshot-old-backlog', payload({ age:3 }));
   await putPayload(env, 'snapshot-recent', payload({ age:5 }));
+  await putPayload(env, 'snapshot-recent-newer', payload({ age:6 }));
 
   const result = await syncOnePendingOfficialSnapshotSource(env, { minFetchedAt:'2026-09-10T00:00:00Z' });
-  assert.equal(result.sourceRecordId, 'snapshot-recent');
+  assert.equal(result.sourceRecordId, 'snapshot-recent', 'recent snapshot promotion remains chronological');
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM official_snapshot_source_sync WHERE source_record_id='snapshot-recent'").get().n, 1);
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM official_snapshot_source_sync WHERE source_record_id='snapshot-old-backlog'").get().n, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM official_snapshot_source_sync WHERE source_record_id='snapshot-recent-newer'").get().n, 0);
 });
 
 test('A4 as-of readers ignore rows from a failed source sync', async () => {
