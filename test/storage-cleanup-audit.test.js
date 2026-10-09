@@ -133,7 +133,7 @@ test('cleanup representation check starts from complete sync sources and uses co
       .map((row) => String(row.detail || '')).join('\n');
     assert.match(plan, /SEARCH sync USING INDEX idx_official_snapshot_source_sync_status_source/);
     assert.match(plan, new RegExp(`SEARCH direct_snapshot USING COVERING INDEX ${index}`));
-    assert.match(plan, /SEARCH o USING INDEX/);
+    assert.match(plan, /SEARCH o USING INDEX sqlite_autoindex_official_snapshot_observations_1 \\(source_record_id=\\? AND snapshot_family=\\?\\)/);
     assert.doesNotMatch(plan, new RegExp(`SCAN ${table}\\b`));
     assert.doesNotMatch(plan, /SCAN official_snapshot_observations\b/);
   }
