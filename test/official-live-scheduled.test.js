@@ -46,6 +46,13 @@ test('scheduled live dates include race day in morning but exclude it in evening
   ]);
 });
 
+test('seven-day morning horizon means today plus six future dates', () => {
+  const dates = scheduledLiveDates('2099-01-15T05:15:00.000Z', { includeToday: true, daysAhead: 6 });
+  assert.equal(dates.length, 7);
+  assert.equal(dates[0], '2099-01-15');
+  assert.equal(dates.at(-1), '2099-01-21');
+});
+
 test('calendar discovery selects only exact V85/V86 eight-leg games', () => {
   const payload = calendar();
   payload.games.V85 = [{
@@ -139,25 +146,25 @@ test('pending live normalization uses the newest snapshot and prioritizes a not-
   assert.equal(selected.external_id, `game:${newGame}`);
 });
 
-test('live normalization progress advances only after a successful entry run', async () => {
+test('live normalization migrates legacy audit checkpoints once into compact operational state', async () => {
   const { env, db } = createTestEnv();
   const sourceRecordId = 'src_live_progress';
   db.prepare(`
     INSERT INTO source_records (id, source_type, external_id, fetched_at, quality_status)
     VALUES (?, 'official_provider', 'game:V86_2099-01-16_999_1', '2099-01-15T17:15:00.000Z', 'captured_unmapped')
   `).run(sourceRecordId);
-  db.prepare(`
-    INSERT INTO normalized_observations
-      (id, entity_type, entity_id, source_record_id, observed_at, fields_json, quality_status)
-    VALUES ('obs_partial_entry', 'race_entry', 'entry_partial', ?, '2099-01-15T17:15:00.500Z', '{}', 'normalized_verified_subset')
-  `).run(sourceRecordId);
 
-  assert.equal(await completedNormalizationCursor(env, sourceRecordId), 0);
   insertNormalizationRun(db, { id: 'imp_failed_0', sourceRecordId, cursor: 0, status: 'failed' });
-  assert.equal(await completedNormalizationCursor(env, sourceRecordId), 0);
   insertNormalizationRun(db, { id: 'imp_success_0', sourceRecordId, cursor: 0 });
   insertNormalizationRun(db, { id: 'imp_success_0_duplicate', sourceRecordId, cursor: 0 });
+
   assert.equal(await completedNormalizationCursor(env, sourceRecordId), 1);
+  const state = db.prepare('SELECT next_cursor,status FROM official_live_normalization_state WHERE source_record_id=?').get(sourceRecordId);
+  assert.equal(state.next_cursor, 1);
+  assert.equal(state.status, 'running');
+
+  db.prepare("DELETE FROM import_runs WHERE source_type='official_provider_normalize'").run();
+  assert.equal(await completedNormalizationCursor(env, sourceRecordId), 1, 'subsequent cursor reads use compact state rather than audit history');
 });
 
 test('live normalization checkpoints fail closed when successful cursors are not contiguous', async () => {
