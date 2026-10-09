@@ -32,43 +32,55 @@ function number(value) {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 }
 
-async function auditFamily(env, family, definition) {
-  const representation = await env.DB.prepare(`
-    WITH represented_counts AS (
-      SELECT source_record_id,COUNT(*) AS n
-      FROM (
-        SELECT source_record_id
-        FROM ${definition.table}
-        UNION ALL
-        SELECT o.source_record_id
-        FROM official_snapshot_observations o
-        WHERE o.snapshot_family=?
-          AND NOT EXISTS (
-            SELECT 1
-            FROM ${definition.table} direct_snapshot
-            WHERE direct_snapshot.id=o.snapshot_id
-              AND direct_snapshot.source_record_id=o.source_record_id
-          )
-      )
-      GROUP BY source_record_id
+// Anchor counts to completed source sync rows. A global UNION over all historical
+// snapshots makes the safety preflight scan unrelated history on every dry-run.
+// The source and family indexes bound each lookup to the source being checked.
+export function buildStorageCleanupRepresentationAuditSql(family) {
+  const definition = FAMILY_AUDITS[String(family || '')];
+  if (!definition) throw new Error('unsupported storage cleanup audit family');
+  return `
+    WITH source_counts AS MATERIALIZED (
+      SELECT
+        sync.source_record_id,
+        sync.${definition.expectedColumn} AS expected_count,
+        (
+          SELECT COUNT(*)
+          FROM ${definition.table} direct_snapshot
+          WHERE direct_snapshot.source_record_id=sync.source_record_id
+        ) + (
+          SELECT COUNT(*)
+          FROM official_snapshot_observations o
+          WHERE o.source_record_id=sync.source_record_id
+            AND o.snapshot_family=?
+            AND NOT EXISTS (
+              SELECT 1
+              FROM ${definition.table} same_source_snapshot
+              WHERE same_source_snapshot.id=o.snapshot_id
+                AND same_source_snapshot.source_record_id=o.source_record_id
+            )
+        ) AS actual_count
+      FROM official_snapshot_source_sync sync
+      WHERE sync.status='complete'
     )
     SELECT
       COUNT(*) AS mismatched_sources,
       COALESCE(SUM(
-        CASE WHEN sync.${definition.expectedColumn} > COALESCE(represented_counts.n,0)
-          THEN sync.${definition.expectedColumn} - COALESCE(represented_counts.n,0)
-          ELSE 0 END
+        CASE WHEN expected_count > actual_count
+          THEN expected_count - actual_count ELSE 0 END
       ),0) AS missing_representations,
       COALESCE(SUM(
-        CASE WHEN COALESCE(represented_counts.n,0) > sync.${definition.expectedColumn}
-          THEN COALESCE(represented_counts.n,0) - sync.${definition.expectedColumn}
-          ELSE 0 END
+        CASE WHEN actual_count > expected_count
+          THEN actual_count - expected_count ELSE 0 END
       ),0) AS excess_representations
-    FROM official_snapshot_source_sync sync
-    LEFT JOIN represented_counts ON represented_counts.source_record_id=sync.source_record_id
-    WHERE sync.status='complete'
-      AND sync.${definition.expectedColumn} <> COALESCE(represented_counts.n,0)
-  `).bind(family).first();
+    FROM source_counts
+    WHERE expected_count <> actual_count
+  `;
+}
+
+async function auditFamily(env, family, definition) {
+  const representation = await env.DB.prepare(
+    buildStorageCleanupRepresentationAuditSql(family)
+  ).bind(family).first();
 
   const observation = await env.DB.prepare(`
     SELECT
