@@ -409,3 +409,10 @@ A single race must not directly change model weights. Candidate learnings are re
 3. Each recovery index uses `CREATE INDEX IF NOT EXISTS` so a partially persisted index from an interrupted provider operation cannot make the next release unsafe.
 4. Production release verification must require both the recovery migration records and the exact expected index names before Worker deployment.
 5. This migration recovery changes schema access paths only. It must not run cleanup, rewrite racing facts, or infer that destructive cleanup is authorized.
+
+
+## Integrity audits must scope representation counts without discarding global checks
+1. Full-history representation-count aggregations should not be repeated solely to reconcile the subset of official source records marked complete. Start from the completed sync source key and use source-indexed direct snapshots and observation lookups.
+2. The canonical representation count for one completed source remains direct snapshots plus independent observations not duplicating that source's own snapshot; all discrepancy counts remain exact. Do not suppress duplicate-source or independent observation evidence to optimize D1 reads.
+3. Orphaned observation identity/source-time mismatches and direct-snapshot source-time anomalies remain global integrity checks. Cost optimization cannot waive these safeguards or authorize cleanup after an incomplete audit.
+4. Read-only integrity audits may report only sanitized read costs by query category, never private source IDs or racing payloads. D1 per-operation and cleanup-run cost limits are not increased; any stop fails closed and requires review before retry.
