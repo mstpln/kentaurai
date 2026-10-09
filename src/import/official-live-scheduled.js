@@ -227,7 +227,6 @@ async function storeNormalizationProgress(env, source, {
       next_cursor = excluded.next_cursor,
       total_entries = COALESCE(excluded.total_entries, official_live_normalization_state.total_entries),
       status = excluded.status,
-      failure_count = CASE WHEN excluded.status IN ('running','completed','source_gap') THEN 0 ELSE official_live_normalization_state.failure_count END,
       last_error = excluded.last_error,
       updated_at = CURRENT_TIMESTAMP
   `).bind(source.id, source.external_id, cursor, total, status, error == null ? null : String(error).slice(0, 500)).run();
