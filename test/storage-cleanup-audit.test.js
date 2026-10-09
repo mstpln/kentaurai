@@ -4,6 +4,7 @@ import worker from '../src/index.js';
 import { createTestEnv } from './helpers/d1.js';
 import {
   auditStorageCleanupIntegrity,
+  auditStorageCleanupFamilyIntegrity,
   bindStorageCleanupIntegrityAudit,
   buildStorageCleanupRepresentationAuditSql
 } from '../src/storage-cleanup-audit.js';
@@ -179,6 +180,35 @@ test('completed-source counts exclude incomplete sources and still report exact 
     missing: 2,
     excess: 1
   });
+});
+
+test('cleanup integrity audit fails closed without running more checks after its read budget is exhausted', async () => {
+  const { env } = createTestEnv();
+  const originalPrepare = env.DB.prepare.bind(env.DB);
+  let preparedStatements = 0;
+  env.DB.prepare = (sql) => {
+    preparedStatements += 1;
+    const statement = originalPrepare(sql);
+    if (!sql.includes('WITH source_counts AS MATERIALIZED')) return statement;
+    return {
+      bind(...args) {
+        const bound = statement.bind(...args);
+        return {
+          async all() {
+            const result = await bound.all();
+            return { ...result, meta: { ...result.meta, rows_read: 250001 } };
+          }
+        };
+      }
+    };
+  };
+
+  const result = await auditStorageCleanupFamilyIntegrity(env, 'horse_profile');
+  assert.equal(result.ok, false);
+  assert.equal(result.auditIncomplete, true);
+  assert.equal(result.readCostByCheck.representations, 250001);
+  assert.equal(preparedStatements, 1, 'later global scans must be skipped after the safety stop');
+  assert.equal(Object.hasOwn(result, 'mismatchedSources'), false, 'unaudited facts must not be reported as clean');
 });
 
 test('cleanup audit source-count paths use dedicated covering indexes', () => {
