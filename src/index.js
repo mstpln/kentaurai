@@ -100,6 +100,7 @@ async function observeStorageCleanupIntegrityAudit(env) {
   const families = [];
   const cost = { rowsRead:0, rowsWritten:0, d1DurationMs:0, durationMs:0 };
   let safetyStop = false;
+  let safetyStopScope = null;
 
   for (const family of STORAGE_CLEANUP_AUDIT_FAMILIES) {
     const observed = await observeD1Operation(
@@ -111,6 +112,7 @@ async function observeStorageCleanupIntegrityAudit(env) {
     addCleanupAuditCost(cost, observed.metrics);
     if (observed.safetyStop) {
       safetyStop = true;
+      safetyStopScope = family;
       break;
     }
   }
@@ -125,12 +127,14 @@ async function observeStorageCleanupIntegrityAudit(env) {
     operations = observed.value;
     addCleanupAuditCost(cost, observed.metrics);
     safetyStop = observed.safetyStop;
+    if (observed.safetyStop) safetyStopScope = 'operations';
   }
 
   return {
     value: combineStorageCleanupIntegrityAudit(families, operations),
     cost,
-    safetyStop
+    safetyStop,
+    safetyStopScope
   };
 }
 
@@ -416,7 +420,12 @@ async function handleFetch(request, env) {
   }
   if (request.method === 'GET' && path === '/v1/storage-cleanup/audit') {
     const observed = await observeStorageCleanupIntegrityAudit(env);
-    return json({ ...observed.value, cost: observed.cost, safetyStop: observed.safetyStop });
+    return json({
+      ...observed.value,
+      cost: observed.cost,
+      safetyStop: observed.safetyStop,
+      safetyStopScope: observed.safetyStopScope
+    });
   }
   if (request.method === 'POST' && path === '/v1/storage-cleanup/session/audit') {
     const body = await readJson(request);
@@ -426,7 +435,8 @@ async function handleFetch(request, env) {
         ...auditObserved.value,
         auditVerified: false,
         cost: auditObserved.cost,
-        safetyStop: true
+        safetyStop: true,
+        safetyStopScope: auditObserved.safetyStopScope
       });
     }
     const bindingObserved = await observeD1Operation(
