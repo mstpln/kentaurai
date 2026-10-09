@@ -483,7 +483,7 @@ async function d1Usage(env, fetchImpl, cycle, now) {
   if (Array.isArray(data.errors) && data.errors.length) throw new Error(data.errors[0]?.message || 'Cloudflare analytics query failed');
   const account = data?.data?.viewer?.accounts?.[0];
   if (!account) throw new Error('Cloudflare analytics account is unavailable');
-  if (!Array.isArray(account.d1AnalyticsAdaptiveGroups) || !Array.isArray(account.d1StorageAdaptiveGroups) || !Array.isArray(account.d1QueriesAdaptiveGroups)) {
+  if (!Array.isArray(account.d1AnalyticsAdaptiveGroups) || !Array.isArray(account.d1StorageAdaptiveGroups)) {
     throw new Error('Cloudflare D1 analytics datasets are unavailable');
   }
   if (!account.d1StorageAdaptiveGroups.length) {
@@ -497,7 +497,7 @@ async function d1Usage(env, fetchImpl, cycle, now) {
     rowsWritten: sumMetric(account.d1AnalyticsAdaptiveGroups, 'rowsWritten'),
     storageBytes: currentD1Storage(account.d1StorageAdaptiveGroups),
     dailyUsage: dailyD1Usage(account.d1AnalyticsAdaptiveGroups),
-    queryInsights: d1QueryInsights(account.d1QueriesAdaptiveGroups),
+    queryInsights: Array.isArray(account.d1QueriesAdaptiveGroups) ? d1QueryInsights(account.d1QueriesAdaptiveGroups) : [],
     r2StorageBytes: r2Storage?.bytes ?? null,
     r2StorageObservedAt: r2Storage?.observedAt ?? null
   };
