@@ -76,6 +76,16 @@ async function loadJsonObject(env, objectKey, label) {
   return payload;
 }
 
+async function initializeNormalizationStateForCapture(env, captured, gameId) {
+  if (!captured?.sourceRecordId || captured.reused) return;
+  await env.DB.prepare(`
+    INSERT INTO official_live_normalization_state
+      (source_record_id, external_id, next_cursor, status)
+    VALUES (?, ?, 0, 'running')
+    ON CONFLICT(source_record_id) DO NOTHING
+  `).bind(captured.sourceRecordId, `game:${gameId}`).run();
+}
+
 export async function captureUpcomingOfficialGames(env, scheduledTime, options = {}) {
   if (!env.DB) throw new Error('DB is not configured');
   if (!env.RAW_BUCKET?.get || !env.RAW_BUCKET?.put) throw new Error('RAW_BUCKET read/write access is not configured');
@@ -101,6 +111,7 @@ export async function captureUpcomingOfficialGames(env, scheduledTime, options =
           const game = await captureGame(env, gameId, { fetchImpl: options.fetchImpl });
           counts.inserted += Number(!game.reused);
           counts.skipped += Number(game.reused);
+          await initializeNormalizationStateForCapture(env, game, gameId);
           capturedGameIds.push(gameId);
         } catch (error) {
           counts.errors += 1;
