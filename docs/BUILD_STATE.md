@@ -1,3 +1,13 @@
+## Cost efficiency & observability v2 candidate
+- Branch: `feat/cost-efficiency-v2`.
+- Automatic Start Points and official snapshot promotion have been removed from legacy Worker overlays and moved into the canonical morning orchestrator, where they share automation control, exact D1 cost observation and the cumulative safety stop.
+- Automatic promotion is limited to normalized official sources from the recent three-day recovery window; older unsynchronized sources remain preserved for explicit/manual replay.
+- Migration `0050_cost_efficiency_v2.sql` adds compact per-source live-normalization cursor/failure state and narrow operational indexes. Existing partial progress is read from legacy import audit history once and then persisted in the state table.
+- The upcoming morning horizon is exactly seven dates: today plus six future dates.
+- Once cumulative D1 cost safety stops, later critical as well as non-critical processors are skipped; raw live capture remains first.
+- Drift scopes D1 analytics to the exact KentaurAI database, surfaces Cloudflare Query Insights for the highest-read SQL and shows exact recorded D1 reads/writes/time for morning stages.
+- No storage cleanup, historical backfill, private data mutation outside normal bounded ingestion, model change or racing-fact deletion is part of this candidate.
+
 ## Settings Drift / usage control candidate
 - Branch: `feat/settings-drift-usage-control`.
 - Settings is reorganized into **Drift** and **Data**. Drift owns automatic-workflow control, Cloudflare D1 usage, source/job status and recent activity; Data keeps stored counts and the sanitized coverage export.
