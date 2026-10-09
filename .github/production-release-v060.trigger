@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=b09114e88123ca00272aff573c64bc4efd57befd
-release_nonce=2026-09-28-pr294-analysis-asterisk-icon
+source_main=2b636de2dd10d287ae5cfc213204d2dfcbf3922e
+release_nonce=2026-10-09-pr295-cost-efficiency-v2
