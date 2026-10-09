@@ -37,7 +37,9 @@ test('cleanup integrity audit accepts direct and observation-backed source repre
   db.prepare(`
     INSERT INTO official_snapshot_observations
       (source_record_id,snapshot_family,entity_key,scope_key,observed_at,snapshot_id,factual_changed)
-    VALUES ('audit-source-b','horse_profile','audit-horse','profile','2026-09-11T10:00:00Z','audit-snapshot',0)
+    VALUES
+      ('audit-source-a','horse_profile','audit-horse','profile','2026-09-10T10:00:00Z','audit-snapshot',1),
+      ('audit-source-b','horse_profile','audit-horse','profile','2026-09-11T10:00:00Z','audit-snapshot',0)
   `).run();
 
   const audit = await auditStorageCleanupIntegrity(env);
@@ -53,21 +55,57 @@ test('cleanup integrity audit accepts direct and observation-backed source repre
   });
 });
 
-test('cleanup integrity audit counts direct plus observation representations without UNION deduplication', async () => {
+test('cleanup integrity audit counts a direct snapshot plus its own observation as one logical representation', async () => {
   const { db, env } = createTestEnv();
-  db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('duplicate-horse','Duplicate Horse')").run();
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('own-observation-horse','Own Observation Horse')").run();
 
-  addSource(db, 'duplicate-source', '2026-09-10T10:00:00Z');
-  addSync(db, 'duplicate-source', 1);
+  addSource(db, 'own-observation-source', '2026-09-10T10:00:00Z');
+  addSync(db, 'own-observation-source', 1);
   db.prepare(`
     INSERT INTO horse_profile_snapshots
       (id,horse_id,observed_at,age_years,source_record_id)
-    VALUES ('duplicate-snapshot','duplicate-horse','2026-09-10T10:00:00Z',4,'duplicate-source')
+    VALUES ('own-observation-snapshot','own-observation-horse','2026-09-10T10:00:00Z',4,'own-observation-source')
   `).run();
   db.prepare(`
     INSERT INTO official_snapshot_observations
       (source_record_id,snapshot_family,entity_key,scope_key,observed_at,snapshot_id,factual_changed)
-    VALUES ('duplicate-source','horse_profile','duplicate-horse','profile','2026-09-10T10:00:00Z','duplicate-snapshot',0)
+    VALUES ('own-observation-source','horse_profile','own-observation-horse','profile',
+      '2026-09-10T10:00:00Z','own-observation-snapshot',1)
+  `).run();
+
+  const audit = await auditStorageCleanupIntegrity(env);
+  const profile = audit.families.find((family) => family.family === 'horse_profile');
+  assert.equal(audit.ok, true);
+  assert.equal(profile.mismatchedSources, 0);
+  assert.equal(profile.excessRepresentations, 0);
+});
+
+test('cleanup integrity audit still detects an independent extra observation-backed representation', async () => {
+  const { db, env } = createTestEnv();
+  db.prepare(`
+    INSERT INTO horses (id,canonical_name)
+    VALUES ('direct-horse','Direct Horse'),('observed-horse','Observed Horse')
+  `).run();
+
+  addSource(db, 'representation-source', '2026-09-11T10:00:00Z');
+  addSource(db, 'retained-source', '2026-09-10T10:00:00Z');
+  addSync(db, 'representation-source', 1);
+
+  db.prepare(`
+    INSERT INTO horse_profile_snapshots
+      (id,horse_id,observed_at,age_years,source_record_id)
+    VALUES
+      ('direct-snapshot','direct-horse','2026-09-11T10:00:00Z',4,'representation-source'),
+      ('retained-snapshot','observed-horse','2026-09-10T10:00:00Z',5,'retained-source')
+  `).run();
+  db.prepare(`
+    INSERT INTO official_snapshot_observations
+      (source_record_id,snapshot_family,entity_key,scope_key,observed_at,snapshot_id,factual_changed)
+    VALUES
+      ('representation-source','horse_profile','direct-horse','profile',
+        '2026-09-11T10:00:00Z','direct-snapshot',1),
+      ('representation-source','horse_profile','observed-horse','profile',
+        '2026-09-11T10:00:00Z','retained-snapshot',0)
   `).run();
 
   const audit = await auditStorageCleanupIntegrity(env);
