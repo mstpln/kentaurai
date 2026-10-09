@@ -70,7 +70,18 @@ async function request(path, { method = 'GET', body = null } = {}) {
     }
     if (!response.ok) throw new Error(`${path} failed with HTTP ${response.status}: ${String(data?.error || 'unknown_error').slice(0, 160)}`);
     addRunCost(data?.cost);
-    if (data?.safetyStop === true) throw new Error(`${path} tripped the D1 cost-safety stop`);
+    if (data?.safetyStop === true) {
+      const cost = data?.cost || {};
+      const scope = String(data?.safetyStopScope || 'unspecified')
+        .replace(/[^a-z0-9_:-]/gi, '')
+        .slice(0, 64) || 'unspecified';
+      throw new Error(
+        `${path} tripped the D1 cost-safety stop ` +
+        `(scope=${scope}, rowsRead=${Math.max(0, Number(cost.rowsRead || 0))}, ` +
+        `rowsWritten=${Math.max(0, Number(cost.rowsWritten || 0))}, ` +
+        `durationMs=${Math.max(0, Number(cost.durationMs || 0))})`
+      );
+    }
     return data;
   }
   throw new Error(`${path} authentication did not stabilize within 30 seconds`);
@@ -110,6 +121,9 @@ async function verifyDryRunIntegrity() {
   const audit = await request('/v1/storage-cleanup/audit');
   logIntegrityAudit(audit);
   if (audit?.ok !== true) throw new Error('storage cleanup integrity audit failed; refusing cleanup');
+  if (costBudgetReached()) {
+    throw new Error('storage cleanup integrity audit reached the cumulative D1 run-cost budget; refusing cleanup planning');
+  }
 }
 
 async function verifyExecuteSessionIntegrity(session) {
@@ -122,6 +136,9 @@ async function verifyExecuteSessionIntegrity(session) {
   logIntegrityAudit(audit, { sessionBound: true });
   if (audit?.ok !== true || audit?.auditVerified !== true) {
     throw new Error('storage cleanup session integrity audit failed; refusing cleanup');
+  }
+  if (costBudgetReached()) {
+    throw new Error('storage cleanup session integrity audit reached the cumulative D1 run-cost budget; refusing cleanup planning');
   }
 }
 

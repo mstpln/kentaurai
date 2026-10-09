@@ -1,6 +1,14 @@
-## Cost-readiness QA hardening candidate
-- Branch: `fix/cost-readiness-qa`.
-- Production baseline before this QA is PR #295 merged at `2b636de2dd10d287ae5cfc213204d2dfcbf3922e` and successfully released by production release #161 from main `b70b634443ef040b0bff191725f56a524009415b`.
+## Storage cleanup integrity-audit cost hardening candidate
+- Branch: `fix/storage-cleanup-audit-cost`, based on deployed main `ec849e62f282803737c94194b8e52dd6d4060cdc`.
+- Production storage-cleanup dry-run #11 failed safely before planning or mutation because the read-only `/v1/storage-cleanup/audit` request tripped the D1 per-operation cost-safety stop. The temporary cleanup token was removed and production health still passed afterward.
+- The provenance representation audit now counts logical source representations by `source_record_id` without a full entity/scope `UNION`. A direct snapshot plus its own factual observation counts once; observation-backed later sources count independently. This preserves current change-point semantics while avoiding the expensive global deduplication.
+- Migration `0051_storage_cleanup_audit_indexes.sql` adds covering `source_record_id` access paths for all four snapshot families plus a status/source index for completed snapshot sync rows.
+- The cleanup audit endpoint now cost-observes each snapshot family separately and then the operational state check, while returning one sanitized aggregate cost. The normal per-operation safety threshold remains unchanged; the GitHub runner still applies the separate cumulative per-run D1 budget.
+- The runner now includes only sanitized rows-read/written/duration metrics when a cost stop occurs and refuses to begin cleanup planning if the integrity audit itself exhausts the cumulative cleanup-run budget.
+- This candidate does not delete, rewrite or clean production data. The dry-run must be rerun after review/merge/deploy before any destructive cleanup authorization.
+
+## Cost-readiness QA hardening — deployed
+- PR #296 merged at `1775852716c998c85cfebd735a0185f35f9b5cb3` and production release #162 completed from main `ec849e62f282803737c94194b8e52dd6d4060cdc`.
 - Deep scheduled-chain review found one dormant legacy minute-cron side path in `worker-pwa.js`: it could still run one post-race review if a retired `* * * * *` trigger were ever delivered. Current Wrangler production config exposes only `15 5 * * *`, so the path was not active, but it violates the single-owner cost-safety rule and is removed in this candidate.
 - Regression coverage now exercises the full production worker chain and requires the retired minute cron to return `unsupported_cron` with no overlay work beyond the outer automation-control point read.
 - QA also found that one static `captured_source_gap` game snapshot could be selected repeatedly inside the same bounded morning normalization loop. Operational state now marks that exact source as attempted, so automatic selection skips it thereafter; a newly captured source for the same game remains independently eligible.
