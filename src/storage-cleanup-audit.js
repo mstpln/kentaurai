@@ -25,6 +25,8 @@ const FAMILY_AUDITS = Object.freeze({
   }
 });
 
+export const STORAGE_CLEANUP_AUDIT_FAMILIES = Object.freeze(Object.keys(FAMILY_AUDITS));
+
 function number(value) {
   const parsed = Number(value ?? 0);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
@@ -32,16 +34,16 @@ function number(value) {
 
 async function auditFamily(env, family, definition) {
   const representation = await env.DB.prepare(`
-    WITH represented AS (
-      SELECT source_record_id, ${definition.directIdentity}
-      FROM ${definition.table}
-      UNION
-      SELECT source_record_id,entity_key,scope_key
-      FROM official_snapshot_observations
-      WHERE snapshot_family=?
-    ), represented_counts AS (
+    WITH represented_counts AS (
       SELECT source_record_id,COUNT(*) AS n
-      FROM represented
+      FROM (
+        SELECT source_record_id
+        FROM ${definition.table}
+        UNION ALL
+        SELECT source_record_id
+        FROM official_snapshot_observations
+        WHERE snapshot_family=?
+      )
       GROUP BY source_record_id
     )
     SELECT
@@ -134,18 +136,44 @@ async function operationalCounts(env) {
   return result;
 }
 
+export async function auditStorageCleanupFamilyIntegrity(env, family) {
+  if (!env?.DB) throw new Error('DB is not configured');
+  const definition = FAMILY_AUDITS[String(family || '')];
+  if (!definition) throw new Error('unsupported storage cleanup audit family');
+  return auditFamily(env, family, definition);
+}
+
+export async function auditStorageCleanupOperationalIntegrity(env) {
+  if (!env?.DB) throw new Error('DB is not configured');
+  return operationalCounts(env);
+}
+
+export function combineStorageCleanupIntegrityAudit(families, operations) {
+  const normalizedFamilies = Array.isArray(families) ? families : [];
+  const normalizedOperations = operations || {
+    batchStatuses: {},
+    sessionStatuses: {},
+    startedBatches: 0,
+    strandedRawBatches: 0,
+    ok: false
+  };
+  return {
+    ok: normalizedFamilies.length === STORAGE_CLEANUP_AUDIT_FAMILIES.length
+      && normalizedFamilies.every((family) => family?.ok === true)
+      && normalizedOperations.ok === true,
+    families: normalizedFamilies,
+    operations: normalizedOperations
+  };
+}
+
 export async function auditStorageCleanupIntegrity(env) {
   if (!env?.DB) throw new Error('DB is not configured');
   const families = [];
-  for (const [family, definition] of Object.entries(FAMILY_AUDITS)) {
-    families.push(await auditFamily(env, family, definition));
+  for (const family of STORAGE_CLEANUP_AUDIT_FAMILIES) {
+    families.push(await auditStorageCleanupFamilyIntegrity(env, family));
   }
-  const operations = await operationalCounts(env);
-  return {
-    ok: families.every((family) => family.ok) && operations.ok,
-    families,
-    operations
-  };
+  const operations = await auditStorageCleanupOperationalIntegrity(env);
+  return combineStorageCleanupIntegrityAudit(families, operations);
 }
 
 
@@ -163,7 +191,7 @@ function normalizeSha(value) {
   return sha;
 }
 
-export async function bindStorageCleanupIntegrityAudit(env, options = {}) {
+export async function bindStorageCleanupIntegrityAudit(env, options = {}, precomputedAudit = null) {
   if (!env?.DB) throw new Error('DB is not configured');
   const sessionId = normalizeSessionId(options.session_id);
   const sourceSha = normalizeSha(options.source_sha);
@@ -179,7 +207,7 @@ export async function bindStorageCleanupIntegrityAudit(env, options = {}) {
   const expiry = Date.parse(String(session.expires_at || ''));
   if (!Number.isFinite(expiry) || expiry <= Date.now()) throw new Error('cleanup session expired; start a new session');
 
-  const audit = await auditStorageCleanupIntegrity(env);
+  const audit = precomputedAudit || await auditStorageCleanupIntegrity(env);
   if (!audit.ok) return { ...audit, sessionId, auditVerified: false };
 
   await env.DB.prepare(`
