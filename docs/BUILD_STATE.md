@@ -1,3 +1,10 @@
+## Storage cleanup audit: source-indexed count candidate (post-release #164)
+- Production storage-cleanup dry-run #12 failed safely before planning: the horse_profile integrity check read 582,304 D1 rows in about 1.2 seconds, exceeding the unchanged 250,000-row per-operation safety limit. The failure reported zero D1 writes; the temporary cleanup credential was removed and post-run production health passed.
+- The failure is not another D1 migration issue. The earlier representation query globally aggregated all historical snapshot and observation source records before comparing them to completed sync rows, which still scans unrelated history despite migration 0051-0056 indexes.
+- The candidate changes representation-count reconciliation to start from complete official_snapshot_source_sync records, using indexed per-source direct and observation lookups. A snapshot plus its own observation still counts once, observation-backed independent source representations still count separately, and missing/excess counts remain exact for every completed source.
+- Global observation identity/source-time and direct-snapshot source-time checks remain in place, and cleanup execution/authorization/safety thresholds are unchanged. The private integrity audit now reports sanitized per-subquery rows-read values so any future cost stop identifies the remaining expensive check without exposing source IDs.
+- This is an unverified production-cost optimization, not a claim that the next dry-run will pass. No further production cleanup run, migration or destructive cleanup should occur before CI/review and a separately approved release and fresh non-destructive dry-run.
+
 ## Storage cleanup audit-index release recovery candidate
 - PR #297 was merged successfully, but production release #163 failed safely before Worker deployment while applying migration `0051_storage_cleanup_audit_indexes.sql`.
 - Full release QA passed 1144/1144 before the production migration step. D1 returned storage-operation timeout code 7429 while the five-index migration bundle was being applied.
