@@ -276,6 +276,13 @@ test('cleanup integrity audit route is private and returns only sanitized aggreg
   assert.equal(body.families.length, 4);
   assert.ok(Number(body.cost?.rowsRead || 0) >= 0);
   assert.ok(Number(body.cost?.durationMs || 0) >= 0);
+  assert.deepEqual(
+    Object.keys(body.families[0].readCostByCheck),
+    ['representations','observations','direct_timeline']
+  );
+  assert.ok(Object.values(body.families[0].readCostByCheck).every((value) =>
+    value == null || (Number.isFinite(value) && value >= 0)
+  ));
 });
 
 
