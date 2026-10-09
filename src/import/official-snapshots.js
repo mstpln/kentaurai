@@ -405,8 +405,9 @@ export async function syncOfficialSnapshotsFromSource(env, sourceRecordId) {
   }
 }
 
-export async function syncOnePendingOfficialSnapshotSource(env) {
+export async function syncOnePendingOfficialSnapshotSource(env, options = {}) {
   if (!env.DB || !env.RAW_BUCKET?.get) return { status: 'not_configured' };
+  const minFetchedAt = options.minFetchedAt == null ? null : String(options.minFetchedAt);
   const source = await env.DB.prepare(`
     SELECT sr.id
     FROM source_records sr
@@ -415,9 +416,10 @@ export async function syncOnePendingOfficialSnapshotSource(env) {
       AND sr.quality_status = ?
       AND sr.raw_object_key IS NOT NULL
       AND os.source_record_id IS NULL
-    ORDER BY sr.fetched_at ASC, sr.id ASC
+      AND (? IS NULL OR sr.fetched_at >= ?)
+    ORDER BY sr.fetched_at DESC, sr.id DESC
     LIMIT 1
-  `).bind(SOURCE_TYPE, NORMALIZED_QUALITY).first();
+  `).bind(SOURCE_TYPE, NORMALIZED_QUALITY, minFetchedAt, minFetchedAt).first();
   if (!source?.id) return { status: 'idle' };
   try { return await syncOfficialSnapshotsFromSource(env, source.id); }
   catch (error) {
