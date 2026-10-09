@@ -156,6 +156,17 @@ async function legacyNormalizationCursor(env, sourceId) {
   return results.length;
 }
 
+async function legacyAutoNormalizationFailureCount(env, sourceId) {
+  const row = await env.DB.prepare(`
+    SELECT COUNT(*) AS failure_count
+    FROM import_runs
+    WHERE source_type = 'official_live_normalize_auto'
+      AND status = 'failed'
+      AND json_extract(metadata_json, '$.sourceRecordId') = ?
+  `).bind(sourceId).first();
+  return Math.max(0, Number(row?.failure_count || 0));
+}
+
 export async function completedNormalizationCursor(env, sourceRecordId, externalIdValue = null) {
   if (!env.DB) throw new Error('DB is not configured');
   const sourceId = String(sourceRecordId || '').trim();
@@ -173,6 +184,7 @@ export async function completedNormalizationCursor(env, sourceRecordId, external
   // Validate that legacy audit history once before requiring source metadata so
   // the existing fail-closed contiguous-cursor guard remains authoritative.
   const cursor = await legacyNormalizationCursor(env, sourceId);
+  const failureCount = await legacyAutoNormalizationFailureCount(env, sourceId);
 
   let externalId = String(externalIdValue || '').trim();
   if (!externalId) {
@@ -183,10 +195,16 @@ export async function completedNormalizationCursor(env, sourceRecordId, external
 
   await env.DB.prepare(`
     INSERT INTO official_live_normalization_state
-      (source_record_id, external_id, next_cursor, status)
-    VALUES (?, ?, ?, 'running')
+      (source_record_id, external_id, next_cursor, status, failure_count)
+    VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(source_record_id) DO NOTHING
-  `).bind(sourceId, externalId, cursor).run();
+  `).bind(
+    sourceId,
+    externalId,
+    cursor,
+    failureCount >= MAX_AUTO_NORMALIZE_FAILURES ? 'failed' : 'running',
+    failureCount
+  ).run();
   return cursor;
 }
 
