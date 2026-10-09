@@ -6,7 +6,8 @@ import {
   getOfficialHorseSnapshotsAsOf,
   getOfficialPersonAnnualSnapshotsAsOf,
   parseOfficialRecord,
-  syncOfficialSnapshotsFromSource
+  syncOfficialSnapshotsFromSource,
+  syncOnePendingOfficialSnapshotSource
 } from '../src/import/official-snapshots.js';
 import { planOfficialSnapshotCleanup } from '../src/storage-cleanup-plans.js';
 
@@ -206,6 +207,20 @@ test('A4 conflicting duplicate facts in one source fail closed and are recorded 
   const sync = db.prepare("SELECT status, error_message FROM official_snapshot_source_sync WHERE source_record_id='source-conflict'").get();
   assert.equal(sync.status, 'failed');
   assert.match(sync.error_message, /conflicting horse age/);
+});
+
+test('automatic official snapshot promotion ignores old normalized backlog outside the recent window', async () => {
+  const { db, env } = createTestEnv();
+  seedEntities(db);
+  addSource(db, 'snapshot-old-backlog', '2026-09-01T10:00:00Z', 'snapshot-old-backlog');
+  addSource(db, 'snapshot-recent', '2026-09-12T10:00:00Z', 'snapshot-recent');
+  await putPayload(env, 'snapshot-old-backlog', payload({ age:3 }));
+  await putPayload(env, 'snapshot-recent', payload({ age:5 }));
+
+  const result = await syncOnePendingOfficialSnapshotSource(env, { minFetchedAt:'2026-09-10T00:00:00Z' });
+  assert.equal(result.sourceRecordId, 'snapshot-recent');
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM official_snapshot_source_sync WHERE source_record_id='snapshot-recent'").get().n, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM official_snapshot_source_sync WHERE source_record_id='snapshot-old-backlog'").get().n, 0);
 });
 
 test('A4 as-of readers ignore rows from a failed source sync', async () => {
