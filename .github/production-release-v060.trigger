@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=2b636de2dd10d287ae5cfc213204d2dfcbf3922e
-release_nonce=2026-10-09-pr295-cost-efficiency-v2
+source_main=1775852716c998c85cfebd735a0185f35f9b5cb3
+release_nonce=2026-10-09-pr296-cost-readiness-qa
