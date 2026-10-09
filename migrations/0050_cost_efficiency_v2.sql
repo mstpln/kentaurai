@@ -8,7 +8,6 @@ CREATE TABLE official_live_normalization_state (
   status TEXT NOT NULL DEFAULT 'running' CHECK(status IN ('running','completed','source_gap','failed')),
   failure_count INTEGER NOT NULL DEFAULT 0 CHECK(failure_count >= 0),
   last_error TEXT,
-  reused_from_source_record_id TEXT REFERENCES source_records(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
