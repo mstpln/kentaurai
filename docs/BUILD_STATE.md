@@ -1,18 +1,27 @@
-## Cost efficiency & observability v2 candidate
-- Branch: `feat/cost-efficiency-v2`.
+## Cost-readiness QA hardening candidate
+- Branch: `fix/cost-readiness-qa`.
+- Production baseline before this QA is PR #295 merged at `2b636de2dd10d287ae5cfc213204d2dfcbf3922e` and successfully released by production release #161 from main `b70b634443ef040b0bff191725f56a524009415b`.
+- Deep scheduled-chain review found one dormant legacy minute-cron side path in `worker-pwa.js`: it could still run one post-race review if a retired `* * * * *` trigger were ever delivered. Current Wrangler production config exposes only `15 5 * * *`, so the path was not active, but it violates the single-owner cost-safety rule and is removed in this candidate.
+- Regression coverage now exercises the full production worker chain and requires the retired minute cron to return `unsupported_cron` with no overlay work beyond the outer automation-control point read.
+- Release preflight is being hardened to probe D1 analytics using the exact KentaurAI database id, matching Drift's production query path.
+- Documentation is aligned to the real seven-date upcoming horizon: today plus six future dates.
+- No cleanup is started by this QA. Destructive cleanup remains a separately authorized operation.
+
+## Cost efficiency & observability v2 — deployed
+- PR #295 is merged and migration `0050_cost_efficiency_v2.sql` is applied in production.
 - Automatic Start Points and official snapshot promotion have been removed from legacy Worker overlays and moved into the canonical morning orchestrator, where they share automation control, exact D1 cost observation and the cumulative safety stop.
 - Automatic promotion is limited to normalized official sources from the recent three-day recovery window; older unsynchronized sources remain preserved for explicit/manual replay.
-- Migration `0050_cost_efficiency_v2.sql` adds compact per-source live-normalization cursor/failure state and narrow operational indexes. Existing partial progress is read from legacy import audit history once and then persisted in the state table.
+- Compact per-source live-normalization cursor/failure state replaces repeated audit-history reconstruction after one legacy-state migration.
 - The upcoming morning horizon is exactly seven dates: today plus six future dates.
 - Once cumulative D1 cost safety stops, later critical as well as non-critical processors are skipped; raw live capture remains first.
-- Drift scopes D1 analytics to the exact KentaurAI database, surfaces Cloudflare Query Insights for the highest-read SQL and shows exact recorded D1 reads/writes/time for morning stages.
-- No storage cleanup, historical backfill, private data mutation outside normal bounded ingestion, model change or racing-fact deletion is part of this candidate.
+- Drift scopes D1 analytics to the exact KentaurAI database, surfaces recent Cloudflare Query Insights and shows exact recorded D1 reads/writes/time for morning stages.
+- No storage cleanup, historical backfill, model change or racing-fact deletion was part of PR #295.
 
 ## Settings Drift / usage control candidate
 - Branch: `feat/settings-drift-usage-control`.
 - Settings is reorganized into **Drift** and **Data**. Drift owns automatic-workflow control, Cloudflare D1 usage, source/job status and recent activity; Data keeps stored counts and the sanitized coverage export.
 - Migration `0049_runtime_controls.sql` adds the persisted `automatic_workflows_enabled` control, enabled by default.
-- The outer production worker checks the control before entering the scheduled worker chain. The scheduled orchestrator also rechecks it before each morning part, and legacy scheduled wrapper side-jobs recheck it before their own work; a newly paused switch therefore stops subsequent automatic work, while an operation already in flight is allowed to finish. Control-read failures fail closed.
+- The outer production worker checks the control before entering the scheduled worker chain, and the canonical scheduled orchestrator rechecks it before each morning part. Legacy Worker overlays do not own automatic data side-jobs; a newly paused switch therefore stops subsequent automatic work, while an operation already in flight is allowed to finish. Control-read failures fail closed.
 - Cloudflare is the usage/billing source of truth. D1 rows read/written/storage come from Cloudflare analytics. R2 storage progress uses the latest Cloudflare `r2StorageAdaptiveGroups` sample for the private `kentaurai-raw` bucket (payload + metadata bytes) and compares current stored bytes with a 10 GB reference level, while the USD cost beside that card continues to come from Cloudflare billable-usage for the current billing period. R2 Class A/Class B progress still uses billable-usage operation counts. Per-metric cost prefers Cloudflare `BilledCost` (falling back to Cloudflare `EffectiveCost`/`ContractedCost` when provided). Because Cloudflare's newer account-usage schema can omit cost fields, D1 rows read/written alone have a deterministic fallback from verified Cloudflare usage and the published Workers Paid included limits/rates; that fallback is explicitly tagged in the API response rather than presented as Cloudflare-returned billing. Progress-bar tones are green below 80%, orange from 80% to below 100%, and red from 100% upward. Missing factual inputs still remain unavailable rather than fabricated.
 - Runtime Cloudflare usage requires `CLOUDFLARE_ACCOUNT_ID` plus a dedicated read-only `CLOUDFLARE_USAGE_API_TOKEN` with Account Analytics Read and Billing Read. Neither value is committed. The release preflight validates D1 analytics, R2 storage analytics and the billable-usage endpoint before production migration.
 - Drift "Senaste aktivitet" can estimate per-workflow D1 reads, writes and USD cost without adding per-query instrumentation. Cloudflare's verified daily D1 totals are allocated across same-day registered `import_runs` using recorded import activity (duration fallback), and the estimated cost is calculated against the billing-period cumulative position so only the estimated share above the included monthly D1 thresholds is charged. These figures are explicitly labeled as estimates and historical runs without sufficient current-cycle data remain unavailable.
