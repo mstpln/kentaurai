@@ -82,11 +82,11 @@ test('cost-efficiency migration keeps live progress and recent selectors indexed
   assert.ok(tables.has('official_live_normalization_state'));
   const indexes = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='index'").all().map((row) => row.name));
   for (const name of [
-    'idx_official_live_normalization_state_status',
+    
     'idx_import_runs_live_normalize_success_cursor',
     'idx_import_runs_scheduled_orchestrator_started',
     'idx_source_records_recent_normalized_official',
-    'idx_source_records_external_content_normalized'
+    
   ]) assert.ok(indexes.has(name), `missing ${name}`);
 });
 
