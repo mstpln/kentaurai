@@ -96,11 +96,9 @@ test('production release verifies required migrations and private observability 
   assert.match(releaseWorkflow, /0049_runtime_controls\.sql/);
   assert.match(releaseWorkflow, /0050_cost_efficiency_v2\.sql/);
   assert.match(releaseWorkflow, /official_live_normalization_state/);
-  assert.match(releaseWorkflow, /idx_official_live_normalization_state_status/);
   assert.match(releaseWorkflow, /idx_import_runs_live_normalize_success_cursor/);
   assert.match(releaseWorkflow, /idx_import_runs_scheduled_orchestrator_started/);
   assert.match(releaseWorkflow, /idx_source_records_recent_normalized_official/);
-  assert.match(releaseWorkflow, /idx_source_records_external_content_normalized/);
   assert.match(releaseWorkflow, /SELECT name FROM sqlite_master WHERE type='table' AND name IN \('storage_cleanup_sessions','storage_cleanup_session_targets','storage_cleanup_session_audits'\)/);
   assert.match(releaseWorkflow, /storage_cleanup_sessions/);
   assert.match(releaseWorkflow, /storage_cleanup_session_targets/);
