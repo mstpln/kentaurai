@@ -158,17 +158,18 @@ export async function completedNormalizationCursor(env, sourceRecordId, external
   `).bind(sourceId).first();
   if (state) return Number(state.next_cursor || 0);
 
+  // Existing deployments may already have partial progress recorded in import_runs.
+  // Validate that legacy audit history once before requiring source metadata so
+  // the existing fail-closed contiguous-cursor guard remains authoritative.
+  const cursor = await legacyNormalizationCursor(env, sourceId);
+
   let externalId = String(externalIdValue || '').trim();
   if (!externalId) {
     const source = await env.DB.prepare('SELECT external_id FROM source_records WHERE id = ? LIMIT 1').bind(sourceId).first();
     externalId = String(source?.external_id || '').trim();
   }
-  if (!externalId) throw new Error('official live normalization source external_id is missing');
+  if (!externalId) return cursor;
 
-  // Existing deployments may already have partial progress recorded in import_runs.
-  // Read that legacy audit history once, persist the cursor, and use the compact
-  // operational state row for all subsequent automatic checks.
-  const cursor = await legacyNormalizationCursor(env, sourceId);
   await env.DB.prepare(`
     INSERT INTO official_live_normalization_state
       (source_record_id, external_id, next_cursor, status)
@@ -247,7 +248,17 @@ export async function selectPendingOfficialGameSource(env) {
       )
       AND (
         sr.quality_status = 'captured_source_gap'
-        OR COALESCE(ns.failure_count, 0) < ?
+        OR COALESCE(
+          ns.failure_count,
+          (
+            SELECT COUNT(*)
+            FROM import_runs ir
+            WHERE ir.source_type = 'official_live_normalize_auto'
+              AND ir.status = 'failed'
+              AND json_extract(ir.metadata_json, '$.sourceRecordId') = sr.id
+          ),
+          0
+        ) < ?
       )
     ORDER BY
       CASE WHEN substr(sr.external_id, 10, 10) >= date('now') THEN 0 ELSE 1 END,
