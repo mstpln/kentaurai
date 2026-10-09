@@ -405,19 +405,33 @@ export async function syncOfficialSnapshotsFromSource(env, sourceRecordId) {
   }
 }
 
-export async function syncOnePendingOfficialSnapshotSource(env) {
+export async function syncOnePendingOfficialSnapshotSource(env, options = {}) {
   if (!env.DB || !env.RAW_BUCKET?.get) return { status: 'not_configured' };
-  const source = await env.DB.prepare(`
-    SELECT sr.id
-    FROM source_records sr
-    LEFT JOIN official_snapshot_source_sync os ON os.source_record_id = sr.id
-    WHERE sr.source_type = ?
-      AND sr.quality_status = ?
-      AND sr.raw_object_key IS NOT NULL
-      AND os.source_record_id IS NULL
-    ORDER BY sr.fetched_at ASC, sr.id ASC
-    LIMIT 1
-  `).bind(SOURCE_TYPE, NORMALIZED_QUALITY).first();
+  const minFetchedAt = options.minFetchedAt == null ? null : String(options.minFetchedAt);
+  const source = minFetchedAt
+    ? await env.DB.prepare(`
+        SELECT sr.id
+        FROM source_records sr
+        LEFT JOIN official_snapshot_source_sync os ON os.source_record_id = sr.id
+        WHERE sr.source_type = ?
+          AND sr.quality_status = ?
+          AND sr.raw_object_key IS NOT NULL
+          AND sr.fetched_at >= ?
+          AND os.source_record_id IS NULL
+        ORDER BY sr.fetched_at ASC, sr.id ASC
+        LIMIT 1
+      `).bind(SOURCE_TYPE, NORMALIZED_QUALITY, minFetchedAt).first()
+    : await env.DB.prepare(`
+        SELECT sr.id
+        FROM source_records sr
+        LEFT JOIN official_snapshot_source_sync os ON os.source_record_id = sr.id
+        WHERE sr.source_type = ?
+          AND sr.quality_status = ?
+          AND sr.raw_object_key IS NOT NULL
+          AND os.source_record_id IS NULL
+        ORDER BY sr.fetched_at ASC, sr.id ASC
+        LIMIT 1
+      `).bind(SOURCE_TYPE, NORMALIZED_QUALITY).first();
   if (!source?.id) return { status: 'idle' };
   try { return await syncOfficialSnapshotsFromSource(env, source.id); }
   catch (error) {

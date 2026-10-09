@@ -36,6 +36,13 @@ function insertNormalizationRun(db, { id, sourceRecordId, cursor, status = 'succ
   `).run(id, status, JSON.stringify({ sourceRecordId, stage: 'entry', cursor }));
 }
 
+function insertAutoNormalizationFailure(db, { id, sourceRecordId }) {
+  db.prepare(`
+    INSERT INTO import_runs (id, source_type, started_at, finished_at, status, metadata_json)
+    VALUES (?, 'official_live_normalize_auto', '2099-01-15T17:15:00.000Z', '2099-01-15T17:15:01.000Z', 'failed', ?)
+  `).run(id, JSON.stringify({ sourceRecordId }));
+}
+
 test('scheduled live dates include race day in morning but exclude it in evening', () => {
   const instant = '2099-01-15T05:15:00.000Z';
   assert.deepEqual(scheduledLiveDates(instant, { includeToday: true, daysAhead: 2 }), [
@@ -44,6 +51,13 @@ test('scheduled live dates include race day in morning but exclude it in evening
   assert.deepEqual(scheduledLiveDates(instant, { includeToday: false, daysAhead: 2 }), [
     '2099-01-16', '2099-01-17'
   ]);
+});
+
+test('seven-day morning horizon means today plus six future dates', () => {
+  const dates = scheduledLiveDates('2099-01-15T05:15:00.000Z', { includeToday: true, daysAhead: 6 });
+  assert.equal(dates.length, 7);
+  assert.equal(dates[0], '2099-01-15');
+  assert.equal(dates.at(-1), '2099-01-21');
 });
 
 test('calendar discovery selects only exact V85/V86 eight-leg games', () => {
@@ -95,6 +109,15 @@ test('scheduled capture archives tomorrow calendar and V86 while evening exclude
   const run = db.prepare(`SELECT status, error_count FROM import_runs WHERE source_type = 'official_live_scheduled_capture'`).get();
   assert.equal(run.status, 'success');
   assert.equal(run.error_count, 0);
+  const state = db.prepare(`
+    SELECT external_id,next_cursor,status,failure_count
+    FROM official_live_normalization_state
+    WHERE source_record_id=(SELECT id FROM source_records WHERE external_id=?)
+  `).get(`game:${GAME_ID}`);
+  assert.equal(state.external_id, `game:${GAME_ID}`);
+  assert.equal(state.next_cursor, 0);
+  assert.equal(state.status, 'running');
+  assert.equal(state.failure_count, 0);
 });
 
 test('pending normalizer ignores calendar-only captures', async () => {
@@ -139,25 +162,45 @@ test('pending live normalization uses the newest snapshot and prioritizes a not-
   assert.equal(selected.external_id, `game:${newGame}`);
 });
 
-test('live normalization progress advances only after a successful entry run', async () => {
+test('live normalization migrates legacy audit checkpoints once into compact operational state', async () => {
   const { env, db } = createTestEnv();
   const sourceRecordId = 'src_live_progress';
   db.prepare(`
     INSERT INTO source_records (id, source_type, external_id, fetched_at, quality_status)
     VALUES (?, 'official_provider', 'game:V86_2099-01-16_999_1', '2099-01-15T17:15:00.000Z', 'captured_unmapped')
   `).run(sourceRecordId);
-  db.prepare(`
-    INSERT INTO normalized_observations
-      (id, entity_type, entity_id, source_record_id, observed_at, fields_json, quality_status)
-    VALUES ('obs_partial_entry', 'race_entry', 'entry_partial', ?, '2099-01-15T17:15:00.500Z', '{}', 'normalized_verified_subset')
-  `).run(sourceRecordId);
 
-  assert.equal(await completedNormalizationCursor(env, sourceRecordId), 0);
   insertNormalizationRun(db, { id: 'imp_failed_0', sourceRecordId, cursor: 0, status: 'failed' });
-  assert.equal(await completedNormalizationCursor(env, sourceRecordId), 0);
   insertNormalizationRun(db, { id: 'imp_success_0', sourceRecordId, cursor: 0 });
   insertNormalizationRun(db, { id: 'imp_success_0_duplicate', sourceRecordId, cursor: 0 });
+
   assert.equal(await completedNormalizationCursor(env, sourceRecordId), 1);
+  const state = db.prepare('SELECT next_cursor,status FROM official_live_normalization_state WHERE source_record_id=?').get(sourceRecordId);
+  assert.equal(state.next_cursor, 1);
+  assert.equal(state.status, 'running');
+
+  db.prepare("DELETE FROM import_runs WHERE source_type='official_provider_normalize'").run();
+  assert.equal(await completedNormalizationCursor(env, sourceRecordId), 1, 'subsequent cursor reads use compact state rather than audit history');
+});
+
+test('legacy live-normalization migration preserves the existing automatic failure budget', async () => {
+  const { env, db } = createTestEnv();
+  const sourceRecordId = 'src_live_retry_budget';
+  db.prepare(`
+    INSERT INTO source_records (id, source_type, external_id, fetched_at, quality_status)
+    VALUES (?, 'official_provider', 'game:V86_2099-01-16_999_2', '2099-01-15T17:15:00.000Z', 'captured_unmapped')
+  `).run(sourceRecordId);
+  insertAutoNormalizationFailure(db, { id:'auto_failure_1', sourceRecordId });
+  insertAutoNormalizationFailure(db, { id:'auto_failure_2', sourceRecordId });
+
+  assert.equal(await completedNormalizationCursor(env, sourceRecordId), 0);
+  const state = db.prepare(`
+    SELECT failure_count,status
+    FROM official_live_normalization_state
+    WHERE source_record_id=?
+  `).get(sourceRecordId);
+  assert.equal(state.failure_count, 2);
+  assert.equal(state.status, 'running');
 });
 
 test('live normalization checkpoints fail closed when successful cursors are not contiguous', async () => {

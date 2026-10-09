@@ -76,6 +76,53 @@ test('cumulative morning cost safety stops after individually safe operations', 
 });
 
 
+test('cost-efficiency migration keeps live progress and recent selectors indexed', () => {
+  const { db } = createTestEnv();
+  const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row) => row.name));
+  assert.ok(tables.has('official_live_normalization_state'));
+  const indexes = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='index'").all().map((row) => row.name));
+  for (const name of [
+    
+    'idx_import_runs_live_normalize_success_cursor',
+    'idx_import_runs_scheduled_orchestrator_started',
+    'idx_source_records_recent_normalized_official',
+    
+  ]) assert.ok(indexes.has(name), `missing ${name}`);
+});
+
+test('recent automatic promotion selectors seek through the bounded source index', () => {
+  const { db } = createTestEnv();
+  for (const sync of [
+    ['horse_start_point_source_sync', 'hs'],
+    ['official_snapshot_source_sync', 'os']
+  ]) {
+    const [table, alias] = sync;
+    const plan = db.prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT sr.id
+      FROM source_records sr
+      LEFT JOIN ${table} ${alias} ON ${alias}.source_record_id = sr.id
+      WHERE sr.source_type = 'official_provider'
+        AND sr.quality_status = 'normalized_verified_subset'
+        AND sr.raw_object_key IS NOT NULL
+        AND sr.fetched_at >= ?
+        AND ${alias}.source_record_id IS NULL
+      ORDER BY sr.fetched_at DESC, sr.id DESC
+      LIMIT 1
+    `).all('2026-10-01T00:00:00.000Z');
+    const details = plan.map((row) => String(row.detail || '')).join('\n');
+    assert.match(details, /idx_source_records_recent_normalized_official/, `${table} selector must use recent-source index`);
+  }
+});
+
+test('morning scheduler centralizes promotion jobs and stops all later processors after abnormal cumulative cost', () => {
+  const source = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+  assert.match(source, /recent_start_points_promotion/);
+  assert.match(source, /recent_official_snapshot_promotion/);
+  assert.match(source, /async function critical\(name, action\)[\s\S]*?if \(safety\.stopped\)/);
+  assert.match(source, /daysAhead: 6/);
+});
+
 test('GitHub operational workflows contain no recurring schedule', () => {
   const directory = new URL('../.github/workflows/', import.meta.url);
   for (const name of readdirSync(directory).filter((value) => value.endsWith('.yml') || value.endsWith('.yaml'))) {

@@ -28,8 +28,10 @@ The current build contains:
 - private import APIs for reference-round and structured editorial data
 - private official-provider calendar/day, game and ordinary-race capture
 - verified official-game normalizer for the observed live payload shape
-- automatic upcoming V85/V86 calendar/game capture once each morning across the seven-day upcoming horizon
-- bounded, resumable automatic normalization of captured V85/V86 game snapshots
+- automatic upcoming V85/V86 calendar/game capture once each morning across exactly seven calendar dates: today plus the next six days
+- bounded, resumable automatic normalization of captured V85/V86 game snapshots, with operational cursor/failure state stored separately from the append-only import audit log
+- Start Points and official horse/person snapshot promotion are owned by the same cost-observed morning orchestrator and automatically consider only recent normalized sources; older promotion backlog remains manual
+- Drift scopes D1 usage to the KentaurAI database and exposes exact morning-stage D1 cost plus Cloudflare Query Insights for the highest-read SQL
 - automatic multi-year history expansion is disabled; historical backfill remains explicit/manual-only while current daily official/X-Labs ingestion is bounded
 - immutable normalized observations plus timestamped betting/odds/equipment snapshots
 - private raw-vs-normalized verification endpoint

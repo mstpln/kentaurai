@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createTestEnv } from './helpers/d1.js';
-import { syncHorseStartPointsFromSource, verifiedOfficialStartPoints } from '../src/import/official-start-points.js';
+import { syncHorseStartPointsFromSource, syncOnePendingHorseStartPointSource, verifiedOfficialStartPoints } from '../src/import/official-start-points.js';
 import { getHorseRankings, getHorseDetailStatistics } from '../src/statistics/horses-complete.js';
 
 function putHorse(db, id='horse-a', externalId='100') {
@@ -72,6 +72,22 @@ test('start-point statistics use latest verified observation at the selected as-
   assert.deepEqual(detail.startPointHistory.map(x=>x.points),[1200,900]);
   assert.equal(detail.startPointHistory[0].sourceRecordId,'source-new');
   assert.equal(detail.startPointHistory[0].raceEntryId,'entry-a');
+});
+
+test('automatic Start Points promotion ignores old normalized backlog outside the recent window', async () => {
+  const {db,env}=createTestEnv();
+  putHorse(db);
+  env.RAW_BUCKET=rawBucket({
+    old:gamePayload('100',700),
+    recent:gamePayload('100',1300)
+  });
+  source(db,'source-old-backlog','2026-09-01T10:00:00Z','old');
+  source(db,'source-recent','2026-09-12T10:00:00Z','recent');
+
+  const result=await syncOnePendingHorseStartPointSource(env,{minFetchedAt:'2026-09-10T00:00:00Z'});
+  assert.equal(result.sourceRecordId,'source-recent');
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM horse_start_point_source_sync WHERE source_record_id='source-recent'").get().n,1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM horse_start_point_source_sync WHERE source_record_id='source-old-backlog'").get().n,0);
 });
 
 test('source sync records schema failures without inventing a value', async () => {

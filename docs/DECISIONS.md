@@ -383,3 +383,16 @@ A single race must not directly change model weights. Candidate learnings are re
 11. Every new manual dry-run or execute session must pass a sanitized snapshot-provenance integrity audit before planning begins. Missing source representations, dangling observation links, identity/timestamp mismatches, stranded mutation state or abnormal audit cost fail closed. Controlled continuations may reuse the audit only when it is persisted for that exact source-bound session.
 12. Production cleanup may run only when the checked-out `main` SHA exactly matches the latest successful production-release workflow SHA. Merged-but-not-deployed cleanup code must never operate against an older Worker contract.
 13. Each cleanup workflow run also has a cumulative D1 row-read/write budget in addition to the per-request safety stop. Reaching that run budget stops further cleanup and explicitly disables automatic continuation so an unexpectedly expensive scan cannot repeat across chained runs.
+
+
+## Cost-efficiency v2: one observed morning owner and compact operational state
+1. Every automatic data-processing task is owned by the canonical 05:15 UTC morning orchestrator. Worker UI/version overlays must not attach independent scheduled Start Points or official-snapshot side jobs.
+2. Automatic Start Points and official horse/person snapshot promotion is limited to normalized official sources from the recent three-day recovery window. Older unsynchronized archived sources remain preserved and may be promoted only through explicit/manual work.
+3. Live-game normalization progress is operational state, not audit reconstruction. A dedicated per-source state row stores the next cursor and failure status. Existing partial progress may be reconstructed once from legacy import-run audit records, after which automatic checks use the compact state row.
+4. `import_runs` remains an append-only operational audit trail and must not be repeatedly scanned as the primary live-normalization checkpoint store.
+5. The normal upcoming capture horizon is exactly seven calendar dates including today, not today plus seven additional dates.
+6. The cumulative morning cost stop applies before both critical and non-critical processing stages. Raw live capture runs first; after an abnormal-cost stop, remaining processors wait rather than continuing to spend D1 reads.
+7. Drift D1 analytics are scoped to the exact KentaurAI D1 database id. Account-wide D1 activity from unrelated databases must not be presented as KentaurAI usage.
+8. Drift exposes two distinct cost views: exact D1 metadata recorded for each morning stage, and Cloudflare D1 Query Insights ordered by total rows read. The existing per-workflow daily allocation remains explicitly approximate.
+9. Query Insights is diagnostic enrichment, not a prerequisite for basic usage reporting; if Cloudflare does not return that dataset, verified D1 usage/storage remains visible.
+10. Cost optimization must preserve verified racing facts and raw provenance. Large historical repair/backfill and destructive storage cleanup remain explicit/manual operations.

@@ -4,7 +4,7 @@ import { markOfficialRaceSourceGap, officialGameSourceGap } from './official-sou
 import { finishImportRun, startImportRun } from './common.js';
 
 const GAME_TYPES = ['V85', 'V86'];
-const DEFAULT_DAYS_AHEAD = 7;
+const DEFAULT_DAYS_AHEAD = 6;
 const AUTO_NORMALIZE_SOURCE_TYPE = 'official_live_normalize_auto';
 const MAX_AUTO_NORMALIZE_FAILURES = 3;
 const DEFAULT_NORMALIZE_STEPS_PER_RUN = 8;
@@ -76,6 +76,16 @@ async function loadJsonObject(env, objectKey, label) {
   return payload;
 }
 
+async function initializeNormalizationStateForCapture(env, captured, gameId) {
+  if (!captured?.sourceRecordId || captured.reused) return;
+  await env.DB.prepare(`
+    INSERT INTO official_live_normalization_state
+      (source_record_id, external_id, next_cursor, status)
+    VALUES (?, ?, 0, 'running')
+    ON CONFLICT(source_record_id) DO NOTHING
+  `).bind(captured.sourceRecordId, `game:${gameId}`).run();
+}
+
 export async function captureUpcomingOfficialGames(env, scheduledTime, options = {}) {
   if (!env.DB) throw new Error('DB is not configured');
   if (!env.RAW_BUCKET?.get || !env.RAW_BUCKET?.put) throw new Error('RAW_BUCKET read/write access is not configured');
@@ -101,6 +111,7 @@ export async function captureUpcomingOfficialGames(env, scheduledTime, options =
           const game = await captureGame(env, gameId, { fetchImpl: options.fetchImpl });
           counts.inserted += Number(!game.reused);
           counts.skipped += Number(game.reused);
+          await initializeNormalizationStateForCapture(env, game, gameId);
           capturedGameIds.push(gameId);
         } catch (error) {
           counts.errors += 1;
@@ -126,10 +137,7 @@ export async function captureUpcomingOfficialGames(env, scheduledTime, options =
   };
 }
 
-export async function completedNormalizationCursor(env, sourceRecordId) {
-  if (!env.DB) throw new Error('DB is not configured');
-  const sourceId = String(sourceRecordId || '').trim();
-  if (!sourceId) throw new Error('source_record_id is required');
+async function legacyNormalizationCursor(env, sourceId) {
   const { results } = await env.DB.prepare(`
     SELECT DISTINCT CAST(json_extract(metadata_json, '$.cursor') AS INTEGER) AS cursor
     FROM import_runs
@@ -148,11 +156,101 @@ export async function completedNormalizationCursor(env, sourceRecordId) {
   return results.length;
 }
 
+async function legacyAutoNormalizationFailureCount(env, sourceId) {
+  const row = await env.DB.prepare(`
+    SELECT COUNT(*) AS failure_count
+    FROM import_runs
+    WHERE source_type = 'official_live_normalize_auto'
+      AND status = 'failed'
+      AND json_extract(metadata_json, '$.sourceRecordId') = ?
+  `).bind(sourceId).first();
+  return Math.max(0, Number(row?.failure_count || 0));
+}
+
+export async function completedNormalizationCursor(env, sourceRecordId, externalIdValue = null) {
+  if (!env.DB) throw new Error('DB is not configured');
+  const sourceId = String(sourceRecordId || '').trim();
+  if (!sourceId) throw new Error('source_record_id is required');
+
+  const state = await env.DB.prepare(`
+    SELECT next_cursor
+    FROM official_live_normalization_state
+    WHERE source_record_id = ?
+    LIMIT 1
+  `).bind(sourceId).first();
+  if (state) return Number(state.next_cursor || 0);
+
+  // Existing deployments may already have partial progress recorded in import_runs.
+  // Validate that legacy audit history once before requiring source metadata so
+  // the existing fail-closed contiguous-cursor guard remains authoritative.
+  const cursor = await legacyNormalizationCursor(env, sourceId);
+  const failureCount = await legacyAutoNormalizationFailureCount(env, sourceId);
+
+  let externalId = String(externalIdValue || '').trim();
+  if (!externalId) {
+    const source = await env.DB.prepare('SELECT external_id FROM source_records WHERE id = ? LIMIT 1').bind(sourceId).first();
+    externalId = String(source?.external_id || '').trim();
+  }
+  if (!externalId) return cursor;
+
+  await env.DB.prepare(`
+    INSERT INTO official_live_normalization_state
+      (source_record_id, external_id, next_cursor, status, failure_count)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(source_record_id) DO NOTHING
+  `).bind(
+    sourceId,
+    externalId,
+    cursor,
+    failureCount >= MAX_AUTO_NORMALIZE_FAILURES ? 'failed' : 'running',
+    failureCount
+  ).run();
+  return cursor;
+}
+
+async function storeNormalizationProgress(env, source, {
+  nextCursor,
+  totalEntries = null,
+  status = 'running',
+  error = null
+}) {
+  const cursor = Number(nextCursor);
+  if (!Number.isInteger(cursor) || cursor < 0) throw new Error('normalization state cursor is invalid');
+  const total = totalEntries == null ? null : Number(totalEntries);
+  if (total != null && (!Number.isInteger(total) || total < 0)) throw new Error('normalization state total is invalid');
+  await env.DB.prepare(`
+    INSERT INTO official_live_normalization_state
+      (source_record_id, external_id, next_cursor, total_entries, status, failure_count, last_error)
+    VALUES (?, ?, ?, ?, ?, 0, ?)
+    ON CONFLICT(source_record_id) DO UPDATE SET
+      external_id = excluded.external_id,
+      next_cursor = excluded.next_cursor,
+      total_entries = COALESCE(excluded.total_entries, official_live_normalization_state.total_entries),
+      status = excluded.status,
+      last_error = excluded.last_error,
+      updated_at = CURRENT_TIMESTAMP
+  `).bind(source.id, source.external_id, cursor, total, status, error == null ? null : String(error).slice(0, 500)).run();
+}
+
+async function recordNormalizationFailure(env, source, error) {
+  await env.DB.prepare(`
+    INSERT INTO official_live_normalization_state
+      (source_record_id, external_id, next_cursor, status, failure_count, last_error)
+    VALUES (?, ?, 0, 'running', 1, ?)
+    ON CONFLICT(source_record_id) DO UPDATE SET
+      failure_count = official_live_normalization_state.failure_count + 1,
+      status = CASE WHEN official_live_normalization_state.failure_count + 1 >= ? THEN 'failed' ELSE 'running' END,
+      last_error = excluded.last_error,
+      updated_at = CURRENT_TIMESTAMP
+  `).bind(source.id, source.external_id, String(error?.message || error).slice(0, 500), MAX_AUTO_NORMALIZE_FAILURES).run();
+}
+
 export async function selectPendingOfficialGameSource(env) {
   if (!env.DB) throw new Error('DB is not configured');
   const pending = await env.DB.prepare(`
     SELECT sr.id, sr.external_id, sr.fetched_at
     FROM source_records sr
+    LEFT JOIN official_live_normalization_state ns ON ns.source_record_id = sr.id
     WHERE sr.source_type = 'official_provider'
       AND sr.quality_status IN ('captured_unmapped','captured_source_gap')
       AND (
@@ -178,12 +276,16 @@ export async function selectPendingOfficialGameSource(env) {
       )
       AND (
         sr.quality_status = 'captured_source_gap'
-        OR (
-          SELECT COUNT(*)
-          FROM import_runs ir
-          WHERE ir.source_type = 'official_live_normalize_auto'
-            AND ir.status = 'failed'
-            AND json_extract(ir.metadata_json, '$.sourceRecordId') = sr.id
+        OR COALESCE(
+          ns.failure_count,
+          (
+            SELECT COUNT(*)
+            FROM import_runs ir
+            WHERE ir.source_type = 'official_live_normalize_auto'
+              AND ir.status = 'failed'
+              AND json_extract(ir.metadata_json, '$.sourceRecordId') = sr.id
+          ),
+          0
         ) < ?
       )
     ORDER BY
@@ -214,7 +316,7 @@ export async function normalizeNextPendingOfficialGame(env, options = {}) {
   if (!source) return { status: 'idle', done: true };
 
   const maxSteps = normalizeStepLimit(options.maxSteps);
-  const initialCursor = await completedNormalizationCursor(env, source.id);
+  const initialCursor = await completedNormalizationCursor(env, source.id, source.external_id);
   let cursor = initialCursor;
   let normalized = null;
   let steps = 0;
@@ -232,6 +334,12 @@ export async function normalizeNextPendingOfficialGame(env, options = {}) {
       steps += 1;
 
       if (normalized.done === true) {
+        const totalEntries = Number(normalized.totalEntries ?? cursor);
+        await storeNormalizationProgress(env, source, {
+          nextCursor: Number.isInteger(totalEntries) && totalEntries >= 0 ? totalEntries : cursor,
+          totalEntries: Number.isInteger(totalEntries) && totalEntries >= 0 ? totalEntries : null,
+          status: 'completed'
+        });
         return {
           status: 'completed_source',
           done: true,
@@ -250,12 +358,18 @@ export async function normalizeNextPendingOfficialGame(env, options = {}) {
         throw new Error('live normalization did not advance its cursor');
       }
       cursor = nextCursor;
+      await storeNormalizationProgress(env, source, {
+        nextCursor: cursor,
+        totalEntries: normalized.totalEntries,
+        status: 'running'
+      });
     } catch (error) {
       const gap = officialGameSourceGap(error);
       if (gap && cursor === 0) {
         const sourceGap = await markOfficialRaceSourceGap(env, source.id, gap);
         counts.skipped = 1;
         await finishImportRun(env, run.id, counts);
+        await storeNormalizationProgress(env, source, { nextCursor: cursor, status: 'source_gap' });
         return {
           status: 'source_gap',
           done: true,
@@ -270,6 +384,7 @@ export async function normalizeNextPendingOfficialGame(env, options = {}) {
       }
       counts.errors = 1;
       await finishImportRun(env, run.id, counts, error);
+      await recordNormalizationFailure(env, source, error);
       throw error;
     }
   }

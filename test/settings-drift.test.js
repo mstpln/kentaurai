@@ -95,8 +95,10 @@ test('Cloudflare usage uses verified API values and never starts from zero estim
     }
     if (String(url).endsWith('/graphql')) {
       const body = JSON.parse(options.body);
-      assert.equal(body.variables.start, '2026-09-12');
       assert.equal(body.variables.end, '2026-09-27');
+      assert.equal(body.variables.start, /d1QueriesAdaptiveGroups/.test(body.query) ? '2026-09-21' : '2026-09-12');
+      assert.equal(body.variables.databaseId, 'd8189e0e-6127-4ef2-88cc-534cb2217340');
+      assert.match(body.query, /databaseId: \$databaseId/);
       return new Response(JSON.stringify({
         data:{
           viewer:{
@@ -152,7 +154,7 @@ test('Cloudflare usage uses verified API values and never starts from zero estim
   assert.equal(storage.billingCost, 0.75);
   assert.equal(storage.billingCurrency, 'USD');
   assert.equal(usage.additional.billingCostAvailable, true);
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 4);
 });
 
 
@@ -352,6 +354,92 @@ test('Drift estimates per-workflow D1 usage from daily Cloudflare totals and mon
   assert.equal(b.estimatedCostUsd, 3.75);
 });
 
+test('Cloudflare Query Insights is database-scoped and exposes read-heavy SQL diagnostics', async () => {
+  const { env } = createTestEnv();
+  env.CLOUDFLARE_ACCOUNT_ID = 'account-synthetic';
+  env.CLOUDFLARE_USAGE_API_TOKEN = 'usage-token-synthetic';
+  const fetchImpl = async (url, options = {}) => {
+    if (String(url).endsWith('/billable-usage/info')) {
+      return new Response(JSON.stringify({
+        success:true,
+        result:{ subscriptions:[{ id:'a', billing_cycle_anchor_timestamp:'2026-09-12T00:00:00Z', start_timestamp:'2026-09-12T00:00:00Z' }] }
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    if (String(url).endsWith('/graphql')) {
+      const body = JSON.parse(options.body);
+      assert.equal(body.variables.databaseId, 'd8189e0e-6127-4ef2-88cc-534cb2217340');
+      if (/d1QueriesAdaptiveGroups/.test(body.query)) {
+        assert.equal(body.variables.start, '2026-09-21');
+        assert.equal(body.variables.end, '2026-09-27');
+        assert.match(body.query, /sum_rowsRead_DESC/);
+        assert.doesNotMatch(body.query, /avg\s*\{\s*rowsRead/);
+        return new Response(JSON.stringify({
+          data:{ viewer:{ accounts:[{
+            d1QueriesAdaptiveGroups:[{
+              count:4,
+              sum:{ rowsRead:1000, rowsReturned:4, rowsWritten:0, queryDurationMs:32 },
+              dimensions:{ query:'SELECT  id   FROM horses WHERE id = ?', databaseId:body.variables.databaseId }
+            }]
+          }] } }
+        }), { status:200, headers:{ 'content-type':'application/json' } });
+      }
+      return new Response(JSON.stringify({
+        data:{ viewer:{ accounts:[{
+          d1AnalyticsAdaptiveGroups:[{ dimensions:{ date:'2026-09-27', databaseId:body.variables.databaseId }, sum:{ rowsRead:1000, rowsWritten:5 } }],
+          d1StorageAdaptiveGroups:[{ dimensions:{ date:'2026-09-27', databaseId:body.variables.databaseId }, max:{ databaseSizeBytes:1000 } }]
+        }] } }
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    if (String(url).includes('/billable-usage?')) {
+      return new Response(JSON.stringify({ success:true, result:[] }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    throw new Error('unexpected URL');
+  };
+
+  const usage = await getCloudflareUsage(env, { fetchImpl, now:'2026-09-27T18:00:00Z' });
+  assert.equal(usage.queryInsights.length, 1);
+  assert.equal(usage.queryInsights[0].query, 'SELECT id FROM horses WHERE id = ?');
+  assert.equal(usage.queryInsights[0].count, 4);
+  assert.equal(usage.queryInsights[0].totalRowsRead, 1000);
+  assert.equal(usage.queryInsights[0].avgRowsRead, 250);
+  assert.equal(usage.queryInsights[0].queryEfficiency, 0.004);
+  assert.deepEqual(usage.queryInsightsWindow, { start:'2026-09-21', end:'2026-09-27' });
+});
+
+test('Cloudflare Query Insights failure does not hide verified core D1 usage', async () => {
+  const { env } = createTestEnv();
+  env.CLOUDFLARE_ACCOUNT_ID = 'account-synthetic';
+  env.CLOUDFLARE_USAGE_API_TOKEN = 'usage-token-synthetic';
+  const fetchImpl = async (url, options = {}) => {
+    if (String(url).endsWith('/billable-usage/info')) {
+      return new Response(JSON.stringify({
+        success:true,
+        result:{ subscriptions:[{ id:'a', billing_cycle_anchor_timestamp:'2026-09-12T00:00:00Z', start_timestamp:'2026-09-12T00:00:00Z' }] }
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    if (String(url).endsWith('/graphql')) {
+      const body = JSON.parse(options.body);
+      if (/d1QueriesAdaptiveGroups/.test(body.query)) {
+        return new Response(JSON.stringify({ errors:[{ message:'synthetic insights unavailable' }] }), { status:200, headers:{ 'content-type':'application/json' } });
+      }
+      return new Response(JSON.stringify({
+        data:{ viewer:{ accounts:[{
+          d1AnalyticsAdaptiveGroups:[{ dimensions:{ date:'2026-09-27', databaseId:body.variables.databaseId }, sum:{ rowsRead:1000, rowsWritten:5 } }],
+          d1StorageAdaptiveGroups:[{ dimensions:{ date:'2026-09-27', databaseId:body.variables.databaseId }, max:{ databaseSizeBytes:1000 } }]
+        }] } }
+      }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    if (String(url).includes('/billable-usage?')) {
+      return new Response(JSON.stringify({ success:true, result:[] }), { status:200, headers:{ 'content-type':'application/json' } });
+    }
+    throw new Error('unexpected URL');
+  };
+  const usage = await getCloudflareUsage(env, { fetchImpl, now:'2026-09-27T18:00:00Z' });
+  assert.equal(usage.configured, true);
+  assert.equal(usage.metrics.find((item) => item.id === 'd1_rows_read').used, 1000);
+  assert.deepEqual(usage.queryInsights, []);
+});
+
 test('Cloudflare usage does not turn missing analytics datasets into zero usage', async () => {
   const { env } = createTestEnv();
   env.CLOUDFLARE_ACCOUNT_ID = 'account-synthetic';
@@ -399,11 +487,11 @@ test('Cloudflare usage refuses malformed numeric analytics instead of fabricatin
   assert.deepEqual(usage.metrics, []);
 });
 
-test('Cloudflare storage chooses the latest dated sample even if analytics order changes', async () => {
+test('Cloudflare storage chooses the latest dated sample for the filtered KentaurAI database', async () => {
   const { env } = createTestEnv();
   env.CLOUDFLARE_ACCOUNT_ID = 'account-synthetic';
   env.CLOUDFLARE_USAGE_API_TOKEN = 'usage-token-synthetic';
-  const fetchImpl = async (url) => {
+  const fetchImpl = async (url, options = {}) => {
     if (String(url).endsWith('/billable-usage/info')) {
       return new Response(JSON.stringify({
         success:true,
@@ -411,13 +499,14 @@ test('Cloudflare storage chooses the latest dated sample even if analytics order
       }), { status:200, headers:{ 'content-type':'application/json' } });
     }
     if (String(url).endsWith('/graphql')) {
+      const body = JSON.parse(options.body);
+      assert.equal(body.variables.databaseId, 'd8189e0e-6127-4ef2-88cc-534cb2217340');
       return new Response(JSON.stringify({
         data:{ viewer:{ accounts:[{
-          d1AnalyticsAdaptiveGroups:[{ sum:{ rowsRead:10, rowsWritten:2 } }],
+          d1AnalyticsAdaptiveGroups:[{ dimensions:{ date:'2026-09-27', databaseId:body.variables.databaseId }, sum:{ rowsRead:10, rowsWritten:2 } }],
           d1StorageAdaptiveGroups:[
-            { dimensions:{ date:'2026-09-20', databaseId:'db-a' }, max:{ databaseSizeBytes:200 } },
-            { dimensions:{ date:'2026-09-27', databaseId:'db-a' }, max:{ databaseSizeBytes:500 } },
-            { dimensions:{ date:'2026-09-25', databaseId:'db-b' }, max:{ databaseSizeBytes:300 } }
+            { dimensions:{ date:'2026-09-20', databaseId:body.variables.databaseId }, max:{ databaseSizeBytes:200 } },
+            { dimensions:{ date:'2026-09-27', databaseId:body.variables.databaseId }, max:{ databaseSizeBytes:500 } }
           ]
         }] } }
       }), { status:200, headers:{ 'content-type':'application/json' } });
@@ -426,7 +515,7 @@ test('Cloudflare storage chooses the latest dated sample even if analytics order
   };
   const usage = await getCloudflareUsage(env, { fetchImpl, now:'2026-09-27T18:00:00Z' });
   assert.equal(usage.available, undefined);
-  assert.equal(usage.metrics.find((item) => item.id === 'd1_storage').used, 800);
+  assert.equal(usage.metrics.find((item) => item.id === 'd1_storage').used, 500);
 });
 
 test('Cloudflare usage refuses to guess when active subscription billing anchors disagree', async () => {
@@ -469,6 +558,8 @@ test('production app contains the Drift/Data settings overlay and no concept bad
   assert.match(html, /data-settings-primary="drift"/);
   assert.match(html, /data-settings-primary="data"/);
   assert.match(html, /Cloudflare-användning/);
+  assert.match(html, /Exakt morgonkostnad/);
+  assert.match(html, /D1 Query Insights/);
   assert.match(html, /automationToggleV079/);
   assert.match(html, /dataCoverageAuditCard/);
   assert.doesNotMatch(html, /Konceptvy/);
@@ -529,15 +620,14 @@ test('runtime controls stay outside structured data exports', () => {
   assert.match(source, /EXCLUDED_TABLES = new Set\(\['d1_migrations', 'runtime_controls'\]\)/);
 });
 
-test('all scheduled wrapper side jobs recheck the persisted automation switch', () => {
+test('legacy worker overlays no longer own scheduled data side jobs', () => {
   const snapshotWrapper = readFileSync(new URL('../src/worker-v066.js', import.meta.url), 'utf8');
   const startPointWrapper = readFileSync(new URL('../src/worker-v064.js', import.meta.url), 'utf8');
-  const pwaWrapper = readFileSync(new URL('../src/worker-pwa.js', import.meta.url), 'utf8');
+  const scheduler = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
 
-  assert.match(snapshotWrapper, /getAutomationControl\(env\)/);
-  assert.match(snapshotWrapper, /if \(!control\.enabled\) return result;/);
-  assert.match(startPointWrapper, /getAutomationControl\(env\)/);
-  assert.match(startPointWrapper, /if \(!control\.enabled\) return result;/);
-  assert.match(pwaWrapper, /getAutomationControl\(env\)/);
-  assert.match(pwaWrapper, /if \(control\.enabled\) await runNextPostRaceReview\(env\)/);
+  assert.doesNotMatch(snapshotWrapper, /syncOnePendingOfficialSnapshotSource|getAutomationControl/);
+  assert.doesNotMatch(startPointWrapper, /syncOnePendingHorseStartPointSource|getAutomationControl/);
+  assert.match(scheduler, /recent_start_points_promotion/);
+  assert.match(scheduler, /recent_official_snapshot_promotion/);
+  assert.match(scheduler, /minFetchedAt: recentPromotionCutoff/);
 });

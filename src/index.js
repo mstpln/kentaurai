@@ -4,6 +4,8 @@ import { importEditorial } from './import/editorial.js';
 import { importReferenceRound } from './import/reference-round-safe.js';
 import { normalizeCapturedOfficialGameSequential } from './import/official-live-sequential.js';
 import { captureUpcomingOfficialGames, normalizeNextPendingOfficialGame } from './import/official-live-scheduled.js';
+import { syncOnePendingHorseStartPointSource } from './import/official-start-points.js';
+import { syncOnePendingOfficialSnapshotSource } from './import/official-snapshots.js';
 import { normalizeCapturedXlabsRace } from './import/xlabs-telemetry.js';
 import {
   createXlabsPositionReconstructionJob,
@@ -548,6 +550,10 @@ export async function handleScheduled(controller, env) {
 
   async function critical(name, action) {
     if (!(await automationAllowed(name))) return;
+    if (safety.stopped) {
+      parts.push(skippedScheduledPart(name, safety.reason));
+      return;
+    }
     const part = await runScheduledPart(name, env, (observedEnv) => action(observedEnv));
     parts.push(part);
     applyRunSafetyResult(safety, name, part);
@@ -564,12 +570,20 @@ export async function handleScheduled(controller, env) {
     applyRunSafetyResult(safety, name, part);
   }
 
+  const recentPromotionCutoff = new Date(Number(controller.scheduledTime || Date.now()) - (3 * 86_400_000)).toISOString();
+
   await critical('live_capture_morning', (observedEnv) => captureUpcomingOfficialGames(observedEnv, controller.scheduledTime, {
     includeToday: true,
-    daysAhead: 7
+    daysAhead: 6
   }));
   await critical('live_normalize_morning', (observedEnv) => runLiveNormalizationMorning(observedEnv));
   await nonCritical('official_daily_incremental', (observedEnv) => runDailyOfficialIncremental(observedEnv, controller.scheduledTime));
+  await nonCritical('recent_start_points_promotion', (observedEnv) => syncOnePendingHorseStartPointSource(observedEnv, {
+    minFetchedAt: recentPromotionCutoff
+  }));
+  await nonCritical('recent_official_snapshot_promotion', (observedEnv) => syncOnePendingOfficialSnapshotSource(observedEnv, {
+    minFetchedAt: recentPromotionCutoff
+  }));
   await critical('post_race_settlement', (observedEnv) => runPostRaceSettlementBatch(observedEnv));
   await nonCritical('xlabs_daily_incremental', (observedEnv) => runDailyXlabsIncremental(observedEnv, controller.scheduledTime));
 
