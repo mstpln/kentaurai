@@ -3,6 +3,7 @@
 - Production baseline before this QA is PR #295 merged at `2b636de2dd10d287ae5cfc213204d2dfcbf3922e` and successfully released by production release #161 from main `b70b634443ef040b0bff191725f56a524009415b`.
 - Deep scheduled-chain review found one dormant legacy minute-cron side path in `worker-pwa.js`: it could still run one post-race review if a retired `* * * * *` trigger were ever delivered. Current Wrangler production config exposes only `15 5 * * *`, so the path was not active, but it violates the single-owner cost-safety rule and is removed in this candidate.
 - Regression coverage now exercises the full production worker chain and requires the retired minute cron to return `unsupported_cron` with no overlay work beyond the outer automation-control point read.
+- QA also found that one static `captured_source_gap` game snapshot could be selected repeatedly inside the same bounded morning normalization loop. Operational state now marks that exact source as attempted, so automatic selection skips it thereafter; a newly captured source for the same game remains independently eligible.
 - Release preflight is being hardened to probe D1 analytics using the exact KentaurAI database id, matching Drift's production query path.
 - Documentation is aligned to the real seven-date upcoming horizon: today plus six future dates.
 - No cleanup is started by this QA. Destructive cleanup remains a separately authorized operation.
