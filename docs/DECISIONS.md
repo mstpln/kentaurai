@@ -383,6 +383,8 @@ A single race must not directly change model weights. Candidate learnings are re
 11. Every new manual dry-run or execute session must pass a sanitized snapshot-provenance integrity audit before planning begins. Missing source representations, dangling observation links, identity/timestamp mismatches, stranded mutation state or abnormal audit cost fail closed. Controlled continuations may reuse the audit only when it is persisted for that exact source-bound session.
 12. Production cleanup may run only when the checked-out `main` SHA exactly matches the latest successful production-release workflow SHA. Merged-but-not-deployed cleanup code must never operate against an older Worker contract.
 13. Each cleanup workflow run also has a cumulative D1 row-read/write budget in addition to the per-request safety stop. Reaching that run budget stops further cleanup and explicitly disables automatic continuation so an unexpectedly expensive scan cannot repeat across chained runs.
+14. Cleanup integrity preflight is cost-observed in bounded logical stages rather than as one monolithic D1 operation. Each snapshot family and the operational-state check keeps the normal per-operation cost stop, while the GitHub runner separately enforces the aggregate per-run D1 budget.
+15. Snapshot source-representation audit counts direct snapshot rows and observation rows independently. It must not deduplicate a direct row plus an observation for the same source/identity; that is excess representation and must fail closed. Dedicated `source_record_id` indexes are required for all four snapshot families before production cleanup may run.
 
 
 ## Cost-efficiency v2: one observed morning owner and compact operational state
