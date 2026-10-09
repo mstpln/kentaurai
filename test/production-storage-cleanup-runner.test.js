@@ -454,3 +454,109 @@ test('runner stops safely when cumulative D1 read budget is reached', async () =
   assert.equal(plans, 3);
   assert.match(stdout, /"cleanup":"snapshot".*"complete":false/);
 });
+
+
+test('runner refuses cleanup planning when the integrity audit alone exceeds the cumulative D1 budget', async () => {
+  let planCalls = 0;
+  const server = createServer((req, res) => {
+    const url = new URL(req.url, 'http://127.0.0.1');
+    if (req.method === 'GET' && url.pathname === '/v1/storage-cleanup/audit') {
+      json(res, {
+        ok: true,
+        families: ['horse_profile','horse_stat','horse_record','person_stat'].map((family) => ({
+          family,
+          mismatchedSources: 0,
+          missingRepresentations: 0,
+          excessRepresentations: 0,
+          danglingObservations: 0,
+          identityMismatchObservations: 0,
+          timestampMismatchRepresentations: 0,
+          ok: true
+        })),
+        operations: { startedBatches: 0, strandedRawBatches: 0, ok: true },
+        cost: { rowsRead: 300000, rowsWritten: 0, d1DurationMs: 10, durationMs: 20 },
+        safetyStop: false
+      });
+      return;
+    }
+    if (url.pathname.includes('/plan') || url.pathname.includes('/execute')) planCalls += 1;
+    json(res, { error: 'unexpected_test_route' }, 404);
+  });
+
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  const script = fileURLToPath(new URL('../scripts/run-production-storage-cleanup.mjs', import.meta.url));
+  const child = spawn(process.execPath, [script], {
+    env: {
+      ...process.env,
+      MODE: 'dry-run',
+      DRY_RUN_MAX_BATCHES: '25',
+      CLEANUP_SOFT_DEADLINE_MS: String(5 * 60 * 1000),
+      CLEANUP_RUN_MAX_ROWS_READ: '250000',
+      CLEANUP_RUN_MAX_ROWS_WRITTEN: '10000',
+      WORKER_URL: `http://127.0.0.1:${address.port}`,
+      ADMIN_TOKEN: 'synthetic-cleanup-token',
+      GITHUB_OUTPUT: ''
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  const [code] = await once(child, 'close');
+  server.close();
+  await once(server, 'close');
+
+  assert.notEqual(code, 0);
+  assert.equal(planCalls, 0);
+  assert.match(stderr, /integrity audit reached the cumulative D1 run-cost budget/);
+});
+
+
+test('runner includes sanitized D1 metrics when a cleanup request trips the per-operation safety stop', async () => {
+  const server = createServer((req, res) => {
+    const url = new URL(req.url, 'http://127.0.0.1');
+    if (req.method === 'GET' && url.pathname === '/v1/storage-cleanup/audit') {
+      json(res, {
+        ok: false,
+        families: [],
+        operations: { startedBatches: 0, strandedRawBatches: 0, ok: false },
+        cost: { rowsRead: 275123, rowsWritten: 7, d1DurationMs: 123, durationMs: 43210 },
+        safetyStop: true
+      });
+      return;
+    }
+    json(res, { error: 'unexpected_test_route' }, 404);
+  });
+
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  const script = fileURLToPath(new URL('../scripts/run-production-storage-cleanup.mjs', import.meta.url));
+  const child = spawn(process.execPath, [script], {
+    env: {
+      ...process.env,
+      MODE: 'dry-run',
+      DRY_RUN_MAX_BATCHES: '25',
+      CLEANUP_SOFT_DEADLINE_MS: String(5 * 60 * 1000),
+      WORKER_URL: `http://127.0.0.1:${address.port}`,
+      ADMIN_TOKEN: 'synthetic-cleanup-token',
+      GITHUB_OUTPUT: ''
+    },
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+
+  let stderr = '';
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  const [code] = await once(child, 'close');
+  server.close();
+  await once(server, 'close');
+
+  assert.notEqual(code, 0);
+  assert.match(stderr, /rowsRead=275123/);
+  assert.match(stderr, /rowsWritten=7/);
+  assert.match(stderr, /durationMs=43210/);
+});
