@@ -72,9 +72,12 @@ async function request(path, { method = 'GET', body = null } = {}) {
     addRunCost(data?.cost);
     if (data?.safetyStop === true) {
       const cost = data?.cost || {};
+      const scope = String(data?.safetyStopScope || 'unspecified')
+        .replace(/[^a-z0-9_:-]/gi, '')
+        .slice(0, 64) || 'unspecified';
       throw new Error(
         `${path} tripped the D1 cost-safety stop ` +
-        `(rowsRead=${Math.max(0, Number(cost.rowsRead || 0))}, ` +
+        `(scope=${scope}, rowsRead=${Math.max(0, Number(cost.rowsRead || 0))}, ` +
         `rowsWritten=${Math.max(0, Number(cost.rowsWritten || 0))}, ` +
         `durationMs=${Math.max(0, Number(cost.durationMs || 0))})`
       );
