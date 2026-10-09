@@ -36,11 +36,14 @@ test('manual post-race endpoint is admin protected and runs deterministic review
   assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM post_race_reviews WHERE system_id='system_review_worker'`).get().count, 8);
 });
 
-test('minute scheduler queues the existing orchestrator and deterministic post-race review', async () => {
-  const { env } = createTestEnv();
+test('retired minute scheduler delegates only to the canonical orchestrator and does not run post-race review', async () => {
+  const { env, db } = createTestEnv();
+  seedSettledRound(db);
   const queued = [];
   const ctx = { waitUntil(promise) { queued.push(promise); } };
-  worker.scheduled({ cron: '* * * * *', scheduledTime: Date.now() }, env, ctx);
-  assert.equal(queued.length, 2);
+  const result = worker.scheduled({ cron: '* * * * *', scheduledTime: Date.now() }, env, ctx);
+  assert.equal(queued.length, 1);
   await Promise.all(queued);
+  assert.deepEqual(await result, { skipped:true, reason:'unsupported_cron', cron:'* * * * *' });
+  assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM post_race_reviews WHERE system_id='system_review_worker'`).get().count, 0);
 });
