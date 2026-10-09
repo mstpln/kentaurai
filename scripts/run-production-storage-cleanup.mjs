@@ -75,11 +75,16 @@ async function request(path, { method = 'GET', body = null } = {}) {
       const scope = String(data?.safetyStopScope || 'unspecified')
         .replace(/[^a-z0-9_:-]/gi, '')
         .slice(0, 64) || 'unspecified';
+      const detailedReadCost = (data?.families || []).find((family) => family?.family === scope)?.readCostByCheck;
+      const checks = ['representations','observations','direct_timeline']
+        .filter((name) => Number.isFinite(detailedReadCost?.[name]) && detailedReadCost[name] >= 0)
+        .map((name) => `${name}=${Math.floor(detailedReadCost[name])}`)
+        .join(',');
       throw new Error(
         `${path} tripped the D1 cost-safety stop ` +
         `(scope=${scope}, rowsRead=${Math.max(0, Number(cost.rowsRead || 0))}, ` +
         `rowsWritten=${Math.max(0, Number(cost.rowsWritten || 0))}, ` +
-        `durationMs=${Math.max(0, Number(cost.durationMs || 0))})`
+        `durationMs=${Math.max(0, Number(cost.durationMs || 0))}${checks ? `, readChecks=${checks}` : ''})`
       );
     }
     return data;
@@ -106,7 +111,10 @@ function logIntegrityAudit(audit, { sessionBound = false } = {}) {
       excessRepresentations: Number(family.excessRepresentations || 0),
       danglingObservations: Number(family.danglingObservations || 0),
       identityMismatchObservations: Number(family.identityMismatchObservations || 0),
-      timestampMismatchRepresentations: Number(family.timestampMismatchRepresentations || 0)
+      timestampMismatchRepresentations: Number(family.timestampMismatchRepresentations || 0),
+      readCostByCheck: Object.fromEntries(['representations','observations','direct_timeline']
+        .filter((name) => Number.isFinite(family.readCostByCheck?.[name]) && family.readCostByCheck[name] >= 0)
+        .map((name) => [name, Math.floor(family.readCostByCheck[name])]))
     })),
     operations: {
       startedBatches: Number(audit?.operations?.startedBatches || 0),
