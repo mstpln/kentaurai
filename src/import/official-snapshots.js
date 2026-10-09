@@ -418,7 +418,7 @@ export async function syncOnePendingOfficialSnapshotSource(env, options = {}) {
           AND sr.raw_object_key IS NOT NULL
           AND sr.fetched_at >= ?
           AND os.source_record_id IS NULL
-        ORDER BY sr.fetched_at DESC, sr.id DESC
+        ORDER BY sr.fetched_at ASC, sr.id ASC
         LIMIT 1
       `).bind(SOURCE_TYPE, NORMALIZED_QUALITY, minFetchedAt).first()
     : await env.DB.prepare(`
@@ -429,7 +429,7 @@ export async function syncOnePendingOfficialSnapshotSource(env, options = {}) {
           AND sr.quality_status = ?
           AND sr.raw_object_key IS NOT NULL
           AND os.source_record_id IS NULL
-        ORDER BY sr.fetched_at DESC, sr.id DESC
+        ORDER BY sr.fetched_at ASC, sr.id ASC
         LIMIT 1
       `).bind(SOURCE_TYPE, NORMALIZED_QUALITY).first();
   if (!source?.id) return { status: 'idle' };
