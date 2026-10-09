@@ -125,7 +125,8 @@ export function createTestEnv() {
     '../../migrations/0046_snapshot_observation_lookup_index.sql',
     '../../migrations/0047_storage_cleanup_session_audits.sql',
     '../../migrations/0048_live_pending_cost_indexes.sql',
-    '../../migrations/0049_runtime_controls.sql'
+    '../../migrations/0049_runtime_controls.sql',
+    '../../migrations/0050_cost_efficiency_v2.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }
