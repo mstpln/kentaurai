@@ -27,8 +27,6 @@ CREATE INDEX idx_import_runs_scheduled_orchestrator_started
   WHERE source_type='scheduled_orchestrator';
 
 CREATE INDEX idx_source_records_recent_normalized_official
-  ON source_records(fetched_at DESC, id DESC)
-  WHERE source_type='official_provider'
-    AND quality_status='normalized_verified_subset'
-    AND raw_object_key IS NOT NULL;
+  ON source_records(source_type, quality_status, fetched_at DESC, id DESC)
+  WHERE raw_object_key IS NOT NULL;
 
