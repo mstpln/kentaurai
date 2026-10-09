@@ -169,18 +169,30 @@ export async function syncHorseStartPointsFromSource(env, sourceRecordId) {
 export async function syncOnePendingHorseStartPointSource(env, options = {}) {
   if (!env.DB || !env.RAW_BUCKET?.get) return { status: 'not_configured' };
   const minFetchedAt = options.minFetchedAt == null ? null : String(options.minFetchedAt);
-  const source = await env.DB.prepare(`
-    SELECT sr.id
-    FROM source_records sr
-    LEFT JOIN horse_start_point_source_sync hs ON hs.source_record_id = sr.id
-    WHERE sr.source_type = ?
-      AND sr.quality_status = ?
-      AND sr.raw_object_key IS NOT NULL
-      AND hs.source_record_id IS NULL
-      AND (? IS NULL OR sr.fetched_at >= ?)
-    ORDER BY sr.fetched_at DESC, sr.id DESC
-    LIMIT 1
-  `).bind(SOURCE_TYPE, NORMALIZED_QUALITY, minFetchedAt, minFetchedAt).first();
+  const source = minFetchedAt
+    ? await env.DB.prepare(`
+        SELECT sr.id
+        FROM source_records sr
+        LEFT JOIN horse_start_point_source_sync hs ON hs.source_record_id = sr.id
+        WHERE sr.source_type = ?
+          AND sr.quality_status = ?
+          AND sr.raw_object_key IS NOT NULL
+          AND sr.fetched_at >= ?
+          AND hs.source_record_id IS NULL
+        ORDER BY sr.fetched_at DESC, sr.id DESC
+        LIMIT 1
+      `).bind(SOURCE_TYPE, NORMALIZED_QUALITY, minFetchedAt).first()
+    : await env.DB.prepare(`
+        SELECT sr.id
+        FROM source_records sr
+        LEFT JOIN horse_start_point_source_sync hs ON hs.source_record_id = sr.id
+        WHERE sr.source_type = ?
+          AND sr.quality_status = ?
+          AND sr.raw_object_key IS NOT NULL
+          AND hs.source_record_id IS NULL
+        ORDER BY sr.fetched_at DESC, sr.id DESC
+        LIMIT 1
+      `).bind(SOURCE_TYPE, NORMALIZED_QUALITY).first();
   if (!source?.id) return { status: 'idle' };
   try {
     return await syncHorseStartPointsFromSource(env, source.id);
