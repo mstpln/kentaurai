@@ -524,7 +524,8 @@ test('runner includes sanitized D1 metrics when a cleanup request trips the per-
         families: [],
         operations: { startedBatches: 0, strandedRawBatches: 0, ok: false },
         cost: { rowsRead: 275123, rowsWritten: 7, d1DurationMs: 123, durationMs: 43210 },
-        safetyStop: true
+        safetyStop: true,
+        safetyStopScope: 'horse_stat'
       });
       return;
     }
@@ -556,6 +557,7 @@ test('runner includes sanitized D1 metrics when a cleanup request trips the per-
   await once(server, 'close');
 
   assert.notEqual(code, 0);
+  assert.match(stderr, /scope=horse_stat/);
   assert.match(stderr, /rowsRead=275123/);
   assert.match(stderr, /rowsWritten=7/);
   assert.match(stderr, /durationMs=43210/);
