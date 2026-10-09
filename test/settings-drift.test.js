@@ -154,7 +154,7 @@ test('Cloudflare usage uses verified API values and never starts from zero estim
   assert.equal(storage.billingCost, 0.75);
   assert.equal(storage.billingCurrency, 'USD');
   assert.equal(usage.additional.billingCostAvailable, true);
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 4);
 });
 
 
