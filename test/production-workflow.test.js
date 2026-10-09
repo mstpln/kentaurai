@@ -102,6 +102,11 @@ test('production release verifies required migrations and private observability 
   assert.match(releaseWorkflow, /0049_runtime_controls\.sql/);
   assert.match(releaseWorkflow, /0050_cost_efficiency_v2\.sql/);
   assert.match(releaseWorkflow, /0051_storage_cleanup_audit_indexes\.sql/);
+  assert.match(releaseWorkflow, /0052_storage_cleanup_horse_profile_source_index\.sql/);
+  assert.match(releaseWorkflow, /0053_storage_cleanup_horse_stat_source_index\.sql/);
+  assert.match(releaseWorkflow, /0054_storage_cleanup_horse_record_source_index\.sql/);
+  assert.match(releaseWorkflow, /0055_storage_cleanup_person_stat_source_index\.sql/);
+  assert.match(releaseWorkflow, /0056_storage_cleanup_sync_status_source_index\.sql/);
   assert.match(releaseWorkflow, /idx_horse_profile_snapshots_source_record/);
   assert.match(releaseWorkflow, /idx_horse_stat_snapshots_source_record/);
   assert.match(releaseWorkflow, /idx_horse_record_snapshots_source_record/);
