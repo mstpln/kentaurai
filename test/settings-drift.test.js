@@ -95,8 +95,8 @@ test('Cloudflare usage uses verified API values and never starts from zero estim
     }
     if (String(url).endsWith('/graphql')) {
       const body = JSON.parse(options.body);
-      assert.equal(body.variables.start, '2026-09-12');
       assert.equal(body.variables.end, '2026-09-27');
+      assert.equal(body.variables.start, /d1QueriesAdaptiveGroups/.test(body.query) ? '2026-09-21' : '2026-09-12');
       assert.equal(body.variables.databaseId, 'd8189e0e-6127-4ef2-88cc-534cb2217340');
       assert.match(body.query, /databaseId: \$databaseId/);
       return new Response(JSON.stringify({
@@ -369,6 +369,8 @@ test('Cloudflare Query Insights is database-scoped and exposes read-heavy SQL di
       const body = JSON.parse(options.body);
       assert.equal(body.variables.databaseId, 'd8189e0e-6127-4ef2-88cc-534cb2217340');
       if (/d1QueriesAdaptiveGroups/.test(body.query)) {
+        assert.equal(body.variables.start, '2026-09-21');
+        assert.equal(body.variables.end, '2026-09-27');
         assert.match(body.query, /sum_rowsRead_DESC/);
         assert.doesNotMatch(body.query, /avg\s*\{\s*rowsRead/);
         return new Response(JSON.stringify({
@@ -401,6 +403,7 @@ test('Cloudflare Query Insights is database-scoped and exposes read-heavy SQL di
   assert.equal(usage.queryInsights[0].totalRowsRead, 1000);
   assert.equal(usage.queryInsights[0].avgRowsRead, 250);
   assert.equal(usage.queryInsights[0].queryEfficiency, 0.004);
+  assert.deepEqual(usage.queryInsightsWindow, { start:'2026-09-21', end:'2026-09-27' });
 });
 
 test('Cloudflare Query Insights failure does not hide verified core D1 usage', async () => {
