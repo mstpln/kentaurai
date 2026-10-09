@@ -76,6 +76,28 @@ test('cumulative morning cost safety stops after individually safe operations', 
 });
 
 
+test('cost-efficiency migration keeps live progress and recent selectors indexed', () => {
+  const { db } = createTestEnv();
+  const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row) => row.name));
+  assert.ok(tables.has('official_live_normalization_state'));
+  const indexes = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='index'").all().map((row) => row.name));
+  for (const name of [
+    'idx_official_live_normalization_state_status',
+    'idx_import_runs_live_normalize_success_cursor',
+    'idx_import_runs_source_started',
+    'idx_source_records_recent_normalized_official',
+    'idx_source_records_external_content_normalized'
+  ]) assert.ok(indexes.has(name), `missing ${name}`);
+});
+
+test('morning scheduler centralizes promotion jobs and stops all later processors after abnormal cumulative cost', () => {
+  const source = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+  assert.match(source, /recent_start_points_promotion/);
+  assert.match(source, /recent_official_snapshot_promotion/);
+  assert.match(source, /async function critical\(name, action\)[\s\S]*?if \(safety\.stopped\)/);
+  assert.match(source, /daysAhead: 6/);
+});
+
 test('GitHub operational workflows contain no recurring schedule', () => {
   const directory = new URL('../.github/workflows/', import.meta.url);
   for (const name of readdirSync(directory).filter((value) => value.endsWith('.yml') || value.endsWith('.yaml'))) {
