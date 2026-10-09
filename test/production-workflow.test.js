@@ -6,6 +6,17 @@ const workflow = readFileSync(new URL('../.github/workflows/production-d1-migrat
 const releaseWorkflow = readFileSync(new URL('../.github/workflows/production-release-v060.yml', import.meta.url), 'utf8');
 const buildsPolicy = readFileSync(new URL('../scripts/cloudflare-builds-policy.mjs', import.meta.url), 'utf8');
 const wrangler = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
+const cleanupAuditIndexMigrations = [
+  '0051_storage_cleanup_audit_indexes.sql',
+  '0052_storage_cleanup_horse_stat_source_index.sql',
+  '0053_storage_cleanup_horse_record_source_index.sql',
+  '0054_storage_cleanup_person_stat_source_index.sql',
+  '0055_storage_cleanup_sync_status_index.sql',
+  '0056_storage_cleanup_profile_source_index_backstop.sql'
+].map((name) => ({
+  name,
+  sql: readFileSync(new URL(`../migrations/${name}`, import.meta.url), 'utf8')
+}));
 
 test('production migration workflow is manual and main-only', () => {
   assert.match(workflow, /workflow_dispatch:/);
@@ -92,6 +103,15 @@ test('production release validates and deploys Cloudflare usage runtime secrets 
   assert.match(wrangler, /"secrets"\s*:\s*\{[\s\S]*"required"\s*:\s*\[[\s\S]*"CLOUDFLARE_ACCOUNT_ID"[\s\S]*"CLOUDFLARE_USAGE_API_TOKEN"[\s\S]*\][\s\S]*\}/);
 });
 
+test('cleanup audit indexes are split into idempotent single-statement migrations', () => {
+  assert.equal(cleanupAuditIndexMigrations.length, 6);
+  for (const { name, sql } of cleanupAuditIndexMigrations) {
+    assert.match(sql, /^CREATE INDEX IF NOT EXISTS /);
+    assert.equal((sql.match(/\bCREATE\s+INDEX\b/gi) || []).length, 1, `${name} must create exactly one index`);
+    assert.equal((sql.match(/;/g) || []).length, 1, `${name} must contain exactly one SQL statement`);
+  }
+});
+
 test('production release verifies required migrations and private observability routes', () => {
   assert.match(releaseWorkflow, /0034_settings_alert_acknowledgements\.sql/);
   assert.match(releaseWorkflow, /settings_alert_acknowledgements/);
@@ -102,6 +122,11 @@ test('production release verifies required migrations and private observability 
   assert.match(releaseWorkflow, /0049_runtime_controls\.sql/);
   assert.match(releaseWorkflow, /0050_cost_efficiency_v2\.sql/);
   assert.match(releaseWorkflow, /0051_storage_cleanup_audit_indexes\.sql/);
+  assert.match(releaseWorkflow, /0052_storage_cleanup_horse_stat_source_index\.sql/);
+  assert.match(releaseWorkflow, /0053_storage_cleanup_horse_record_source_index\.sql/);
+  assert.match(releaseWorkflow, /0054_storage_cleanup_person_stat_source_index\.sql/);
+  assert.match(releaseWorkflow, /0055_storage_cleanup_sync_status_index\.sql/);
+  assert.match(releaseWorkflow, /0056_storage_cleanup_profile_source_index_backstop\.sql/);
   assert.match(releaseWorkflow, /idx_horse_profile_snapshots_source_record/);
   assert.match(releaseWorkflow, /idx_horse_stat_snapshots_source_record/);
   assert.match(releaseWorkflow, /idx_horse_record_snapshots_source_record/);

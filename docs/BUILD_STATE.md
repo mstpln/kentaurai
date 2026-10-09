@@ -1,3 +1,12 @@
+## Storage cleanup integrity-audit index migration recovery candidate
+- Branch: `fix/split-cleanup-audit-index-migrations`, based on main release-marker commit `9c9e2adc497d135abcab1eed54339f13a3fb732b`.
+- PR #297 merged successfully and both exact-head CI and post-merge main CI passed. Production release #163 then stopped safely before Worker deployment while applying migration `0051_storage_cleanup_audit_indexes.sql`: D1 returned storage timeout code 7429 while the five indexes were being built in one migration request.
+- No Worker deployment or destructive storage cleanup occurred after that failure. The failure is a schema-migration sizing issue, not a test or cleanup-integrity failure.
+- The recovery splits the five index builds into bounded idempotent single-statement migrations (`0051`-`0055`) and adds `0056` as a profile-index backstop. Snapshot-table indexes are reduced to the exact `source_record_id` key required by the audit, avoiding unnecessary index width.
+- Every recovery migration uses `CREATE INDEX IF NOT EXISTS`. The `0056` backstop guarantees the profile index even if Cloudflare happened to record the timed-out original `0051` migration before the client saw the reset.
+- Production release verification now requires all six recovery migration records and all five final index names before Worker deployment.
+- No racing facts, provenance rows, raw payloads or cleanup-session state are changed by this recovery.
+
 ## Storage cleanup integrity-audit cost hardening candidate
 - Branch: `fix/storage-cleanup-audit-cost`, based on deployed main `ec849e62f282803737c94194b8e52dd6d4060cdc`.
 - Production storage-cleanup dry-run #11 failed safely before planning or mutation because the read-only `/v1/storage-cleanup/audit` request tripped the D1 per-operation cost-safety stop. The temporary cleanup token was removed and production health still passed afterward.
