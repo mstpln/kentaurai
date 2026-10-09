@@ -25,8 +25,9 @@ CREATE INDEX idx_import_runs_live_normalize_success_cursor
     AND status='success'
     AND json_extract(metadata_json,'$.stage')='entry';
 
-CREATE INDEX idx_import_runs_source_started
-  ON import_runs(source_type, started_at DESC, id DESC);
+CREATE INDEX idx_import_runs_scheduled_orchestrator_started
+  ON import_runs(started_at DESC, id DESC)
+  WHERE source_type='scheduled_orchestrator';
 
 CREATE INDEX idx_source_records_recent_normalized_official
   ON source_records(fetched_at DESC, id DESC)
