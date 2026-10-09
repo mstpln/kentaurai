@@ -1,5 +1,4 @@
 import worker from './index.js';
-import { getAutomationControl } from './settings-drift.js';
 import { requireAdmin } from './auth.js';
 import {
   getRoundAnalysisSubmission,
@@ -12,8 +11,6 @@ import {
 import { runNextPostRaceReview } from './post-race-review.js';
 import { getPostRaceSettlementJob, runNextPostRaceSettlement } from './post-race-settlement-v1.js';
 import { pwaIcon, pwaManifest, pwaServiceWorker } from './pwa.js';
-
-const BACKFILL_CRON = '* * * * *';
 
 function staticResponse(body, contentType) {
   return new Response(body, {
@@ -130,19 +127,6 @@ export default {
     return worker.fetch(request, env);
   },
   async scheduled(controller, env, ctx) {
-    const task = (async () => {
-      const result = await worker.scheduled(controller, env, ctx);
-      if (controller.cron === BACKFILL_CRON) {
-        try {
-          const control = await getAutomationControl(env);
-          if (control.enabled) await runNextPostRaceReview(env);
-        } catch (error) {
-          console.error('automatic workflow control unavailable', error);
-        }
-      }
-      return result;
-    })();
-    if (ctx?.waitUntil) ctx.waitUntil(task);
-    return task;
+    return worker.scheduled(controller, env, ctx);
   }
 };
