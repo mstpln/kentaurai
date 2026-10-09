@@ -45,7 +45,7 @@ export function buildStorageCleanupRepresentationAuditSql(family) {
         sync.${definition.expectedColumn} AS expected_count,
         (
           SELECT COUNT(*)
-          FROM ${definition.table} direct_snapshot
+          FROM ${definition.table} direct_snapshot INDEXED BY idx_${definition.table}_source_record
           WHERE direct_snapshot.source_record_id=sync.source_record_id
         ) + (
           SELECT COUNT(*)
@@ -59,7 +59,7 @@ export function buildStorageCleanupRepresentationAuditSql(family) {
                 AND same_source_snapshot.source_record_id=o.source_record_id
             )
         ) AS actual_count
-      FROM official_snapshot_source_sync sync
+      FROM official_snapshot_source_sync sync INDEXED BY idx_official_snapshot_source_sync_status_source
       WHERE sync.status='complete'
     )
     SELECT
