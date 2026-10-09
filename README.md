@@ -140,7 +140,7 @@ Real source data belongs only in the private Cloudflare D1/R2 deployment or is s
 All `/v1/*` routes fail closed unless `ADMIN_TOKEN` is configured and supplied.
 
 ### Automatic V85/V86 acquisition
-The only automatic Worker schedule is `15 5 * * *` UTC. The morning run captures the current date plus the next seven dates, normalizes pending current game snapshots within a fixed run budget, imports recent official results through explicit one-day jobs, settles eligible saved rounds and then processes a bounded three-day X-Labs daily catch-up window. There is no automatic evening refresh and no minute cron. Late changes can still be handled through the admin-only manual refresh path.
+The only automatic Worker schedule is `15 5 * * *` UTC. The morning run captures exactly seven calendar dates — the current date plus the next six dates — normalizes pending current game snapshots within a fixed run budget, imports recent official results through explicit one-day jobs, settles eligible saved rounds and then processes a bounded three-day X-Labs daily catch-up window. There is no automatic evening refresh and no minute cron. Late changes can still be handled through the admin-only manual refresh path.
 
 Each calendar snapshot is archived privately before game discovery. Discovery accepts only V85/V86 identities for the requested date with exactly eight same-date race ids. Each discovered game is then captured through the same verified official provider path and archived before normalization. A partial date/game capture failure marks the scheduled operation as failed rather than silently reporting success.
 
