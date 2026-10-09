@@ -49,7 +49,7 @@ export function buildStorageCleanupRepresentationAuditSql(family) {
           WHERE direct_snapshot.source_record_id=sync.source_record_id
         ) + (
           SELECT COUNT(*)
-          FROM official_snapshot_observations o
+          FROM official_snapshot_observations o INDEXED BY sqlite_autoindex_official_snapshot_observations_1
           WHERE o.source_record_id=sync.source_record_id
             AND o.snapshot_family=?
             AND NOT EXISTS (
