@@ -13,8 +13,6 @@ CREATE TABLE official_live_normalization_state (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_official_live_normalization_state_status
-  ON official_live_normalization_state(status, updated_at DESC, source_record_id);
 
 CREATE INDEX idx_import_runs_live_normalize_success_cursor
   ON import_runs(
@@ -35,7 +33,3 @@ CREATE INDEX idx_source_records_recent_normalized_official
     AND quality_status='normalized_verified_subset'
     AND raw_object_key IS NOT NULL;
 
-CREATE INDEX idx_source_records_external_content_normalized
-  ON source_records(source_type, external_id, content_hash, fetched_at DESC, id DESC)
-  WHERE quality_status='normalized_verified_subset'
-    AND content_hash IS NOT NULL;
