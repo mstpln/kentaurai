@@ -401,3 +401,11 @@ A single race must not directly change model weights. Candidate learnings are re
 11. Legacy Worker overlays must be transparent for scheduled events. Retired cron expressions must delegate to the canonical orchestrator and remain unsupported; an overlay must not attach its own background data or review job.
 12. A recoverable official live source gap may be retried automatically at most once per exact source record. Once that source is recorded as `source_gap` in compact operational state, automatic selection skips it; a newly captured source record for the same game remains independently eligible.
 13. Production release preflight must validate D1 analytics using the exact KentaurAI D1 database id, matching the runtime Drift query scope rather than proving only account-wide analytics access.
+
+
+## Large production indexes are migrated in isolated idempotent steps
+1. A production D1 index bundle that times out before its migration is recorded must not be recovered by raising cleanup or query safety limits.
+2. When several additive indexes are the only content of the failed migration, recovery may replace that not-successfully-applied migration with a no-op reconciliation marker and move each intended index into its own subsequent idempotent migration.
+3. Each recovery index uses `CREATE INDEX IF NOT EXISTS` so a partially persisted index from an interrupted provider operation cannot make the next release unsafe.
+4. Production release verification must require both the recovery migration records and the exact expected index names before Worker deployment.
+5. This migration recovery changes schema access paths only. It must not run cleanup, rewrite racing facts, or infer that destructive cleanup is authorized.

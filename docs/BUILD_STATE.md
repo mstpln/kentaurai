@@ -1,3 +1,10 @@
+## Storage cleanup audit-index release recovery candidate
+- PR #297 was merged successfully, but production release #163 failed safely before Worker deployment while applying migration `0051_storage_cleanup_audit_indexes.sql`.
+- Full release QA passed 1144/1144 before the production migration step. D1 returned storage-operation timeout code 7429 while the five-index migration bundle was being applied.
+- Recovery keeps every intended index and does not raise any safety threshold. Migration 0051 becomes a no-op reconciliation marker, and migrations 0052-0056 create the same five indexes idempotently one D1 migration at a time.
+- The release gate now requires migrations 0051-0056 plus all five index names before Worker deployment can proceed.
+- This recovery performs no storage cleanup, no racing-data rewrite and no destructive operation. After a successful release, the production cleanup must still be rerun in dry-run mode before any destructive authorization.
+
 ## Storage cleanup integrity-audit cost hardening candidate
 - Branch: `fix/storage-cleanup-audit-cost`, based on deployed main `ec849e62f282803737c94194b8e52dd6d4060cdc`.
 - Production storage-cleanup dry-run #11 failed safely before planning or mutation because the read-only `/v1/storage-cleanup/audit` request tripped the D1 per-operation cost-safety stop. The temporary cleanup token was removed and production health still passed afterward.
