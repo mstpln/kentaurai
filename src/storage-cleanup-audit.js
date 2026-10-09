@@ -40,9 +40,15 @@ async function auditFamily(env, family, definition) {
         SELECT source_record_id
         FROM ${definition.table}
         UNION ALL
-        SELECT source_record_id
-        FROM official_snapshot_observations
-        WHERE snapshot_family=?
+        SELECT o.source_record_id
+        FROM official_snapshot_observations o
+        WHERE o.snapshot_family=?
+          AND NOT EXISTS (
+            SELECT 1
+            FROM ${definition.table} direct_snapshot
+            WHERE direct_snapshot.id=o.snapshot_id
+              AND direct_snapshot.source_record_id=o.source_record_id
+          )
       )
       GROUP BY source_record_id
     )
