@@ -274,6 +274,7 @@ export async function selectPendingOfficialGameSource(env) {
             OR (newer.fetched_at = sr.fetched_at AND newer.id > sr.id)
           )
       )
+      AND COALESCE(ns.status, 'running') <> 'source_gap'
       AND (
         sr.quality_status = 'captured_source_gap'
         OR COALESCE(
