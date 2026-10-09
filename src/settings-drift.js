@@ -1,4 +1,5 @@
 const AUTOMATION_KEY = 'automatic_workflows_enabled';
+const KENTAURAI_D1_DATABASE_ID = 'd8189e0e-6127-4ef2-88cc-534cb2217340';
 
 export const CLOUDFLARE_USAGE_LIMITS = Object.freeze({
   d1RowsRead: 25_000_000_000,
@@ -113,6 +114,7 @@ async function billingCycle(env, fetchImpl, now) {
 
 const D1_USAGE_QUERY = `query KentaurAiUsage(
   $accountTag: string!,
+  $databaseId: string!,
   $start: Date,
   $end: Date,
   $r2Start: Time!,
@@ -123,18 +125,28 @@ const D1_USAGE_QUERY = `query KentaurAiUsage(
     accounts(filter: { accountTag: $accountTag }) {
       d1AnalyticsAdaptiveGroups(
         limit: 10000
-        filter: { date_geq: $start, date_leq: $end }
+        filter: { date_geq: $start, date_leq: $end, databaseId: $databaseId }
       ) {
         sum { rowsRead rowsWritten }
         dimensions { date databaseId }
       }
       d1StorageAdaptiveGroups(
         limit: 10000
-        filter: { date_geq: $start, date_leq: $end }
+        filter: { date_geq: $start, date_leq: $end, databaseId: $databaseId }
         orderBy: [date_DESC]
       ) {
         max { databaseSizeBytes }
         dimensions { date databaseId }
+      }
+      d1QueriesAdaptiveGroups(
+        limit: 20
+        filter: { date_geq: $start, date_leq: $end, databaseId: $databaseId }
+        orderBy: [sum_rowsRead_DESC]
+      ) {
+        count
+        avg { rowsRead rowsReturned rowsWritten queryDurationMs }
+        sum { rowsRead rowsReturned rowsWritten queryDurationMs }
+        dimensions { query databaseId }
       }
       r2StorageAdaptiveGroups(
         limit: 10000
@@ -396,6 +408,60 @@ async function billingMetrics(env, fetchImpl, cycle, now) {
   return aggregateBillingMetrics(data.result);
 }
 
+function d1QueryInsights(groups) {
+  return (groups || []).map((group) => {
+    const query = String(group?.dimensions?.query || '').replace(/\s+/g, ' ').trim().slice(0, 1200);
+    const count = verifiedNonNegativeNumber(group?.count, 'D1 query count');
+    const totalRowsRead = verifiedNonNegativeNumber(group?.sum?.rowsRead, 'D1 query rowsRead');
+    const totalRowsWritten = verifiedNonNegativeNumber(group?.sum?.rowsWritten, 'D1 query rowsWritten');
+    const totalDurationMs = verifiedNonNegativeNumber(group?.sum?.queryDurationMs, 'D1 query duration');
+    const rowsReturned = verifiedNonNegativeNumber(group?.sum?.rowsReturned, 'D1 query rowsReturned');
+    return {
+      query,
+      count,
+      totalRowsRead,
+      avgRowsRead: count > 0 ? totalRowsRead / count : 0,
+      totalRowsWritten,
+      avgRowsWritten: count > 0 ? totalRowsWritten / count : 0,
+      totalDurationMs,
+      avgDurationMs: count > 0 ? totalDurationMs / count : 0,
+      queryEfficiency: totalRowsRead > 0 ? rowsReturned / totalRowsRead : 0
+    };
+  }).sort((a, b) => b.totalRowsRead - a.totalRowsRead);
+}
+
+async function recentMorningStageCosts(env) {
+  if (!env?.DB) return [];
+  const { results = [] } = await env.DB.prepare(`
+    SELECT id, started_at, finished_at, status, metadata_json
+    FROM import_runs
+    WHERE source_type = 'scheduled_orchestrator'
+    ORDER BY started_at DESC, id DESC
+    LIMIT 7
+  `).all();
+  return results.map((run) => {
+    let metadata = {};
+    try { metadata = JSON.parse(run.metadata_json || '{}'); } catch {}
+    return {
+      id: run.id,
+      startedAt: run.started_at || null,
+      finishedAt: run.finished_at || null,
+      status: run.status || null,
+      total: metadata?.safety?.metrics || null,
+      stopped: Boolean(metadata?.safety?.stopped),
+      stopReason: metadata?.safety?.reason || null,
+      stages: Array.isArray(metadata?.parts) ? metadata.parts.map((part) => ({
+        name: part?.name || 'unknown',
+        ok: part?.ok !== false,
+        skipped: Boolean(part?.skipped),
+        reason: part?.reason || null,
+        cost: part?.cost || null,
+        safetyStop: Boolean(part?.safetyStop)
+      })) : []
+    };
+  });
+}
+
 async function d1Usage(env, fetchImpl, cycle, now) {
   const accountId = String(env.CLOUDFLARE_ACCOUNT_ID || '').trim();
   const token = String(env.CLOUDFLARE_USAGE_API_TOKEN || '').trim();
@@ -405,6 +471,7 @@ async function d1Usage(env, fetchImpl, cycle, now) {
       query: D1_USAGE_QUERY,
       variables: {
         accountTag: accountId,
+        databaseId: KENTAURAI_D1_DATABASE_ID,
         start: dateKey(cycle.start),
         end: dateKey(now),
         r2Start: cycle.start,
@@ -416,7 +483,7 @@ async function d1Usage(env, fetchImpl, cycle, now) {
   if (Array.isArray(data.errors) && data.errors.length) throw new Error(data.errors[0]?.message || 'Cloudflare analytics query failed');
   const account = data?.data?.viewer?.accounts?.[0];
   if (!account) throw new Error('Cloudflare analytics account is unavailable');
-  if (!Array.isArray(account.d1AnalyticsAdaptiveGroups) || !Array.isArray(account.d1StorageAdaptiveGroups)) {
+  if (!Array.isArray(account.d1AnalyticsAdaptiveGroups) || !Array.isArray(account.d1StorageAdaptiveGroups) || !Array.isArray(account.d1QueriesAdaptiveGroups)) {
     throw new Error('Cloudflare D1 analytics datasets are unavailable');
   }
   if (!account.d1StorageAdaptiveGroups.length) {
@@ -430,6 +497,7 @@ async function d1Usage(env, fetchImpl, cycle, now) {
     rowsWritten: sumMetric(account.d1AnalyticsAdaptiveGroups, 'rowsWritten'),
     storageBytes: currentD1Storage(account.d1StorageAdaptiveGroups),
     dailyUsage: dailyD1Usage(account.d1AnalyticsAdaptiveGroups),
+    queryInsights: d1QueryInsights(account.d1QueriesAdaptiveGroups),
     r2StorageBytes: r2Storage?.bytes ?? null,
     r2StorageObservedAt: r2Storage?.observedAt ?? null
   };
@@ -522,6 +590,8 @@ export async function getCloudflareUsage(env, options = {}) {
       fetchedAt: nowIso(now),
       billingPeriod: cycle,
       metrics,
+      queryInsights: d1.queryInsights,
+      queryInsightsWindow: { start: cycle.start, end: nowIso(now) },
       additional: {
         billingCostAvailable,
         r2Available: Boolean(d1.r2StorageBytes != null || r2Storage?.available || r2ClassA?.available || r2ClassB?.available)
@@ -541,9 +611,10 @@ export async function getCloudflareUsage(env, options = {}) {
 }
 
 export async function getDriftOverview(env, options = {}) {
-  const [automation, cloudflare] = await Promise.all([
+  const [automation, cloudflare, morningStageCosts] = await Promise.all([
     getAutomationControl(env),
-    getCloudflareUsage(env, { ...options, includeDailyUsage:true })
+    getCloudflareUsage(env, { ...options, includeDailyUsage:true }),
+    recentMorningStageCosts(env)
   ]);
   let recentRunEstimates = {};
   if (cloudflare?.configured && cloudflare.available !== false && cloudflare.billingPeriod && Array.isArray(cloudflare._dailyUsage)) {
@@ -554,6 +625,7 @@ export async function getDriftOverview(env, options = {}) {
     automation,
     cloudflare,
     recentRunEstimates,
+    morningStageCosts,
     usageEstimateNote:'Beräknad fördelning av den dagens verifierade Cloudflare D1-usage mellan registrerade workflows. Detta är en uppskattning, inte exakt per-query-mätning.',
     schedule: {
       cron: '15 5 * * *',
