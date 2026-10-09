@@ -2,7 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/index.js';
 import { createTestEnv } from './helpers/d1.js';
-import { auditStorageCleanupIntegrity, bindStorageCleanupIntegrityAudit } from '../src/storage-cleanup-audit.js';
+import {
+  auditStorageCleanupIntegrity,
+  bindStorageCleanupIntegrityAudit,
+  buildStorageCleanupRepresentationAuditSql
+} from '../src/storage-cleanup-audit.js';
 
 function addSource(db, id, fetchedAt) {
   db.prepare(`
@@ -114,6 +118,67 @@ test('cleanup integrity audit still detects an independent extra observation-bac
   assert.equal(profile.mismatchedSources, 1);
   assert.equal(profile.missingRepresentations, 0);
   assert.equal(profile.excessRepresentations, 1);
+});
+
+test('cleanup representation check starts from complete sync sources and uses covering index lookups', () => {
+  const { db } = createTestEnv();
+  for (const [family, table, index] of [
+    ['horse_profile', 'horse_profile_snapshots', 'idx_horse_profile_snapshots_source_record'],
+    ['horse_stat', 'horse_stat_snapshots', 'idx_horse_stat_snapshots_source_record'],
+    ['horse_record', 'horse_record_snapshots', 'idx_horse_record_snapshots_source_record'],
+    ['person_stat', 'person_stat_snapshots', 'idx_person_stat_snapshots_source_record']
+  ]) {
+    const sql = buildStorageCleanupRepresentationAuditSql(family);
+    const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(family)
+      .map((row) => String(row.detail || '')).join('\n');
+    assert.match(plan, /SEARCH sync USING INDEX idx_official_snapshot_source_sync_status_source/);
+    assert.match(plan, new RegExp(`SEARCH direct_snapshot USING COVERING INDEX ${index}`));
+    assert.match(plan, /SEARCH o USING INDEX/);
+    assert.doesNotMatch(plan, new RegExp(`SCAN ${table}\\b`));
+    assert.doesNotMatch(plan, /SCAN official_snapshot_observations\b/);
+  }
+  assert.throws(
+    () => buildStorageCleanupRepresentationAuditSql('not_a_family'),
+    /unsupported storage cleanup audit family/
+  );
+});
+
+test('completed-source counts exclude incomplete sources and still report exact missing and excess representations', () => {
+  const { db } = createTestEnv();
+  for (const id of ['sync-a', 'sync-b', 'sync-c', 'sync-failed']) {
+    addSource(db, id, '2026-09-10T10:00:00Z');
+  }
+  addSync(db, 'sync-a', 2);
+  addSync(db, 'sync-b', 0);
+  addSync(db, 'sync-c', 1);
+  db.prepare(`
+    INSERT INTO official_snapshot_source_sync (source_record_id,status,horse_profile_count)
+    VALUES ('sync-failed','failed',0)
+  `).run();
+  db.prepare(`
+    INSERT INTO horses (id,canonical_name)
+    VALUES ('source-test-horse','Source Test Horse')
+  `).run();
+  db.prepare(`
+    INSERT INTO horse_profile_snapshots (id,horse_id,observed_at,source_record_id)
+    VALUES
+      ('snapshot-a','source-test-horse','2026-09-10T10:00:00Z','sync-a'),
+      ('snapshot-b','source-test-horse','2026-09-10T10:00:00Z','sync-b'),
+      ('snapshot-failed','source-test-horse','2026-09-10T10:00:00Z','sync-failed')
+  `).run();
+  db.prepare(`
+    INSERT INTO official_snapshot_observations
+      (source_record_id,snapshot_family,entity_key,scope_key,observed_at,snapshot_id,factual_changed)
+    VALUES
+      ('sync-a','horse_profile','source-test-horse','profile','2026-09-10T10:00:00Z','snapshot-a',1),
+      ('sync-failed','horse_profile','source-test-horse','profile','2026-09-10T10:00:00Z','snapshot-failed',1)
+  `).run();
+  const result = db.prepare(buildStorageCleanupRepresentationAuditSql('horse_profile')).get('horse_profile');
+  assert.deepEqual({ mismatch: result.mismatched_sources, missing: result.missing_representations, excess: result.excess_representations }, {
+    mismatch: 3,
+    missing: 2,
+    excess: 1
+  });
 });
 
 test('cleanup audit source-count paths use dedicated covering indexes', () => {
