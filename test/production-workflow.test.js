@@ -11,7 +11,8 @@ const cleanupAuditIndexMigrations = [
   '0052_storage_cleanup_horse_stat_source_index.sql',
   '0053_storage_cleanup_horse_record_source_index.sql',
   '0054_storage_cleanup_person_stat_source_index.sql',
-  '0055_storage_cleanup_sync_status_index.sql'
+  '0055_storage_cleanup_sync_status_index.sql',
+  '0056_storage_cleanup_profile_source_index_backstop.sql'
 ].map((name) => ({
   name,
   sql: readFileSync(new URL(`../migrations/${name}`, import.meta.url), 'utf8')
@@ -103,7 +104,7 @@ test('production release validates and deploys Cloudflare usage runtime secrets 
 });
 
 test('cleanup audit indexes are split into idempotent single-statement migrations', () => {
-  assert.equal(cleanupAuditIndexMigrations.length, 5);
+  assert.equal(cleanupAuditIndexMigrations.length, 6);
   for (const { name, sql } of cleanupAuditIndexMigrations) {
     assert.match(sql, /^CREATE INDEX IF NOT EXISTS /);
     assert.equal((sql.match(/\bCREATE\s+INDEX\b/gi) || []).length, 1, `${name} must create exactly one index`);
@@ -125,6 +126,7 @@ test('production release verifies required migrations and private observability 
   assert.match(releaseWorkflow, /0053_storage_cleanup_horse_record_source_index\.sql/);
   assert.match(releaseWorkflow, /0054_storage_cleanup_person_stat_source_index\.sql/);
   assert.match(releaseWorkflow, /0055_storage_cleanup_sync_status_index\.sql/);
+  assert.match(releaseWorkflow, /0056_storage_cleanup_profile_source_index_backstop\.sql/);
   assert.match(releaseWorkflow, /idx_horse_profile_snapshots_source_record/);
   assert.match(releaseWorkflow, /idx_horse_stat_snapshots_source_record/);
   assert.match(releaseWorkflow, /idx_horse_record_snapshots_source_record/);
