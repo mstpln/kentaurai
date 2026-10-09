@@ -1,3 +1,5 @@
+import { DEFAULT_COST_SAFETY_THRESHOLDS } from './cost-safety.js';
+
 const FAMILY_AUDITS = Object.freeze({
   horse_profile: {
     table: 'horse_profile_snapshots',
@@ -89,12 +91,24 @@ async function auditFamily(env, family, definition) {
     readCostByCheck[check] = Number.isFinite(read) && read >= 0 ? read : null;
     return response?.results?.[0] || null;
   }
+  const exceededReadSafety = () =>
+    Object.values(readCostByCheck).reduce((total, value) => total + Number(value || 0), 0)
+    > DEFAULT_COST_SAFETY_THRESHOLDS.rowsRead;
+  const incompleteAudit = () => ({
+    family,
+    auditIncomplete: true,
+    ok: false,
+    readCostByCheck
+  });
 
   const representation = await scalar(
     'representations',
     buildStorageCleanupRepresentationAuditSql(family),
     [family]
   );
+  // Do not spend more reads on subsequent checks after the current audit
+  // family has already exhausted the unchanged per-operation safety limit.
+  if (exceededReadSafety()) return incompleteAudit();
 
   const observation = await scalar('observations', `
     SELECT
@@ -106,6 +120,7 @@ async function auditFamily(env, family, definition) {
     LEFT JOIN source_records sr ON sr.id=o.source_record_id
     WHERE o.snapshot_family=?
   `, [family]);
+  if (exceededReadSafety()) return incompleteAudit();
 
   const directTimeline = await scalar('direct_timeline', `
     SELECT COUNT(*) AS n
