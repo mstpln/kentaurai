@@ -53,6 +53,73 @@ test('cleanup integrity audit accepts direct and observation-backed source repre
   });
 });
 
+test('cleanup integrity audit counts direct plus observation representations without UNION deduplication', async () => {
+  const { db, env } = createTestEnv();
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('duplicate-horse','Duplicate Horse')").run();
+
+  addSource(db, 'duplicate-source', '2026-09-10T10:00:00Z');
+  addSync(db, 'duplicate-source', 1);
+  db.prepare(`
+    INSERT INTO horse_profile_snapshots
+      (id,horse_id,observed_at,age_years,source_record_id)
+    VALUES ('duplicate-snapshot','duplicate-horse','2026-09-10T10:00:00Z',4,'duplicate-source')
+  `).run();
+  db.prepare(`
+    INSERT INTO official_snapshot_observations
+      (source_record_id,snapshot_family,entity_key,scope_key,observed_at,snapshot_id,factual_changed)
+    VALUES ('duplicate-source','horse_profile','duplicate-horse','profile','2026-09-10T10:00:00Z','duplicate-snapshot',0)
+  `).run();
+
+  const audit = await auditStorageCleanupIntegrity(env);
+  const profile = audit.families.find((family) => family.family === 'horse_profile');
+  assert.equal(audit.ok, false);
+  assert.equal(profile.mismatchedSources, 1);
+  assert.equal(profile.missingRepresentations, 0);
+  assert.equal(profile.excessRepresentations, 1);
+});
+
+test('cleanup audit source-count paths use dedicated covering indexes', () => {
+  const { db } = createTestEnv();
+  const indexes = new Set(
+    db.prepare("SELECT name FROM sqlite_master WHERE type='index'").all().map((row) => row.name)
+  );
+  for (const name of [
+    'idx_horse_profile_snapshots_source_record',
+    'idx_horse_stat_snapshots_source_record',
+    'idx_horse_record_snapshots_source_record',
+    'idx_person_stat_snapshots_source_record',
+    'idx_official_snapshot_source_sync_status_source'
+  ]) {
+    assert.ok(indexes.has(name), `missing ${name}`);
+  }
+
+  for (const [table, indexName] of [
+    ['horse_profile_snapshots', 'idx_horse_profile_snapshots_source_record'],
+    ['horse_stat_snapshots', 'idx_horse_stat_snapshots_source_record'],
+    ['horse_record_snapshots', 'idx_horse_record_snapshots_source_record'],
+    ['person_stat_snapshots', 'idx_person_stat_snapshots_source_record']
+  ]) {
+    const plan = db.prepare(`EXPLAIN QUERY PLAN SELECT COUNT(*) FROM ${table} WHERE source_record_id=?`).all('synthetic-source');
+    assert.match(
+      plan.map((row) => String(row.detail || '')).join('\n'),
+      new RegExp(indexName),
+      `${table} source-record lookup must use its cleanup audit index`
+    );
+  }
+
+  const syncPlan = db.prepare(`
+    EXPLAIN QUERY PLAN
+    SELECT source_record_id
+    FROM official_snapshot_source_sync
+    WHERE status='complete'
+    ORDER BY source_record_id
+  `).all();
+  assert.match(
+    syncPlan.map((row) => String(row.detail || '')).join('\n'),
+    /idx_official_snapshot_source_sync_status_source/
+  );
+});
+
 test('cleanup integrity audit detects missing, dangling and identity-mismatched provenance without exposing ids', async () => {
   const { db, env } = createTestEnv();
   db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('audit-horse','Audit Horse')").run();
@@ -103,6 +170,9 @@ test('cleanup integrity audit route is private and returns only sanitized aggreg
   assert.equal(body.ok, true);
   assert.equal(body.safetyStop, false);
   assert.ok(Array.isArray(body.families));
+  assert.equal(body.families.length, 4);
+  assert.ok(Number(body.cost?.rowsRead || 0) >= 0);
+  assert.ok(Number(body.cost?.durationMs || 0) >= 0);
 });
 
 
