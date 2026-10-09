@@ -131,7 +131,8 @@ export function createTestEnv() {
     '../../migrations/0052_storage_cleanup_horse_stat_source_index.sql',
     '../../migrations/0053_storage_cleanup_horse_record_source_index.sql',
     '../../migrations/0054_storage_cleanup_person_stat_source_index.sql',
-    '../../migrations/0055_storage_cleanup_sync_status_index.sql'
+    '../../migrations/0055_storage_cleanup_sync_status_index.sql',
+    '../../migrations/0056_storage_cleanup_profile_source_index_backstop.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }
