@@ -473,7 +473,14 @@ async function recentMorningStageCosts(env) {
   });
 }
 
-async function loadD1QueryInsights(fetchImpl, token, accountId, cycle, now) {
+function recentQueryInsightsWindow(now) {
+  const end = new Date(now);
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - 6);
+  return { start: dateKey(start), end: dateKey(end) };
+}
+
+async function loadD1QueryInsights(fetchImpl, token, accountId, window) {
   try {
     const data = await cloudflareJson(fetchImpl, 'https://api.cloudflare.com/client/v4/graphql', token, {
       method:'POST',
@@ -482,8 +489,8 @@ async function loadD1QueryInsights(fetchImpl, token, accountId, cycle, now) {
         variables: {
           accountTag: accountId,
           databaseId: KENTAURAI_D1_DATABASE_ID,
-          start: dateKey(cycle.start),
-          end: dateKey(now)
+          start: window.start,
+          end: window.end
         }
       })
     });
@@ -525,13 +532,15 @@ async function d1Usage(env, fetchImpl, cycle, now) {
   const r2Storage = Array.isArray(account.r2StorageAdaptiveGroups)
     ? currentR2Storage(account.r2StorageAdaptiveGroups)
     : null;
-  const queryInsights = await loadD1QueryInsights(fetchImpl, token, accountId, cycle, now);
+  const queryInsightsWindow = recentQueryInsightsWindow(now);
+  const queryInsights = await loadD1QueryInsights(fetchImpl, token, accountId, queryInsightsWindow);
   return {
     rowsRead: sumMetric(account.d1AnalyticsAdaptiveGroups, 'rowsRead'),
     rowsWritten: sumMetric(account.d1AnalyticsAdaptiveGroups, 'rowsWritten'),
     storageBytes: currentD1Storage(account.d1StorageAdaptiveGroups),
     dailyUsage: dailyD1Usage(account.d1AnalyticsAdaptiveGroups),
     queryInsights,
+    queryInsightsWindow,
     r2StorageBytes: r2Storage?.bytes ?? null,
     r2StorageObservedAt: r2Storage?.observedAt ?? null
   };
@@ -625,7 +634,7 @@ export async function getCloudflareUsage(env, options = {}) {
       billingPeriod: cycle,
       metrics,
       queryInsights: d1.queryInsights,
-      queryInsightsWindow: { start: cycle.start, end: nowIso(now) },
+      queryInsightsWindow: d1.queryInsightsWindow,
       additional: {
         billingCostAvailable,
         r2Available: Boolean(d1.r2StorageBytes != null || r2Storage?.available || r2ClassA?.available || r2ClassB?.available)
