@@ -1,3 +1,5 @@
+import { DEFAULT_COST_SAFETY_THRESHOLDS } from './cost-safety.js';
+
 const FAMILY_AUDITS = Object.freeze({
   horse_profile: {
     table: 'horse_profile_snapshots',
@@ -32,45 +34,83 @@ function number(value) {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 }
 
-async function auditFamily(env, family, definition) {
-  const representation = await env.DB.prepare(`
-    WITH represented_counts AS (
-      SELECT source_record_id,COUNT(*) AS n
-      FROM (
-        SELECT source_record_id
-        FROM ${definition.table}
-        UNION ALL
-        SELECT o.source_record_id
-        FROM official_snapshot_observations o
-        WHERE o.snapshot_family=?
-          AND NOT EXISTS (
-            SELECT 1
-            FROM ${definition.table} direct_snapshot
-            WHERE direct_snapshot.id=o.snapshot_id
-              AND direct_snapshot.source_record_id=o.source_record_id
-          )
-      )
-      GROUP BY source_record_id
+// Anchor counts to completed source sync rows. A global UNION over all historical
+// snapshots makes the safety preflight scan unrelated history on every dry-run.
+// The source and family indexes bound each lookup to the source being checked.
+export function buildStorageCleanupRepresentationAuditSql(family) {
+  const definition = FAMILY_AUDITS[String(family || '')];
+  if (!definition) throw new Error('unsupported storage cleanup audit family');
+  return `
+    WITH source_counts AS MATERIALIZED (
+      SELECT
+        sync.source_record_id,
+        sync.${definition.expectedColumn} AS expected_count,
+        (
+          SELECT COUNT(*)
+          FROM ${definition.table} direct_snapshot INDEXED BY idx_${definition.table}_source_record
+          WHERE direct_snapshot.source_record_id=sync.source_record_id
+        ) + (
+          SELECT COUNT(*)
+          FROM official_snapshot_observations o INDEXED BY sqlite_autoindex_official_snapshot_observations_1
+          WHERE o.source_record_id=sync.source_record_id
+            AND o.snapshot_family=?
+            AND NOT EXISTS (
+              SELECT 1
+              FROM ${definition.table} same_source_snapshot
+              WHERE same_source_snapshot.id=o.snapshot_id
+                AND same_source_snapshot.source_record_id=o.source_record_id
+            )
+        ) AS actual_count
+      FROM official_snapshot_source_sync sync INDEXED BY idx_official_snapshot_source_sync_status_source
+      WHERE sync.status='complete'
     )
     SELECT
       COUNT(*) AS mismatched_sources,
       COALESCE(SUM(
-        CASE WHEN sync.${definition.expectedColumn} > COALESCE(represented_counts.n,0)
-          THEN sync.${definition.expectedColumn} - COALESCE(represented_counts.n,0)
-          ELSE 0 END
+        CASE WHEN expected_count > actual_count
+          THEN expected_count - actual_count ELSE 0 END
       ),0) AS missing_representations,
       COALESCE(SUM(
-        CASE WHEN COALESCE(represented_counts.n,0) > sync.${definition.expectedColumn}
-          THEN COALESCE(represented_counts.n,0) - sync.${definition.expectedColumn}
-          ELSE 0 END
+        CASE WHEN actual_count > expected_count
+          THEN actual_count - expected_count ELSE 0 END
       ),0) AS excess_representations
-    FROM official_snapshot_source_sync sync
-    LEFT JOIN represented_counts ON represented_counts.source_record_id=sync.source_record_id
-    WHERE sync.status='complete'
-      AND sync.${definition.expectedColumn} <> COALESCE(represented_counts.n,0)
-  `).bind(family).first();
+    FROM source_counts
+    WHERE expected_count <> actual_count
+  `;
+}
 
-  const observation = await env.DB.prepare(`
+async function auditFamily(env, family, definition) {
+  // Each query returns one aggregate row. Preserve its provider-reported read
+  // cost so a failed dry-run identifies the costly check without exposing IDs.
+  const readCostByCheck = {};
+  async function scalar(check, sql, bindings = []) {
+    let statement = env.DB.prepare(sql);
+    if (bindings.length) statement = statement.bind(...bindings);
+    const response = await statement.all();
+    const read = Number(response?.meta?.rows_read);
+    readCostByCheck[check] = Number.isFinite(read) && read >= 0 ? read : null;
+    return response?.results?.[0] || null;
+  }
+  const exceededReadSafety = () =>
+    Object.values(readCostByCheck).reduce((total, value) => total + Number(value || 0), 0)
+    > DEFAULT_COST_SAFETY_THRESHOLDS.rowsRead;
+  const incompleteAudit = () => ({
+    family,
+    auditIncomplete: true,
+    ok: false,
+    readCostByCheck
+  });
+
+  const representation = await scalar(
+    'representations',
+    buildStorageCleanupRepresentationAuditSql(family),
+    [family]
+  );
+  // Do not spend more reads on subsequent checks after the current audit
+  // family has already exhausted the unchanged per-operation safety limit.
+  if (exceededReadSafety()) return incompleteAudit();
+
+  const observation = await scalar('observations', `
     SELECT
       SUM(CASE WHEN s.id IS NULL THEN 1 ELSE 0 END) AS dangling_observations,
       SUM(CASE WHEN s.id IS NOT NULL AND NOT (${definition.identityPredicate}) THEN 1 ELSE 0 END) AS identity_mismatch_observations,
@@ -79,14 +119,15 @@ async function auditFamily(env, family, definition) {
     LEFT JOIN ${definition.table} s ON s.id=o.snapshot_id
     LEFT JOIN source_records sr ON sr.id=o.source_record_id
     WHERE o.snapshot_family=?
-  `).bind(family).first();
+  `, [family]);
+  if (exceededReadSafety()) return incompleteAudit();
 
-  const directTimeline = await env.DB.prepare(`
+  const directTimeline = await scalar('direct_timeline', `
     SELECT COUNT(*) AS n
     FROM ${definition.table} s
     LEFT JOIN source_records sr ON sr.id=s.source_record_id
     WHERE sr.id IS NULL OR julianday(s.observed_at) IS NOT julianday(sr.fetched_at)
-  `).first();
+  `);
   const result = {
     family,
     mismatchedSources: number(representation?.mismatched_sources),
@@ -94,7 +135,8 @@ async function auditFamily(env, family, definition) {
     excessRepresentations: number(representation?.excess_representations),
     danglingObservations: number(observation?.dangling_observations),
     identityMismatchObservations: number(observation?.identity_mismatch_observations),
-    timestampMismatchRepresentations: number(observation?.observation_time_mismatches) + number(directTimeline?.n)
+    timestampMismatchRepresentations: number(observation?.observation_time_mismatches) + number(directTimeline?.n),
+    readCostByCheck
   };
   result.ok = result.mismatchedSources === 0
     && result.missingRepresentations === 0

@@ -521,7 +521,9 @@ test('runner includes sanitized D1 metrics when a cleanup request trips the per-
     if (req.method === 'GET' && url.pathname === '/v1/storage-cleanup/audit') {
       json(res, {
         ok: false,
-        families: [],
+        families: [{ family: 'horse_stat',
+          readCostByCheck: { representations: 182000, observations: 82000, direct_timeline: 11123 }
+        }],
         operations: { startedBatches: 0, strandedRawBatches: 0, ok: false },
         cost: { rowsRead: 275123, rowsWritten: 7, d1DurationMs: 123, durationMs: 43210 },
         safetyStop: true,
@@ -561,4 +563,5 @@ test('runner includes sanitized D1 metrics when a cleanup request trips the per-
   assert.match(stderr, /rowsRead=275123/);
   assert.match(stderr, /rowsWritten=7/);
   assert.match(stderr, /durationMs=43210/);
+  assert.match(stderr, /readChecks=representations=182000,observations=82000,direct_timeline=11123/);
 });
