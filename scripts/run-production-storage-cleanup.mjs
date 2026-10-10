@@ -9,8 +9,19 @@ const DEADLINE_RESERVE_MS = 2 * 60 * 1000;
 const WORKER_URL = process.env.WORKER_URL;
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 const SOURCE_SHA = process.env.GITHUB_SHA || '';
-const CLEANUP_SESSION_ID = process.env.CLEANUP_SESSION_ID || null;
-const CLEANUP_AUDIT_RUN_ID = process.env.CLEANUP_AUDIT_RUN_ID || null;
+// Dry-run has no execution session. Older UI listed the execute-only field
+// first, leading people to paste their audit UUID into continuation_session.
+const RAW_SESSION_ID = process.env.CLEANUP_SESSION_ID?.trim() || null;
+const RAW_AUDIT_ID = process.env.CLEANUP_AUDIT_RUN_ID?.trim() || null;
+if (MODE === 'dry-run' && RAW_SESSION_ID && RAW_AUDIT_ID) {
+  throw new Error('dry-run has two continuation IDs; fill only continuation_audit');
+}
+const recoveredMisfiledAuditId = MODE === 'dry-run' && RAW_SESSION_ID && !RAW_AUDIT_ID;
+const CLEANUP_SESSION_ID = MODE === 'dry-run' ? null : RAW_SESSION_ID;
+const CLEANUP_AUDIT_RUN_ID = RAW_AUDIT_ID || (recoveredMisfiledAuditId ? RAW_SESSION_ID : null);
+if (recoveredMisfiledAuditId) {
+  console.warn('dry-run: using the Audit-ID from continuation_session as continuation_audit; no execution session will be used.');
+}
 const CONFIRMATION = 'execute-reviewed-storage-cleanup-batch';
 const FAMILIES = ['horse_profile', 'horse_stat', 'horse_record', 'person_stat'];
 const TARGETS = [...FAMILIES, 'raw_object'];
@@ -52,6 +63,32 @@ function costBudgetReached() {
   return runCost.rowsRead > RUN_MAX_ROWS_READ || runCost.rowsWritten > RUN_MAX_ROWS_WRITTEN;
 }
 
+// Only known audit lifecycle failures are surfaced; never print arbitrary
+// Worker/database exception messages or private identifiers.
+function knownAuditStartFailure(message) {
+  const detail = String(message || '');
+  if (detail === 'cleanup audit run not found') {
+    return { code: 'audit_not_found', hint: 'Audit ID not found; check continuation_audit.' };
+  }
+  if (detail === 'cleanup audit source_sha changed; start a new audit') {
+    return { code: 'audit_source_changed', hint: 'The audit belongs to an earlier deployment.' };
+  }
+  if (detail === 'cleanup audit run expired; start a new audit') {
+    return { code: 'audit_expired', hint: 'The audit has passed its expiry.' };
+  }
+  if (detail === 'cleanup audit dataset changed; start a new audit') {
+    return { code: 'audit_dataset_changed', hint: 'Underlying data changed since the audit began.' };
+  }
+  const status = /^cleanup audit run is (stale|expired|exhausted); start a new audit$/.exec(detail);
+  if (status) return { code: 'audit_' + status[1], hint: 'This audit cannot be resumed.' };
+  if (detail === 'cleanup audit continuation limit reached') {
+    return { code: 'audit_exhausted', hint: 'The audit reached its continuation limit.' };
+  }
+  const active = /^cleanup audit is already running; resume it explicitly with audit_run_id ([0-9a-f-]{36})$/.exec(detail);
+  if (active) return { code: 'audit_already_running', hint: 'Resuming the currently running audit is allowed for dry-run.', auditRunId: active[1] };
+  return null;
+}
+
 async function request(path, { method = 'GET', body = null } = {}) {
   for (let attempt = 1; attempt <= 15; attempt += 1) {
     const response = await fetch(WORKER_URL + path, {
@@ -69,7 +106,16 @@ async function request(path, { method = 'GET', body = null } = {}) {
       await new Promise((resolve) => setTimeout(resolve, 2000));
       continue;
     }
-    if (!response.ok) throw new Error(`${path} failed with HTTP ${response.status}: ${String(data?.error || 'unknown_error').slice(0, 160)}`);
+    if (!response.ok) {
+      const known = path === '/v1/storage-cleanup/audit/start'
+        ? knownAuditStartFailure(data?.message) : null;
+      const errorCode = String(data?.error || 'unknown_error').replace(/[^a-z0-9_:-]/gi, '').slice(0, 48);
+      const error = new Error(path + ' failed with HTTP ' + response.status + ': ' + errorCode
+        + (known ? ' [' + known.code + '] ' + known.hint : ''));
+      error.cleanupReason = known?.code || null;
+      error.auditRunId = known?.auditRunId || null;
+      throw error;
+    }
     addRunCost(data?.cost);
     if (data?.safetyStop === true) {
       const cost = data?.cost || {};
@@ -136,10 +182,40 @@ async function verifyResumableIntegrity(session) {
   if (MODE === 'execute' && session?.auditVerified === true) {
     return { ready: true, auditRunId: null, progressMade: false };
   }
-  let audit = await post('/v1/storage-cleanup/audit/start', {
-    audit_run_id: CLEANUP_AUDIT_RUN_ID,
-    source_sha: SOURCE_SHA
-  });
+  let audit;
+  try {
+    audit = await post('/v1/storage-cleanup/audit/start', {
+      audit_run_id: CLEANUP_AUDIT_RUN_ID,
+      source_sha: SOURCE_SHA
+    });
+  } catch (error) {
+    // A manually triggered dry-run with no ID may resume an existing proof
+    // ONLY when the Worker itself selected it by the exact source SHA and
+    // current dataset revision. No arbitrary session or unverified ID reuse.
+    if (MODE === 'dry-run' && !CLEANUP_AUDIT_RUN_ID
+      && error?.cleanupReason === 'audit_already_running' && error?.auditRunId) {
+      console.warn('dry-run: resuming the active source/revision-bound audit without requiring an operator-entered ID.');
+      audit = await post('/v1/storage-cleanup/audit/start', {
+        audit_run_id: error.auditRunId,
+        source_sha: SOURCE_SHA
+      });
+    } else {
+      // A proof from an older release or changed dataset is never reused.
+      // Only dry-run may restart read-only verification; missing IDs, cost
+      // stops, exhausted proofs and execute mode continue to fail closed.
+      const safeResetReasons = new Set([
+        'audit_source_changed', 'audit_expired', 'audit_stale', 'audit_dataset_changed'
+      ]);
+      if (MODE !== 'dry-run' || !CLEANUP_AUDIT_RUN_ID
+        || !safeResetReasons.has(error?.cleanupReason)) throw error;
+      console.warn('dry-run: previous audit is not reusable (' + error.cleanupReason
+        + '); starting a new read-only audit with independent integrity verification.');
+      audit = await post('/v1/storage-cleanup/audit/start', {
+        audit_run_id: null,
+        source_sha: SOURCE_SHA
+      });
+    }
+  }
   const auditRunId = audit.auditRunId;
   let progressMade = false;
   while (audit?.complete !== true) {

@@ -53,3 +53,20 @@ test('manual production storage cleanup workflow stays gated, resumable and boun
   assert.doesNotMatch(runner, /storage-cleanup\/state/);
   assert.doesNotMatch(runner, /historical_all|backfill|repair/i);
 });
+
+test('GitHub dry-run continuation puts the audit ID first and recovers accidental session entry', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/production-storage-cleanup.yml', import.meta.url), 'utf8');
+  const runner = readFileSync(new URL('../scripts/run-production-storage-cleanup.mjs', import.meta.url), 'utf8');
+  const auditIndex = workflow.indexOf('      continuation_audit:');
+  const sessionIndex = workflow.indexOf('      continuation_session:');
+  assert.ok(auditIndex > 0 && sessionIndex > auditIndex, 'Audit-ID field must precede execute-only session field');
+  assert.match(workflow, /EXECUTE ONLY: internal cleanup session/);
+  assert.match(workflow, /Validate cleanup continuation fields before costly work/);
+  assert.match(workflow, /Dry-run has two IDs/);
+  assert.match(runner, /recoveredMisfiledAuditId = MODE === 'dry-run'/);
+  assert.match(runner, /audit_run_id: error\.auditRunId/);
+  assert.match(runner, /error\?\.cleanupReason === 'audit_already_running'/);
+  assert.match(runner, /safeResetReasons\.has\(error\?\.cleanupReason\)/);
+  assert.match(runner, /MODE !== 'dry-run' \|\| !CLEANUP_AUDIT_RUN_ID/);
+  assert.doesNotMatch(workflow, /schedule:/);
+});
