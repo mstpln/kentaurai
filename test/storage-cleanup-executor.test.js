@@ -313,7 +313,7 @@ test('snapshot cursor preserves sequential comparison across a bounded page boun
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM horse_profile_snapshots').get().n, 25);
 });
 
-test('raw executor verifies content, creates canonical object, rewrites references, then deletes legacy object', async () => {
+test('raw executor normalizes references atomically and retains physical legacy R2 objects', async () => {
   const { db, env, objects } = createTestEnv();
   const body = JSON.stringify({ synthetic: true });
   const hash = await sha256(body);
@@ -336,10 +336,11 @@ test('raw executor verifies content, creates canonical object, rewrites referenc
   });
   assert.deepEqual(
     { rewrites: result.referencesRewritten, created: result.canonicalObjectsCreated, deleted: result.legacyObjectsDeleted },
-    { rewrites: 2, created: 1, deleted: 1 }
+    { rewrites: 2, created: 1, deleted: 0 }
   );
   assert.ok(await env.RAW_BUCKET.head(canonicalKey));
-  assert.equal(await env.RAW_BUCKET.head(legacyKey), null);
+  assert.ok(await env.RAW_BUCKET.head(legacyKey));
+  assert.equal(result.objectDeletionDeferred, true);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM source_records').get().n, beforeCount);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM source_records WHERE raw_object_key=?').get(canonicalKey).n, 2);
 });
@@ -416,8 +417,8 @@ test('raw executor keeps the legacy object until every bounded reference batch i
     planToken: plan.planToken, confirmation: CLEANUP_CONFIRMATION
   });
   assert.equal(result.referencesRewritten, 2);
-  assert.equal(result.legacyObjectsDeleted, 1);
-  assert.equal(await env.RAW_BUCKET.head(legacyKey), null);
+  assert.equal(result.legacyObjectsDeleted, 0);
+  assert.ok(await env.RAW_BUCKET.head(legacyKey));
 });
 
 
@@ -452,6 +453,6 @@ test('raw executor keeps cursor on active page so later legacy groups are not sk
     if (!cursor && plan.referenceRewrites === 0) break;
   }
 
-  assert.equal(await env.RAW_BUCKET.head(legacyA), null);
-  assert.equal(await env.RAW_BUCKET.head(legacyB), null);
+  assert.ok(await env.RAW_BUCKET.head(legacyA));
+  assert.ok(await env.RAW_BUCKET.head(legacyB));
 });

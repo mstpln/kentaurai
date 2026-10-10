@@ -393,51 +393,120 @@ test('external mutation between plan and execution is rejected by the in-transac
   );
 });
 
-test('interrupted final raw-object deletion cannot retain reusable authorization', async () => {
+test('authorized raw normalization rebases in one D1 batch and never deletes R2', async () => {
   const { db, env, objects } = createTestEnv();
-  const sourceSha = 'c'.repeat(40);
-  const body = 'interrupted raw cleanup';
+  const sha = 'c'.repeat(40);
+  const body = 'retained raw source';
   const hash = await sha256(body);
   const legacyKey = `raw/synthetic/day/${hash}.bin`;
+  const canonicalKey = `raw/synthetic/${hash}.bin`;
   objects.set(legacyKey, { body, options: {} });
   db.prepare(`
     INSERT INTO source_records
       (id,source_type,fetched_at,raw_object_key,content_hash,quality_status)
-    VALUES ('interrupted-source','synthetic','2026-09-10T10:00:00Z',?,?, 'unknown')
+    VALUES ('retained-raw-source','synthetic','2026-09-10T10:00:00Z',?,?, 'unknown')
   `).run(legacyKey, hash);
-  const audit = await completeEmptyAudit(env, sourceSha);
+  const audit = await completeEmptyAudit(env, sha);
   const sessionId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
   db.prepare(`
     INSERT INTO storage_cleanup_sessions(id,source_sha,status,continuation_count,expires_at)
     VALUES (?,?,'running',1,'2099-01-01T00:00:00.000Z')
-  `).run(sessionId, sourceSha);
-  await bindStorageCleanupIntegrityAudit(env, {
-    session_id: sessionId, source_sha: sourceSha, audit_run_id: audit.auditRunId
-  });
-  const authorization = await assertStorageCleanupAuthorization(env, {
-    session_id: sessionId, source_sha: sourceSha
-  }, { requireSession: true });
+  `).run(sessionId, sha);
+  await bindStorageCleanupIntegrityAudit(env, { session_id: sessionId, source_sha: sha, audit_run_id: audit.auditRunId });
+  const auth = await assertStorageCleanupAuthorization(env, { session_id: sessionId, source_sha: sha }, { requireSession: true });
+  let deletes = 0;
+  env.RAW_BUCKET.delete = async () => { deletes++; throw new Error('unsafe delete reached'); };
   const plan = await planRawCleanupBatch(env, { sourceType: 'synthetic', limit: 25 });
-  env.RAW_BUCKET.delete = async () => { throw new Error('injected R2 delete interruption'); };
+  const result = await executeRawCleanupBatch(env, {
+    sourceType: 'synthetic', limit: 25, planToken: plan.planToken,
+    confirmation: CLEANUP_CONFIRMATION, _authorization: auth
+  });
+  assert.equal(result.referencesRewritten, 1);
+  assert.equal(result.legacyObjectsDeleted, 0);
+  assert.equal(result.objectDeletionDeferred, true);
+  assert.equal(deletes, 0);
+  assert.ok(await env.RAW_BUCKET.head(legacyKey));
+  assert.ok(await env.RAW_BUCKET.head(canonicalKey));
+  assert.equal(db.prepare("SELECT raw_object_key FROM source_records WHERE id='retained-raw-source'").get().raw_object_key, canonicalKey);
+  const current = db.prepare('SELECT revision FROM storage_cleanup_dataset_revision WHERE singleton=1').get().revision;
+  assert.equal(current, auth.datasetRevision + 1);
+  assert.equal(db.prepare('SELECT dataset_revision FROM storage_cleanup_audit_runs WHERE id=?').get(audit.auditRunId).dataset_revision, current);
+  const active = await assertStorageCleanupAuthorization(env, { session_id: sessionId, source_sha: sha }, { requireSession: true });
+  assert.equal(active.datasetRevision, current);
+  const batch = db.prepare("SELECT status,actual_changes FROM storage_cleanup_batches WHERE cleanup_kind='raw_object'").get();
+  assert.equal(batch.status, 'complete');
+  assert.equal(batch.actual_changes, 1);
+});
+
+test('unrelated import before guarded raw rewrite rolls back cleanup and preserves both source objects', async () => {
+  const { db, env, objects } = createTestEnv();
+  const sha = 'e'.repeat(40);
+  const body = 'concurrent raw source';
+  const hash = await sha256(body);
+  const legacyKey = `raw/synthetic/day/${hash}.bin`;
+  const canonicalKey = `raw/synthetic/${hash}.bin`;
+  objects.set(legacyKey, { body, options: {} });
+  db.prepare(`
+    INSERT INTO source_records
+      (id,source_type,fetched_at,raw_object_key,content_hash,quality_status)
+    VALUES ('race-raw-source','synthetic','2026-09-10T10:00:00Z',?,?, 'unknown')
+  `).run(legacyKey, hash);
+  const audit = await completeEmptyAudit(env, sha);
+  const sessionId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+  db.prepare(`
+    INSERT INTO storage_cleanup_sessions(id,source_sha,status,continuation_count,expires_at)
+    VALUES (?,?,'running',1,'2099-01-01T00:00:00.000Z')
+  `).run(sessionId, sha);
+  await bindStorageCleanupIntegrityAudit(env, { session_id: sessionId, source_sha: sha, audit_run_id: audit.auditRunId });
+  const auth = await assertStorageCleanupAuthorization(env, { session_id: sessionId, source_sha: sha }, { requireSession: true });
+  const plan = await planRawCleanupBatch(env, { sourceType: 'synthetic', limit: 25 });
+  const originalBatch = env.DB.batch.bind(env.DB);
+  env.DB.batch = async (statements) => {
+    env.DB.batch = originalBatch;
+    db.prepare(`
+      INSERT INTO source_records(id,source_type,fetched_at,quality_status)
+      VALUES ('interleaved-source','synthetic','2026-09-12T10:00:00Z','unknown')
+    `).run();
+    return originalBatch(statements);
+  };
   await assert.rejects(
     () => executeRawCleanupBatch(env, {
       sourceType: 'synthetic', limit: 25,
       planToken: plan.planToken, confirmation: CLEANUP_CONFIRMATION,
-      _authorization: authorization
+      _authorization: auth
     }),
-    /injected R2 delete interruption/
+    /authorization revision guard failed/
   );
-  assert.equal(db.prepare(`
-    SELECT status FROM storage_cleanup_batches
-    WHERE cleanup_kind='raw_object' ORDER BY created_at DESC LIMIT 1
-  `).get().status, 'references_rewritten');
+  assert.equal(db.prepare("SELECT raw_object_key FROM source_records WHERE id='race-raw-source'").get().raw_object_key, legacyKey);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM storage_cleanup_batches").get().n, 0);
+  assert.ok(await env.RAW_BUCKET.head(legacyKey));
+  assert.ok(await env.RAW_BUCKET.head(canonicalKey));
   await assert.rejects(
-    () => assertStorageCleanupAuthorization(env, {
-      session_id: sessionId, source_sha: sourceSha
-    }, { requireSession: true }),
+    () => assertStorageCleanupAuthorization(env, { session_id: sessionId, source_sha: sha }, { requireSession: true }),
     /stale/
   );
 });
+
+test('many imported source rows only invalidate an active audit revision once', async () => {
+  const { db, env } = createTestEnv();
+  const sha = 'f'.repeat(40);
+  const audit = await completeEmptyAudit(env, sha);
+  const before = db.prepare('SELECT revision FROM storage_cleanup_dataset_revision WHERE singleton=1').get().revision;
+  const insert = db.prepare(`
+    INSERT INTO source_records(id,source_type,fetched_at,quality_status)
+    VALUES (?,'synthetic','2026-09-13T10:00:00Z','unknown')
+  `);
+  db.exec('BEGIN');
+  for (let i = 0; i < 200; i++) insert.run(`many-new-${String(i).padStart(4,'0')}`);
+  db.exec('COMMIT');
+  const after = db.prepare('SELECT revision FROM storage_cleanup_dataset_revision WHERE singleton=1').get().revision;
+  assert.equal(after, before + 1);
+  await assert.rejects(
+    () => assertStorageCleanupAuthorization(env, { audit_run_id: audit.auditRunId, source_sha: sha }),
+    /stale/
+  );
+});
+
 
 test('HTTP audit route finalizes only after measured page settlement', async () => {
   const { db, env } = createTestEnv();

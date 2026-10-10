@@ -1,3 +1,9 @@
+## PR #301 follow-up: guarded raw normalization and bounded revision writes
+- New work continues from published HEAD 4e80dedc; unpublished local Codex edits were not available here.
+- Raw cleanup preserves legacy R2 objects; reference normalization is guarded and committed in one D1 transaction with the exact session/audit rebase. R2 deletion is deferred to separately reviewed GC.
+- Revision triggers invalidate current proofs once per unverified mutation epoch, avoiding unbounded hot singleton writes during bulk import.
+- This is pre-production work only. No merge, deployment or cleanup is part of this implementation.
+
 ## Resumable storage-cleanup integrity audit candidate
 - Branch: `codex/storage-cleanup-cost-safety`, based on deployed production release commit `b0a847dcf070b72f9e68c5bd303675c5090536f7`.
 - Production dry-run #13 confirmed that PR #300 was partial: `horse_profile` still read 436,499 rows (173,941 representations, 232 observations and 262,326 direct-timeline rows) before any planning or mutation.

@@ -74,7 +74,7 @@ function cleanupAuthorization(options) {
   };
 }
 
-function authorizationGuard(env, authorization, expectedCurrentRevision = authorization?.datasetRevision) {
+function authorizationGuard(env, authorization) {
   if (!authorization) return null;
   const guardId = crypto.randomUUID();
   return {
@@ -88,7 +88,7 @@ function authorizationGuard(env, authorization, expectedCurrentRevision = author
       authorization.sessionId,
       authorization.auditRunId,
       authorization.datasetRevision,
-      Number(expectedCurrentRevision)
+      authorization.datasetRevision
     )
   };
 }
@@ -110,13 +110,6 @@ function authorizationRebaseStatements(env, authorization, guard) {
     `).bind(authorization.sessionId, authorization.auditRunId, authorization.datasetRevision),
     env.DB.prepare('DELETE FROM storage_cleanup_revision_guards WHERE id=?').bind(guard.id)
   ];
-}
-
-async function datasetRevision(env) {
-  const row = await env.DB.prepare('SELECT revision FROM storage_cleanup_dataset_revision WHERE singleton=1').first();
-  const value = Number(row?.revision);
-  if (!Number.isInteger(value) || value < 0) throw new Error('cleanup dataset revision is unavailable');
-  return value;
 }
 
 function snapshotPartitionKey(row, columns) {
@@ -421,6 +414,7 @@ async function detailedRawPlan(env, { sourceType = null, limit, cursor = null })
       legacyReferences,
       canonicalReferences,
       redundantObjectCandidates: selected && legacyReferences === references.length ? 1 : 0,
+      objectDeletionDeferred: true,
       conflictsSkipped: warnings.filter((warning) => warning !== 'limit_reached_results_incomplete').length,
       truncated,
       warnings: [...new Set(warnings)].sort(),
@@ -501,72 +495,50 @@ export async function executeRawCleanupBatch(env, options = {}) {
     canonicalObjectsCreated = 1;
   }
   verifiedCanonicalHead(canonicalHead, selected.hash, selected.row.source_type, legacyHead);
+  // A single D1 transaction applies the revision guard, the reference
+  // rewrite, batch completion and audit/session rebase. R2 cannot participate
+  // in that transaction, so physical legacy object deletion is deferred.
   const batchId = crypto.randomUUID();
   const ids = plan.references.map((row) => row.id);
-  let phaseRevision = authorization?.datasetRevision ?? null;
-  if (ids.length > 0) {
-    const placeholders = ids.map(() => '?').join(',');
-    const guard = authorizationGuard(env, authorization);
-    const statements = [];
-    if (guard) statements.push(guard.statement);
-    statements.push(env.DB.prepare(`
-        INSERT INTO storage_cleanup_batches
-          (id,cleanup_kind,target,plan_token,expected_changes,status,
-           legacy_key,canonical_key,legacy_etag,canonical_etag,object_verified)
-        VALUES (?,'raw_object',?,?,?,'started',?,?,?,?,1)
-      `).bind(
-        batchId, selected.row.source_type, plan.planToken, ids.length,
-        selected.legacyKey, selected.canonicalKey,
-        typeof legacyHead.etag === 'string' ? legacyHead.etag : null,
-        typeof canonicalHead.etag === 'string' ? canonicalHead.etag : null
-      ));
-    statements.push(env.DB.prepare(`
-        UPDATE source_records SET raw_object_key=?
-        WHERE id IN (${placeholders}) AND raw_object_key=? AND source_type=? AND content_hash=?
-      `).bind(selected.canonicalKey, ...ids, selected.legacyKey, selected.row.source_type, selected.hash));
-    statements.push(env.DB.prepare(`
-        UPDATE storage_cleanup_batches
-        SET actual_changes=changes(),status='references_rewritten'
-        WHERE id=?
-      `).bind(batchId));
-    if (guard) statements.push(env.DB.prepare('DELETE FROM storage_cleanup_revision_guards WHERE id=?').bind(guard.id));
-    await env.DB.batch(statements);
-    phaseRevision = authorization ? await datasetRevision(env) : null;
-  }
-  const remaining = await env.DB.prepare('SELECT COUNT(*) AS n FROM source_records WHERE raw_object_key=?')
-    .bind(selected.legacyKey).first();
-  let legacyObjectsDeleted = 0;
-  if (Number(remaining?.n || 0) === 0) {
-    await env.RAW_BUCKET.delete(selected.legacyKey);
-    if (await env.RAW_BUCKET.head(selected.legacyKey)) throw new Error('legacy R2 object deletion could not be verified');
-    legacyObjectsDeleted = 1;
-    if (ids.length > 0) {
-      const guard = authorizationGuard(env, authorization, phaseRevision);
-      const statements = [];
-      if (guard) statements.push(guard.statement);
-      statements.push(env.DB.prepare(`
-        UPDATE storage_cleanup_batches
-        SET status='complete',completed_at=CURRENT_TIMESTAMP
-        WHERE id=?
-      `).bind(batchId));
-      statements.push(...authorizationRebaseStatements(env, authorization, guard));
-      await env.DB.batch(statements);
-    }
-  } else if (authorization && ids.length > 0) {
-    // A bounded rewrite can legitimately leave more references for the next
-    // reviewed batch.  Rebase only after verifying that no unrelated D1
-    // mutation occurred between the guarded rewrite and this checkpoint.
-    const guard = authorizationGuard(env, authorization, phaseRevision);
-    await env.DB.batch([
-      guard.statement,
-      ...authorizationRebaseStatements(env, authorization, guard)
-    ]);
-  }
+  if (ids.length === 0) throw new Error('raw cleanup plan contains no verified references');
+  const placeholders = ids.map(() => '?').join(',');
+  const guard = authorizationGuard(env, authorization);
+  const statements = [];
+  if (guard) statements.push(guard.statement);
+  statements.push(env.DB.prepare(`
+    INSERT INTO storage_cleanup_batches
+      (id,cleanup_kind,target,plan_token,expected_changes,status,
+       legacy_key,canonical_key,legacy_etag,canonical_etag,object_verified)
+    VALUES (?,'raw_object',?,?,?,'started',?,?,?,?,1)
+  `).bind(
+    batchId, selected.row.source_type, plan.planToken, ids.length,
+    selected.legacyKey, selected.canonicalKey,
+    typeof legacyHead.etag === 'string' ? legacyHead.etag : null,
+    typeof canonicalHead.etag === 'string' ? canonicalHead.etag : null
+  ));
+  statements.push(env.DB.prepare(`
+    UPDATE source_records SET raw_object_key=?
+    WHERE id IN (${placeholders}) AND raw_object_key=? AND source_type=? AND content_hash=?
+  `).bind(selected.canonicalKey, ...ids, selected.legacyKey, selected.row.source_type, selected.hash));
+  statements.push(env.DB.prepare(`
+    UPDATE storage_cleanup_batches
+    SET actual_changes=changes(),status='complete',completed_at=CURRENT_TIMESTAMP
+    WHERE id=?
+  `).bind(batchId));
+  statements.push(...authorizationRebaseStatements(env, authorization, guard));
+  await env.DB.batch(statements);
+
+  const remaining = await env.DB.prepare(
+    'SELECT COUNT(*) AS n FROM source_records WHERE raw_object_key=?'
+  ).bind(selected.legacyKey).first();
+  const legacyObjectsDeleted = 0;
+
   return {
     executed: true,
     referencesRewritten: ids.length,
     canonicalObjectsCreated,
     legacyObjectsDeleted,
+    objectDeletionDeferred: true,
     legacyReferencesRemaining: Number(remaining?.n || 0),
     nextCursor: plan.selected ? (options.cursor || null) : plan.pageCursor
   };

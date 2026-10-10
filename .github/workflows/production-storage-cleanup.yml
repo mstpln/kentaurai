@@ -252,7 +252,7 @@ jobs:
               echo "No cleanup mutation was authorized."
             fi
           elif [ "${{ steps.cleanup.outputs.cleanup_complete }}" = "true" ]; then
-            echo "Cleanup completed across all snapshot families and raw storage."
+            echo "Cleanup completed snapshot work and raw reference normalization; physical R2 deletion remains deferred."
           elif [ "${{ steps.cleanup.outputs.cost_budget_stop }}" = "true" ]; then
             echo "Cleanup stopped at the cumulative D1 run-cost budget; no automatic continuation was queued."
           elif [ "${{ steps.cleanup.outputs.progress_made }}" = "true" ]; then

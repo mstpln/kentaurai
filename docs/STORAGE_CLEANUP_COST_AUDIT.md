@@ -1,3 +1,21 @@
+## Pre-production D1/R2 consistency and revision hardening
+
+Physical deletion of legacy R2 objects is **deferred**. D1 and R2 do not
+share an atomic transaction. The cleanup executor now verifies/copies the
+canonical object and completes guarded source-reference normalization plus
+audit/session revision rebase in **one D1 transaction**. Legacy R2 objects
+remain available even when no references remain. No R2 byte savings are
+claimed; a separately reviewed, reference-fenced garbage collector is
+required before any R2 objects may be physically removed.
+
+All relevant revision triggers now increment the global singleton only
+while at least one current, unexpired audit proof is at the current revision.
+The first mutation invalidates all such proofs; additional imports into the
+already-invalidated dataset avoid repeated hot-row revision writes. A single
+guarded cleanup batch moves the revision once and rebases only its session
+before committing. Unknown external writes cannot enter a distinct D1
+transaction midway through this operation.
+
 # Storage cleanup cost-safety audit
 
 ## Verified baseline and incident evidence

@@ -73,6 +73,9 @@ END;
 -- The executor inserts a short-lived guard as the first statement in its D1
 -- batch.  The trigger makes authorization/revision validation part of the
 -- same transaction as the destructive mutation.
+CREATE INDEX IF NOT EXISTS idx_cleanup_audit_runs_live_revision
+  ON storage_cleanup_audit_runs(dataset_revision,status,expires_at);
+
 CREATE TABLE storage_cleanup_revision_guards (
   id TEXT PRIMARY KEY,
   session_id TEXT NOT NULL,
@@ -99,6 +102,10 @@ BEGIN
     WHERE d.singleton=1
       AND d.revision=NEW.expected_current_revision
       AND r.dataset_revision=NEW.audit_revision
+      AND r.dataset_revision=d.revision
+      AND NEW.expected_current_revision=NEW.audit_revision
+      AND r.source_sha=s.source_sha
+      AND a.source_sha=s.source_sha
       AND julianday(r.expires_at)>julianday('now')
       AND julianday(s.expires_at)>julianday('now')
   ) THEN RAISE(ABORT,'cleanup authorization revision guard failed') END;
@@ -106,72 +113,240 @@ END;
 
 -- Every D1 mutation that can change audit results, provenance, cleanup plans,
 -- raw references or operational integrity advances the same monotonic fence.
-CREATE TRIGGER storage_cleanup_source_record_revision_insert AFTER INSERT ON source_records BEGIN
+CREATE TRIGGER storage_cleanup_source_record_revision_insert AFTER INSERT ON source_records
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
+BEGIN
   UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
 END;
-CREATE TRIGGER storage_cleanup_source_record_revision_update AFTER UPDATE ON source_records BEGIN
+CREATE TRIGGER storage_cleanup_source_record_revision_update AFTER UPDATE ON source_records
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
+BEGIN
   UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
 END;
-CREATE TRIGGER storage_cleanup_source_record_revision_delete AFTER DELETE ON source_records BEGIN
-  UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
-END;
-
-CREATE TRIGGER storage_cleanup_horse_profile_revision_insert AFTER INSERT ON horse_profile_snapshots BEGIN
-  UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
-END;
-CREATE TRIGGER storage_cleanup_horse_profile_revision_update AFTER UPDATE ON horse_profile_snapshots BEGIN
-  UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
-END;
-CREATE TRIGGER storage_cleanup_horse_profile_revision_delete AFTER DELETE ON horse_profile_snapshots BEGIN
-  UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
-END;
-
-CREATE TRIGGER storage_cleanup_horse_stat_revision_insert AFTER INSERT ON horse_stat_snapshots BEGIN
-  UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
-END;
-CREATE TRIGGER storage_cleanup_horse_stat_revision_update AFTER UPDATE ON horse_stat_snapshots BEGIN
-  UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
-END;
-CREATE TRIGGER storage_cleanup_horse_stat_revision_delete AFTER DELETE ON horse_stat_snapshots BEGIN
-  UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
-END;
-
-CREATE TRIGGER storage_cleanup_horse_record_revision_insert AFTER INSERT ON horse_record_snapshots BEGIN
-  UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
-END;
-CREATE TRIGGER storage_cleanup_horse_record_revision_update AFTER UPDATE ON horse_record_snapshots BEGIN
-  UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
-END;
-CREATE TRIGGER storage_cleanup_horse_record_revision_delete AFTER DELETE ON horse_record_snapshots BEGIN
+CREATE TRIGGER storage_cleanup_source_record_revision_delete AFTER DELETE ON source_records
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
+BEGIN
   UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
 END;
 
-CREATE TRIGGER storage_cleanup_person_stat_revision_insert AFTER INSERT ON person_stat_snapshots BEGIN
+CREATE TRIGGER storage_cleanup_horse_profile_revision_insert AFTER INSERT ON horse_profile_snapshots
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
+BEGIN
   UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
 END;
-CREATE TRIGGER storage_cleanup_person_stat_revision_update AFTER UPDATE ON person_stat_snapshots BEGIN
+CREATE TRIGGER storage_cleanup_horse_profile_revision_update AFTER UPDATE ON horse_profile_snapshots
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
+BEGIN
   UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
 END;
-CREATE TRIGGER storage_cleanup_person_stat_revision_delete AFTER DELETE ON person_stat_snapshots BEGIN
+CREATE TRIGGER storage_cleanup_horse_profile_revision_delete AFTER DELETE ON horse_profile_snapshots
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
+BEGIN
   UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
 END;
 
-CREATE TRIGGER storage_cleanup_observation_revision_insert AFTER INSERT ON official_snapshot_observations BEGIN
+CREATE TRIGGER storage_cleanup_horse_stat_revision_insert AFTER INSERT ON horse_stat_snapshots
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
+BEGIN
   UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
 END;
-CREATE TRIGGER storage_cleanup_observation_revision_update AFTER UPDATE ON official_snapshot_observations BEGIN
+CREATE TRIGGER storage_cleanup_horse_stat_revision_update AFTER UPDATE ON horse_stat_snapshots
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
+BEGIN
   UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
 END;
-CREATE TRIGGER storage_cleanup_observation_revision_delete AFTER DELETE ON official_snapshot_observations BEGIN
+CREATE TRIGGER storage_cleanup_horse_stat_revision_delete AFTER DELETE ON horse_stat_snapshots
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
+BEGIN
   UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
 END;
 
-CREATE TRIGGER storage_cleanup_batch_revision_insert AFTER INSERT ON storage_cleanup_batches BEGIN
+CREATE TRIGGER storage_cleanup_horse_record_revision_insert AFTER INSERT ON horse_record_snapshots
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
+BEGIN
   UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
 END;
-CREATE TRIGGER storage_cleanup_batch_revision_update AFTER UPDATE ON storage_cleanup_batches BEGIN
+CREATE TRIGGER storage_cleanup_horse_record_revision_update AFTER UPDATE ON horse_record_snapshots
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
+BEGIN
   UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
 END;
-CREATE TRIGGER storage_cleanup_batch_revision_delete AFTER DELETE ON storage_cleanup_batches BEGIN
+CREATE TRIGGER storage_cleanup_horse_record_revision_delete AFTER DELETE ON horse_record_snapshots
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
+BEGIN
+  UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
+END;
+
+CREATE TRIGGER storage_cleanup_person_stat_revision_insert AFTER INSERT ON person_stat_snapshots
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
+BEGIN
+  UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
+END;
+CREATE TRIGGER storage_cleanup_person_stat_revision_update AFTER UPDATE ON person_stat_snapshots
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
+BEGIN
+  UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
+END;
+CREATE TRIGGER storage_cleanup_person_stat_revision_delete AFTER DELETE ON person_stat_snapshots
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
+BEGIN
+  UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
+END;
+
+CREATE TRIGGER storage_cleanup_observation_revision_insert AFTER INSERT ON official_snapshot_observations
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
+BEGIN
+  UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
+END;
+CREATE TRIGGER storage_cleanup_observation_revision_update AFTER UPDATE ON official_snapshot_observations
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
+BEGIN
+  UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
+END;
+CREATE TRIGGER storage_cleanup_observation_revision_delete AFTER DELETE ON official_snapshot_observations
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
+BEGIN
+  UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
+END;
+
+CREATE TRIGGER storage_cleanup_batch_revision_insert AFTER INSERT ON storage_cleanup_batches
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
+BEGIN
+  UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
+END;
+CREATE TRIGGER storage_cleanup_batch_revision_update AFTER UPDATE ON storage_cleanup_batches
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
+BEGIN
+  UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
+END;
+CREATE TRIGGER storage_cleanup_batch_revision_delete AFTER DELETE ON storage_cleanup_batches
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
+BEGIN
   UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1;
 END;

@@ -14,6 +14,13 @@ VALUES (1,0);
 
 CREATE TRIGGER storage_cleanup_sync_revision_insert
 AFTER INSERT ON official_snapshot_source_sync
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
 BEGIN
   UPDATE storage_cleanup_dataset_revision
   SET revision=revision+1,updated_at=CURRENT_TIMESTAMP
@@ -22,6 +29,13 @@ END;
 
 CREATE TRIGGER storage_cleanup_sync_revision_update
 AFTER UPDATE ON official_snapshot_source_sync
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
 BEGIN
   UPDATE storage_cleanup_dataset_revision
   SET revision=revision+1,updated_at=CURRENT_TIMESTAMP
@@ -30,6 +44,13 @@ END;
 
 CREATE TRIGGER storage_cleanup_sync_revision_delete
 AFTER DELETE ON official_snapshot_source_sync
+WHEN EXISTS (
+  SELECT 1 FROM storage_cleanup_audit_runs a
+  JOIN storage_cleanup_dataset_revision d
+    ON d.singleton=1 AND d.revision=a.dataset_revision
+  WHERE a.status IN ('running','complete')
+    AND julianday(a.expires_at)>julianday('now')
+)
 BEGIN
   UPDATE storage_cleanup_dataset_revision
   SET revision=revision+1,updated_at=CURRENT_TIMESTAMP
