@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createTestEnv } from './helpers/d1.js';
 import {
   CLEANUP_CONFIRMATION,
+  buildBoundedRawReferenceCountSql,
   executeRawCleanupBatch,
   executeSnapshotCleanupBatch,
   planRawCleanupBatch,
@@ -455,4 +456,28 @@ test('raw executor keeps cursor on active page so later legacy groups are not sk
 
   assert.ok(await env.RAW_BUCKET.head(legacyA));
   assert.ok(await env.RAW_BUCKET.head(legacyB));
+});
+
+test('raw planning is index-bounded even when one legacy R2 key has a long reference list', async () => {
+  const { db, env, objects } = createTestEnv();
+  const body = 'many-shared-raw-source-references';
+  const hash = await sha256(body);
+  const legacyKey = `raw/synthetic_provider/day/${hash}.bin`;
+  objects.set(legacyKey, { body, options: {} });
+  for (let i = 0; i < 250; i++) {
+    addSource(db, `bounded-ref-${String(i).padStart(4, '0')}`,
+      '2026-09-10T10:00:00Z', legacyKey, hash, 'synthetic_provider');
+  }
+  const sql = buildBoundedRawReferenceCountSql();
+  const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(
+    legacyKey, 26, `raw/synthetic_provider/${hash}.bin`, 26
+  ).map((row) => String(row.detail || '')).join('\n');
+  assert.match(plan, /idx_source_records_raw_object_key/);
+  assert.doesNotMatch(plan, /SCAN source_records(?! USING COVERING INDEX)/);
+  const report = await planRawCleanupBatch(env, { sourceType: 'synthetic_provider', limit: 25 });
+  assert.equal(report.referenceRewrites, 25);
+  assert.equal(report.legacyReferences, 26, 'reported reference count is a bounded lower bound');
+  assert.equal(report.referenceCountsTruncated, true);
+  assert.equal(report.redundantObjectCandidates, 0, 'cannot infer R2 garbage eligibility from a truncated sample');
+  assert.equal(report.objectDeletionDeferred, true);
 });

@@ -1,3 +1,15 @@
+### Raw reference planning is bounded even for highly shared objects
+
+A key shared by hundreds of thousands of source records must not trigger a
+global COUNT. The planner now uses two covering raw-key index samples,
+each capped at 26 rows; `legacyReferences`/`canonicalReferences` in the
+dry-run report are **lower bounds** whenever `referenceCountsTruncated`
+is true, not invented exact totals. Physical R2 deletion is disabled, so a
+truncated count is not used to authorize object deletion. The rewrite still
+returns at most 25 source IDs per batch; reference conflicts are rejected.
+The number of references therefore increases pages rather than per-request
+reads. The worker retains D1's actual cost safety stop as final authority.
+
 ## Pre-production D1/R2 consistency and revision hardening
 
 Physical deletion of legacy R2 objects is **deferred**. D1 and R2 do not

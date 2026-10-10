@@ -1,3 +1,5 @@
+- Additional raw cleanup cost fix: replace full historical raw-key reference COUNT with two 26-row indexed samples; mark sampled totals as truncated and never infer R2 deletion eligibility from incomplete counts.
+
 ## PR #301 follow-up: guarded raw normalization and bounded revision writes
 - New work continues from published HEAD 4e80dedc; unpublished local Codex edits were not available here.
 - Raw cleanup preserves legacy R2 objects; reference normalization is guarded and committed in one D1 transaction with the exact session/audit rebase. R2 deletion is deferred to separately reviewed GC.

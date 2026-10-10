@@ -330,6 +330,22 @@ function hashFromKey(value) {
   return match ? match[1].toLowerCase() : null;
 }
 
+export function buildBoundedRawReferenceCountSql() {
+  // Both scalar subqueries stop at MAX_BATCH+1 indexed rows. A COUNT over
+  // the complete historical raw key would make planning unbounded again.
+  return `
+    SELECT
+      (SELECT COUNT(*) FROM (
+        SELECT id FROM source_records INDEXED BY idx_source_records_raw_object_key
+        WHERE raw_object_key=? LIMIT ?
+      )) AS legacy_n,
+      (SELECT COUNT(*) FROM (
+        SELECT id FROM source_records INDEXED BY idx_source_records_raw_object_key
+        WHERE raw_object_key=? LIMIT ?
+      )) AS canonical_n
+  `;
+}
+
 async function detailedRawPlan(env, { sourceType = null, limit, cursor = null }) {
   if (!env?.DB || !env?.RAW_BUCKET) throw new Error('DB and RAW_BUCKET are required');
   const rowLimit = boundedCleanupLimit(limit, MAX_BATCH);
@@ -366,12 +382,8 @@ async function detailedRawPlan(env, { sourceType = null, limit, cursor = null })
   let legacyReferences = 0;
   let canonicalReferences = 0;
   if (selected) {
-    const count = await env.DB.prepare(`
-      SELECT
-        SUM(CASE WHEN raw_object_key=? THEN 1 ELSE 0 END) AS legacy_n,
-        SUM(CASE WHEN raw_object_key=? THEN 1 ELSE 0 END) AS canonical_n
-      FROM source_records WHERE raw_object_key IN (?,?)
-    `).bind(selected.legacyKey, selected.canonicalKey, selected.legacyKey, selected.canonicalKey).first();
+    const count = await env.DB.prepare(buildBoundedRawReferenceCountSql())
+      .bind(selected.legacyKey, MAX_BATCH + 1, selected.canonicalKey, MAX_BATCH + 1).first();
     legacyReferences = Number(count?.legacy_n || 0);
     canonicalReferences = Number(count?.canonical_n || 0);
     const result = await env.DB.prepare(`
@@ -394,7 +406,8 @@ async function detailedRawPlan(env, { sourceType = null, limit, cursor = null })
     canonicalKey: selected.canonicalKey,
     referenceIds: references.map((row) => row.id),
     legacyReferences,
-    canonicalReferences
+    canonicalReferences,
+    referenceCountsTruncated: legacyReferences > MAX_BATCH || canonicalReferences > MAX_BATCH
   } : { kind: 'raw_object', cursor: cursor || null, sourceType: normalizedSourceType, empty: true, pageCursor };
   const planToken = await tokenFor(material);
   return {
@@ -413,7 +426,8 @@ async function detailedRawPlan(env, { sourceType = null, limit, cursor = null })
       referenceRewrites: references.length,
       legacyReferences,
       canonicalReferences,
-      redundantObjectCandidates: selected && legacyReferences === references.length ? 1 : 0,
+      referenceCountsTruncated: legacyReferences > MAX_BATCH || canonicalReferences > MAX_BATCH,
+      redundantObjectCandidates: selected && legacyReferences <= MAX_BATCH && legacyReferences === references.length ? 1 : 0,
       objectDeletionDeferred: true,
       conflictsSkipped: warnings.filter((warning) => warning !== 'limit_reached_results_incomplete').length,
       truncated,
