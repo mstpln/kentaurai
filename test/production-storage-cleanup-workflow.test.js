@@ -70,3 +70,34 @@ test('GitHub dry-run continuation puts the audit ID first and recovers accidenta
   assert.match(runner, /MODE !== 'dry-run' \|\| !CLEANUP_AUDIT_RUN_ID/);
   assert.doesNotMatch(workflow, /schedule:/);
 });
+
+
+test('one-click read-only audits safely dispatch another bounded workflow without enabling cleanup', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/production-storage-cleanup.yml', import.meta.url), 'utf8');
+  const runner = readFileSync(new URL('../scripts/run-production-storage-cleanup.mjs', import.meta.url), 'utf8');
+  const dispatcher = readFileSync(new URL('../scripts/queue-production-storage-audit.mjs', import.meta.url), 'utf8');
+  assert.match(workflow, /Queue next bounded READ-ONLY audit continuation/);
+  assert.match(workflow, /id: queue_audit/);
+  assert.match(workflow, /steps\.cleanup\.outputs\.audit_incomplete == 'true' && steps\.cleanup\.outputs\.progress_made == 'true'/);
+  assert.match(workflow, /steps\.cleanup\.outputs\.cost_budget_stop != 'true' && steps\.cleanup\.outputs\.audit_safety_stop != 'true'/);
+  assert.match(workflow, /AUDIT_CONTINUATION_COUNT: \$\{\{ steps\.cleanup\.outputs\.audit_continuation_count \}\}/);
+  assert.match(workflow, /AUDIT_MAX_CONTINUATIONS: \$\{\{ steps\.cleanup\.outputs\.audit_max_continuations \}\}/);
+  assert.match(workflow, /AUDIT_EXPIRES_AT: \$\{\{ steps\.cleanup\.outputs\.audit_expires_at \}\}/);
+  assert.match(workflow, /steps\.queue_audit\.outcome == 'skipped'/);
+  assert.match(workflow, /CLEANUP_TRIGGER_CONFIRMATION: \$\{\{ inputs\.confirmation \}\}/);
+  assert.match(workflow, /"RESUME READ ONLY AUDIT"/);
+  assert.match(workflow, /actions: write/);
+  assert.match(workflow, /cancel-in-progress: false/);
+  assert.match(workflow, /Remove short-lived cleanup-only Worker token[\s\S]*Verify production health after cleanup run[\s\S]*Queue next bounded READ-ONLY audit continuation/);
+  assert.match(workflow, /Queue controlled continuation/);
+  assert.match(runner, /AUTOMATED_READ_ONLY_CONTINUATION/);
+  assert.match(runner, /if \(MODE !== 'dry-run' \|\| AUTOMATED_READ_ONLY_CONTINUATION/);
+  assert.match(runner, /audit_safety_stop=/);
+  assert.match(runner, /audit_continuation_count=/);
+  assert.match(runner, /audit_expires_at=/);
+  assert.match(dispatcher, /mode: 'dry-run'/);
+  assert.match(dispatcher, /confirmation: READ_ONLY_MARKER/);
+  assert.match(dispatcher, /continuation_session: ''/);
+  assert.match(dispatcher, /count >= max/);
+  assert.doesNotMatch(workflow, /schedule:/);
+});
