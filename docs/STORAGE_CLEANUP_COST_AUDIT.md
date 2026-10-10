@@ -1,3 +1,10 @@
+### Reference-key lookup cost hardening
+
+The raw rewrite reads at most 26 rows from the legacy-key index *before*
+testing source-type or content-hash agreement. Mixed-source references raise
+a conflict and block rewriting. Along with 26-row bounded reference counts,
+the planner can never traverse an arbitrarily long incompatible-key prefix.
+
 ### Raw reference planning is bounded even for highly shared objects
 
 A key shared by hundreds of thousands of source records must not trigger a

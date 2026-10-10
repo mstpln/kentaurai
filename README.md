@@ -209,7 +209,7 @@ Historical Form prefers audited Step 1 lineage. KentaurAI rebuilds the pre-marke
 
 Production storage cleanup is manual, authenticated, dry-run first and
 fail-closed. Its full-history integrity proof is persisted as bounded keyset
-pages tied to an unchanged official-snapshot dataset revision; incomplete or
+pages tied to an unchanged cleanup-relevant D1 dataset revision; incomplete or
 stale progress cannot authorize planning or execution. See
 [`docs/STORAGE_CLEANUP_COST_AUDIT.md`](docs/STORAGE_CLEANUP_COST_AUDIT.md) for
 the root-cause matrix, query plans and scale evidence.
