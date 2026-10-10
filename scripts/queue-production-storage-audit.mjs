@@ -7,7 +7,7 @@ const REPOSITORY = 'mstpln/kentaurai';
 export const READ_ONLY_MARKER = 'RESUME READ ONLY AUDIT';
 export const WORKFLOW = 'production-storage-cleanup.yml';
 const MIN_TIME_REMAINING_MS = 3 * 60 * 1000;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function positiveInteger(value, label) {
   const text = String(value ?? '');
