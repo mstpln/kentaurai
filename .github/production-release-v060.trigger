@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=c04c25b9a2d4da2f40b8a8ab31890f8704cf9da3
-release_nonce=2026-10-09-pr299-storage-cleanup-index-migration-recovery
+source_main=2c64f8303ac4393fdc0e478fb3a38365be9ff78c
+release_nonce=2026-10-10-pr300-source-indexed-cleanup-audit
