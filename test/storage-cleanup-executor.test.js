@@ -501,3 +501,87 @@ test('raw reference lookup stops at a bounded legacy-key prefix and rejects cros
   assert.ok(report.warnings.includes('legacy_reference_conflict'));
   assert.equal(report.objectDeletionDeferred, true);
 });
+
+test('snapshot cleanup does not remove an earlier event because offset timestamps sort differently as text', async () => {
+  const { db, env } = createTestEnv();
+  db.prepare("INSERT INTO horses(id,canonical_name) VALUES ('offset-horse','Offset Horse')").run();
+  // The second source sorts earlier as text, but actually occurs later in time.
+  const sources = [
+    ['source-earlier', '2026-09-10T02:00:00+03:00'],
+    ['source-later', '2026-09-10T01:00:00Z']
+  ];
+  for (const [id, observedAt] of sources) {
+    addSource(db, id, observedAt);
+    markSnapshotSourceComplete(db, id);
+    db.prepare(`INSERT INTO horse_profile_snapshots
+      (id,horse_id,observed_at,age_years,source_record_id)
+      VALUES (?,'offset-horse',?,4,?)`).run(`snapshot-${id}`, observedAt, id);
+  }
+  const plan = await planSnapshotCleanupBatch(env, { family: 'horse_profile', limit: 25 });
+  assert.equal(plan.rowsScanned, 2);
+  assert.equal(plan.rowsRemovable, 0, 'never retain a chronologically later source in place of an earlier one');
+});
+
+test('snapshot quality status differences are not collapsed as identical facts', async () => {
+  const { db, env } = createTestEnv();
+  db.prepare("INSERT INTO horses(id,canonical_name) VALUES ('quality-horse','Quality Horse')").run();
+  for (const [id, at, quality] of [
+    ['q-first','2026-09-10T00:00:00Z','verified_official_snapshot'],
+    ['q-second','2026-09-11T00:00:00Z','unknown']
+  ]) {
+    addSource(db, id, at);
+    markSnapshotSourceComplete(db, id);
+    db.prepare(`INSERT INTO horse_profile_snapshots
+      (id,horse_id,observed_at,age_years,quality_status,source_record_id)
+      VALUES (?,'quality-horse',?,4,?,?)`).run(`snapshot-${id}`, at, quality, id);
+  }
+  const plan = await planSnapshotCleanupBatch(env, { family: 'horse_profile', limit: 25 });
+  assert.equal(plan.rowsRemovable, 0);
+});
+
+test('raw planning pages over bounded source ID ranges, including null and unrelated keys', async () => {
+  const { db, env } = createTestEnv();
+  for (let i = 0; i < 120; i++) {
+    addSource(db, `aaa-ineligible-${String(i).padStart(4,'0')}`,
+      '2026-09-10T10:00:00Z', null, null, 'unrelated');
+  }
+  const hash = 'a'.repeat(64);
+  const legacy = `raw/synthetic_provider/day/${hash}.bin`;
+  addSource(db, 'zzz-eligible-raw', '2026-09-10T10:00:00Z',
+    legacy, hash, 'synthetic_provider');
+  let cursor = null;
+  let selected = null;
+  let pages = 0;
+  do {
+    const page = await planRawCleanupBatch(env, {
+      limit: 25, cursor, sourceType: 'synthetic_provider'
+    });
+    assert.ok(page.rowsScanned <= 25);
+    if (page.referenceRewrites) selected = page;
+    cursor = page.nextCursor;
+    pages++;
+  } while (cursor && !selected && pages < 8);
+  assert.ok(selected, 'a late candidate must not be skipped behind null-key prefixes');
+  assert.ok(pages >= 5);
+});
+
+test('raw reference normalization only reports bounded remaining-reference existence', async () => {
+  const { db, env, objects } = createTestEnv();
+  const body = 'many-remaining-legacy-records';
+  const hash = await sha256(body);
+  const legacy = `raw/synthetic_provider/day/${hash}.bin`;
+  objects.set(legacy, { body, options: {} });
+  for (let i = 0; i < 60; i++) {
+    addSource(db, `remaining-ref-${String(i).padStart(3,'0')}`,
+      '2026-09-10T10:00:00Z', legacy, hash, 'synthetic_provider');
+  }
+  const plan = await planRawCleanupBatch(env, { limit: 25, sourceType: 'synthetic_provider' });
+  const result = await executeRawCleanupBatch(env, {
+    limit: 25, sourceType: 'synthetic_provider',
+    planToken: plan.planToken, confirmation: CLEANUP_CONFIRMATION
+  });
+  assert.equal(result.referencesRewritten, 25);
+  assert.equal(result.legacyReferencesStillPresent, true);
+  assert.equal(result.legacyReferencesRemaining, null);
+  assert.ok(await env.RAW_BUCKET.head(legacy));
+});

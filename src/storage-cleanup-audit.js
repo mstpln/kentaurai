@@ -118,7 +118,7 @@ async function auditFamily(env, family, definition) {
     SELECT
       SUM(CASE WHEN s.id IS NULL THEN 1 ELSE 0 END) AS dangling_observations,
       SUM(CASE WHEN s.id IS NOT NULL AND NOT (${definition.identityPredicate}) THEN 1 ELSE 0 END) AS identity_mismatch_observations,
-      SUM(CASE WHEN sr.id IS NULL OR julianday(o.observed_at) IS NOT julianday(sr.fetched_at) THEN 1 ELSE 0 END) AS observation_time_mismatches
+      SUM(CASE WHEN sr.id IS NULL OR julianday(o.observed_at) IS NULL OR julianday(sr.fetched_at) IS NULL OR julianday(o.observed_at) IS NOT julianday(sr.fetched_at) THEN 1 ELSE 0 END) AS observation_time_mismatches
     FROM official_snapshot_observations o
     LEFT JOIN ${definition.table} s ON s.id=o.snapshot_id
     LEFT JOIN source_records sr ON sr.id=o.source_record_id
@@ -130,7 +130,7 @@ async function auditFamily(env, family, definition) {
     SELECT COUNT(*) AS n
     FROM ${definition.table} s
     LEFT JOIN source_records sr ON sr.id=s.source_record_id
-    WHERE sr.id IS NULL OR julianday(s.observed_at) IS NOT julianday(sr.fetched_at)
+    WHERE sr.id IS NULL OR julianday(s.observed_at) IS NULL OR julianday(sr.fetched_at) IS NULL OR julianday(s.observed_at) IS NOT julianday(sr.fetched_at)
   `);
   const result = {
     family,
@@ -480,7 +480,7 @@ async function observationPage(env, family, cursor) {
       COUNT(*) AS rows_checked,
       COALESCE(SUM(s.id IS NULL),0) AS dangling_observations,
       COALESCE(SUM(s.id IS NOT NULL AND NOT (${definition.identityPredicate})),0) AS identity_mismatch_observations,
-      COALESCE(SUM(sr.id IS NULL OR julianday(o.observed_at) IS NOT julianday(sr.fetched_at)),0) AS timestamp_mismatches,
+      COALESCE(SUM(sr.id IS NULL OR julianday(o.observed_at) IS NULL OR julianday(sr.fetched_at) IS NULL OR julianday(o.observed_at) IS NOT julianday(sr.fetched_at)),0) AS timestamp_mismatches,
       (SELECT json_array(source_record_id,entity_key,scope_key) FROM page
         ORDER BY source_record_id DESC,entity_key DESC,scope_key DESC LIMIT 1) AS next_cursor
     FROM page o
@@ -513,7 +513,7 @@ async function directTimelinePage(env, family, cursor) {
     )
     SELECT
       COUNT(*) AS rows_checked,
-      COALESCE(SUM(sr.id IS NULL OR julianday(page.observed_at) IS NOT julianday(sr.fetched_at)),0) AS timestamp_mismatches,
+      COALESCE(SUM(sr.id IS NULL OR julianday(page.observed_at) IS NULL OR julianday(sr.fetched_at) IS NULL OR julianday(page.observed_at) IS NOT julianday(sr.fetched_at)),0) AS timestamp_mismatches,
       (SELECT id FROM page ORDER BY id DESC LIMIT 1) AS next_cursor
     FROM page
     LEFT JOIN source_records sr ON sr.id=page.source_record_id

@@ -539,3 +539,22 @@ test('HTTP audit route finalizes only after measured page settlement', async () 
     WHERE audit_run_id=? AND pending_page_id IS NOT NULL
   `).get(audit.auditRunId).n, 0);
 });
+
+test('resumable audit rejects invalid timestamps even when both source and snapshot values are unparseable', async () => {
+  const { db, env } = createTestEnv();
+  db.prepare("INSERT INTO horses(id,canonical_name) VALUES ('invalid-time-horse','Invalid Time Horse')").run();
+  db.prepare(`INSERT INTO source_records(id,source_type,fetched_at,quality_status)
+    VALUES ('invalid-time-source','synthetic','not-a-date','unknown')`).run();
+  db.prepare(`INSERT INTO official_snapshot_source_sync(source_record_id,status,horse_profile_count)
+    VALUES ('invalid-time-source','complete',1)`).run();
+  db.prepare(`INSERT INTO horse_profile_snapshots(id,horse_id,observed_at,age_years,source_record_id)
+    VALUES ('invalid-time-snapshot','invalid-time-horse','also-not-a-date',4,'invalid-time-source')`).run();
+  db.prepare(`INSERT INTO official_snapshot_observations
+    (source_record_id,snapshot_family,entity_key,scope_key,observed_at,snapshot_id,factual_changed)
+    VALUES ('invalid-time-source','horse_profile','invalid-time-horse','profile',
+      'also-not-a-date','invalid-time-snapshot',1)`).run();
+  let audit = await startOrResumeStorageCleanupAudit(env, { source_sha: '1'.repeat(40) });
+  while (!audit.complete) audit = await stepStorageCleanupAudit(env, { audit_run_id: audit.auditRunId });
+  assert.equal(audit.status, 'failed');
+  assert.ok(audit.families.find((row) => row.family === 'horse_profile').timestampMismatchRepresentations >= 2);
+});

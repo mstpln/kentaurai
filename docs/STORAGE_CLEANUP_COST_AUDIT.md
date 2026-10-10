@@ -1,3 +1,20 @@
+### Final review: remaining performance and chronology boundaries
+
+- Raw-object planning now advances by bounded source-record **primary-key
+  slices** including unrelated, null-key and null-hash records. No WHERE
+  filter can turn the 26-row limit into an unbounded hidden scan; the signed
+  cursor advances by source ID. This may require more bounded pages for
+  heavily ineligible history, but guarantees termination and complete coverage.
+- A post-normalization global COUNT over legacy references has been replaced
+  with one indexed existence check. When references remain, the **exact**
+  remaining count is unknown/null rather than fabricated.
+- Snapshot deduplication retains any event whose predecessor cannot be proved
+  chronologically earlier (including mixed-offset timestamp formats). The
+  transactional delete guard independently checks true SQLite time order.
+  Changes of verification quality status are not collapsed.
+- Resumable integrity checks treat unparseable timestamps as anomalies even
+  when both compared values are unparseable (both julianday values NULL).
+
 ### Reference-key lookup cost hardening
 
 The raw rewrite reads at most 26 rows from the legacy-key index *before*

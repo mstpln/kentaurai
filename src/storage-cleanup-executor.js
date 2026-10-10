@@ -184,12 +184,18 @@ async function detailedSnapshotPlan(env, { family, limit, cursor = null }) {
   let priorPartition = decoded?.priorPartition ?? null;
   let priorFacts = decoded?.priorFacts ?? null;
   let retainedId = decoded?.retainedId ?? null;
+  let priorObservedAt = decoded?.priorObservedAt ?? null;
   let rowsRetained = 0;
   const candidates = [];
   for (const row of rows) {
     const partitionKey = snapshotPartitionKey(row, partition);
     const facts = snapshotTuple(row, definition.facts);
-    if (partitionKey === priorPartition && snapshotFactsEqual(facts, priorFacts)) {
+    const previousTime = Date.parse(String(priorObservedAt || ''));
+    const currentTime = Date.parse(String(row.observed_at || ''));
+    const chronologicallyLater = Number.isFinite(previousTime)
+      && Number.isFinite(currentTime) && currentTime > previousTime;
+    if (partitionKey === priorPartition && chronologicallyLater
+      && snapshotFactsEqual(facts, priorFacts)) {
       const observation = snapshotObservationIdentity(family, row);
       candidates.push({
         removeId: row.id,
@@ -204,6 +210,7 @@ async function detailedSnapshotPlan(env, { family, limit, cursor = null }) {
       priorPartition = partitionKey;
       priorFacts = facts;
       retainedId = row.id;
+      priorObservedAt = row.observed_at;
     }
   }
   const last = scannedRows.at(-1);
@@ -213,7 +220,8 @@ async function detailedSnapshotPlan(env, { family, limit, cursor = null }) {
     order: [...snapshotOrderTuple(family, last, partition), last.observed_at, last.id],
     priorPartition,
     priorFacts,
-    retainedId
+    retainedId,
+    priorObservedAt
   }) : null;
   const material = { kind: 'snapshot', family, cursor: cursor || null, candidates, nextCursor };
   return {
@@ -291,6 +299,7 @@ export async function executeSnapshotCleanupBatch(env, options = {}) {
       JOIN official_snapshot_source_sync prior_sync
         ON prior_sync.source_record_id=prior.source_record_id AND prior_sync.status='complete'
       WHERE prior.id=? AND ${samePartition} AND ${sameFacts}
+        AND julianday(prior.observed_at)<julianday(doomed.observed_at)
         AND NOT EXISTS (
           SELECT 1 FROM ${plan.definition.table} between_row
           JOIN official_snapshot_source_sync between_sync
@@ -351,22 +360,24 @@ async function detailedRawPlan(env, { sourceType = null, limit, cursor = null })
   const rowLimit = boundedCleanupLimit(limit, MAX_BATCH);
   const normalizedSourceType = sourceType == null ? null : String(sourceType);
   const decoded = await decodeCursor(env, cursor, 'raw_object');
-  let sql = `SELECT id,source_type,content_hash,raw_object_key FROM source_records
-    WHERE content_hash IS NOT NULL AND raw_object_key IS NOT NULL`;
-  const bindings = [];
-  if (normalizedSourceType != null) { sql += ' AND source_type=?'; bindings.push(normalizedSourceType); }
-  if (decoded) {
-    if (!Array.isArray(decoded.order) || decoded.order.length !== 3) throw new Error('cleanup cursor is invalid');
-    sql += ' AND (source_type,content_hash,id) > (?,?,?)';
-    bindings.push(...decoded.order);
-  }
-  sql += ' ORDER BY source_type,content_hash,id LIMIT ?';
-  const { results = [] } = await env.DB.prepare(sql).bind(...bindings, rowLimit + 1).all();
+  // Drive planning from the source-record primary key, with no SQL filter
+  // that can skip an arbitrarily long prefix of ineligible records. Inspect
+  // at most 26 physical index entries per request, including null raw keys.
+  if (decoded && (!Array.isArray(decoded.order) || decoded.order.length !== 1
+    || typeof decoded.order[0] !== 'string')) throw new Error('cleanup cursor is invalid');
+  const afterId = decoded?.order[0] || '';
+  const { results = [] } = await env.DB.prepare(`
+    SELECT id,source_type,content_hash,raw_object_key
+    FROM source_records
+    WHERE id>? ORDER BY id LIMIT ?
+  `).bind(afterId, rowLimit + 1).all();
   const truncated = results.length > rowLimit;
   const rows = results.slice(0, rowLimit);
   const warnings = [];
   let selected = null;
   for (const row of rows) {
+    if (normalizedSourceType != null && row.source_type !== normalizedSourceType) continue;
+    if (row.content_hash == null || row.raw_object_key == null) continue;
     if (!/^[a-z0-9][a-z0-9_-]{0,79}$/.test(String(row.source_type || ''))) { warnings.push('invalid_source_type'); continue; }
     const hash = String(row.content_hash || '').toLowerCase();
     if (!/^[a-f0-9]{64}$/.test(hash)) { warnings.push('invalid_content_hash'); continue; }
@@ -377,7 +388,7 @@ async function detailedRawPlan(env, { sourceType = null, limit, cursor = null })
     if (canonicalKey !== row.raw_object_key) { selected = { row, hash, extension, canonicalKey, legacyKey: row.raw_object_key }; break; }
   }
   const last = rows.at(-1);
-  const pageCursor = truncated && last ? await encodeCursor(env, { v: 1, kind: 'raw_object', order: [last.source_type, last.content_hash, last.id] }) : null;
+  const pageCursor = truncated && last ? await encodeCursor(env, { v: 1, kind: 'raw_object', order: [last.id] }) : null;
   let references = [];
   let legacyReferences = 0;
   let canonicalReferences = 0;
@@ -464,7 +475,6 @@ function verifiedCanonicalHead(head, hash, sourceType, legacyHead) {
 export async function executeRawCleanupBatch(env, options = {}) {
   assertExecutionRequest(options);
   const authorization = cleanupAuthorization(options);
-  if (typeof env?.RAW_BUCKET?.delete !== 'function') throw new Error('RAW_BUCKET delete is not configured');
   const plan = await detailedRawPlan(env, options);
   if (plan.planToken !== options.planToken) throw new Error('cleanup plan changed; run dry-run again');
   if (!plan.selected) return { executed: true, referencesRewritten: 0, canonicalObjectsCreated: 0, legacyObjectsDeleted: 0, nextCursor: plan.pageCursor };
@@ -546,9 +556,12 @@ export async function executeRawCleanupBatch(env, options = {}) {
   statements.push(...authorizationRebaseStatements(env, authorization, guard));
   await env.DB.batch(statements);
 
-  const remaining = await env.DB.prepare(
-    'SELECT COUNT(*) AS n FROM source_records WHERE raw_object_key=?'
-  ).bind(selected.legacyKey).first();
+  // We do not delete R2 objects, so the exact number of remaining legacy
+  // references is unnecessary. A covering-key existence probe is bounded.
+  const remaining = await env.DB.prepare(`
+    SELECT 1 AS present FROM source_records INDEXED BY idx_source_records_raw_object_key
+    WHERE raw_object_key=? LIMIT 1
+  `).bind(selected.legacyKey).first();
   const legacyObjectsDeleted = 0;
 
   return {
@@ -557,7 +570,8 @@ export async function executeRawCleanupBatch(env, options = {}) {
     canonicalObjectsCreated,
     legacyObjectsDeleted,
     objectDeletionDeferred: true,
-    legacyReferencesRemaining: Number(remaining?.n || 0),
+    legacyReferencesRemaining: remaining ? null : 0,
+    legacyReferencesStillPresent: Boolean(remaining),
     nextCursor: plan.selected ? (options.cursor || null) : plan.pageCursor
   };
 }

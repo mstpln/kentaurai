@@ -1,3 +1,13 @@
+## Comprehensive cleanup review additions (pre-release)
+- Review identified unbounded post-normalization legacy-reference count, raw-source
+  planning with filtered-index prefix scans, mixed-zone timestamp order,
+  loss of quality-status distinctions and invalid-null date comparison.
+- All now addressed with primary-key-bounded raw paging, indexed key-existence
+  checks, chronological candidate/delete guards, expanded factual equality
+  and fail-closed timeline tests. Source raw objects remain preserved in R2.
+- Public GitHub CI on exact final head and separate review remain mandatory.
+- No actual cleanup or production mutations are authorized by this patch.
+
 - Additional raw cleanup cost fix: replace full historical raw-key reference COUNT with two 26-row indexed samples; mark sampled totals as truncated and never infer R2 deletion eligibility from incomplete counts.
 
 ## PR #301 follow-up: guarded raw normalization and bounded revision writes
