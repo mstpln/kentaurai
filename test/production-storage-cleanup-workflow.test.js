@@ -67,7 +67,8 @@ test('GitHub dry-run continuation puts the audit ID first and recovers accidenta
   assert.match(runner, /audit_run_id: error\.auditRunId/);
   assert.match(runner, /error\?\.cleanupReason === 'audit_already_running'/);
   assert.match(runner, /safeResetReasons\.has\(error\?\.cleanupReason\)/);
-  assert.match(runner, /MODE !== 'dry-run' \|\| !CLEANUP_AUDIT_RUN_ID/);
+  assert.match(runner, /MODE !== 'dry-run' \|\| AUTOMATED_READ_ONLY_CONTINUATION/);
+  assert.match(runner, /\|\| !CLEANUP_AUDIT_RUN_ID \|\| !safeResetReasons\.has/);
   assert.doesNotMatch(workflow, /schedule:/);
 });
 
