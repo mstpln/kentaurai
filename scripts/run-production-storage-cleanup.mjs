@@ -85,7 +85,7 @@ function knownAuditStartFailure(message) {
     return { code: 'audit_exhausted', hint: 'The audit reached its continuation limit.' };
   }
   const active = /^cleanup audit is already running; resume it explicitly with audit_run_id ([0-9a-f-]{36})$/.exec(detail);
-  if (active) return { code: 'audit_already_running', hint: 'Use continuation_audit=' + active[1] };
+  if (active) return { code: 'audit_already_running', hint: 'Resuming the currently running audit is allowed for dry-run.', auditRunId: active[1] };
   return null;
 }
 
@@ -113,6 +113,7 @@ async function request(path, { method = 'GET', body = null } = {}) {
       const error = new Error(path + ' failed with HTTP ' + response.status + ': ' + errorCode
         + (known ? ' [' + known.code + '] ' + known.hint : ''));
       error.cleanupReason = known?.code || null;
+      error.auditRunId = known?.auditRunId || null;
       throw error;
     }
     addRunCost(data?.cost);
@@ -188,20 +189,32 @@ async function verifyResumableIntegrity(session) {
       source_sha: SOURCE_SHA
     });
   } catch (error) {
-    // A source-bound proof from a previous release or changed dataset is
-    // never reused. A dry-run may begin one NEW read-only audit; execute
-    // mode, unknown IDs, exhausted proofs and all other errors fail closed.
-    const safeResetReasons = new Set([
-      'audit_source_changed', 'audit_expired', 'audit_stale', 'audit_dataset_changed'
-    ]);
-    if (MODE !== 'dry-run' || !CLEANUP_AUDIT_RUN_ID
-      || !safeResetReasons.has(error?.cleanupReason)) throw error;
-    console.warn('dry-run: previous audit is not reusable (' + error.cleanupReason
-      + '); starting a new read-only audit with independent integrity verification.');
-    audit = await post('/v1/storage-cleanup/audit/start', {
-      audit_run_id: null,
-      source_sha: SOURCE_SHA
-    });
+    // A manually triggered dry-run with no ID may resume an existing proof
+    // ONLY when the Worker itself selected it by the exact source SHA and
+    // current dataset revision. No arbitrary session or unverified ID reuse.
+    if (MODE === 'dry-run' && !CLEANUP_AUDIT_RUN_ID
+      && error?.cleanupReason === 'audit_already_running' && error?.auditRunId) {
+      console.warn('dry-run: resuming the active source/revision-bound audit without requiring an operator-entered ID.');
+      audit = await post('/v1/storage-cleanup/audit/start', {
+        audit_run_id: error.auditRunId,
+        source_sha: SOURCE_SHA
+      });
+    } else {
+      // A proof from an older release or changed dataset is never reused.
+      // Only dry-run may restart read-only verification; missing IDs, cost
+      // stops, exhausted proofs and execute mode continue to fail closed.
+      const safeResetReasons = new Set([
+        'audit_source_changed', 'audit_expired', 'audit_stale', 'audit_dataset_changed'
+      ]);
+      if (MODE !== 'dry-run' || !CLEANUP_AUDIT_RUN_ID
+        || !safeResetReasons.has(error?.cleanupReason)) throw error;
+      console.warn('dry-run: previous audit is not reusable (' + error.cleanupReason
+        + '); starting a new read-only audit with independent integrity verification.');
+      audit = await post('/v1/storage-cleanup/audit/start', {
+        audit_run_id: null,
+        source_sha: SOURCE_SHA
+      });
+    }
   }
   const auditRunId = audit.auditRunId;
   let progressMade = false;
