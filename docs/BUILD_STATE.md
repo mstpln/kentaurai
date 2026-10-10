@@ -1,3 +1,12 @@
+## Production cleanup dry-run continuation recovery (PR candidate)
+
+- Production dry-run #14 created a source-bound, incomplete integrity audit within the D1 safety budgets. Runs #15 and #16 both supplied that Audit-ID in GitHub's \`continuation_session\` field while \`continuation_audit\` remained empty; this is confirmed from the actual Actions job environment and is why both runs stopped with generic HTTP 400 before processing any audit page.
+- The GitHub form now places \`continuation_audit\` before the execute-only \`continuation_session\` and checks contradictory inputs before QA and token setup. In read-only \`dry-run\` only, the runner safely interprets a single misfiled session-field ID as an Audit-ID. Execute-mode sessions are **never** silently relabeled.
+- Only known Worker audit lifecycle failures produce sanitized diagnostic codes. A read-only dry-run can start one new audit when a prior ID is source-version-bound, stale, expired or its dataset revision has changed. Unknown and missing IDs, exhausted audits, execution mode and safety-cost stops remain fail-closed. There is no automatic recurring continuation and no change to D1 safety budgets or cleanup authorization.
+- Any merged code/release creates a new exact GitHub source SHA, so an old audit that was bound to release #167 may legitimately be rejected by design. Safe read-only restart on recognized old-proof reasons avoids presenting that normal guard as an unexplained error.
+- The new runner regression suite simulates the production misfiled field, a source SHA mismatch, invalid IDs, conflicting inputs and nonleaking errors.
+- **No production dry-run or data cleanup executed as part of this change.** A reviewed merge/release decision is required before production use.
+
 ## Production release #166 migration recovery (D1 SQL trigger syntax)
 - The reviewed PR #301 merged and production release #166 passed QA and Cloudflare policy checks.
 - Migrations 0057 through 0066 completed successfully in private D1; 0067 was not recorded as applied, with SQLITE_ERROR 7500 'incomplete input'. Worker deployment was not reached and no cleanup ran.
