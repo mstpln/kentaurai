@@ -433,7 +433,7 @@ async function detailedRawPlan(env, { sourceType = null, limit, cursor = null })
       referenceCountsTruncated: legacyReferences > MAX_BATCH || canonicalReferences > MAX_BATCH,
       redundantObjectCandidates: selected && legacyReferences <= MAX_BATCH && legacyReferences === references.length ? 1 : 0,
       objectDeletionDeferred: true,
-      conflictsSkipped: warnings.filter((warning) => warning !== 'limit_reached_results_incomplete').length,
+      conflictsSkipped: new Set(warnings.filter((warning) => warning !== 'limit_reached_results_incomplete')).size,
       truncated,
       warnings: [...new Set(warnings)].sort(),
       planToken,
