@@ -33,7 +33,7 @@ CREATE INDEX idx_storage_cleanup_audit_pages_pending
 CREATE TRIGGER storage_cleanup_audit_page_insert_guard
 BEFORE INSERT ON storage_cleanup_audit_pages
 BEGIN
-  SELECT CASE WHEN NOT EXISTS (
+  SELECT RAISE(ABORT,'cleanup audit page guard failed') WHERE NOT EXISTS (
     SELECT 1
     FROM storage_cleanup_audit_runs r
     JOIN storage_cleanup_audit_progress p
@@ -46,14 +46,14 @@ BEGIN
       AND p.pending_page_id IS NULL
       AND p.page_version=NEW.page_version
       AND COALESCE(p.cursor,'')=NEW.previous_cursor
-  ) THEN RAISE(ABORT,'cleanup audit page guard failed') END;
+  );
 END;
 
 CREATE TRIGGER storage_cleanup_audit_page_accept_guard
 BEFORE UPDATE OF status ON storage_cleanup_audit_pages
 WHEN NEW.status='accepted'
 BEGIN
-  SELECT CASE WHEN NOT EXISTS (
+  SELECT RAISE(ABORT,'cleanup audit page acceptance guard failed') WHERE NOT EXISTS (
     SELECT 1
     FROM storage_cleanup_audit_runs r
     JOIN storage_cleanup_audit_progress p
@@ -67,7 +67,7 @@ BEGIN
       AND julianday(NEW.accept_before)>=julianday('now')
       AND r.continuation_rows_read+COALESCE(NEW.rows_read,0)<=1000000
       AND r.continuation_rows_written+COALESCE(NEW.rows_written,0)<=100000
-  ) THEN RAISE(ABORT,'cleanup audit page acceptance guard failed') END;
+  );
 END;
 
 -- The executor inserts a short-lived guard as the first statement in its D1
@@ -88,7 +88,7 @@ CREATE TABLE storage_cleanup_revision_guards (
 CREATE TRIGGER storage_cleanup_revision_guard_insert
 BEFORE INSERT ON storage_cleanup_revision_guards
 BEGIN
-  SELECT CASE WHEN NOT EXISTS (
+  SELECT RAISE(ABORT,'cleanup authorization revision guard failed') WHERE NOT EXISTS (
     SELECT 1
     FROM storage_cleanup_dataset_revision d
     JOIN storage_cleanup_audit_runs r
@@ -108,7 +108,7 @@ BEGIN
       AND a.source_sha=s.source_sha
       AND julianday(r.expires_at)>julianday('now')
       AND julianday(s.expires_at)>julianday('now')
-  ) THEN RAISE(ABORT,'cleanup authorization revision guard failed') END;
+  );
 END;
 
 -- Every D1 mutation that can change audit results, provenance, cleanup plans,
