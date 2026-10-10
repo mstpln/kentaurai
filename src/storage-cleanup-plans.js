@@ -1,19 +1,23 @@
 export const SNAPSHOT_FAMILIES = Object.freeze({
   horse_profile: {
     table: 'horse_profile_snapshots', entity: ['horse_id'], scope: [],
-    facts: ['age_years']
+    cleanupIndex: 'idx_cleanup_horse_profile_order',
+    facts: ['age_years','quality_status']
   },
   horse_stat: {
     table: 'horse_stat_snapshots', entity: ['horse_id'], scope: ['snapshot_scope'],
-    facts: ['stat_year','starts','earnings_raw','wins','seconds','thirds','win_percentage_raw','place_percentage_raw','earnings_per_start_raw','start_points']
+    cleanupIndex: 'idx_cleanup_horse_stat_order',
+    facts: ['stat_year','starts','earnings_raw','wins','seconds','thirds','win_percentage_raw','place_percentage_raw','earnings_per_start_raw','start_points','quality_status']
   },
   horse_record: {
     table: 'horse_record_snapshots', entity: ['horse_id'], scope: ['record_scope','stat_year','record_ordinal'],
-    facts: ['code','start_method','distance_group','time_minutes','time_seconds','time_tenths','place']
+    cleanupIndex: 'idx_cleanup_horse_record_order',
+    facts: ['code','start_method','distance_group','time_minutes','time_seconds','time_tenths','place','quality_status']
   },
   person_stat: {
     table: 'person_stat_snapshots', entity: ['person_type','person_id'], scope: ['stat_year'],
-    facts: ['starts','earnings_raw','wins','seconds','thirds','win_percentage_raw']
+    cleanupIndex: 'idx_cleanup_person_stat_order',
+    facts: ['starts','earnings_raw','wins','seconds','thirds','win_percentage_raw','quality_status']
   }
 });
 

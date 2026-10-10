@@ -5,6 +5,25 @@ import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 
+const AUDIT_RUN_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+
+function completedAudit(overrides = {}) {
+  return {
+    auditRunId: AUDIT_RUN_ID,
+    status: 'complete',
+    complete: true,
+    ok: true,
+    families: ['horse_profile','horse_stat','horse_record','person_stat'].map((family) => ({
+      family, complete: true, mismatchedSources: 0, missingRepresentations: 0,
+      excessRepresentations: 0, danglingObservations: 0,
+      identityMismatchObservations: 0, timestampMismatchRepresentations: 0, ok: true
+    })),
+    operations: { complete: true, startedBatches: 0, strandedRawBatches: 0, ok: true },
+    safetyStop: false,
+    ...overrides
+  };
+}
+
 function json(res, value, status = 200) {
   const body = JSON.stringify(value);
   res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) });
@@ -31,11 +50,17 @@ test('execute runner continues beyond 250 batches and checkpoints one source-bou
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://127.0.0.1');
+      if (req.method === 'POST' && url.pathname === '/v1/storage-cleanup/audit/start') {
+        auditCalls += 1;
+        json(res, completedAudit());
+        return;
+      }
       if (req.method === 'POST' && url.pathname === '/v1/storage-cleanup/session/audit') {
         const body = await readBody(req);
         auditCalls += 1;
         assert.equal(body.session_id, sessionId);
         assert.equal(body.source_sha, sourceSha);
+        assert.equal(body.audit_run_id, AUDIT_RUN_ID);
         json(res, {
           ok: true,
           auditVerified: true,
@@ -157,7 +182,7 @@ test('execute runner continues beyond 250 batches and checkpoints one source-bou
   await once(server, 'close');
 
   assert.equal(code, 0, stderr);
-  assert.equal(auditCalls, 1);
+  assert.equal(auditCalls, 2);
   assert.equal(startCalls, 1);
   assert.ok(snapshotPlans > 250, `expected >250 snapshot plans, saw ${snapshotPlans}`);
   assert.ok([...targets.values()].every((target) => target.complete));
@@ -169,9 +194,10 @@ test('runner refuses every new cleanup when provenance integrity preflight fails
   let planCalls = 0;
   const server = createServer((req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
-    if (req.method === 'GET' && url.pathname === '/v1/storage-cleanup/audit') {
-      json(res, {
+    if (req.method === 'POST' && url.pathname === '/v1/storage-cleanup/audit/start') {
+      json(res, completedAudit({
         ok: false,
+        status: 'failed',
         families: [{
           family: 'horse_profile',
           mismatchedSources: 1,
@@ -182,7 +208,7 @@ test('runner refuses every new cleanup when provenance integrity preflight fails
           ok: false
         }],
         safetyStop: false
-      });
+      }));
       return;
     }
     if (url.pathname.includes('/plan') || url.pathname.includes('/execute') || url.pathname.includes('/session/start')) {
@@ -203,6 +229,7 @@ test('runner refuses every new cleanup when provenance integrity preflight fails
       CLEANUP_SOFT_DEADLINE_MS: String(5 * 60 * 1000),
       WORKER_URL: `http://127.0.0.1:${address.port}`,
       ADMIN_TOKEN: 'synthetic-cleanup-token',
+      GITHUB_SHA: 'b'.repeat(40),
       GITHUB_OUTPUT: ''
     },
     stdio: ['ignore', 'pipe', 'pipe']
@@ -252,7 +279,7 @@ test('execute continuation reuses the session-bound audit without rerunning the 
       });
       return;
     }
-    if (url.pathname === '/v1/storage-cleanup/audit' || url.pathname === '/v1/storage-cleanup/session/audit') {
+    if (url.pathname.startsWith('/v1/storage-cleanup/audit/') || url.pathname === '/v1/storage-cleanup/session/audit') {
       auditCalls += 1;
       json(res, { error: 'audit_should_not_repeat' }, 500);
       return;
@@ -332,6 +359,10 @@ test('execute refuses to plan when the session-bound integrity audit fails', asy
       });
       return;
     }
+    if (req.method === 'POST' && url.pathname === '/v1/storage-cleanup/audit/start') {
+      json(res, completedAudit({ ok: false, status: 'failed' }));
+      return;
+    }
     if (req.method === 'POST' && url.pathname === '/v1/storage-cleanup/session/audit') {
       const body = await readBody(req);
       assert.equal(body.session_id, sessionId);
@@ -385,9 +416,9 @@ test('execute refuses to plan when the session-bound integrity audit fails', asy
   await once(server, 'close');
 
   assert.notEqual(code, 0);
-  assert.equal(sessionAuditCalls, 1);
+  assert.equal(sessionAuditCalls, 0);
   assert.equal(planCalls, 0);
-  assert.match(stderr, /storage cleanup session integrity audit failed; refusing cleanup/);
+  assert.match(stderr, /storage cleanup integrity audit failed; refusing cleanup/);
 });
 
 
@@ -395,14 +426,10 @@ test('runner stops safely when cumulative D1 read budget is reached', async () =
   let plans = 0;
   const server = createServer((req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
-    if (req.method === 'GET' && url.pathname === '/v1/storage-cleanup/audit') {
-      json(res, {
-        ok: true,
-        families: [],
-        operations: { startedBatches: 0, strandedRawBatches: 0, ok: true },
+    if (req.method === 'POST' && url.pathname === '/v1/storage-cleanup/audit/start') {
+      json(res, completedAudit({
         cost: { rowsRead: 1, rowsWritten: 0, d1DurationMs: 1 },
-        safetyStop: false
-      });
+      }));
       return;
     }
     if (req.method === 'POST' && url.pathname === '/v1/storage-cleanup/snapshots/plan') {
@@ -435,6 +462,7 @@ test('runner stops safely when cumulative D1 read budget is reached', async () =
       CLEANUP_RUN_MAX_ROWS_WRITTEN: '10000',
       WORKER_URL: `http://127.0.0.1:${address.port}`,
       ADMIN_TOKEN: 'synthetic-cleanup-token',
+      GITHUB_SHA: 'c'.repeat(40),
       GITHUB_OUTPUT: ''
     },
     stdio: ['ignore', 'pipe', 'pipe']
@@ -460,23 +488,10 @@ test('runner refuses cleanup planning when the integrity audit alone exceeds the
   let planCalls = 0;
   const server = createServer((req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
-    if (req.method === 'GET' && url.pathname === '/v1/storage-cleanup/audit') {
-      json(res, {
-        ok: true,
-        families: ['horse_profile','horse_stat','horse_record','person_stat'].map((family) => ({
-          family,
-          mismatchedSources: 0,
-          missingRepresentations: 0,
-          excessRepresentations: 0,
-          danglingObservations: 0,
-          identityMismatchObservations: 0,
-          timestampMismatchRepresentations: 0,
-          ok: true
-        })),
-        operations: { startedBatches: 0, strandedRawBatches: 0, ok: true },
+    if (req.method === 'POST' && url.pathname === '/v1/storage-cleanup/audit/start') {
+      json(res, completedAudit({
         cost: { rowsRead: 300000, rowsWritten: 0, d1DurationMs: 10, durationMs: 20 },
-        safetyStop: false
-      });
+      }));
       return;
     }
     if (url.pathname.includes('/plan') || url.pathname.includes('/execute')) planCalls += 1;
@@ -497,6 +512,7 @@ test('runner refuses cleanup planning when the integrity audit alone exceeds the
       CLEANUP_RUN_MAX_ROWS_WRITTEN: '10000',
       WORKER_URL: `http://127.0.0.1:${address.port}`,
       ADMIN_TOKEN: 'synthetic-cleanup-token',
+      GITHUB_SHA: 'd'.repeat(40),
       GITHUB_OUTPUT: ''
     },
     stdio: ['ignore', 'pipe', 'pipe']
@@ -509,26 +525,21 @@ test('runner refuses cleanup planning when the integrity audit alone exceeds the
   server.close();
   await once(server, 'close');
 
-  assert.notEqual(code, 0);
+  assert.equal(code, 0, stderr);
   assert.equal(planCalls, 0);
-  assert.match(stderr, /integrity audit reached the cumulative D1 run-cost budget/);
 });
 
 
 test('runner includes sanitized D1 metrics when a cleanup request trips the per-operation safety stop', async () => {
   const server = createServer((req, res) => {
     const url = new URL(req.url, 'http://127.0.0.1');
-    if (req.method === 'GET' && url.pathname === '/v1/storage-cleanup/audit') {
-      json(res, {
-        ok: false,
-        families: [{ family: 'horse_stat',
-          readCostByCheck: { representations: 182000, observations: 82000, direct_timeline: 11123 }
-        }],
-        operations: { startedBatches: 0, strandedRawBatches: 0, ok: false },
+    if (req.method === 'POST' && url.pathname === '/v1/storage-cleanup/audit/start') {
+      json(res, completedAudit({
+        ok: false, complete: false, status: 'running',
         cost: { rowsRead: 275123, rowsWritten: 7, d1DurationMs: 123, durationMs: 43210 },
         safetyStop: true,
-        safetyStopScope: 'horse_stat'
-      });
+        safetyStopScope: 'horse_stat:direct_timeline'
+      }));
       return;
     }
     json(res, { error: 'unexpected_test_route' }, 404);
@@ -546,6 +557,7 @@ test('runner includes sanitized D1 metrics when a cleanup request trips the per-
       CLEANUP_SOFT_DEADLINE_MS: String(5 * 60 * 1000),
       WORKER_URL: `http://127.0.0.1:${address.port}`,
       ADMIN_TOKEN: 'synthetic-cleanup-token',
+      GITHUB_SHA: 'e'.repeat(40),
       GITHUB_OUTPUT: ''
     },
     stdio: ['ignore', 'pipe', 'pipe']
@@ -559,9 +571,8 @@ test('runner includes sanitized D1 metrics when a cleanup request trips the per-
   await once(server, 'close');
 
   assert.notEqual(code, 0);
-  assert.match(stderr, /scope=horse_stat/);
+  assert.match(stderr, /scope=horse_stat:direct_timeline/);
   assert.match(stderr, /rowsRead=275123/);
   assert.match(stderr, /rowsWritten=7/);
   assert.match(stderr, /durationMs=43210/);
-  assert.match(stderr, /readChecks=representations=182000,observations=82000,direct_timeline=11123/);
 });

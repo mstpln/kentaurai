@@ -167,14 +167,28 @@ test('completed targets are monotonic within a cleanup session', async () => {
 test('cleanup session reports a bound integrity audit', async () => {
   const { db, env } = createTestEnv();
   const created = await startOrResumeStorageCleanupSession(env, { source_sha: SOURCE_SHA });
+  const auditRunId = '99999999-9999-4999-8999-999999999999';
   db.prepare(`
-    INSERT INTO storage_cleanup_session_audits(session_id,source_sha)
-    VALUES (?,?)
-  `).run(created.sessionId, SOURCE_SHA);
+    INSERT INTO storage_cleanup_audit_runs
+      (id,source_sha,dataset_revision,status,continuation_count,expires_at,completed_at)
+    VALUES (?,?,0,'complete',1,'2099-01-01T00:00:00.000Z',CURRENT_TIMESTAMP)
+  `).run(auditRunId, SOURCE_SHA);
+  db.prepare(`
+    INSERT INTO storage_cleanup_session_audits(session_id,source_sha,audit_run_id,dataset_revision)
+    VALUES (?,?,?,0)
+  `).run(created.sessionId, SOURCE_SHA, auditRunId);
 
   const resumed = await startOrResumeStorageCleanupSession(env, {
     session_id: created.sessionId,
     source_sha: SOURCE_SHA
   });
   assert.equal(resumed.auditVerified, true);
+
+  db.prepare("UPDATE storage_cleanup_audit_runs SET expires_at='2000-01-01T00:00:00.000Z' WHERE id=?")
+    .run(auditRunId);
+  const resumedAfterAuditExpiry = await startOrResumeStorageCleanupSession(env, {
+    session_id: created.sessionId,
+    source_sha: SOURCE_SHA
+  });
+  assert.equal(resumedAfterAuditExpiry.auditVerified, false);
 });

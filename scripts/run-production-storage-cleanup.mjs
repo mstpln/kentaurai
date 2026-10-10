@@ -10,6 +10,7 @@ const WORKER_URL = process.env.WORKER_URL;
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 const SOURCE_SHA = process.env.GITHUB_SHA || '';
 const CLEANUP_SESSION_ID = process.env.CLEANUP_SESSION_ID || null;
+const CLEANUP_AUDIT_RUN_ID = process.env.CLEANUP_AUDIT_RUN_ID || null;
 const CONFIRMATION = 'execute-reviewed-storage-cleanup-batch';
 const FAMILIES = ['horse_profile', 'horse_stat', 'horse_record', 'person_stat'];
 const TARGETS = [...FAMILIES, 'raw_object'];
@@ -31,8 +32,8 @@ if (!Number.isInteger(RUN_MAX_ROWS_WRITTEN) || RUN_MAX_ROWS_WRITTEN < 10_000 || 
   throw new Error('CLEANUP_RUN_MAX_ROWS_WRITTEN must be between 10000 and 1000000');
 }
 if (!WORKER_URL || !ADMIN_TOKEN) throw new Error('WORKER_URL and ADMIN_TOKEN are required');
-if (MODE === 'execute' && !/^[a-f0-9]{40}$/.test(SOURCE_SHA)) {
-  throw new Error('execute mode requires the exact GITHUB_SHA');
+if (!/^[a-f0-9]{40}$/.test(SOURCE_SHA)) {
+  throw new Error('cleanup requires the exact GITHUB_SHA');
 }
 
 function deadlineReached() {
@@ -93,6 +94,13 @@ async function request(path, { method = 'GET', body = null } = {}) {
 }
 
 const post = (path, body) => request(path, { method: 'POST', body });
+let activeAuditRunId = CLEANUP_AUDIT_RUN_ID;
+
+function authorizationBody(session) {
+  return MODE === 'execute'
+    ? { session_id: session.sessionId, source_sha: SOURCE_SHA }
+    : { audit_run_id: activeAuditRunId, source_sha: SOURCE_SHA };
+}
 
 function safeWarnings(value) {
   return Array.isArray(value) ? value.map(String).slice(0, 20) : [];
@@ -124,30 +132,40 @@ function logIntegrityAudit(audit, { sessionBound = false } = {}) {
   }));
 }
 
-async function verifyDryRunIntegrity() {
-  if (MODE !== 'dry-run') return;
-  const audit = await request('/v1/storage-cleanup/audit');
-  logIntegrityAudit(audit);
-  if (audit?.ok !== true) throw new Error('storage cleanup integrity audit failed; refusing cleanup');
-  if (costBudgetReached()) {
-    throw new Error('storage cleanup integrity audit reached the cumulative D1 run-cost budget; refusing cleanup planning');
+async function verifyResumableIntegrity(session) {
+  if (MODE === 'execute' && session?.auditVerified === true) {
+    return { ready: true, auditRunId: null, progressMade: false };
   }
-}
-
-async function verifyExecuteSessionIntegrity(session) {
-  if (MODE !== 'execute') return;
-  if (session?.auditVerified === true) return;
-  const audit = await post('/v1/storage-cleanup/session/audit', {
-    session_id: session.sessionId,
+  let audit = await post('/v1/storage-cleanup/audit/start', {
+    audit_run_id: CLEANUP_AUDIT_RUN_ID,
     source_sha: SOURCE_SHA
   });
-  logIntegrityAudit(audit, { sessionBound: true });
-  if (audit?.ok !== true || audit?.auditVerified !== true) {
-    throw new Error('storage cleanup session integrity audit failed; refusing cleanup');
+  const auditRunId = audit.auditRunId;
+  let progressMade = false;
+  while (audit?.complete !== true) {
+    if (costBudgetReached()) {
+      return { ready: false, auditRunId, progressMade, audit };
+    }
+    audit = await post('/v1/storage-cleanup/audit/step', { audit_run_id: auditRunId });
+    if (audit?.cumulativeSafetyStop === true || audit?.budgetBlocked === true) {
+      return { ready: false, auditRunId, progressMade, audit };
+    }
+    progressMade = true;
   }
-  if (costBudgetReached()) {
-    throw new Error('storage cleanup session integrity audit reached the cumulative D1 run-cost budget; refusing cleanup planning');
+  logIntegrityAudit(audit, { sessionBound: MODE === 'execute' });
+  if (audit?.ok !== true) throw new Error('storage cleanup integrity audit failed; refusing cleanup');
+  if (costBudgetReached()) return { ready: false, auditRunId, progressMade, audit };
+  if (MODE === 'execute') {
+    const bound = await post('/v1/storage-cleanup/session/audit', {
+      session_id: session.sessionId,
+      source_sha: SOURCE_SHA,
+      audit_run_id: auditRunId
+    });
+    if (bound?.ok !== true || bound?.auditVerified !== true) {
+      throw new Error('storage cleanup session integrity audit failed; refusing cleanup');
+    }
   }
+  return { ready: true, auditRunId, progressMade, audit };
 }
 
 async function startSession() {
@@ -208,7 +226,9 @@ async function runSnapshotFamily(family, initialState, session) {
       return { target: family, complete: false, progressMade: runPages > 0, stoppedForCost: true };
     }
 
-    const plan = await post('/v1/storage-cleanup/snapshots/plan', { family, limit: 25, cursor });
+    const plan = await post('/v1/storage-cleanup/snapshots/plan', {
+      family, limit: 25, cursor, ...authorizationBody(session)
+    });
     runPages += 1;
     scanned += Number(plan.rowsScanned || 0);
     removable += Number(plan.rowsRemovable || 0);
@@ -223,6 +243,7 @@ async function runSnapshotFamily(family, initialState, session) {
         family,
         limit: 25,
         cursor,
+        ...authorizationBody(session),
         planToken: plan.planToken,
         confirmation: CONFIRMATION
       });
@@ -291,7 +312,9 @@ async function runRawCleanup(initialState, session) {
       return { target: 'raw_object', complete: false, progressMade: runBatches > 0, stoppedForCost: true };
     }
 
-    const plan = await post('/v1/storage-cleanup/raw/plan', { limit: 25, cursor });
+    const plan = await post('/v1/storage-cleanup/raw/plan', {
+      limit: 25, cursor, ...authorizationBody(session)
+    });
     runBatches += 1;
     scanned += Number(plan.rowsScanned || 0);
     rewritesPlanned += Number(plan.referenceRewrites || 0);
@@ -320,6 +343,7 @@ async function runRawCleanup(initialState, session) {
       const result = await post('/v1/storage-cleanup/raw/execute', {
         limit: 25,
         cursor,
+        ...authorizationBody(session),
         planToken: plan.planToken,
         confirmation: CONFIRMATION
       });
@@ -347,61 +371,92 @@ async function runRawCleanup(initialState, session) {
   return { target: 'raw_object', complete: confirmedComplete, progressMade: runBatches > 0 };
 }
 
-await verifyDryRunIntegrity();
-const session = await startSession();
-await verifyExecuteSessionIntegrity(session);
-const targetState = new Map(
-  (session?.targets || TARGETS.map((target) => ({ target, cursor: null, complete: false })))
-    .map((state) => [state.target, state])
-);
-const completeTargets = new Set(
-  [...targetState.entries()].filter(([, state]) => state.complete).map(([target]) => target)
-);
-let progressMade = false;
-let stoppedForCost = false;
-
-for (const family of FAMILIES) {
-  const result = await runSnapshotFamily(family, targetState.get(family), session);
-  if (result.complete) completeTargets.add(family);
-  progressMade ||= result.progressMade;
-  stoppedForCost ||= result.stoppedForCost === true;
-  if (!result.complete && (deadlineReached() || stoppedForCost)) break;
-}
-
-if (!deadlineReached() && !stoppedForCost) {
-  const rawResult = await runRawCleanup(targetState.get('raw_object'), session);
-  if (rawResult.complete) completeTargets.add('raw_object');
-  progressMade ||= rawResult.progressMade;
-  stoppedForCost ||= rawResult.stoppedForCost === true;
-}
-
-const allComplete = MODE === 'execute'
-  ? TARGETS.every((target) => completeTargets.has(target))
-  : false;
-
-if (MODE === 'execute') {
-  console.log(JSON.stringify({
-    cleanup: 'session',
-    mode: MODE,
-    complete: allComplete,
-    progressMade,
-    continuationCount: Number(session?.continuationCount || 0),
-    stoppedForDeadline: !allComplete && deadlineReached(),
-    stoppedForCost,
-    cost: runCost
-  }));
-
-  if (!allComplete && Number(session?.continuationCount || 0) >= Number(session?.maxContinuations || 0)) {
-    throw new Error('cleanup session continuation limit reached before completion');
+async function main() {
+  const session = await startSession();
+  const integrity = await verifyResumableIntegrity(session);
+  activeAuditRunId = integrity.auditRunId || activeAuditRunId;
+  if (!integrity.ready) {
+    console.log(JSON.stringify({
+      cleanup: 'integrity_audit',
+      mode: MODE,
+      complete: false,
+      auditRunId: integrity.auditRunId,
+      progressMade: integrity.progressMade,
+      stoppedForCost: costBudgetReached(),
+      cost: runCost
+    }));
+    return {
+      session,
+      auditRunId: integrity.auditRunId,
+      auditIncomplete: true,
+      allComplete: false,
+      progressMade: integrity.progressMade,
+      stoppedForCost: costBudgetReached()
+    };
   }
+
+  const targetState = new Map(
+    (session?.targets || TARGETS.map((target) => ({ target, cursor: null, complete: false })))
+      .map((state) => [state.target, state])
+  );
+  const completeTargets = new Set(
+    [...targetState.entries()].filter(([, state]) => state.complete).map(([target]) => target)
+  );
+  let progressMade = integrity.progressMade;
+  let stoppedForCost = false;
+
+  for (const family of FAMILIES) {
+    const result = await runSnapshotFamily(family, targetState.get(family), session);
+    if (result.complete) completeTargets.add(family);
+    progressMade ||= result.progressMade;
+    stoppedForCost ||= result.stoppedForCost === true;
+    if (!result.complete && (deadlineReached() || stoppedForCost)) break;
+  }
+
+  if (!deadlineReached() && !stoppedForCost) {
+    const rawResult = await runRawCleanup(targetState.get('raw_object'), session);
+    if (rawResult.complete) completeTargets.add('raw_object');
+    progressMade ||= rawResult.progressMade;
+    stoppedForCost ||= rawResult.stoppedForCost === true;
+  }
+
+  const allComplete = MODE === 'execute'
+    ? TARGETS.every((target) => completeTargets.has(target))
+    : false;
+  if (MODE === 'execute') {
+    console.log(JSON.stringify({
+      cleanup: 'session',
+      mode: MODE,
+      complete: allComplete,
+      progressMade,
+      continuationCount: Number(session?.continuationCount || 0),
+      stoppedForDeadline: !allComplete && deadlineReached(),
+      stoppedForCost,
+      cost: runCost
+    }));
+    if (!allComplete && Number(session?.continuationCount || 0) >= Number(session?.maxContinuations || 0)) {
+      throw new Error('cleanup session continuation limit reached before completion');
+    }
+  }
+  return {
+    session,
+    auditRunId: integrity.auditRunId,
+    auditIncomplete: false,
+    allComplete,
+    progressMade,
+    stoppedForCost
+  };
 }
 
+const result = await main();
 if (process.env.GITHUB_OUTPUT) {
-  appendFileSync(process.env.GITHUB_OUTPUT, `cleanup_complete=${MODE === 'execute' && allComplete ? 'true' : 'false'}\n`);
-  appendFileSync(process.env.GITHUB_OUTPUT, `progress_made=${progressMade ? 'true' : 'false'}\n`);
-  appendFileSync(process.env.GITHUB_OUTPUT, `cost_budget_stop=${stoppedForCost ? 'true' : 'false'}\n`);
-  if (MODE === 'execute' && session?.sessionId) {
-    appendFileSync(process.env.GITHUB_OUTPUT, `cleanup_session_id=${session.sessionId}\n`);
-    appendFileSync(process.env.GITHUB_OUTPUT, `continuation_count=${Number(session.continuationCount || 0)}\n`);
+  appendFileSync(process.env.GITHUB_OUTPUT, `cleanup_complete=${MODE === 'execute' && result.allComplete ? 'true' : 'false'}\n`);
+  appendFileSync(process.env.GITHUB_OUTPUT, `progress_made=${result.progressMade ? 'true' : 'false'}\n`);
+  appendFileSync(process.env.GITHUB_OUTPUT, `cost_budget_stop=${result.stoppedForCost ? 'true' : 'false'}\n`);
+  appendFileSync(process.env.GITHUB_OUTPUT, `audit_incomplete=${result.auditIncomplete ? 'true' : 'false'}\n`);
+  if (result.auditRunId) appendFileSync(process.env.GITHUB_OUTPUT, `cleanup_audit_run_id=${result.auditRunId}\n`);
+  if (MODE === 'execute' && result.session?.sessionId) {
+    appendFileSync(process.env.GITHUB_OUTPUT, `cleanup_session_id=${result.session.sessionId}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, `continuation_count=${Number(result.session.continuationCount || 0)}\n`);
   }
 }

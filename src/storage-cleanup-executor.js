@@ -58,6 +58,60 @@ function assertExecutionRequest({ planToken, confirmation }) {
   if (confirmation !== CLEANUP_CONFIRMATION) throw new Error('cleanup confirmation is invalid');
 }
 
+function cleanupAuthorization(options) {
+  const value = options?._authorization;
+  if (value == null) return null;
+  if (!/^[0-9a-f-]{36}$/i.test(String(value.sessionId || ''))
+    || !/^[0-9a-f-]{36}$/i.test(String(value.auditRunId || ''))
+    || !Number.isInteger(Number(value.datasetRevision))
+    || Number(value.datasetRevision) < 0) {
+    throw new Error('cleanup authorization fence is invalid');
+  }
+  return {
+    sessionId: String(value.sessionId),
+    auditRunId: String(value.auditRunId),
+    datasetRevision: Number(value.datasetRevision)
+  };
+}
+
+function authorizationGuard(env, authorization) {
+  if (!authorization) return null;
+  const guardId = crypto.randomUUID();
+  return {
+    id: guardId,
+    statement: env.DB.prepare(`
+      INSERT INTO storage_cleanup_revision_guards
+        (id,session_id,audit_run_id,audit_revision,expected_current_revision)
+      VALUES (?,?,?,?,?)
+    `).bind(
+      guardId,
+      authorization.sessionId,
+      authorization.auditRunId,
+      authorization.datasetRevision,
+      authorization.datasetRevision
+    )
+  };
+}
+
+function authorizationRebaseStatements(env, authorization, guard) {
+  if (!authorization || !guard) return [];
+  return [
+    env.DB.prepare(`
+      UPDATE storage_cleanup_audit_runs
+      SET dataset_revision=(SELECT revision FROM storage_cleanup_dataset_revision WHERE singleton=1),
+        updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND status='complete' AND dataset_revision=?
+    `).bind(authorization.auditRunId, authorization.datasetRevision),
+    env.DB.prepare(`
+      UPDATE storage_cleanup_session_audits
+      SET dataset_revision=(SELECT revision FROM storage_cleanup_dataset_revision WHERE singleton=1),
+        verified_at=CURRENT_TIMESTAMP
+      WHERE session_id=? AND audit_run_id=? AND dataset_revision=?
+    `).bind(authorization.sessionId, authorization.auditRunId, authorization.datasetRevision),
+    env.DB.prepare('DELETE FROM storage_cleanup_revision_guards WHERE id=?').bind(guard.id)
+  ];
+}
+
 function snapshotPartitionKey(row, columns) {
   return JSON.stringify(columns.map((column) => row[column]));
 }
@@ -76,6 +130,20 @@ function snapshotOrderValue(family, row, column) {
 
 function snapshotOrderTuple(family, row, columns) {
   return columns.map((column) => snapshotOrderValue(family, row, column));
+}
+
+export function buildSnapshotCleanupPageSql(family, hasCursor = false) {
+  const definition = SNAPSHOT_FAMILIES[String(family || '')];
+  if (!definition) throw new Error('unsupported snapshot family');
+  const partition = [...definition.entity, ...definition.scope];
+  let sql = `SELECT snapshot.*, EXISTS (\n      SELECT 1 FROM official_snapshot_source_sync source_sync INDEXED BY idx_official_snapshot_source_sync_status_source\n      WHERE source_sync.source_record_id=snapshot.source_record_id AND source_sync.status='complete'\n    ) AS cleanup_source_complete\n    FROM ${definition.table} snapshot INDEXED BY ${definition.cleanupIndex}`;
+  if (hasCursor) {
+    const left = [...partition.map((column) => snapshotOrderExpression(family, column)), 'observed_at', 'id'].join(',');
+    const right = [...partition.map(() => '?'), '?', '?'].join(',');
+    sql += ` WHERE (${left}) > (${right})`;
+  }
+  sql += ` ORDER BY ${partition.map((column) => snapshotOrderExpression(family, column)).join(',')}, observed_at, id LIMIT ?`;
+  return sql;
 }
 
 function snapshotObservationIdentity(family, row) {
@@ -103,28 +171,31 @@ async function detailedSnapshotPlan(env, { family, limit, cursor = null }) {
   const rowLimit = boundedCleanupLimit(limit, MAX_BATCH);
   const partition = [...definition.entity, ...definition.scope];
   const decoded = await decodeCursor(env, cursor, `snapshot:${family}`);
-  let sql = `SELECT snapshot.* FROM ${definition.table} snapshot\n    JOIN official_snapshot_source_sync source_sync\n      ON source_sync.source_record_id=snapshot.source_record_id AND source_sync.status='complete'`;
+  const sql = buildSnapshotCleanupPageSql(family, Boolean(decoded));
   let bindings = [];
   if (decoded) {
     if (!Array.isArray(decoded.order) || decoded.order.length !== partition.length + 2) throw new Error('cleanup cursor is invalid');
-    const left = [...partition.map((column) => snapshotOrderExpression(family, column)), 'observed_at', 'id'].join(',');
-    const right = [...partition.map(() => '?'), '?', '?'].join(',');
-    sql += ` WHERE (${left}) > (${right})`;
     bindings = decoded.order;
   }
-  sql += ` ORDER BY ${partition.map((column) => snapshotOrderExpression(family, column)).join(',')}, observed_at, id LIMIT ?`;
   const { results = [] } = await env.DB.prepare(sql).bind(...bindings, rowLimit + 1).all();
   const truncated = results.length > rowLimit;
-  const rows = results.slice(0, rowLimit);
+  const scannedRows = results.slice(0, rowLimit);
+  const rows = scannedRows.filter((row) => Number(row.cleanup_source_complete) === 1);
   let priorPartition = decoded?.priorPartition ?? null;
   let priorFacts = decoded?.priorFacts ?? null;
   let retainedId = decoded?.retainedId ?? null;
+  let priorObservedAt = decoded?.priorObservedAt ?? null;
   let rowsRetained = 0;
   const candidates = [];
   for (const row of rows) {
     const partitionKey = snapshotPartitionKey(row, partition);
     const facts = snapshotTuple(row, definition.facts);
-    if (partitionKey === priorPartition && snapshotFactsEqual(facts, priorFacts)) {
+    const previousTime = Date.parse(String(priorObservedAt || ''));
+    const currentTime = Date.parse(String(row.observed_at || ''));
+    const chronologicallyLater = Number.isFinite(previousTime)
+      && Number.isFinite(currentTime) && currentTime > previousTime;
+    if (partitionKey === priorPartition && chronologicallyLater
+      && snapshotFactsEqual(facts, priorFacts)) {
       const observation = snapshotObservationIdentity(family, row);
       candidates.push({
         removeId: row.id,
@@ -139,16 +210,18 @@ async function detailedSnapshotPlan(env, { family, limit, cursor = null }) {
       priorPartition = partitionKey;
       priorFacts = facts;
       retainedId = row.id;
+      priorObservedAt = row.observed_at;
     }
   }
-  const last = rows.at(-1);
+  const last = scannedRows.at(-1);
   const nextCursor = truncated && last ? await encodeCursor(env, {
     v: 1,
     kind: `snapshot:${family}`,
     order: [...snapshotOrderTuple(family, last, partition), last.observed_at, last.id],
     priorPartition,
     priorFacts,
-    retainedId
+    retainedId,
+    priorObservedAt
   }) : null;
   const material = { kind: 'snapshot', family, cursor: cursor || null, candidates, nextCursor };
   return {
@@ -162,7 +235,7 @@ async function detailedSnapshotPlan(env, { family, limit, cursor = null }) {
       family,
       table: definition.table,
       limit: rowLimit,
-      rowsScanned: rows.length,
+      rowsScanned: scannedRows.length,
       rowsRetained,
       rowsRemovable: candidates.length,
       truncated,
@@ -179,15 +252,19 @@ export async function planSnapshotCleanupBatch(env, options = {}) {
 
 export async function executeSnapshotCleanupBatch(env, options = {}) {
   assertExecutionRequest(options);
+  const authorization = cleanupAuthorization(options);
   const plan = await detailedSnapshotPlan(env, options);
   if (plan.planToken !== options.planToken) throw new Error('cleanup plan changed; run dry-run again');
   if (plan.candidates.length === 0) return { executed: true, family: plan.family, rowsRemoved: 0, nextCursor: plan.nextCursor };
   const batchId = crypto.randomUUID();
-  const statements = [env.DB.prepare(`
+  const guard = authorizationGuard(env, authorization);
+  const statements = [];
+  if (guard) statements.push(guard.statement);
+  statements.push(env.DB.prepare(`
     INSERT INTO storage_cleanup_batches
       (id,cleanup_kind,target,plan_token,expected_changes,status)
     VALUES (?,'snapshot',?,?,?,'started')
-  `).bind(batchId, plan.family, plan.planToken, plan.candidates.length)];
+  `).bind(batchId, plan.family, plan.planToken, plan.candidates.length));
   for (const candidate of plan.candidates) {
     statements.push(env.DB.prepare(`
       INSERT OR IGNORE INTO official_snapshot_observations
@@ -222,6 +299,7 @@ export async function executeSnapshotCleanupBatch(env, options = {}) {
       JOIN official_snapshot_source_sync prior_sync
         ON prior_sync.source_record_id=prior.source_record_id AND prior_sync.status='complete'
       WHERE prior.id=? AND ${samePartition} AND ${sameFacts}
+        AND julianday(prior.observed_at)<julianday(doomed.observed_at)
         AND NOT EXISTS (
           SELECT 1 FROM ${plan.definition.table} between_row
           JOIN official_snapshot_source_sync between_sync
@@ -246,6 +324,7 @@ export async function executeSnapshotCleanupBatch(env, options = {}) {
     SET actual_changes=changes(),status='complete',completed_at=CURRENT_TIMESTAMP
     WHERE id=?
   `).bind(batchId));
+  statements.push(...authorizationRebaseStatements(env, authorization, guard));
   await env.DB.batch(statements);
   return { executed: true, family: plan.family, rowsRemoved: plan.candidates.length, nextCursor: plan.nextCursor };
 }
@@ -260,27 +339,45 @@ function hashFromKey(value) {
   return match ? match[1].toLowerCase() : null;
 }
 
+export function buildBoundedRawReferenceCountSql() {
+  // Both scalar subqueries stop at MAX_BATCH+1 indexed rows. A COUNT over
+  // the complete historical raw key would make planning unbounded again.
+  return `
+    SELECT
+      (SELECT COUNT(*) FROM (
+        SELECT id FROM source_records INDEXED BY idx_source_records_raw_object_key
+        WHERE raw_object_key=? LIMIT ?
+      )) AS legacy_n,
+      (SELECT COUNT(*) FROM (
+        SELECT id FROM source_records INDEXED BY idx_source_records_raw_object_key
+        WHERE raw_object_key=? LIMIT ?
+      )) AS canonical_n
+  `;
+}
+
 async function detailedRawPlan(env, { sourceType = null, limit, cursor = null }) {
   if (!env?.DB || !env?.RAW_BUCKET) throw new Error('DB and RAW_BUCKET are required');
   const rowLimit = boundedCleanupLimit(limit, MAX_BATCH);
   const normalizedSourceType = sourceType == null ? null : String(sourceType);
   const decoded = await decodeCursor(env, cursor, 'raw_object');
-  let sql = `SELECT id,source_type,content_hash,raw_object_key FROM source_records
-    WHERE content_hash IS NOT NULL AND raw_object_key IS NOT NULL`;
-  const bindings = [];
-  if (normalizedSourceType != null) { sql += ' AND source_type=?'; bindings.push(normalizedSourceType); }
-  if (decoded) {
-    if (!Array.isArray(decoded.order) || decoded.order.length !== 3) throw new Error('cleanup cursor is invalid');
-    sql += ' AND (source_type,content_hash,id) > (?,?,?)';
-    bindings.push(...decoded.order);
-  }
-  sql += ' ORDER BY source_type,content_hash,id LIMIT ?';
-  const { results = [] } = await env.DB.prepare(sql).bind(...bindings, rowLimit + 1).all();
+  // Drive planning from the source-record primary key, with no SQL filter
+  // that can skip an arbitrarily long prefix of ineligible records. Inspect
+  // at most 26 physical index entries per request, including null raw keys.
+  if (decoded && (!Array.isArray(decoded.order) || decoded.order.length !== 1
+    || typeof decoded.order[0] !== 'string')) throw new Error('cleanup cursor is invalid');
+  const afterId = decoded?.order[0] || '';
+  const { results = [] } = await env.DB.prepare(`
+    SELECT id,source_type,content_hash,raw_object_key
+    FROM source_records
+    WHERE id>? ORDER BY id LIMIT ?
+  `).bind(afterId, rowLimit + 1).all();
   const truncated = results.length > rowLimit;
   const rows = results.slice(0, rowLimit);
   const warnings = [];
   let selected = null;
   for (const row of rows) {
+    if (normalizedSourceType != null && row.source_type !== normalizedSourceType) continue;
+    if (row.content_hash == null || row.raw_object_key == null) continue;
     if (!/^[a-z0-9][a-z0-9_-]{0,79}$/.test(String(row.source_type || ''))) { warnings.push('invalid_source_type'); continue; }
     const hash = String(row.content_hash || '').toLowerCase();
     if (!/^[a-f0-9]{64}$/.test(hash)) { warnings.push('invalid_content_hash'); continue; }
@@ -291,25 +388,25 @@ async function detailedRawPlan(env, { sourceType = null, limit, cursor = null })
     if (canonicalKey !== row.raw_object_key) { selected = { row, hash, extension, canonicalKey, legacyKey: row.raw_object_key }; break; }
   }
   const last = rows.at(-1);
-  const pageCursor = truncated && last ? await encodeCursor(env, { v: 1, kind: 'raw_object', order: [last.source_type, last.content_hash, last.id] }) : null;
+  const pageCursor = truncated && last ? await encodeCursor(env, { v: 1, kind: 'raw_object', order: [last.id] }) : null;
   let references = [];
   let legacyReferences = 0;
   let canonicalReferences = 0;
   if (selected) {
-    const count = await env.DB.prepare(`
-      SELECT
-        SUM(CASE WHEN raw_object_key=? THEN 1 ELSE 0 END) AS legacy_n,
-        SUM(CASE WHEN raw_object_key=? THEN 1 ELSE 0 END) AS canonical_n
-      FROM source_records WHERE raw_object_key IN (?,?)
-    `).bind(selected.legacyKey, selected.canonicalKey, selected.legacyKey, selected.canonicalKey).first();
+    const count = await env.DB.prepare(buildBoundedRawReferenceCountSql())
+      .bind(selected.legacyKey, MAX_BATCH + 1, selected.canonicalKey, MAX_BATCH + 1).first();
     legacyReferences = Number(count?.legacy_n || 0);
     canonicalReferences = Number(count?.canonical_n || 0);
     const result = await env.DB.prepare(`
-      SELECT id FROM source_records
-      WHERE raw_object_key=? AND source_type=? AND content_hash=?
-      ORDER BY id LIMIT ?
-    `).bind(selected.legacyKey, selected.row.source_type, selected.hash, MAX_BATCH).all();
-    references = result.results || [];
+      SELECT id,source_type,content_hash
+      FROM source_records INDEXED BY idx_source_records_raw_object_key
+      WHERE raw_object_key=? ORDER BY id LIMIT ?
+    `).bind(selected.legacyKey, MAX_BATCH + 1).all();
+    const sampled = result.results || [];
+    const compatible = (row) => row.source_type === selected.row.source_type
+      && String(row.content_hash || '').toLowerCase() === selected.hash;
+    if (sampled.some((row) => !compatible(row))) warnings.push('legacy_reference_conflict');
+    references = sampled.slice(0, MAX_BATCH).filter(compatible).map((row) => ({ id: row.id }));
     if (references.length !== Math.min(legacyReferences, MAX_BATCH)) warnings.push('legacy_reference_conflict');
   }
   if (truncated) warnings.push('limit_reached_results_incomplete');
@@ -324,7 +421,8 @@ async function detailedRawPlan(env, { sourceType = null, limit, cursor = null })
     canonicalKey: selected.canonicalKey,
     referenceIds: references.map((row) => row.id),
     legacyReferences,
-    canonicalReferences
+    canonicalReferences,
+    referenceCountsTruncated: legacyReferences > MAX_BATCH || canonicalReferences > MAX_BATCH
   } : { kind: 'raw_object', cursor: cursor || null, sourceType: normalizedSourceType, empty: true, pageCursor };
   const planToken = await tokenFor(material);
   return {
@@ -343,8 +441,10 @@ async function detailedRawPlan(env, { sourceType = null, limit, cursor = null })
       referenceRewrites: references.length,
       legacyReferences,
       canonicalReferences,
-      redundantObjectCandidates: selected && legacyReferences === references.length ? 1 : 0,
-      conflictsSkipped: warnings.filter((warning) => warning !== 'limit_reached_results_incomplete').length,
+      referenceCountsTruncated: legacyReferences > MAX_BATCH || canonicalReferences > MAX_BATCH,
+      redundantObjectCandidates: selected && legacyReferences <= MAX_BATCH && legacyReferences === references.length ? 1 : 0,
+      objectDeletionDeferred: true,
+      conflictsSkipped: new Set(warnings.filter((warning) => warning !== 'limit_reached_results_incomplete')).size,
       truncated,
       warnings: [...new Set(warnings)].sort(),
       planToken,
@@ -374,7 +474,7 @@ function verifiedCanonicalHead(head, hash, sourceType, legacyHead) {
 
 export async function executeRawCleanupBatch(env, options = {}) {
   assertExecutionRequest(options);
-  if (typeof env?.RAW_BUCKET?.delete !== 'function') throw new Error('RAW_BUCKET delete is not configured');
+  const authorization = cleanupAuthorization(options);
   const plan = await detailedRawPlan(env, options);
   if (plan.planToken !== options.planToken) throw new Error('cleanup plan changed; run dry-run again');
   if (!plan.selected) return { executed: true, referencesRewritten: 0, canonicalObjectsCreated: 0, legacyObjectsDeleted: 0, nextCursor: plan.pageCursor };
@@ -423,48 +523,55 @@ export async function executeRawCleanupBatch(env, options = {}) {
     canonicalObjectsCreated = 1;
   }
   verifiedCanonicalHead(canonicalHead, selected.hash, selected.row.source_type, legacyHead);
+  // A single D1 transaction applies the revision guard, the reference
+  // rewrite, batch completion and audit/session rebase. R2 cannot participate
+  // in that transaction, so physical legacy object deletion is deferred.
   const batchId = crypto.randomUUID();
   const ids = plan.references.map((row) => row.id);
-  if (ids.length > 0) {
-    const placeholders = ids.map(() => '?').join(',');
-    await env.DB.batch([
-      env.DB.prepare(`
-        INSERT INTO storage_cleanup_batches
-          (id,cleanup_kind,target,plan_token,expected_changes,status,
-           legacy_key,canonical_key,legacy_etag,canonical_etag,object_verified)
-        VALUES (?,'raw_object',?,?,?,'started',?,?,?,?,1)
-      `).bind(
-        batchId, selected.row.source_type, plan.planToken, ids.length,
-        selected.legacyKey, selected.canonicalKey,
-        typeof legacyHead.etag === 'string' ? legacyHead.etag : null,
-        typeof canonicalHead.etag === 'string' ? canonicalHead.etag : null
-      ),
-      env.DB.prepare(`
-        UPDATE source_records SET raw_object_key=?
-        WHERE id IN (${placeholders}) AND raw_object_key=? AND source_type=? AND content_hash=?
-      `).bind(selected.canonicalKey, ...ids, selected.legacyKey, selected.row.source_type, selected.hash),
-      env.DB.prepare(`
-        UPDATE storage_cleanup_batches
-        SET actual_changes=changes(),status='references_rewritten'
-        WHERE id=?
-      `).bind(batchId)
-    ]);
-  }
-  const remaining = await env.DB.prepare('SELECT COUNT(*) AS n FROM source_records WHERE raw_object_key=?')
-    .bind(selected.legacyKey).first();
-  let legacyObjectsDeleted = 0;
-  if (Number(remaining?.n || 0) === 0) {
-    await env.RAW_BUCKET.delete(selected.legacyKey);
-    if (await env.RAW_BUCKET.head(selected.legacyKey)) throw new Error('legacy R2 object deletion could not be verified');
-    legacyObjectsDeleted = 1;
-    if (ids.length > 0) await env.DB.prepare(`UPDATE storage_cleanup_batches SET status='complete',completed_at=CURRENT_TIMESTAMP WHERE id=?`).bind(batchId).run();
-  }
+  if (ids.length === 0) throw new Error('raw cleanup plan contains no verified references');
+  const placeholders = ids.map(() => '?').join(',');
+  const guard = authorizationGuard(env, authorization);
+  const statements = [];
+  if (guard) statements.push(guard.statement);
+  statements.push(env.DB.prepare(`
+    INSERT INTO storage_cleanup_batches
+      (id,cleanup_kind,target,plan_token,expected_changes,status,
+       legacy_key,canonical_key,legacy_etag,canonical_etag,object_verified)
+    VALUES (?,'raw_object',?,?,?,'started',?,?,?,?,1)
+  `).bind(
+    batchId, selected.row.source_type, plan.planToken, ids.length,
+    selected.legacyKey, selected.canonicalKey,
+    typeof legacyHead.etag === 'string' ? legacyHead.etag : null,
+    typeof canonicalHead.etag === 'string' ? canonicalHead.etag : null
+  ));
+  statements.push(env.DB.prepare(`
+    UPDATE source_records SET raw_object_key=?
+    WHERE id IN (${placeholders}) AND raw_object_key=? AND source_type=? AND content_hash=?
+  `).bind(selected.canonicalKey, ...ids, selected.legacyKey, selected.row.source_type, selected.hash));
+  statements.push(env.DB.prepare(`
+    UPDATE storage_cleanup_batches
+    SET actual_changes=changes(),status='complete',completed_at=CURRENT_TIMESTAMP
+    WHERE id=?
+  `).bind(batchId));
+  statements.push(...authorizationRebaseStatements(env, authorization, guard));
+  await env.DB.batch(statements);
+
+  // We do not delete R2 objects, so the exact number of remaining legacy
+  // references is unnecessary. A covering-key existence probe is bounded.
+  const remaining = await env.DB.prepare(`
+    SELECT 1 AS present FROM source_records INDEXED BY idx_source_records_raw_object_key
+    WHERE raw_object_key=? LIMIT 1
+  `).bind(selected.legacyKey).first();
+  const legacyObjectsDeleted = 0;
+
   return {
     executed: true,
     referencesRewritten: ids.length,
     canonicalObjectsCreated,
     legacyObjectsDeleted,
-    legacyReferencesRemaining: Number(remaining?.n || 0),
+    objectDeletionDeferred: true,
+    legacyReferencesRemaining: remaining ? null : 0,
+    legacyReferencesStillPresent: Boolean(remaining),
     nextCursor: plan.selected ? (options.cursor || null) : plan.pageCursor
   };
 }

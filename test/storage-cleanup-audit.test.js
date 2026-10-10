@@ -6,7 +6,9 @@ import {
   auditStorageCleanupIntegrity,
   auditStorageCleanupFamilyIntegrity,
   bindStorageCleanupIntegrityAudit,
-  buildStorageCleanupRepresentationAuditSql
+  buildStorageCleanupRepresentationAuditSql,
+  startOrResumeStorageCleanupAudit,
+  stepStorageCleanupAudit
 } from '../src/storage-cleanup-audit.js';
 
 function addSource(db, id, fetchedAt) {
@@ -23,6 +25,15 @@ function addSync(db, sourceId, horseProfileCount = 0) {
       (source_record_id,status,horse_profile_count,horse_stat_count,horse_record_count,person_stat_count)
     VALUES (?,'complete',?,0,0,0)
   `).run(sourceId, horseProfileCount);
+}
+
+async function completeAudit(env, sourceSha) {
+  let audit = await startOrResumeStorageCleanupAudit(env, { source_sha: sourceSha });
+  for (let page = 0; page < 100 && !audit.complete; page += 1) {
+    audit = await stepStorageCleanupAudit(env, { audit_run_id: audit.auditRunId });
+  }
+  assert.equal(audit.complete, true);
+  return audit;
 }
 
 test('cleanup integrity audit accepts direct and observation-backed source representations', async () => {
@@ -227,10 +238,10 @@ test('cleanup audit source-count paths use dedicated covering indexes', () => {
   }
 
   for (const [table, indexName] of [
-    ['horse_profile_snapshots', 'idx_horse_profile_snapshots_source_record'],
-    ['horse_stat_snapshots', 'idx_horse_stat_snapshots_source_record'],
-    ['horse_record_snapshots', 'idx_horse_record_snapshots_source_record'],
-    ['person_stat_snapshots', 'idx_person_stat_snapshots_source_record']
+    ['horse_profile_snapshots', 'idx_cleanup_horse_profile_source_page'],
+    ['horse_stat_snapshots', 'idx_cleanup_horse_stat_source_page'],
+    ['horse_record_snapshots', 'idx_cleanup_horse_record_source_page'],
+    ['person_stat_snapshots', 'idx_cleanup_person_stat_source_page']
   ]) {
     const plan = db.prepare(`EXPLAIN QUERY PLAN SELECT COUNT(*) FROM ${table} WHERE source_record_id=?`).all('synthetic-source');
     assert.match(
@@ -277,42 +288,59 @@ test('cleanup integrity audit detects missing, dangling and identity-mismatched 
 
   const audit = await auditStorageCleanupIntegrity(env);
   const profile = audit.families.find((family) => family.family === 'horse_profile');
+  const resumable = await completeAudit(env, '9'.repeat(40));
+  const resumableProfile = resumable.families.find((family) => family.family === 'horse_profile');
   assert.equal(audit.ok, false);
   assert.equal(profile.mismatchedSources, 1);
   assert.equal(profile.missingRepresentations, 1);
   assert.equal(profile.danglingObservations, 1);
   assert.equal(profile.ok, false);
+  assert.deepEqual(
+    {
+      mismatchedSources: resumableProfile.mismatchedSources,
+      missingRepresentations: resumableProfile.missingRepresentations,
+      danglingObservations: resumableProfile.danglingObservations,
+      identityMismatchObservations: resumableProfile.identityMismatchObservations,
+      timestampMismatchRepresentations: resumableProfile.timestampMismatchRepresentations
+    },
+    {
+      mismatchedSources: profile.mismatchedSources,
+      missingRepresentations: profile.missingRepresentations,
+      danglingObservations: profile.danglingObservations,
+      identityMismatchObservations: profile.identityMismatchObservations,
+      timestampMismatchRepresentations: profile.timestampMismatchRepresentations
+    }
+  );
   assert.equal(JSON.stringify(audit).includes('audit-source-'), false);
   assert.equal(JSON.stringify(audit).includes('audit-horse'), false);
 });
 
-test('cleanup integrity audit route is private and returns only sanitized aggregate state', async () => {
+test('cleanup integrity audit route is private, bounded and resumable', async () => {
   const { env } = createTestEnv();
-  const url = 'https://example.invalid/v1/storage-cleanup/audit';
+  const url = 'https://example.invalid/v1/storage-cleanup/audit/start';
 
-  assert.equal((await worker.fetch(new Request(url), {})).status, 503);
+  assert.equal((await worker.fetch(new Request(url, { method: 'POST' }), {})).status, 503);
   assert.equal((await worker.fetch(new Request(url, {
-    headers: { authorization: 'Bearer wrong' }
+    method: 'POST', headers: { authorization: 'Bearer wrong', 'content-type': 'application/json' },
+    body: JSON.stringify({ source_sha: 'f'.repeat(40) })
   }), { ADMIN_TOKEN: 'right' })).status, 401);
 
   const response = await worker.fetch(new Request(url, {
-    headers: { authorization: `Bearer ${env.ADMIN_TOKEN}` }
+    method: 'POST',
+    headers: { authorization: `Bearer ${env.ADMIN_TOKEN}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ source_sha: 'f'.repeat(40) })
   }), env);
   assert.equal(response.status, 200);
   const body = await response.json();
-  assert.equal(body.ok, true);
+  assert.equal(body.ok, false);
+  assert.equal(body.complete, false);
   assert.equal(body.safetyStop, false);
   assert.ok(Array.isArray(body.families));
   assert.equal(body.families.length, 4);
   assert.ok(Number(body.cost?.rowsRead || 0) >= 0);
   assert.ok(Number(body.cost?.durationMs || 0) >= 0);
-  assert.deepEqual(
-    Object.keys(body.families[0].readCostByCheck),
-    ['representations','observations','direct_timeline']
-  );
-  assert.ok(Object.values(body.families[0].readCostByCheck).every((value) =>
-    value == null || (Number.isFinite(value) && value >= 0)
-  ));
+  assert.match(body.auditRunId, /^[0-9a-f-]{36}$/);
+  assert.equal(JSON.stringify(body).includes('source_record_id'), false);
 });
 
 
@@ -328,7 +356,8 @@ test('session-bound cleanup audit records only a verified matching running sessi
 
   const bound = await bindStorageCleanupIntegrityAudit(env, {
     session_id: sessionId,
-    source_sha: sourceSha
+    source_sha: sourceSha,
+    audit_run_id: (await completeAudit(env, sourceSha)).auditRunId
   });
   assert.equal(bound.ok, true);
   assert.equal(bound.auditVerified, true);
@@ -340,7 +369,8 @@ test('session-bound cleanup audit records only a verified matching running sessi
   await assert.rejects(
     () => bindStorageCleanupIntegrityAudit(env, {
       session_id: sessionId,
-      source_sha: 'b'.repeat(40)
+      source_sha: 'b'.repeat(40),
+      audit_run_id: bound.auditRunId
     }),
     /source_sha changed/
   );
@@ -359,9 +389,12 @@ test('session-bound cleanup audit does not mark a session when provenance integr
   addSource(db, 'missing-audit-source', '2026-09-10T10:00:00Z');
   addSync(db, 'missing-audit-source', 1);
 
+  const audit = await completeAudit(env, sourceSha);
+
   const bound = await bindStorageCleanupIntegrityAudit(env, {
     session_id: sessionId,
-    source_sha: sourceSha
+    source_sha: sourceSha,
+    audit_run_id: audit.auditRunId
   });
   assert.equal(bound.ok, false);
   assert.equal(bound.auditVerified, false);
@@ -382,8 +415,10 @@ test('session-bound cleanup audit route is private and persists verification', a
     VALUES (?,?,'running',1,'2099-01-01T00:00:00.000Z')
   `).run(sessionId, sourceSha);
 
+  const audit = await completeAudit(env, sourceSha);
+
   const url = 'https://example.invalid/v1/storage-cleanup/session/audit';
-  const body = JSON.stringify({ session_id: sessionId, source_sha: sourceSha });
+  const body = JSON.stringify({ session_id: sessionId, source_sha: sourceSha, audit_run_id: audit.auditRunId });
 
   const denied = await worker.fetch(new Request(url, {
     method: 'POST',

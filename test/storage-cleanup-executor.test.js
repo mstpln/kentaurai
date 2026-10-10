@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createTestEnv } from './helpers/d1.js';
 import {
   CLEANUP_CONFIRMATION,
+  buildBoundedRawReferenceCountSql,
   executeRawCleanupBatch,
   executeSnapshotCleanupBatch,
   planRawCleanupBatch,
@@ -104,10 +105,44 @@ test('snapshot cleanup ignores rows from failed source syncs', async () => {
   }
 
   const plan = await planSnapshotCleanupBatch(env, { family: 'horse_profile', limit: 25 });
-  assert.equal(plan.rowsScanned, 1);
+  assert.equal(plan.rowsScanned, 2);
   assert.equal(plan.rowsRetained, 1);
   assert.equal(plan.rowsRemovable, 0);
   assert.equal(plan.nextCursor, null);
+});
+
+test('snapshot planning bounds long runs of failed-source rows before complete history', async () => {
+  const { db, env } = createTestEnv();
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('horse-failed-prefix','Failed Prefix Horse')").run();
+  for (let index = 0; index < 42; index += 1) {
+    const suffix = String(index).padStart(2, '0');
+    const sourceId = `failed-prefix-source-${suffix}`;
+    const observedAt = `2026-09-${String(1 + Math.floor(index / 24)).padStart(2, '0')}T${String(index % 24).padStart(2, '0')}:00:00Z`;
+    const status = index < 40 ? 'failed' : 'complete';
+    addSource(db, sourceId, observedAt);
+    db.prepare(`
+      INSERT INTO official_snapshot_source_sync(source_record_id,status,horse_profile_count,error_message)
+      VALUES (?,?,1,?)
+    `).run(sourceId, status, status === 'failed' ? 'synthetic failure' : null);
+    db.prepare(`
+      INSERT INTO horse_profile_snapshots(id,horse_id,observed_at,age_years,source_record_id)
+      VALUES (?,'horse-failed-prefix',?,4,?)
+    `).run(`failed-prefix-snapshot-${suffix}`, observedAt, sourceId);
+  }
+
+  const first = await planSnapshotCleanupBatch(env, { family: 'horse_profile', limit: 25 });
+  assert.equal(first.rowsScanned, 25);
+  assert.equal(first.rowsRetained, 0);
+  assert.equal(first.rowsRemovable, 0);
+  assert.ok(first.nextCursor);
+
+  const second = await planSnapshotCleanupBatch(env, {
+    family: 'horse_profile', limit: 25, cursor: first.nextCursor
+  });
+  assert.equal(second.rowsScanned, 17);
+  assert.equal(second.rowsRetained, 1);
+  assert.equal(second.rowsRemovable, 1);
+  assert.equal(second.nextCursor, null);
 });
 
 test('failed snapshot rows do not block dedupe across complete sources', async () => {
@@ -133,7 +168,7 @@ test('failed snapshot rows do not block dedupe across complete sources', async (
   }
 
   const plan = await planSnapshotCleanupBatch(env, { family: 'horse_profile', limit: 25 });
-  assert.equal(plan.rowsScanned, 2);
+  assert.equal(plan.rowsScanned, 3);
   assert.equal(plan.rowsRemovable, 1);
 
   const result = await executeSnapshotCleanupBatch(env, {
@@ -279,7 +314,7 @@ test('snapshot cursor preserves sequential comparison across a bounded page boun
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM horse_profile_snapshots').get().n, 25);
 });
 
-test('raw executor verifies content, creates canonical object, rewrites references, then deletes legacy object', async () => {
+test('raw executor normalizes references atomically and retains physical legacy R2 objects', async () => {
   const { db, env, objects } = createTestEnv();
   const body = JSON.stringify({ synthetic: true });
   const hash = await sha256(body);
@@ -302,10 +337,11 @@ test('raw executor verifies content, creates canonical object, rewrites referenc
   });
   assert.deepEqual(
     { rewrites: result.referencesRewritten, created: result.canonicalObjectsCreated, deleted: result.legacyObjectsDeleted },
-    { rewrites: 2, created: 1, deleted: 1 }
+    { rewrites: 2, created: 1, deleted: 0 }
   );
   assert.ok(await env.RAW_BUCKET.head(canonicalKey));
-  assert.equal(await env.RAW_BUCKET.head(legacyKey), null);
+  assert.ok(await env.RAW_BUCKET.head(legacyKey));
+  assert.equal(result.objectDeletionDeferred, true);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM source_records').get().n, beforeCount);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM source_records WHERE raw_object_key=?').get(canonicalKey).n, 2);
 });
@@ -382,8 +418,8 @@ test('raw executor keeps the legacy object until every bounded reference batch i
     planToken: plan.planToken, confirmation: CLEANUP_CONFIRMATION
   });
   assert.equal(result.referencesRewritten, 2);
-  assert.equal(result.legacyObjectsDeleted, 1);
-  assert.equal(await env.RAW_BUCKET.head(legacyKey), null);
+  assert.equal(result.legacyObjectsDeleted, 0);
+  assert.ok(await env.RAW_BUCKET.head(legacyKey));
 });
 
 
@@ -418,6 +454,143 @@ test('raw executor keeps cursor on active page so later legacy groups are not sk
     if (!cursor && plan.referenceRewrites === 0) break;
   }
 
-  assert.equal(await env.RAW_BUCKET.head(legacyA), null);
-  assert.equal(await env.RAW_BUCKET.head(legacyB), null);
+  assert.ok(await env.RAW_BUCKET.head(legacyA));
+  assert.ok(await env.RAW_BUCKET.head(legacyB));
+});
+
+test('raw planning is index-bounded even when one legacy R2 key has a long reference list', async () => {
+  const { db, env, objects } = createTestEnv();
+  const body = 'many-shared-raw-source-references';
+  const hash = await sha256(body);
+  const legacyKey = `raw/synthetic_provider/day/${hash}.bin`;
+  objects.set(legacyKey, { body, options: {} });
+  for (let i = 0; i < 250; i++) {
+    addSource(db, `bounded-ref-${String(i).padStart(4, '0')}`,
+      '2026-09-10T10:00:00Z', legacyKey, hash, 'synthetic_provider');
+  }
+  const sql = buildBoundedRawReferenceCountSql();
+  const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(
+    legacyKey, 26, `raw/synthetic_provider/${hash}.bin`, 26
+  ).map((row) => String(row.detail || '')).join('\n');
+  assert.match(plan, /idx_source_records_raw_object_key/);
+  assert.doesNotMatch(plan, /SCAN source_records(?! USING COVERING INDEX)/);
+  const report = await planRawCleanupBatch(env, { sourceType: 'synthetic_provider', limit: 25 });
+  assert.equal(report.referenceRewrites, 25);
+  assert.equal(report.legacyReferences, 26, 'reported reference count is a bounded lower bound');
+  assert.equal(report.referenceCountsTruncated, true);
+  assert.equal(report.redundantObjectCandidates, 0, 'cannot infer R2 garbage eligibility from a truncated sample');
+  assert.equal(report.objectDeletionDeferred, true);
+});
+
+test('raw reference lookup stops at a bounded legacy-key prefix and rejects cross-source conflicts', async () => {
+  const { db, env, objects } = createTestEnv();
+  const body = 'bounded-mixed-provider-source';
+  const hash = await sha256(body);
+  const legacyKey = `raw/synthetic_provider/day/${hash}.bin`;
+  objects.set(legacyKey, { body, options: {} });
+  for (let i = 0; i < 120; i++) {
+    addSource(db, `aa-conflicting-${String(i).padStart(4, '0')}`,
+      '2026-09-10T10:00:00Z', legacyKey, hash, 'z_other_provider');
+  }
+  addSource(db, 'zzz-valid-legacy-source',
+    '2026-09-10T10:00:00Z', legacyKey, hash, 'synthetic_provider');
+  let cursor = null;
+  let report;
+  for (let page = 0; page < 7; page++) {
+    report = await planRawCleanupBatch(env, {
+      sourceType: 'synthetic_provider', limit: 25, cursor
+    });
+    assert.ok(report.rowsScanned <= 25);
+    if (report.conflictsSkipped > 0 || report.referenceRewrites > 0) break;
+    cursor = report.nextCursor;
+  }
+  assert.equal(report.referenceRewrites, 0);
+  assert.equal(report.referenceCountsTruncated, true);
+  assert.equal(report.conflictsSkipped, 1);
+  assert.ok(report.warnings.includes('legacy_reference_conflict'));
+  assert.equal(report.objectDeletionDeferred, true);
+});
+
+test('snapshot cleanup does not remove an earlier event because offset timestamps sort differently as text', async () => {
+  const { db, env } = createTestEnv();
+  db.prepare("INSERT INTO horses(id,canonical_name) VALUES ('offset-horse','Offset Horse')").run();
+  // The second source sorts earlier as text, but actually occurs later in time.
+  const sources = [
+    ['source-earlier', '2026-09-10T02:00:00+03:00'],
+    ['source-later', '2026-09-10T01:00:00Z']
+  ];
+  for (const [id, observedAt] of sources) {
+    addSource(db, id, observedAt);
+    markSnapshotSourceComplete(db, id);
+    db.prepare(`INSERT INTO horse_profile_snapshots
+      (id,horse_id,observed_at,age_years,source_record_id)
+      VALUES (?,'offset-horse',?,4,?)`).run(`snapshot-${id}`, observedAt, id);
+  }
+  const plan = await planSnapshotCleanupBatch(env, { family: 'horse_profile', limit: 25 });
+  assert.equal(plan.rowsScanned, 2);
+  assert.equal(plan.rowsRemovable, 0, 'never retain a chronologically later source in place of an earlier one');
+});
+
+test('snapshot quality status differences are not collapsed as identical facts', async () => {
+  const { db, env } = createTestEnv();
+  db.prepare("INSERT INTO horses(id,canonical_name) VALUES ('quality-horse','Quality Horse')").run();
+  for (const [id, at, quality] of [
+    ['q-first','2026-09-10T00:00:00Z','verified_official_snapshot'],
+    ['q-second','2026-09-11T00:00:00Z','unknown']
+  ]) {
+    addSource(db, id, at);
+    markSnapshotSourceComplete(db, id);
+    db.prepare(`INSERT INTO horse_profile_snapshots
+      (id,horse_id,observed_at,age_years,quality_status,source_record_id)
+      VALUES (?,'quality-horse',?,4,?,?)`).run(`snapshot-${id}`, at, quality, id);
+  }
+  const plan = await planSnapshotCleanupBatch(env, { family: 'horse_profile', limit: 25 });
+  assert.equal(plan.rowsRemovable, 0);
+});
+
+test('raw planning pages over bounded source ID ranges, including null and unrelated keys', async () => {
+  const { db, env } = createTestEnv();
+  for (let i = 0; i < 120; i++) {
+    addSource(db, `aaa-ineligible-${String(i).padStart(4,'0')}`,
+      '2026-09-10T10:00:00Z', null, null, 'unrelated');
+  }
+  const hash = 'a'.repeat(64);
+  const legacy = `raw/synthetic_provider/day/${hash}.bin`;
+  addSource(db, 'zzz-eligible-raw', '2026-09-10T10:00:00Z',
+    legacy, hash, 'synthetic_provider');
+  let cursor = null;
+  let selected = null;
+  let pages = 0;
+  do {
+    const page = await planRawCleanupBatch(env, {
+      limit: 25, cursor, sourceType: 'synthetic_provider'
+    });
+    assert.ok(page.rowsScanned <= 25);
+    if (page.referenceRewrites) selected = page;
+    cursor = page.nextCursor;
+    pages++;
+  } while (cursor && !selected && pages < 8);
+  assert.ok(selected, 'a late candidate must not be skipped behind null-key prefixes');
+  assert.ok(pages >= 5);
+});
+
+test('raw reference normalization only reports bounded remaining-reference existence', async () => {
+  const { db, env, objects } = createTestEnv();
+  const body = 'many-remaining-legacy-records';
+  const hash = await sha256(body);
+  const legacy = `raw/synthetic_provider/day/${hash}.bin`;
+  objects.set(legacy, { body, options: {} });
+  for (let i = 0; i < 60; i++) {
+    addSource(db, `remaining-ref-${String(i).padStart(3,'0')}`,
+      '2026-09-10T10:00:00Z', legacy, hash, 'synthetic_provider');
+  }
+  const plan = await planRawCleanupBatch(env, { limit: 25, sourceType: 'synthetic_provider' });
+  const result = await executeRawCleanupBatch(env, {
+    limit: 25, sourceType: 'synthetic_provider',
+    planToken: plan.planToken, confirmation: CLEANUP_CONFIRMATION
+  });
+  assert.equal(result.referencesRewritten, 25);
+  assert.equal(result.legacyReferencesStillPresent, true);
+  assert.equal(result.legacyReferencesRemaining, null);
+  assert.ok(await env.RAW_BUCKET.head(legacy));
 });
