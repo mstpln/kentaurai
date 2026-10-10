@@ -387,11 +387,15 @@ async function detailedRawPlan(env, { sourceType = null, limit, cursor = null })
     legacyReferences = Number(count?.legacy_n || 0);
     canonicalReferences = Number(count?.canonical_n || 0);
     const result = await env.DB.prepare(`
-      SELECT id FROM source_records
-      WHERE raw_object_key=? AND source_type=? AND content_hash=?
-      ORDER BY id LIMIT ?
-    `).bind(selected.legacyKey, selected.row.source_type, selected.hash, MAX_BATCH).all();
-    references = result.results || [];
+      SELECT id,source_type,content_hash
+      FROM source_records INDEXED BY idx_source_records_raw_object_key
+      WHERE raw_object_key=? ORDER BY id LIMIT ?
+    `).bind(selected.legacyKey, MAX_BATCH + 1).all();
+    const sampled = result.results || [];
+    const compatible = (row) => row.source_type === selected.row.source_type
+      && String(row.content_hash || '').toLowerCase() === selected.hash;
+    if (sampled.some((row) => !compatible(row))) warnings.push('legacy_reference_conflict');
+    references = sampled.slice(0, MAX_BATCH).filter(compatible).map((row) => ({ id: row.id }));
     if (references.length !== Math.min(legacyReferences, MAX_BATCH)) warnings.push('legacy_reference_conflict');
   }
   if (truncated) warnings.push('limit_reached_results_incomplete');
