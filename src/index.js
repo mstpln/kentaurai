@@ -40,7 +40,7 @@ import { getGameHistorySummary } from './routes/game-summary.js';
 import { appAuthConfigured, appPasswordMatches, createAppSessionCookie, hasValidAppSession } from './app-auth.js';
 import { htmlResponse, redirectResponse, renderAppPage, renderLoginPage } from './app-page-history.js';
 import { renderReferenceImportPage } from './app-reference-import.js';
-import { applyRunSafetyResult, createRunSafetyState, observeD1Operation } from './cost-safety.js';
+import { applyRunSafetyResult, createRunSafetyState, exceedsCostSafety, observeD1Operation } from './cost-safety.js';
 import {
   executeRawCleanupBatch,
   executeSnapshotCleanupBatch,
@@ -50,9 +50,12 @@ import {
 import { checkpointStorageCleanupSession, startOrResumeStorageCleanupSession } from './storage-cleanup-session.js';
 import {
   assertStorageCleanupAuthorization,
+  applyStorageCleanupAuditPage,
   bindStorageCleanupIntegrityAudit,
+  prepareStorageCleanupAuditStep,
+  recordStorageCleanupAuditStartCost,
+  settleStorageCleanupAuditPage,
   startOrResumeStorageCleanupAudit,
-  stepStorageCleanupAudit
 } from './storage-cleanup-audit.js';
 import { getAutomationControl } from './settings-drift.js';
 
@@ -68,6 +71,15 @@ function json(data, status = 200) {
     status,
     headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }
   });
+}
+
+function combinedCost(...parts) {
+  return parts.reduce((total, value) => ({
+    rowsRead: total.rowsRead + Math.max(0, Number(value?.rowsRead || 0)),
+    rowsWritten: total.rowsWritten + Math.max(0, Number(value?.rowsWritten || 0)),
+    d1DurationMs: total.d1DurationMs + Math.max(0, Number(value?.d1DurationMs || 0)),
+    durationMs: total.durationMs + Math.max(0, Number(value?.durationMs || 0))
+  }), { rowsRead: 0, rowsWritten: 0, d1DurationMs: 0, durationMs: 0 });
 }
 
 async function readJson(request) {
@@ -376,20 +388,64 @@ async function handleFetch(request, env) {
       'storage_cleanup_integrity_audit:start',
       (observedEnv) => startOrResumeStorageCleanupAudit(observedEnv, body)
     );
-    return json({ ...observed.value, cost: observed.metrics, safetyStop: observed.safetyStop });
+    const persisted = observed.value?.auditRunId
+      ? await recordStorageCleanupAuditStartCost(env, observed.value.auditRunId, observed.metrics, observed.safetyStop)
+      : observed.value;
+    return json({ ...persisted, cost: observed.metrics, safetyStop: observed.safetyStop });
   }
   if (request.method === 'POST' && path === '/v1/storage-cleanup/audit/step') {
     const body = await readJson(request);
-    const observed = await observeD1Operation(
+    const prepared = await observeD1Operation(
       env,
-      'storage_cleanup_integrity_audit:step',
-      (observedEnv) => stepStorageCleanupAudit(observedEnv, body)
+      'storage_cleanup_integrity_audit:page_read',
+      (observedEnv) => prepareStorageCleanupAuditStep(observedEnv, body)
+    );
+    if (!prepared.value?.preparedPage) {
+      return json({
+        ...prepared.value,
+        cost: prepared.metrics,
+        safetyStop: prepared.safetyStop,
+        safetyStopScope: null
+      });
+    }
+    if (prepared.safetyStop) {
+      const rejected = await recordStorageCleanupAuditStartCost(
+        env, prepared.value.auditRunId, prepared.metrics, true
+      );
+      return json({
+        ...rejected,
+        cost: prepared.metrics,
+        safetyStop: true,
+        safetyStopScope: prepared.value.preparedPage.target
+      });
+    }
+    const applied = await observeD1Operation(
+      env,
+      'storage_cleanup_integrity_audit:page_commit',
+      (observedEnv) => applyStorageCleanupAuditPage(observedEnv, prepared.value.preparedPage)
+    );
+    const cost = combinedCost(prepared.metrics, applied.metrics);
+    const safetyStop = exceedsCostSafety(cost);
+    if (applied.value?.applied === false) {
+      const current = await recordStorageCleanupAuditStartCost(
+        env, prepared.value.auditRunId, cost, safetyStop
+      );
+      return json({
+        ...current,
+        concurrentRetry: true,
+        cost,
+        safetyStop,
+        safetyStopScope: prepared.value.preparedPage.target
+      });
+    }
+    const settled = await settleStorageCleanupAuditPage(
+      env, prepared.value.preparedPage, cost, { safetyStop }
     );
     return json({
-      ...observed.value,
-      cost: observed.metrics,
-      safetyStop: observed.safetyStop,
-      safetyStopScope: observed.value?.page?.target || null
+      ...settled,
+      cost,
+      safetyStop,
+      safetyStopScope: prepared.value.preparedPage.target
     });
   }
   if (request.method === 'POST' && path === '/v1/storage-cleanup/session/audit') {
@@ -426,8 +482,8 @@ async function handleFetch(request, env) {
   if (request.method === 'POST' && path === '/v1/storage-cleanup/snapshots/execute') {
     const body = await readJson(request);
     const observed = await observeD1Operation(env, 'storage_cleanup_snapshot_execute', async (observedEnv) => {
-      await assertStorageCleanupAuthorization(observedEnv, body, { requireSession: true });
-      return executeSnapshotCleanupBatch(observedEnv, body);
+      const authorization = await assertStorageCleanupAuthorization(observedEnv, body, { requireSession: true });
+      return executeSnapshotCleanupBatch(observedEnv, { ...body, _authorization: authorization });
     });
     return json({ ...observed.value, cost: observed.metrics, safetyStop: observed.safetyStop });
   }
@@ -442,8 +498,8 @@ async function handleFetch(request, env) {
   if (request.method === 'POST' && path === '/v1/storage-cleanup/raw/execute') {
     const body = await readJson(request);
     const observed = await observeD1Operation(env, 'storage_cleanup_raw_execute', async (observedEnv) => {
-      await assertStorageCleanupAuthorization(observedEnv, body, { requireSession: true });
-      return executeRawCleanupBatch(observedEnv, body);
+      const authorization = await assertStorageCleanupAuthorization(observedEnv, body, { requireSession: true });
+      return executeRawCleanupBatch(observedEnv, { ...body, _authorization: authorization });
     });
     return json({ ...observed.value, cost: observed.metrics, safetyStop: observed.safetyStop });
   }

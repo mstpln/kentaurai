@@ -58,6 +58,67 @@ function assertExecutionRequest({ planToken, confirmation }) {
   if (confirmation !== CLEANUP_CONFIRMATION) throw new Error('cleanup confirmation is invalid');
 }
 
+function cleanupAuthorization(options) {
+  const value = options?._authorization;
+  if (value == null) return null;
+  if (!/^[0-9a-f-]{36}$/i.test(String(value.sessionId || ''))
+    || !/^[0-9a-f-]{36}$/i.test(String(value.auditRunId || ''))
+    || !Number.isInteger(Number(value.datasetRevision))
+    || Number(value.datasetRevision) < 0) {
+    throw new Error('cleanup authorization fence is invalid');
+  }
+  return {
+    sessionId: String(value.sessionId),
+    auditRunId: String(value.auditRunId),
+    datasetRevision: Number(value.datasetRevision)
+  };
+}
+
+function authorizationGuard(env, authorization, expectedCurrentRevision = authorization?.datasetRevision) {
+  if (!authorization) return null;
+  const guardId = crypto.randomUUID();
+  return {
+    id: guardId,
+    statement: env.DB.prepare(`
+      INSERT INTO storage_cleanup_revision_guards
+        (id,session_id,audit_run_id,audit_revision,expected_current_revision)
+      VALUES (?,?,?,?,?)
+    `).bind(
+      guardId,
+      authorization.sessionId,
+      authorization.auditRunId,
+      authorization.datasetRevision,
+      Number(expectedCurrentRevision)
+    )
+  };
+}
+
+function authorizationRebaseStatements(env, authorization, guard) {
+  if (!authorization || !guard) return [];
+  return [
+    env.DB.prepare(`
+      UPDATE storage_cleanup_audit_runs
+      SET dataset_revision=(SELECT revision FROM storage_cleanup_dataset_revision WHERE singleton=1),
+        updated_at=CURRENT_TIMESTAMP
+      WHERE id=? AND status='complete' AND dataset_revision=?
+    `).bind(authorization.auditRunId, authorization.datasetRevision),
+    env.DB.prepare(`
+      UPDATE storage_cleanup_session_audits
+      SET dataset_revision=(SELECT revision FROM storage_cleanup_dataset_revision WHERE singleton=1),
+        verified_at=CURRENT_TIMESTAMP
+      WHERE session_id=? AND audit_run_id=? AND dataset_revision=?
+    `).bind(authorization.sessionId, authorization.auditRunId, authorization.datasetRevision),
+    env.DB.prepare('DELETE FROM storage_cleanup_revision_guards WHERE id=?').bind(guard.id)
+  ];
+}
+
+async function datasetRevision(env) {
+  const row = await env.DB.prepare('SELECT revision FROM storage_cleanup_dataset_revision WHERE singleton=1').first();
+  const value = Number(row?.revision);
+  if (!Number.isInteger(value) || value < 0) throw new Error('cleanup dataset revision is unavailable');
+  return value;
+}
+
 function snapshotPartitionKey(row, columns) {
   return JSON.stringify(columns.map((column) => row[column]));
 }
@@ -190,15 +251,19 @@ export async function planSnapshotCleanupBatch(env, options = {}) {
 
 export async function executeSnapshotCleanupBatch(env, options = {}) {
   assertExecutionRequest(options);
+  const authorization = cleanupAuthorization(options);
   const plan = await detailedSnapshotPlan(env, options);
   if (plan.planToken !== options.planToken) throw new Error('cleanup plan changed; run dry-run again');
   if (plan.candidates.length === 0) return { executed: true, family: plan.family, rowsRemoved: 0, nextCursor: plan.nextCursor };
   const batchId = crypto.randomUUID();
-  const statements = [env.DB.prepare(`
+  const guard = authorizationGuard(env, authorization);
+  const statements = [];
+  if (guard) statements.push(guard.statement);
+  statements.push(env.DB.prepare(`
     INSERT INTO storage_cleanup_batches
       (id,cleanup_kind,target,plan_token,expected_changes,status)
     VALUES (?,'snapshot',?,?,?,'started')
-  `).bind(batchId, plan.family, plan.planToken, plan.candidates.length)];
+  `).bind(batchId, plan.family, plan.planToken, plan.candidates.length));
   for (const candidate of plan.candidates) {
     statements.push(env.DB.prepare(`
       INSERT OR IGNORE INTO official_snapshot_observations
@@ -257,6 +322,7 @@ export async function executeSnapshotCleanupBatch(env, options = {}) {
     SET actual_changes=changes(),status='complete',completed_at=CURRENT_TIMESTAMP
     WHERE id=?
   `).bind(batchId));
+  statements.push(...authorizationRebaseStatements(env, authorization, guard));
   await env.DB.batch(statements);
   return { executed: true, family: plan.family, rowsRemoved: plan.candidates.length, nextCursor: plan.nextCursor };
 }
@@ -385,6 +451,7 @@ function verifiedCanonicalHead(head, hash, sourceType, legacyHead) {
 
 export async function executeRawCleanupBatch(env, options = {}) {
   assertExecutionRequest(options);
+  const authorization = cleanupAuthorization(options);
   if (typeof env?.RAW_BUCKET?.delete !== 'function') throw new Error('RAW_BUCKET delete is not configured');
   const plan = await detailedRawPlan(env, options);
   if (plan.planToken !== options.planToken) throw new Error('cleanup plan changed; run dry-run again');
@@ -436,10 +503,13 @@ export async function executeRawCleanupBatch(env, options = {}) {
   verifiedCanonicalHead(canonicalHead, selected.hash, selected.row.source_type, legacyHead);
   const batchId = crypto.randomUUID();
   const ids = plan.references.map((row) => row.id);
+  let phaseRevision = authorization?.datasetRevision ?? null;
   if (ids.length > 0) {
     const placeholders = ids.map(() => '?').join(',');
-    await env.DB.batch([
-      env.DB.prepare(`
+    const guard = authorizationGuard(env, authorization);
+    const statements = [];
+    if (guard) statements.push(guard.statement);
+    statements.push(env.DB.prepare(`
         INSERT INTO storage_cleanup_batches
           (id,cleanup_kind,target,plan_token,expected_changes,status,
            legacy_key,canonical_key,legacy_etag,canonical_etag,object_verified)
@@ -449,17 +519,19 @@ export async function executeRawCleanupBatch(env, options = {}) {
         selected.legacyKey, selected.canonicalKey,
         typeof legacyHead.etag === 'string' ? legacyHead.etag : null,
         typeof canonicalHead.etag === 'string' ? canonicalHead.etag : null
-      ),
-      env.DB.prepare(`
+      ));
+    statements.push(env.DB.prepare(`
         UPDATE source_records SET raw_object_key=?
         WHERE id IN (${placeholders}) AND raw_object_key=? AND source_type=? AND content_hash=?
-      `).bind(selected.canonicalKey, ...ids, selected.legacyKey, selected.row.source_type, selected.hash),
-      env.DB.prepare(`
+      `).bind(selected.canonicalKey, ...ids, selected.legacyKey, selected.row.source_type, selected.hash));
+    statements.push(env.DB.prepare(`
         UPDATE storage_cleanup_batches
         SET actual_changes=changes(),status='references_rewritten'
         WHERE id=?
-      `).bind(batchId)
-    ]);
+      `).bind(batchId));
+    if (guard) statements.push(env.DB.prepare('DELETE FROM storage_cleanup_revision_guards WHERE id=?').bind(guard.id));
+    await env.DB.batch(statements);
+    phaseRevision = authorization ? await datasetRevision(env) : null;
   }
   const remaining = await env.DB.prepare('SELECT COUNT(*) AS n FROM source_records WHERE raw_object_key=?')
     .bind(selected.legacyKey).first();
@@ -468,7 +540,27 @@ export async function executeRawCleanupBatch(env, options = {}) {
     await env.RAW_BUCKET.delete(selected.legacyKey);
     if (await env.RAW_BUCKET.head(selected.legacyKey)) throw new Error('legacy R2 object deletion could not be verified');
     legacyObjectsDeleted = 1;
-    if (ids.length > 0) await env.DB.prepare(`UPDATE storage_cleanup_batches SET status='complete',completed_at=CURRENT_TIMESTAMP WHERE id=?`).bind(batchId).run();
+    if (ids.length > 0) {
+      const guard = authorizationGuard(env, authorization, phaseRevision);
+      const statements = [];
+      if (guard) statements.push(guard.statement);
+      statements.push(env.DB.prepare(`
+        UPDATE storage_cleanup_batches
+        SET status='complete',completed_at=CURRENT_TIMESTAMP
+        WHERE id=?
+      `).bind(batchId));
+      statements.push(...authorizationRebaseStatements(env, authorization, guard));
+      await env.DB.batch(statements);
+    }
+  } else if (authorization && ids.length > 0) {
+    // A bounded rewrite can legitimately leave more references for the next
+    // reviewed batch.  Rebase only after verifying that no unrelated D1
+    // mutation occurred between the guarded rewrite and this checkpoint.
+    const guard = authorizationGuard(env, authorization, phaseRevision);
+    await env.DB.batch([
+      guard.statement,
+      ...authorizationRebaseStatements(env, authorization, guard)
+    ]);
   }
   return {
     executed: true,

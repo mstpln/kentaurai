@@ -58,14 +58,24 @@ class StatementAdapter {
 }
 
 class D1Adapter {
-  constructor(db, metrics) { this.db = db; this.metrics = metrics; }
+  constructor(db, metrics, faults) { this.db = db; this.metrics = metrics; this.faults = faults; }
   prepare(sql) { const terms = maxCompoundSelectTerms(sql); if (terms > D1_MAX_COMPOUND_SELECT_TERMS) throw new Error(`D1_ERROR: too many terms in compound SELECT (${terms} > ${D1_MAX_COMPOUND_SELECT_TERMS})`); return new StatementAdapter(this.db, sql, this.metrics); }
   async batch(statements) {
     if (this.metrics) this.metrics.batches += 1;
     this.db.exec('BEGIN');
     try {
       const results = [];
-      for (const statement of statements) results.push(await statement.run());
+      for (let index = 0; index < statements.length; index += 1) {
+        if (this.faults?.batchBeforeStatement === index) {
+          this.faults.batchBeforeStatement = null;
+          throw new Error(`injected D1 batch failure before statement ${index}`);
+        }
+        results.push(await statements[index].run());
+        if (this.faults?.batchAfterStatement === index) {
+          this.faults.batchAfterStatement = null;
+          throw new Error(`injected D1 batch failure after statement ${index}`);
+        }
+      }
       this.db.exec('COMMIT');
       return results;
     } catch (error) {
@@ -142,18 +152,21 @@ export function createTestEnv() {
     '../../migrations/0063_cleanup_horse_stat_source_page.sql',
     '../../migrations/0064_cleanup_horse_record_source_page.sql',
     '../../migrations/0065_cleanup_person_stat_source_page.sql',
-    '../../migrations/0066_cleanup_observation_source_page.sql'
+    '../../migrations/0066_cleanup_observation_source_page.sql',
+    '../../migrations/0067_cleanup_audit_atomic_fencing.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }
 
   const objects = new Map();
   const d1Metrics = { statements: 0, runs: 0, firsts: 0, alls: 0, batches: 0 };
+  const d1Faults = { batchBeforeStatement: null, batchAfterStatement: null };
   return {
     db,
     d1Metrics,
+    d1Faults,
     env: {
-      DB: new D1Adapter(db, d1Metrics),
+      DB: new D1Adapter(db, d1Metrics, d1Faults),
       ADMIN_TOKEN: 'synthetic-test-admin-token',
       V85_LINE_PRICE_SEK: '0.50',
       V86_LINE_PRICE_SEK: '0.25',

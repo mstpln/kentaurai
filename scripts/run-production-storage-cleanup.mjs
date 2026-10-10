@@ -147,6 +147,9 @@ async function verifyResumableIntegrity(session) {
       return { ready: false, auditRunId, progressMade, audit };
     }
     audit = await post('/v1/storage-cleanup/audit/step', { audit_run_id: auditRunId });
+    if (audit?.cumulativeSafetyStop === true || audit?.budgetBlocked === true) {
+      return { ready: false, auditRunId, progressMade, audit };
+    }
     progressMade = true;
   }
   logIntegrityAudit(audit, { sessionBound: MODE === 'execute' });

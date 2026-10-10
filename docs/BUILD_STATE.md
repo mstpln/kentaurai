@@ -4,7 +4,7 @@
 - The candidate replaces every global integrity scan with persistent, revision-bound keyset pages, and requires that exact completed audit proof on all plan routes and the source-bound session proof on execute routes.
 - Snapshot planning for all four families now follows dedicated ordering indexes rather than sorting complete history into a temp B-tree. Raw-object planning remains indexed and bounded.
 - A 250,000-representation, 2,550-source synthetic fixture completes 510,100 logical checks in 122 pages with a 5,000-row maximum page, including interruption/resume and stale-data rejection. Exact Cloudflare D1 rows-read amplification remains production-verification evidence, not a local claim.
-- Migrations 0057-0066 are additive. Large indexes are isolated one per migration. No production deployment, dry-run, cleanup or data mutation is authorized by this candidate.
+- Migrations 0057-0067 are additive. Large indexes remain isolated one per migration; 0067 adds atomic page receipts, cost settlement, revision guards and mutation fencing. No production deployment, dry-run, cleanup or data mutation is authorized by this candidate.
 
 ## Storage cleanup audit: source-indexed count candidate (post-release #164)
 - Production storage-cleanup dry-run #12 failed safely before planning: the horse_profile integrity check read 582,304 D1 rows in about 1.2 seconds, exceeding the unchanged 250,000-row per-operation safety limit. The failure reported zero D1 writes; the temporary cleanup credential was removed and post-run production health passed.

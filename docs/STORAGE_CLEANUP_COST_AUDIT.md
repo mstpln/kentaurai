@@ -36,12 +36,24 @@ representations, while the direct timeline remained a full-history scan.
 ## Architecture and consistency boundary
 
 Migration `0057` adds resumable audit runs, per-target progress, accumulated
-source counts and a monotonic dataset revision. The existing
-`official_snapshot_source_sync` row is the commit marker for one official
-snapshot import, so its insert/update/delete advances the revision once per
-source rather than adding a write trigger to every snapshot. A running audit
-captures that revision. Every page update and final transition verifies the
-same revision; newly committed source evidence makes the run stale.
+source counts and a monotonic dataset revision. Migration `0067` closes the
+proof boundary over every D1 table that can change representation, provenance,
+planning or operational-integrity results: source records, all four snapshot
+tables, observations, source sync and cleanup batches. A running audit captures
+that revision. Every page application and final transition verifies the same
+revision; any unrelated mutation makes the run stale.
+
+Each page now has an immutable UUID and monotonic target version. The page read
+is cost-observed without changing proof state. Its receipt, source-count delta
+and cursor/counters are then written in one `env.DB.batch()` guarded by the
+expected cursor, page version and dataset revision. Cloudflare documents D1
+batched statements as transactions that execute sequentially and roll back the
+entire sequence on failure:
+https://developers.cloudflare.com/d1/worker-api/d1-database/#batch
+The receipt remains `pending` until the combined read-and-commit cost is known.
+Only cost acceptance clears the pending marker and can finalize the run. A
+crash with an ambiguous pending receipt fails the audit closed on its next use.
+Concurrent/replayed pages either win the unique version once or apply nothing.
 
 An audit has 22 deterministic targets: five checks for each of the four
 families plus bounded batch/session checks. Progress is idempotent, keyset
@@ -52,11 +64,33 @@ running audit cannot authorize planning. Execute binding additionally records
 the exact audit run and revision on the cleanup session.
 
 The workflow still enforces 250,000 reads/25,000 writes/45 seconds per request
-and 1,000,000 reads/100,000 writes per workflow run. If the global audit needs
-more than one workflow budget, it stops after the current bounded page and
-prints a resumable audit ID. It never queues a destructive continuation from
-an incomplete audit; an operator must explicitly resume it. No threshold was
-raised.
+and 1,000,000 reads/100,000 writes per workflow run. Per-continuation measured
+cost is persisted with the audit. Before another page, the backend reserves a
+full per-operation allowance; if that could exceed the workflow ceiling it
+leaves the audit running and requires an explicit continuation, which resets
+only the continuation counters. A page that trips read, write, duration or
+cumulative settlement is rejected and the persisted run cannot authorize
+cleanup. No threshold was raised.
+
+## Mutation-to-revision matrix
+
+| Mutation path/table | Integrity or plan impact | Revision action | Authorized cleanup handling |
+| --- | --- | --- | --- |
+| Raw capture / `source_records` insert | Adds provenance and possibly a raw-object candidate | Insert trigger advances the fence immediately, even without official sync | Not a cleanup mutation; old audits become stale. |
+| `source_records.raw_object_key` or other source update/delete | Changes raw references, source timestamps or provenance joins | Update/delete trigger advances the fence | Raw executor starts with an in-transaction authorization guard; a verified completed rewrite rebases only its bound audit/session. |
+| Four snapshot tables insert/update/delete | Changes representation, timeline and snapshot plan state | Per-row trigger advances the fence, including partial imports | Snapshot cleanup is one guarded D1 transaction and rebases only after observations, deletion and batch completion all succeed. |
+| `official_snapshot_observations` insert/update/delete | Changes representation and observation integrity | Per-row trigger advances the fence | Authorized rewiring occurs inside the same guarded snapshot transaction. |
+| `official_snapshot_source_sync` insert/update/delete | Changes expected counts and completed-source eligibility | Existing 0057 triggers advance the fence | Cleanup never edits sync facts. |
+| `storage_cleanup_batches` insert/update/delete | Changes started/stranded operational integrity | Trigger advances the fence | Completed snapshot batches rebase atomically. Raw multi-phase work rebases only at a verified safe checkpoint; an interrupted final rewrite remains stale and visible. |
+| Audit/session bookkeeping | Changes proof state, not racing/provenance facts | Does not advance the dataset fence | Receipt/version/status guards control this lineage directly. |
+| R2 object copy/delete | Physical storage state; D1 references determine plan eligibility | No independent D1 revision is possible | Body/hash/metadata are reverified; D1 guard surrounds reference changes, and a failed final delete cannot rebase an authorization proof. |
+
+The executor guard is the first statement in its mutation batch. It checks the
+current global revision, exact completed audit, running session and persisted
+session/audit binding. Trigger-driven revision changes from the authorized
+batch are then rebased to that one audit/session only after the operation has
+reached a verified safe state. A concurrent import changes the expected
+revision and aborts the whole mutation batch.
 
 ## Bounded-access inventory
 
@@ -68,7 +102,7 @@ These are logical access bounds, not claims about D1's provider-specific
 | Direct representation stream | `idx_cleanup_<family>_source_page` | At most 5,000 snapshot rows for the boundary plus the same bounded range for grouped accumulation. |
 | Observation representation stream | `idx_cleanup_observation_source_page` | At most 5,000 observations, with at most one snapshot-PK anti-lookup per row. |
 | Source-count comparison | `idx_official_snapshot_source_sync_status_source` and audit-count PK | At most 5,000 completed sources and one accumulated-count lookup each. |
-| Observation integrity | Observation table PK beginning with family/source/entity/scope | At most 5,000 observations and one snapshot/source lookup each. |
+| Observation integrity | `idx_cleanup_observation_source_page` beginning with family/source/entity/scope | At most 5,000 observations from the selected family and one snapshot/source lookup each; unrelated-family prefixes are not scanned. |
 | Direct timeline integrity | Snapshot table PK | At most 5,000 snapshots and one source lookup each. |
 | Operational batches/sessions | Each table PK | At most 5,000 metadata rows; raw stranded-state lookup occurs only for rows in that page. |
 | Snapshot planning | `idx_cleanup_<family>_order` plus `idx_official_snapshot_source_sync_status_source` | At most 26 indexed snapshot rows and 26 covering sync lookups, including arbitrarily long failed-source prefixes across separate pages. |
@@ -98,15 +132,25 @@ SEARCH source_sync EXISTS USING COVERING INDEX
   idx_official_snapshot_source_sync_status_source (status=? AND source_record_id=?)
 ```
 
-The scale regression creates only synthetic data: 50,000 rows in each snapshot
+The family-selectivity regression adds 50,000 observations in one family,
+100,000 in another, one in a sparse family and none in the fourth. SQLite uses
+`idx_cleanup_observation_source_page` with `snapshot_family=?` and a composite
+cursor and reports no temporary sort. It verifies limits 4,999/5,000/5,001,
+repeated reads, identical source IDs with distinct entity/scope keys and exact
+multi-page identity coverage.
+
+The main scale regression creates only synthetic data: 50,000 rows in each snapshot
 family plus 50,000 repeated observation-backed representations (250,000 stored
 representations total), distributed across 2,500 non-empty completed sources.
 It also includes 25 completed zero-count sources and 25 failed sync sources.
 The complete audit performs 510,100 logical row checks in exactly 122 resumable
-steps. No page checks more than 5,000 source rows. It also interrupts and
-resumes the same run to verify stable progress. Separate tests verify stale
-invalidation after a new source-sync commit and compare the optimized anomaly
-totals with the independent legacy reference audit.
+steps. No page checks more than 5,000 source rows. Adversarial tests inject a
+failure after a source-count statement but before progress, race two commits,
+replay the same page, change revision between read and commit, and leave a
+post-commit receipt unsettled. The D1 transaction either rolls back every
+change or commits exactly one pending receipt; only accepted receipts can
+finish a proof. Separate tests verify stale invalidation across raw capture,
+source reference, snapshot, observation and cleanup-batch mutations.
 
 Local SQLite cannot reproduce Cloudflare D1's provider `rows_read` accounting.
 The tests therefore prove bounded access plans and hard logical page sizes,

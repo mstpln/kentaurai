@@ -230,7 +230,7 @@ jobs:
           grep -q 'idx_person_stat_snapshots_source_record' /tmp/storage-cleanup-audit-index-check.txt
           grep -q 'idx_official_snapshot_source_sync_status_source' /tmp/storage-cleanup-audit-index-check.txt
 
-          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT name FROM d1_migrations WHERE name IN ('0057_storage_cleanup_resumable_audits.sql','0058_cleanup_horse_profile_order.sql','0059_cleanup_horse_stat_order.sql','0060_cleanup_horse_record_order.sql','0061_cleanup_person_stat_order.sql','0062_cleanup_horse_profile_source_page.sql','0063_cleanup_horse_stat_source_page.sql','0064_cleanup_horse_record_source_page.sql','0065_cleanup_person_stat_source_page.sql','0066_cleanup_observation_source_page.sql') ORDER BY name; SELECT name FROM sqlite_master WHERE type='table' AND name IN ('storage_cleanup_dataset_revision','storage_cleanup_audit_runs','storage_cleanup_audit_progress','storage_cleanup_audit_source_counts') ORDER BY name; SELECT name FROM sqlite_master WHERE type='index' AND name IN ('idx_storage_cleanup_audit_runs_running','idx_storage_cleanup_session_audits_run','idx_cleanup_horse_profile_order','idx_cleanup_horse_stat_order','idx_cleanup_horse_record_order','idx_cleanup_person_stat_order','idx_cleanup_horse_profile_source_page','idx_cleanup_horse_stat_source_page','idx_cleanup_horse_record_source_page','idx_cleanup_person_stat_source_page','idx_cleanup_observation_source_page') ORDER BY name; SELECT audit_run_id,dataset_revision FROM storage_cleanup_session_audits LIMIT 0;" > /tmp/storage-cleanup-resumable-audit-check.txt
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT name FROM d1_migrations WHERE name IN ('0057_storage_cleanup_resumable_audits.sql','0058_cleanup_horse_profile_order.sql','0059_cleanup_horse_stat_order.sql','0060_cleanup_horse_record_order.sql','0061_cleanup_person_stat_order.sql','0062_cleanup_horse_profile_source_page.sql','0063_cleanup_horse_stat_source_page.sql','0064_cleanup_horse_record_source_page.sql','0065_cleanup_person_stat_source_page.sql','0066_cleanup_observation_source_page.sql','0067_cleanup_audit_atomic_fencing.sql') ORDER BY name; SELECT name FROM sqlite_master WHERE type='table' AND name IN ('storage_cleanup_dataset_revision','storage_cleanup_audit_runs','storage_cleanup_audit_progress','storage_cleanup_audit_source_counts','storage_cleanup_audit_pages','storage_cleanup_revision_guards') ORDER BY name; SELECT name FROM sqlite_master WHERE type='index' AND name IN ('idx_storage_cleanup_audit_runs_running','idx_storage_cleanup_session_audits_run','idx_cleanup_horse_profile_order','idx_cleanup_horse_stat_order','idx_cleanup_horse_record_order','idx_cleanup_person_stat_order','idx_cleanup_horse_profile_source_page','idx_cleanup_horse_stat_source_page','idx_cleanup_horse_record_source_page','idx_cleanup_person_stat_source_page','idx_cleanup_observation_source_page','idx_storage_cleanup_audit_pages_pending') ORDER BY name; SELECT audit_run_id,dataset_revision FROM storage_cleanup_session_audits LIMIT 0; SELECT page_version,pending_page_id FROM storage_cleanup_audit_progress LIMIT 0;" > /tmp/storage-cleanup-resumable-audit-check.txt
           grep -q '0057_storage_cleanup_resumable_audits.sql' /tmp/storage-cleanup-resumable-audit-check.txt
           grep -q '0058_cleanup_horse_profile_order.sql' /tmp/storage-cleanup-resumable-audit-check.txt
           grep -q '0059_cleanup_horse_stat_order.sql' /tmp/storage-cleanup-resumable-audit-check.txt
@@ -241,10 +241,13 @@ jobs:
           grep -q '0064_cleanup_horse_record_source_page.sql' /tmp/storage-cleanup-resumable-audit-check.txt
           grep -q '0065_cleanup_person_stat_source_page.sql' /tmp/storage-cleanup-resumable-audit-check.txt
           grep -q '0066_cleanup_observation_source_page.sql' /tmp/storage-cleanup-resumable-audit-check.txt
+          grep -q '0067_cleanup_audit_atomic_fencing.sql' /tmp/storage-cleanup-resumable-audit-check.txt
           grep -q 'storage_cleanup_dataset_revision' /tmp/storage-cleanup-resumable-audit-check.txt
           grep -q 'storage_cleanup_audit_runs' /tmp/storage-cleanup-resumable-audit-check.txt
           grep -q 'storage_cleanup_audit_progress' /tmp/storage-cleanup-resumable-audit-check.txt
           grep -q 'storage_cleanup_audit_source_counts' /tmp/storage-cleanup-resumable-audit-check.txt
+          grep -q 'storage_cleanup_audit_pages' /tmp/storage-cleanup-resumable-audit-check.txt
+          grep -q 'storage_cleanup_revision_guards' /tmp/storage-cleanup-resumable-audit-check.txt
           grep -q 'idx_storage_cleanup_audit_runs_running' /tmp/storage-cleanup-resumable-audit-check.txt
           grep -q 'idx_storage_cleanup_session_audits_run' /tmp/storage-cleanup-resumable-audit-check.txt
           grep -q 'idx_cleanup_horse_profile_order' /tmp/storage-cleanup-resumable-audit-check.txt
@@ -256,6 +259,7 @@ jobs:
           grep -q 'idx_cleanup_horse_record_source_page' /tmp/storage-cleanup-resumable-audit-check.txt
           grep -q 'idx_cleanup_person_stat_source_page' /tmp/storage-cleanup-resumable-audit-check.txt
           grep -q 'idx_cleanup_observation_source_page' /tmp/storage-cleanup-resumable-audit-check.txt
+          grep -q 'idx_storage_cleanup_audit_pages_pending' /tmp/storage-cleanup-resumable-audit-check.txt
           grep -q 'idx_storage_cleanup_sessions_status' /tmp/storage-cleanup-session-schema-check.txt
           grep -q 'idx_storage_cleanup_sessions_one_running_source' /tmp/storage-cleanup-session-schema-check.txt
           grep -q 'idx_official_snapshot_observations_snapshot_lookup' /tmp/storage-cleanup-session-schema-check.txt
