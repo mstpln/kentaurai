@@ -72,8 +72,13 @@ async function loadRunningForSource(env, sourceSha) {
 async function sessionAuditVerified(env, id, sourceSha) {
   const row = await env.DB.prepare(`
     SELECT 1 AS ok
-    FROM storage_cleanup_session_audits
-    WHERE session_id=? AND source_sha=?
+    FROM storage_cleanup_session_audits a
+    JOIN storage_cleanup_audit_runs r
+      ON r.id=a.audit_run_id AND r.status='complete'
+    JOIN storage_cleanup_dataset_revision d
+      ON d.singleton=1 AND d.revision=a.dataset_revision
+    WHERE a.session_id=? AND a.source_sha=?
+      AND julianday(r.expires_at)>julianday('now')
     LIMIT 1
   `).bind(id, sourceSha).first();
   return Boolean(row?.ok);

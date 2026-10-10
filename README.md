@@ -204,3 +204,12 @@ Opening a round shows its eight stored legs. Horse rows expose only deterministi
 Spel outcome statistics reuse canonical stored data first. Results, final official market and final payout continue to arrive through post-race settlement. Statistics-history repair is not part of automatic morning maintenance; it remains an explicit admin-only bounded backfill that fills only gaps not already covered by normal acquisition.
 
 Historical Form prefers audited Step 1 lineage. KentaurAI rebuilds the pre-market pack at the original `as_of` and writes Form/Form-rank only when both the rebuilt `pack_id` and `facts_fingerprint` exactly match the recorded Step 1 export. For older registered systems that predate Step 1 packs, Form may instead be reconstructed from that system model's own stored `ai_race_analyses.data_snapshot_at` values, but only when all eight leg snapshots are verified before the round's earliest pre-race cutoff; each leg keeps its own cutoff and the snapshot is explicitly tagged `legacy_analysis_snapshot`. Historical KentaurAI rank/ABCD and spike facts are never regenerated from a current model; missing canonical historical judgments remain unavailable. If a stored final game source exists but its closing-market normalization is incomplete, the backfill may run a narrow closing-market repair against that already archived private source without making a new provider request.
+
+## Storage cleanup safety
+
+Production storage cleanup is manual, authenticated, dry-run first and
+fail-closed. Its full-history integrity proof is persisted as bounded keyset
+pages tied to an unchanged official-snapshot dataset revision; incomplete or
+stale progress cannot authorize planning or execution. See
+[`docs/STORAGE_CLEANUP_COST_AUDIT.md`](docs/STORAGE_CLEANUP_COST_AUDIT.md) for
+the root-cause matrix, query plans and scale evidence.

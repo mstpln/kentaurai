@@ -416,3 +416,12 @@ A single race must not directly change model weights. Candidate learnings are re
 2. The canonical representation count for one completed source remains direct snapshots plus independent observations not duplicating that source's own snapshot; all discrepancy counts remain exact. Do not suppress duplicate-source or independent observation evidence to optimize D1 reads.
 3. Orphaned observation identity/source-time mismatches and direct-snapshot source-time anomalies remain global integrity checks. Cost optimization cannot waive these safeguards or authorize cleanup after an incomplete audit.
 4. Read-only integrity audits may report only sanitized read costs by query category, never private source IDs or racing payloads. D1 per-operation and cleanup-run cost limits are not increased; any stop fails closed and requires review before retry.
+
+
+## Global cleanup integrity is resumable evidence, not one request
+1. Every full-history integrity check is keyset-paginated with a fixed row bound. Splitting a scan does not weaken coverage: a successful audit requires every page of every family and operational target.
+2. Representation counts are built by bounded direct and independent-observation streams, then compared with completed source-sync expectations. No page may hide an unbounded per-source correlated count.
+3. `official_snapshot_source_sync` is the commit boundary for an official snapshot import. A monotonic revision changes once when a source sync is committed; an audit can complete only if that revision stays unchanged from its first page through finalization.
+4. Incomplete, failed, stale, expired or exhausted audit progress is never cleanup permission. Planning requires the exact completed audit run and current revision. Execution additionally requires a running source-bound session with that audit persisted.
+5. An audit that exceeds one workflow's cumulative budget may be resumed explicitly, up to the audit continuation/expiry limits. It cannot automatically cross from incomplete read-only verification into destructive cleanup.
+6. Snapshot planning must use the family order index and stable signed cursor. A query plan that needs a global temp sort is a cost-safety regression even when its result limit is 25.

@@ -104,10 +104,44 @@ test('snapshot cleanup ignores rows from failed source syncs', async () => {
   }
 
   const plan = await planSnapshotCleanupBatch(env, { family: 'horse_profile', limit: 25 });
-  assert.equal(plan.rowsScanned, 1);
+  assert.equal(plan.rowsScanned, 2);
   assert.equal(plan.rowsRetained, 1);
   assert.equal(plan.rowsRemovable, 0);
   assert.equal(plan.nextCursor, null);
+});
+
+test('snapshot planning bounds long runs of failed-source rows before complete history', async () => {
+  const { db, env } = createTestEnv();
+  db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('horse-failed-prefix','Failed Prefix Horse')").run();
+  for (let index = 0; index < 42; index += 1) {
+    const suffix = String(index).padStart(2, '0');
+    const sourceId = `failed-prefix-source-${suffix}`;
+    const observedAt = `2026-09-${String(1 + Math.floor(index / 24)).padStart(2, '0')}T${String(index % 24).padStart(2, '0')}:00:00Z`;
+    const status = index < 40 ? 'failed' : 'complete';
+    addSource(db, sourceId, observedAt);
+    db.prepare(`
+      INSERT INTO official_snapshot_source_sync(source_record_id,status,horse_profile_count,error_message)
+      VALUES (?,?,1,?)
+    `).run(sourceId, status, status === 'failed' ? 'synthetic failure' : null);
+    db.prepare(`
+      INSERT INTO horse_profile_snapshots(id,horse_id,observed_at,age_years,source_record_id)
+      VALUES (?,'horse-failed-prefix',?,4,?)
+    `).run(`failed-prefix-snapshot-${suffix}`, observedAt, sourceId);
+  }
+
+  const first = await planSnapshotCleanupBatch(env, { family: 'horse_profile', limit: 25 });
+  assert.equal(first.rowsScanned, 25);
+  assert.equal(first.rowsRetained, 0);
+  assert.equal(first.rowsRemovable, 0);
+  assert.ok(first.nextCursor);
+
+  const second = await planSnapshotCleanupBatch(env, {
+    family: 'horse_profile', limit: 25, cursor: first.nextCursor
+  });
+  assert.equal(second.rowsScanned, 17);
+  assert.equal(second.rowsRetained, 1);
+  assert.equal(second.rowsRemovable, 1);
+  assert.equal(second.nextCursor, null);
 });
 
 test('failed snapshot rows do not block dedupe across complete sources', async () => {
@@ -133,7 +167,7 @@ test('failed snapshot rows do not block dedupe across complete sources', async (
   }
 
   const plan = await planSnapshotCleanupBatch(env, { family: 'horse_profile', limit: 25 });
-  assert.equal(plan.rowsScanned, 2);
+  assert.equal(plan.rowsScanned, 3);
   assert.equal(plan.rowsRemovable, 1);
 
   const result = await executeSnapshotCleanupBatch(env, {

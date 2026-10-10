@@ -1,3 +1,11 @@
+## Resumable storage-cleanup integrity audit candidate
+- Branch: `codex/storage-cleanup-cost-safety`, based on deployed production release commit `b0a847dcf070b72f9e68c5bd303675c5090536f7`.
+- Production dry-run #13 confirmed that PR #300 was partial: `horse_profile` still read 436,499 rows (173,941 representations, 232 observations and 262,326 direct-timeline rows) before any planning or mutation.
+- The candidate replaces every global integrity scan with persistent, revision-bound keyset pages, and requires that exact completed audit proof on all plan routes and the source-bound session proof on execute routes.
+- Snapshot planning for all four families now follows dedicated ordering indexes rather than sorting complete history into a temp B-tree. Raw-object planning remains indexed and bounded.
+- A 250,000-representation, 2,550-source synthetic fixture completes 510,100 logical checks in 122 pages with a 5,000-row maximum page, including interruption/resume and stale-data rejection. Exact Cloudflare D1 rows-read amplification remains production-verification evidence, not a local claim.
+- Migrations 0057-0066 are additive. Large indexes are isolated one per migration. No production deployment, dry-run, cleanup or data mutation is authorized by this candidate.
+
 ## Storage cleanup audit: source-indexed count candidate (post-release #164)
 - Production storage-cleanup dry-run #12 failed safely before planning: the horse_profile integrity check read 582,304 D1 rows in about 1.2 seconds, exceeding the unchanged 250,000-row per-operation safety limit. The failure reported zero D1 writes; the temporary cleanup credential was removed and post-run production health passed.
 - The failure is not another D1 migration issue. The earlier representation query globally aggregated all historical snapshot and observation source records before comparing them to completed sync rows, which still scans unrelated history despite migration 0051-0056 indexes.

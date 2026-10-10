@@ -132,7 +132,17 @@ export function createTestEnv() {
     '../../migrations/0053_storage_cleanup_horse_stat_source_index.sql',
     '../../migrations/0054_storage_cleanup_horse_record_source_index.sql',
     '../../migrations/0055_storage_cleanup_person_stat_source_index.sql',
-    '../../migrations/0056_storage_cleanup_sync_status_source_index.sql'
+    '../../migrations/0056_storage_cleanup_sync_status_source_index.sql',
+    '../../migrations/0057_storage_cleanup_resumable_audits.sql',
+    '../../migrations/0058_cleanup_horse_profile_order.sql',
+    '../../migrations/0059_cleanup_horse_stat_order.sql',
+    '../../migrations/0060_cleanup_horse_record_order.sql',
+    '../../migrations/0061_cleanup_person_stat_order.sql',
+    '../../migrations/0062_cleanup_horse_profile_source_page.sql',
+    '../../migrations/0063_cleanup_horse_stat_source_page.sql',
+    '../../migrations/0064_cleanup_horse_record_source_page.sql',
+    '../../migrations/0065_cleanup_person_stat_source_page.sql',
+    '../../migrations/0066_cleanup_observation_source_page.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }

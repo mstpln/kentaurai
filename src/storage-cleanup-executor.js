@@ -78,6 +78,20 @@ function snapshotOrderTuple(family, row, columns) {
   return columns.map((column) => snapshotOrderValue(family, row, column));
 }
 
+export function buildSnapshotCleanupPageSql(family, hasCursor = false) {
+  const definition = SNAPSHOT_FAMILIES[String(family || '')];
+  if (!definition) throw new Error('unsupported snapshot family');
+  const partition = [...definition.entity, ...definition.scope];
+  let sql = `SELECT snapshot.*, EXISTS (\n      SELECT 1 FROM official_snapshot_source_sync source_sync INDEXED BY idx_official_snapshot_source_sync_status_source\n      WHERE source_sync.source_record_id=snapshot.source_record_id AND source_sync.status='complete'\n    ) AS cleanup_source_complete\n    FROM ${definition.table} snapshot INDEXED BY ${definition.cleanupIndex}`;
+  if (hasCursor) {
+    const left = [...partition.map((column) => snapshotOrderExpression(family, column)), 'observed_at', 'id'].join(',');
+    const right = [...partition.map(() => '?'), '?', '?'].join(',');
+    sql += ` WHERE (${left}) > (${right})`;
+  }
+  sql += ` ORDER BY ${partition.map((column) => snapshotOrderExpression(family, column)).join(',')}, observed_at, id LIMIT ?`;
+  return sql;
+}
+
 function snapshotObservationIdentity(family, row) {
   if (family === 'horse_profile') {
     return { entityKey: row.horse_id, scopeKey: 'profile' };
@@ -103,19 +117,16 @@ async function detailedSnapshotPlan(env, { family, limit, cursor = null }) {
   const rowLimit = boundedCleanupLimit(limit, MAX_BATCH);
   const partition = [...definition.entity, ...definition.scope];
   const decoded = await decodeCursor(env, cursor, `snapshot:${family}`);
-  let sql = `SELECT snapshot.* FROM ${definition.table} snapshot\n    JOIN official_snapshot_source_sync source_sync\n      ON source_sync.source_record_id=snapshot.source_record_id AND source_sync.status='complete'`;
+  const sql = buildSnapshotCleanupPageSql(family, Boolean(decoded));
   let bindings = [];
   if (decoded) {
     if (!Array.isArray(decoded.order) || decoded.order.length !== partition.length + 2) throw new Error('cleanup cursor is invalid');
-    const left = [...partition.map((column) => snapshotOrderExpression(family, column)), 'observed_at', 'id'].join(',');
-    const right = [...partition.map(() => '?'), '?', '?'].join(',');
-    sql += ` WHERE (${left}) > (${right})`;
     bindings = decoded.order;
   }
-  sql += ` ORDER BY ${partition.map((column) => snapshotOrderExpression(family, column)).join(',')}, observed_at, id LIMIT ?`;
   const { results = [] } = await env.DB.prepare(sql).bind(...bindings, rowLimit + 1).all();
   const truncated = results.length > rowLimit;
-  const rows = results.slice(0, rowLimit);
+  const scannedRows = results.slice(0, rowLimit);
+  const rows = scannedRows.filter((row) => Number(row.cleanup_source_complete) === 1);
   let priorPartition = decoded?.priorPartition ?? null;
   let priorFacts = decoded?.priorFacts ?? null;
   let retainedId = decoded?.retainedId ?? null;
@@ -141,7 +152,7 @@ async function detailedSnapshotPlan(env, { family, limit, cursor = null }) {
       retainedId = row.id;
     }
   }
-  const last = rows.at(-1);
+  const last = scannedRows.at(-1);
   const nextCursor = truncated && last ? await encodeCursor(env, {
     v: 1,
     kind: `snapshot:${family}`,
@@ -162,7 +173,7 @@ async function detailedSnapshotPlan(env, { family, limit, cursor = null }) {
       family,
       table: definition.table,
       limit: rowLimit,
-      rowsScanned: rows.length,
+      rowsScanned: scannedRows.length,
       rowsRetained,
       rowsRemovable: candidates.length,
       truncated,

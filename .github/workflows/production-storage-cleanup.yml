@@ -30,6 +30,10 @@ on:
         description: Internal continuation session id - leave blank for a new manual cleanup
         required: false
         type: string
+      continuation_audit:
+        description: Resumable read-only audit id - use only the id reported by an incomplete audit
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -53,6 +57,7 @@ jobs:
       CLEANUP_RUN_MAX_ROWS_READ: "1000000"
       CLEANUP_RUN_MAX_ROWS_WRITTEN: "100000"
       CLEANUP_SESSION_ID: ${{ inputs.continuation_session }}
+      CLEANUP_AUDIT_RUN_ID: ${{ inputs.continuation_audit }}
       D1_DATABASE_ID: d8189e0e-6127-4ef2-88cc-534cb2217340
       WORKER_NAME: kentaurai-api
 
@@ -200,6 +205,13 @@ jobs:
           echo "::error::Cleanup reached the cumulative D1 run-cost budget; automatic continuation is disabled."
           exit 1
 
+      - name: Require manual continuation for incomplete integrity audit
+        if: ${{ always() && steps.cleanup.outcome == 'success' && steps.cleanup.outputs.audit_incomplete == 'true' }}
+        shell: bash
+        run: |
+          echo "::error::The bounded integrity audit is incomplete. No cleanup planning or mutation ran. Resume manually with audit id ${{ steps.cleanup.outputs.cleanup_audit_run_id }}."
+          exit 1
+
       - name: Refuse stalled execute continuation
         if: ${{ success() && env.MODE == 'execute' && steps.cleanup.outputs.cleanup_complete == 'false' && steps.cleanup.outputs.progress_made != 'true' }}
         shell: bash
@@ -208,7 +220,7 @@ jobs:
           exit 1
 
       - name: Queue controlled continuation
-        if: ${{ success() && env.MODE == 'execute' && steps.cleanup.outputs.cleanup_complete == 'false' && steps.cleanup.outputs.progress_made == 'true' && steps.cleanup.outputs.cost_budget_stop != 'true' && steps.cleanup.outputs.cleanup_session_id != '' }}
+        if: ${{ success() && env.MODE == 'execute' && steps.cleanup.outputs.audit_incomplete != 'true' && steps.cleanup.outputs.cleanup_complete == 'false' && steps.cleanup.outputs.progress_made == 'true' && steps.cleanup.outputs.cost_budget_stop != 'true' && steps.cleanup.outputs.cleanup_session_id != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           CLEANUP_SESSION_ID: ${{ steps.cleanup.outputs.cleanup_session_id }}
@@ -233,7 +245,12 @@ jobs:
           echo "Dry-run maximum batches per family: $DRY_RUN_MAX_BATCHES"
           echo "D1 restore point: ${{ steps.restore.outputs.restore_timestamp }}"
           if [ "$MODE" = "dry-run" ]; then
-            echo "No cleanup mutation was authorized."
+            if [ "${{ steps.cleanup.outputs.audit_incomplete }}" = "true" ]; then
+              echo "Integrity audit incomplete; no cleanup planning or mutation was authorized."
+              echo "Audit continuation id: ${{ steps.cleanup.outputs.cleanup_audit_run_id }}"
+            else
+              echo "No cleanup mutation was authorized."
+            fi
           elif [ "${{ steps.cleanup.outputs.cleanup_complete }}" = "true" ]; then
             echo "Cleanup completed across all snapshot families and raw storage."
           elif [ "${{ steps.cleanup.outputs.cost_budget_stop }}" = "true" ]; then
