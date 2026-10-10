@@ -494,7 +494,16 @@ test('raw reference lookup stops at a bounded legacy-key prefix and rejects cros
   }
   addSource(db, 'zzz-valid-legacy-source',
     '2026-09-10T10:00:00Z', legacyKey, hash, 'synthetic_provider');
-  const report = await planRawCleanupBatch(env, { sourceType: 'synthetic_provider', limit: 25 });
+  let cursor = null;
+  let report;
+  for (let page = 0; page < 7; page++) {
+    report = await planRawCleanupBatch(env, {
+      sourceType: 'synthetic_provider', limit: 25, cursor
+    });
+    assert.ok(report.rowsScanned <= 25);
+    if (report.conflictsSkipped > 0 || report.referenceRewrites > 0) break;
+    cursor = report.nextCursor;
+  }
   assert.equal(report.referenceRewrites, 0);
   assert.equal(report.referenceCountsTruncated, true);
   assert.equal(report.conflictsSkipped, 1);
