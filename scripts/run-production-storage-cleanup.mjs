@@ -237,8 +237,14 @@ async function verifyResumableIntegrity(session) {
       return { ready: false, auditRunId, progressMade, audit };
     }
     audit = await post('/v1/storage-cleanup/audit/step', { audit_run_id: auditRunId });
-    if (audit?.cumulativeSafetyStop === true || audit?.budgetBlocked === true) {
+    if (audit?.cumulativeSafetyStop === true || audit?.safetyStop === true
+      || audit?.budgetBlocked === true) {
       return { ready: false, auditRunId, progressMade, audit };
+    }
+    // A response is not proof of progress. Only an accepted, settled page
+    // may authorize another automatic audit workflow.
+    if (audit?.page?.accepted !== true || audit?.concurrentRetry === true) {
+      return { ready: false, auditRunId, progressMade: false, audit };
     }
     progressMade = true;
   }
@@ -473,7 +479,7 @@ async function main() {
       auditRunId: integrity.auditRunId,
       progressMade: integrity.progressMade,
       stoppedForCost: costBudgetReached(),
-      auditSafetyStop: integrity.audit?.cumulativeSafetyStop === true,
+      auditSafetyStop: integrity.audit?.cumulativeSafetyStop === true || integrity.audit?.safetyStop === true,
       continuationCount: integrity.audit?.continuationCount ?? null,
       maxContinuations: integrity.audit?.maxContinuations ?? null,
       verifiedRows: (integrity.audit?.families || []).reduce(
@@ -557,7 +563,7 @@ if (process.env.GITHUB_OUTPUT) {
   if (result.auditRunId) appendFileSync(process.env.GITHUB_OUTPUT, `cleanup_audit_run_id=${result.auditRunId}\n`);
   if (result.auditIncomplete) {
     const a = result.audit || {};
-    appendFileSync(process.env.GITHUB_OUTPUT, `audit_safety_stop=${a.cumulativeSafetyStop === true ? 'true' : 'false'}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, `audit_safety_stop=${a.cumulativeSafetyStop === true || a.safetyStop === true ? 'true' : 'false'}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `audit_continuation_count=${a.continuationCount ?? ''}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `audit_max_continuations=${a.maxContinuations ?? ''}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `audit_expires_at=${a.expiresAt ?? ''}\n`);
