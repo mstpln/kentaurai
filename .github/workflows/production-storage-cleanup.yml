@@ -27,7 +27,7 @@ on:
           - "250"
         default: "50"
       continuation_audit:
-        description: "DRY-RUN: Audit-ID from incomplete check; blank starts a new check."
+        description: "DRY-RUN: leave blank to start or resume; optional previous Audit-ID."
         required: false
         type: string
       continuation_session:
