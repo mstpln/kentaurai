@@ -217,7 +217,7 @@ test('a budget-paused audit exports bounded auto-continuation evidence and never
       if (path === '/v1/storage-cleanup/audit/start') return reply(res, state);
       if (path === '/v1/storage-cleanup/audit/step') {
         stepCalls++;
-        if (stepCalls === 1) return reply(res, { ...state, cost: { rowsRead: 100, rowsWritten: 3, durationMs: 5 } });
+        if (stepCalls === 1) return reply(res, { ...state, page: { target: 'horse_profile:direct', rowsChecked: 5000, complete: false, accepted: true }, cost: { rowsRead: 100, rowsWritten: 3, durationMs: 5 } });
         return reply(res, { ...state, budgetBlocked: true });
       }
       if (path.includes('/plan') || path.includes('/execute') || path.includes('/session/')) planCalls++;
@@ -269,4 +269,25 @@ test('automated read-only continuation requires an audit ID and never accepts ex
     assert.notEqual(result.code, 0);
     assert.equal(result.calls.length, 0, 'invalid continuation should stop before any request');
   }
+});
+
+test('HTTP audit response without a settled page is not treated as forward progress', async () => {
+  let steps = 0;
+  const state = {
+    auditRunId: AUDIT_ID, continuationCount: 2, maxContinuations: 48,
+    expiresAt: '2099-01-01T00:00:00.000Z',
+    status: 'running', complete: false, ok: false, families: [], operations: {}
+  };
+  const result = await invokeRunner({}, async ({ path, res }) => {
+    if (path === '/v1/storage-cleanup/audit/start') return reply(res, state);
+    if (path === '/v1/storage-cleanup/audit/step') {
+      steps++;
+      return reply(res, { ...state, concurrentRetry: true, cost: { rowsRead: 12, rowsWritten: 0 } });
+    }
+    reply(res, { error: 'unapproved' }, 500);
+  });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(steps, 1);
+  assert.match(result.stdout, /"progressMade":false/);
+  assert.equal(result.calls.filter((x) => x.path.includes('/execute')).length, 0);
 });
