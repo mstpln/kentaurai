@@ -481,3 +481,23 @@ test('raw planning is index-bounded even when one legacy R2 key has a long refer
   assert.equal(report.redundantObjectCandidates, 0, 'cannot infer R2 garbage eligibility from a truncated sample');
   assert.equal(report.objectDeletionDeferred, true);
 });
+
+test('raw reference lookup stops at a bounded legacy-key prefix and rejects cross-source conflicts', async () => {
+  const { db, env, objects } = createTestEnv();
+  const body = 'bounded-mixed-provider-source';
+  const hash = await sha256(body);
+  const legacyKey = `raw/synthetic_provider/day/${hash}.bin`;
+  objects.set(legacyKey, { body, options: {} });
+  for (let i = 0; i < 120; i++) {
+    addSource(db, `aa-conflicting-${String(i).padStart(4, '0')}`,
+      '2026-09-10T10:00:00Z', legacyKey, hash, 'z_other_provider');
+  }
+  addSource(db, 'zzz-valid-legacy-source',
+    '2026-09-10T10:00:00Z', legacyKey, hash, 'synthetic_provider');
+  const report = await planRawCleanupBatch(env, { sourceType: 'synthetic_provider', limit: 25 });
+  assert.equal(report.referenceRewrites, 0);
+  assert.equal(report.referenceCountsTruncated, true);
+  assert.equal(report.conflictsSkipped, 1);
+  assert.ok(report.warnings.includes('legacy_reference_conflict'));
+  assert.equal(report.objectDeletionDeferred, true);
+});
