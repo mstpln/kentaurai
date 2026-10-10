@@ -1,3 +1,10 @@
+## Safe one-click audit continuation — 2026-10-10
+1. Manual `dry-run` is the only start of a new automatic audit chain. Every continuation is a separately cost-bounded, serialized GitHub Actions `workflow_dispatch` run using the repository-scoped `GITHUB_TOKEN` with `actions:write`. No cron or permanent cleanup scheduler is introduced.
+2. The continuation dispatcher sends only `mode=dry-run`, a fixed read-only marker, an existing source-bound audit identifier and a bounded dry-run batch size. An execute session is always empty. The worker rechecks source SHA and dataset revision at every start.
+3. Automatic dispatch is denied when there was no accepted progress, a per-operation/cumulative safety stop, invalid metadata, a missing proof ID, expired evidence or the existing 48-run limit. Once failed, require a human decision; do not automatically start a new proof on a changed source or dataset.
+4. D1 budgets stay at 250,000 reads / 25,000 writes / 45 seconds per operation, and 1,000,000 reads / 100,000 writes per workflow continuation. The last accepted cursor/receipt is persisted before a new run. Temporary auth deletion and production health verification precede dispatch.
+5. "Auto-continuation queued" is not audit completion. Full integrity proof and first-stage cleanup planning must complete before any separate destructive authorization. Physical R2 deletion remains disabled.
+
 # Product and architecture decisions
 
 ## Architecture
@@ -423,7 +430,7 @@ A single race must not directly change model weights. Candidate learnings are re
 2. Representation counts are built by bounded direct and independent-observation streams, then compared with completed source-sync expectations. No page may hide an unbounded per-source correlated count.
 3. `official_snapshot_source_sync` is the commit boundary for an official snapshot import. A monotonic revision changes once when a source sync is committed; an audit can complete only if that revision stays unchanged from its first page through finalization.
 4. Incomplete, failed, stale, expired or exhausted audit progress is never cleanup permission. Planning requires the exact completed audit run and current revision. Execution additionally requires a running source-bound session with that audit persisted.
-5. An audit that exceeds one workflow's cumulative budget may be resumed explicitly, up to the audit continuation/expiry limits. It cannot automatically cross from incomplete read-only verification into destructive cleanup.
+5. An audit exceeding one workflow's cumulative budget may be resumed, within its unchanged per-run cost, 24-hour expiry and 48-continuation limits. A manually started dry-run may queue a subsequent **read-only** workflow run automatically only if its exact source/revision-bound audit made verified forward progress without a cumulative or per-operation safety stop. A continuation may not start a replacement stale/expired audit unattended, carry an execute session or auto-cross from incomplete verification into destructive cleanup.
 6. Snapshot planning must use the family order index and stable signed cursor. A query plan that needs a global temp sort is a cost-safety regression even when its result limit is 25.
 7. Audit page reads do not directly mutate authorization evidence. A unique page/version receipt, source-count delta and cursor transition commit in one guarded D1 batch; the receipt remains pending until its complete cost is accepted. Pending, rejected or ambiguously interrupted pages can never finalize or authorize an audit.
 8. The cleanup dataset fence covers source records, snapshot rows, observations, source-sync state and cleanup batches. An authorized cleanup batch may rebase only its exact bound audit/session, and only inside a revision-guarded transaction after reaching a verified safe state.

@@ -13,7 +13,7 @@ on:
           - execute
         default: dry-run
       confirmation:
-        description: For execute, type exactly EXECUTE REVIEWED STORAGE CLEANUP
+        description: 'Execute: type EXACTLY EXECUTE REVIEWED STORAGE CLEANUP; dry-run: leave blank.'
         required: false
         type: string
       dry_run_max_batches:
@@ -58,6 +58,7 @@ jobs:
       CLEANUP_RUN_MAX_ROWS_WRITTEN: "100000"
       CLEANUP_SESSION_ID: ${{ inputs.continuation_session }}
       CLEANUP_AUDIT_RUN_ID: ${{ inputs.continuation_audit }}
+      CLEANUP_TRIGGER_CONFIRMATION: ${{ inputs.confirmation }}
       D1_DATABASE_ID: d8189e0e-6127-4ef2-88cc-534cb2217340
       WORKER_NAME: kentaurai-api
 
@@ -76,6 +77,16 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$MODE" = "dry-run" ]; then
+            case "$CLEANUP_TRIGGER_CONFIRMATION" in
+              ""|"RESUME READ ONLY AUDIT") ;;
+              *) echo "::error::Dry-run refuses execute confirmation or unknown marker."; exit 1 ;;
+            esac
+            if [ "$CLEANUP_TRIGGER_CONFIRMATION" = "RESUME READ ONLY AUDIT" ]; then
+              if [ -z "$CLEANUP_AUDIT_RUN_ID" ] || [ -n "$CLEANUP_SESSION_ID" ]; then
+                echo "::error::An automatic READ-ONLY continuation needs exactly one audit ID, never a session ID."
+                exit 1
+              fi
+            fi
             if [ -n "$CLEANUP_SESSION_ID" ] && [ -n "$CLEANUP_AUDIT_RUN_ID" ]; then
               echo "::error::Dry-run has two IDs. Fill only continuation_audit and leave continuation_session blank."
               exit 1
@@ -213,17 +224,34 @@ jobs:
           echo "Production health check passed."
 
       - name: Refuse automatic continuation after cumulative cost stop
-        if: ${{ success() && env.MODE == 'execute' && steps.cleanup.outputs.cleanup_complete == 'false' && steps.cleanup.outputs.cost_budget_stop == 'true' }}
+        if: ${{ success() && ((env.MODE == 'execute' && steps.cleanup.outputs.cleanup_complete == 'false' && steps.cleanup.outputs.cost_budget_stop == 'true') || (env.MODE == 'dry-run' && steps.cleanup.outputs.audit_incomplete == 'true' && (steps.cleanup.outputs.cost_budget_stop == 'true' || steps.cleanup.outputs.audit_safety_stop == 'true'))) }}
         shell: bash
         run: |
           echo "::error::Cleanup reached the cumulative D1 run-cost budget; automatic continuation is disabled."
           exit 1
 
-      - name: Require manual continuation for incomplete integrity audit
-        if: ${{ always() && steps.cleanup.outcome == 'success' && steps.cleanup.outputs.audit_incomplete == 'true' }}
+      - name: Queue next bounded READ-ONLY audit continuation
+        id: queue_audit
+        if: ${{ success() && env.MODE == 'dry-run' && steps.cleanup.outputs.audit_incomplete == 'true' && steps.cleanup.outputs.progress_made == 'true' && steps.cleanup.outputs.cost_budget_stop != 'true' && steps.cleanup.outputs.audit_safety_stop != 'true' && steps.cleanup.outputs.cleanup_audit_run_id != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUDIT_INCOMPLETE: ${{ steps.cleanup.outputs.audit_incomplete }}
+          PROGRESS_MADE: ${{ steps.cleanup.outputs.progress_made }}
+          COST_BUDGET_STOP: ${{ steps.cleanup.outputs.cost_budget_stop }}
+          AUDIT_SAFETY_STOP: ${{ steps.cleanup.outputs.audit_safety_stop }}
+          AUDIT_RUN_ID: ${{ steps.cleanup.outputs.cleanup_audit_run_id }}
+          AUDIT_CONTINUATION_COUNT: ${{ steps.cleanup.outputs.audit_continuation_count }}
+          AUDIT_MAX_CONTINUATIONS: ${{ steps.cleanup.outputs.audit_max_continuations }}
+          AUDIT_EXPIRES_AT: ${{ steps.cleanup.outputs.audit_expires_at }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        shell: bash
+        run: node scripts/queue-production-storage-audit.mjs
+
+      - name: Require manual intervention for unsafe or stalled integrity audit
+        if: ${{ always() && steps.cleanup.outcome == 'success' && steps.cleanup.outputs.audit_incomplete == 'true' && steps.queue_audit.outcome == 'skipped' }}
         shell: bash
         run: |
-          echo "::error::The bounded integrity audit is incomplete. No cleanup planning or mutation ran. Resume manually with audit id ${{ steps.cleanup.outputs.cleanup_audit_run_id }}."
+          echo "::error::The integrity audit is incomplete and no safe continuation was queued. No cleanup mutation ran. Review the cost, progress, and proof status before retrying."
           exit 1
 
       - name: Refuse stalled execute continuation
@@ -261,9 +289,15 @@ jobs:
           if [ "$MODE" = "dry-run" ]; then
             if [ "${{ steps.cleanup.outputs.audit_incomplete }}" = "true" ]; then
               echo "Integrity audit incomplete; no cleanup planning or mutation was authorized."
-              echo "Audit continuation id: ${{ steps.cleanup.outputs.cleanup_audit_run_id }}"
+              echo "Audit continuation: ${{ steps.cleanup.outputs.audit_continuation_count }}/${{ steps.cleanup.outputs.audit_max_continuations }}"
+              if [ "${{ steps.queue_audit.outcome }}" = "success" ]; then
+                echo "A new bounded READ-ONLY continuation was automatically queued. You do not need to start another run."
+                echo "Read-only audit in progress: next bounded run queued automatically." >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "No automatic continuation; review the previous steps before retrying." >> "$GITHUB_STEP_SUMMARY"
+              fi
             else
-              echo "No cleanup mutation was authorized."
+              echo "Read-only audit completed and bounded planning reported. No cleanup mutation was authorized." >> "$GITHUB_STEP_SUMMARY"
             fi
           elif [ "${{ steps.cleanup.outputs.cleanup_complete }}" = "true" ]; then
             echo "Cleanup completed snapshot work and raw reference normalization; physical R2 deletion remains deferred."

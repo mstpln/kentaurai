@@ -207,8 +207,15 @@ Historical Form prefers audited Step 1 lineage. KentaurAI rebuilds the pre-marke
 
 ## Storage cleanup safety
 
-Production storage cleanup is manual, authenticated, dry-run first and
-fail-closed. Its full-history integrity proof is persisted as bounded keyset
+Production storage cleanup is manually initiated, authenticated, dry-run first
+and fail-closed. After a single manual dry-run start, unfinished **read-only**
+integrity-audit pages may automatically continue through separate, individually
+cost-bounded GitHub Actions runs. The audit can never authorize or switch into
+execute mode automatically. Auto-continuation stops on no progress, abnormal
+D1 cost, invalid source/revision, a pending/failed audit, expiry or the existing
+48-continuation cap. GitHub shows completed safe checkpoints as queued, not as
+failed cleanup. After a successful audit and bounded planning review, actual
+deletion still requires the user's separate explicit execute approval. Its full-history integrity proof is persisted as bounded keyset
 pages tied to an unchanged cleanup-relevant D1 dataset revision; incomplete or
 stale progress cannot authorize planning or execution. See
 [`docs/STORAGE_CLEANUP_COST_AUDIT.md`](docs/STORAGE_CLEANUP_COST_AUDIT.md) for
