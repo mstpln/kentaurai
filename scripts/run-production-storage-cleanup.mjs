@@ -13,6 +13,9 @@ const READ_ONLY_CONTINUATION_MARKER = 'RESUME READ ONLY AUDIT';
 const TRIGGER_CONFIRMATION = process.env.CLEANUP_TRIGGER_CONFIRMATION || '';
 const AUTOMATED_READ_ONLY_CONTINUATION = MODE === 'dry-run'
   && TRIGGER_CONFIRMATION === READ_ONLY_CONTINUATION_MARKER;
+if (MODE === 'execute' && TRIGGER_CONFIRMATION === READ_ONLY_CONTINUATION_MARKER) {
+  throw new Error('A read-only continuation marker cannot authorize execute mode');
+}
 if (MODE === 'dry-run' && !['', READ_ONLY_CONTINUATION_MARKER].includes(TRIGGER_CONFIRMATION)) {
   throw new Error('dry-run does not accept execute confirmation or unknown continuation markers');
 }
