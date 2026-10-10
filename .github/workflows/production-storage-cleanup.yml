@@ -26,12 +26,12 @@ on:
           - "100"
           - "250"
         default: "50"
-      continuation_session:
-        description: Internal continuation session id - leave blank for a new manual cleanup
+      continuation_audit:
+        description: "DRY-RUN: Audit-ID from incomplete check; blank starts a new check."
         required: false
         type: string
-      continuation_audit:
-        description: Resumable read-only audit id - use only the id reported by an incomplete audit
+      continuation_session:
+        description: "EXECUTE ONLY: internal cleanup session. Always blank for dry-run."
         required: false
         type: string
 
@@ -70,6 +70,20 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/main" || { echo "::error::Production cleanup must run from main"; exit 1; }
+
+      - name: Validate cleanup continuation fields before costly work
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$MODE" = "dry-run" ]; then
+            if [ -n "$CLEANUP_SESSION_ID" ] && [ -n "$CLEANUP_AUDIT_RUN_ID" ]; then
+              echo "::error::Dry-run has two IDs. Fill only continuation_audit and leave continuation_session blank."
+              exit 1
+            fi
+            if [ -n "$CLEANUP_SESSION_ID" ]; then
+              echo "::warning::Audit-ID entered under continuation_session: the dry-run runner will safely use it as continuation_audit."
+            fi
+          fi
 
       - name: Require exact deployed main
         env:
