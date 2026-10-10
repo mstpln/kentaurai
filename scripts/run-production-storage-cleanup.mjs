@@ -9,6 +9,17 @@ const DEADLINE_RESERVE_MS = 2 * 60 * 1000;
 const WORKER_URL = process.env.WORKER_URL;
 const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
 const SOURCE_SHA = process.env.GITHUB_SHA || '';
+const READ_ONLY_CONTINUATION_MARKER = 'RESUME READ ONLY AUDIT';
+const TRIGGER_CONFIRMATION = process.env.CLEANUP_TRIGGER_CONFIRMATION || '';
+const AUTOMATED_READ_ONLY_CONTINUATION = MODE === 'dry-run'
+  && TRIGGER_CONFIRMATION === READ_ONLY_CONTINUATION_MARKER;
+if (MODE === 'dry-run' && !['', READ_ONLY_CONTINUATION_MARKER].includes(TRIGGER_CONFIRMATION)) {
+  throw new Error('dry-run does not accept execute confirmation or unknown continuation markers');
+}
+if (AUTOMATED_READ_ONLY_CONTINUATION
+  && (!process.env.CLEANUP_AUDIT_RUN_ID || process.env.CLEANUP_SESSION_ID)) {
+  throw new Error('Automated read-only continuation requires an audit ID and no execute session');
+}
 // Dry-run has no execution session. Older UI listed the execute-only field
 // first, leading people to paste their audit UUID into continuation_session.
 const RAW_SESSION_ID = process.env.CLEANUP_SESSION_ID?.trim() || null;
@@ -48,7 +59,7 @@ if (!/^[a-f0-9]{40}$/.test(SOURCE_SHA)) {
 }
 
 function deadlineReached() {
-  return MODE === 'execute' && Date.now() + DEADLINE_RESERVE_MS >= deadlineAt;
+  return Date.now() + DEADLINE_RESERVE_MS >= deadlineAt;
 }
 
 function addRunCost(cost) {
@@ -206,8 +217,8 @@ async function verifyResumableIntegrity(session) {
       const safeResetReasons = new Set([
         'audit_source_changed', 'audit_expired', 'audit_stale', 'audit_dataset_changed'
       ]);
-      if (MODE !== 'dry-run' || !CLEANUP_AUDIT_RUN_ID
-        || !safeResetReasons.has(error?.cleanupReason)) throw error;
+      if (MODE !== 'dry-run' || AUTOMATED_READ_ONLY_CONTINUATION
+        || !CLEANUP_AUDIT_RUN_ID || !safeResetReasons.has(error?.cleanupReason)) throw error;
       console.warn('dry-run: previous audit is not reusable (' + error.cleanupReason
         + '); starting a new read-only audit with independent integrity verification.');
       audit = await post('/v1/storage-cleanup/audit/start', {
@@ -219,7 +230,7 @@ async function verifyResumableIntegrity(session) {
   const auditRunId = audit.auditRunId;
   let progressMade = false;
   while (audit?.complete !== true) {
-    if (costBudgetReached()) {
+    if (costBudgetReached() || deadlineReached()) {
       return { ready: false, auditRunId, progressMade, audit };
     }
     audit = await post('/v1/storage-cleanup/audit/step', { audit_run_id: auditRunId });
@@ -459,11 +470,21 @@ async function main() {
       auditRunId: integrity.auditRunId,
       progressMade: integrity.progressMade,
       stoppedForCost: costBudgetReached(),
+      auditSafetyStop: integrity.audit?.cumulativeSafetyStop === true,
+      continuationCount: integrity.audit?.continuationCount ?? null,
+      maxContinuations: integrity.audit?.maxContinuations ?? null,
+      verifiedRows: (integrity.audit?.families || []).reduce(
+        (sum, family) => sum + Number(family?.rowsChecked || 0), 0
+      ) + Number(integrity.audit?.operations?.rowsChecked || 0),
+      completedFamilies: (integrity.audit?.families || []).filter(
+        (family) => family?.complete === true
+      ).length,
       cost: runCost
     }));
     return {
       session,
       auditRunId: integrity.auditRunId,
+      audit: integrity.audit,
       auditIncomplete: true,
       allComplete: false,
       progressMade: integrity.progressMade,
@@ -531,6 +552,13 @@ if (process.env.GITHUB_OUTPUT) {
   appendFileSync(process.env.GITHUB_OUTPUT, `cost_budget_stop=${result.stoppedForCost ? 'true' : 'false'}\n`);
   appendFileSync(process.env.GITHUB_OUTPUT, `audit_incomplete=${result.auditIncomplete ? 'true' : 'false'}\n`);
   if (result.auditRunId) appendFileSync(process.env.GITHUB_OUTPUT, `cleanup_audit_run_id=${result.auditRunId}\n`);
+  if (result.auditIncomplete) {
+    const a = result.audit || {};
+    appendFileSync(process.env.GITHUB_OUTPUT, `audit_safety_stop=${a.cumulativeSafetyStop === true ? 'true' : 'false'}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, `audit_continuation_count=${a.continuationCount ?? ''}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, `audit_max_continuations=${a.maxContinuations ?? ''}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, `audit_expires_at=${a.expiresAt ?? ''}\n`);
+  }
   if (MODE === 'execute' && result.session?.sessionId) {
     appendFileSync(process.env.GITHUB_OUTPUT, `cleanup_session_id=${result.session.sessionId}\n`);
     appendFileSync(process.env.GITHUB_OUTPUT, `continuation_count=${Number(result.session.continuationCount || 0)}\n`);
