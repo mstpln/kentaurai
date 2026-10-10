@@ -154,3 +154,27 @@ test('production release verifies required migrations and private observability 
   assert.match(releaseWorkflow, /\/v1\/storage-cleanup\/session\/start/);
   assert.match(releaseWorkflow, /\/v1\/storage-cleanup\/session\/checkpoint/);
 });
+
+test('cleanup atomic fencing migration uses D1-safe trigger guards and LF line endings', () => {
+  // D1's remote SQL splitter has historically mistaken CASE...END inside a
+  // CREATE TRIGGER body for the trigger END, producing SQLITE_ERROR 7500.
+  const sql = readFileSync(new URL('../migrations/0067_cleanup_audit_atomic_fencing.sql', import.meta.url), 'utf8');
+  assert.doesNotMatch(sql, /\r/, 'remote D1 migration must not use CRLF');
+  assert.doesNotMatch(sql, /SELECT\s+CASE\s+WHEN\s+NOT\s+EXISTS/i);
+  const guards = [
+    ['storage_cleanup_audit_page_insert_guard', 'cleanup audit page guard failed'],
+    ['storage_cleanup_audit_page_accept_guard', 'cleanup audit page acceptance guard failed'],
+    ['storage_cleanup_revision_guard_insert', 'cleanup authorization revision guard failed']
+  ];
+  for (const [name, message] of guards) {
+    const start = sql.indexOf('CREATE TRIGGER ' + name);
+    assert.ok(start >= 0, name + ' must remain present');
+    const body = sql.slice(start, sql.indexOf('\nEND;', start) + 5);
+    assert.ok(body.includes("SELECT RAISE(ABORT,'" + message + "') WHERE NOT EXISTS"),
+      name + ' must use D1-compatible RAISE/WHERE NOT EXISTS');
+  }
+  assert.equal((sql.match(/CREATE TRIGGER /g) || []).length, 24,
+    'all three authorization guards and 21 dataset revision triggers must remain');
+  const attrs = readFileSync(new URL('../.gitattributes', import.meta.url), 'utf8');
+  assert.match(attrs, /migrations\/\*\.sql text eol=lf/);
+});

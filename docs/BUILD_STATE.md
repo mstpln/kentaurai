@@ -1,3 +1,10 @@
+## Production release #166 migration recovery (D1 SQL trigger syntax)
+- The reviewed PR #301 merged and production release #166 passed QA and Cloudflare policy checks.
+- Migrations 0057 through 0066 completed successfully in private D1; 0067 was not recorded as applied, with SQLITE_ERROR 7500 'incomplete input'. Worker deployment was not reached and no cleanup ran.
+- The failing migration used SELECT CASE WHEN NOT EXISTS ... THEN RAISE(ABORT) END inside CREATE TRIGGER. Wrangler/D1 remote SQL statement splitting can misinterpret the inner CASE END token as a trigger terminator even when local SQLite accepts it.
+- Pending 0067 now preserves identical guard semantics with SELECT RAISE(ABORT,...) WHERE NOT EXISTS(...), avoiding the nested CASE END; .gitattributes forces LF for migration files.
+- A new CI regression checks all three guards, keeps all 21 revision triggers, and rejects the remote-incompatible syntax. Normal reviewed release promotion, exact schema verification and no destructive cleanup remain mandatory.
+
 ## Comprehensive cleanup review additions (pre-release)
 - Review identified unbounded post-normalization legacy-reference count, raw-source
   planning with filtered-index prefix scans, mixed-zone timestamp order,
