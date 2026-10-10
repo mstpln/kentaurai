@@ -163,3 +163,29 @@ test('unrecognized Worker errors do not leak their raw message or trigger restar
   assert.doesNotMatch(result.stderr, /private-source-secret-do-not-log/);
   assert.equal(result.calls.length, 1);
 });
+
+test('blank dry-run continuation fields resume only the active source-bound audit selected by the Worker', async () => {
+  let starts = 0;
+  const result = await invokeRunner({}, async (request) => {
+    if (request.path === '/v1/storage-cleanup/audit/start') {
+      starts++;
+      assert.equal(request.body.source_sha, SOURCE_SHA);
+      if (starts === 1) {
+        assert.equal(request.body.audit_run_id, null);
+        reply(request.res, {
+          error: 'request_failed',
+          message: 'cleanup audit is already running; resume it explicitly with audit_run_id ' + AUDIT_ID
+        }, 400);
+      } else {
+        assert.equal(request.body.audit_run_id, AUDIT_ID);
+        reply(request.res, completeAudit());
+      }
+      return;
+    }
+    await normalDryRunRoute(request);
+  });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(starts, 2);
+  assert.match(result.stderr, /resuming the active source\/revision-bound audit/);
+  assert.equal(result.calls.filter((call) => call.path.includes('/execute') || call.path.includes('/session/')).length, 0);
+});
