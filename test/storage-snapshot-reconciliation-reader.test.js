@@ -272,6 +272,17 @@ test('historical cross-source observation is read and value-matched by snapshot 
   assert.equal(report.classifications.represented, 1);
   assert.equal(report.classifications.missing_unverified_chronology, 1);
 
+  f.db.prepare(
+    "UPDATE official_snapshot_observations SET factual_changed=1 " +
+    "WHERE source_record_id='src-a' AND snapshot_family='horse_profile'"
+  ).run();
+  const wrongMarker = await inspectPrivateSnapshotReconciliationPage(f.env, { family: 'horse_profile' });
+  assert.equal(wrongMarker.classifications.conflict, 1);
+  f.db.prepare(
+    "UPDATE official_snapshot_observations SET factual_changed=0 " +
+    "WHERE source_record_id='src-a' AND snapshot_family='horse_profile'"
+  ).run();
+
   f.db.prepare("UPDATE horse_profile_snapshots SET age_years=7 WHERE id='old-snapshot'").run();
   const conflict = await inspectPrivateSnapshotReconciliationPage(f.env, { family: 'horse_profile' });
   assert.equal(conflict.classifications.conflict, 1);
