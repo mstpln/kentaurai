@@ -1,3 +1,37 @@
+## Comprehensive historical provenance recovery build — PR #315 (2026-10-11)
+
+- Confirmed historical snapshot cleanup defect from exact 2026-09-27 production
+  execute logs: 18,717 source-owned direct snapshots removed across two runs
+  without inserting the removed source's own observation when missing.
+  This caused real gaps in logical source provenance. The old executor was
+  corrected later; destructive cleanup endpoints remain disabled.
+- Successful read-only production run \`38151111458\`: 25/25 deficient
+  sample facts have equal verified older R2 original facts, zero conflicts
+  and zero writes. 43,613 is the complete historical **representation
+  count deficit**, not 43,613 lost unique facts and not proof of a single
+  cause for every discrepancy.
+- PR #315 contains the original four-family synthetic regression, a
+  source-owned direct restoration primitive with immutable-source SHA/
+  external-ID/scope/row guards, and a private read-only aggregate preview.
+- **Same PR** now adds migration \`0068\`: private durable run and receipt
+  journal, four-family source and identity revision epoch triggers, a
+  fully paged index-backed live source inventory **independent of the old
+  failed audit**, and persisted cross-run status/position.
+- GitHub Actions \`production-historical-recovery.yml\` provides a single
+  manual \`inventory\` launch with automatic bounded continuations; a
+  separate typed approval enables \`execute\` only after completed inventory.
+  The Worker creates a whole-D1 SQL export by Cloudflare REST and streams
+  it directly into private Cloudflare R2, **never through GitHub runners**.
+- Each restoring INSERT plus receipt/run/epoch and audit-revision state is
+  committed as one D1 transaction. Any identity/source disagreement or
+  concurrent external modification stops or quarantines the source.
+  No existing racing facts are UPDATEd or DELETEd. A fresh independent
+  full-source, four-family count audit follows restoration; residual gaps
+  are reported as \`complete_with_quarantine\`, not misreported as fixed.
+- All cleanup execute endpoints stay disabled. Neither merge/deployment
+  nor production execution is authorized by construction; obtain explicit
+  user approval for both according to \`AGENTS.md\`.
+
 ## Root-cause confirmed and selective history recovery designed — PR #315 (2026-10-11)
 
 - **Historical deletion defect confirmed from exact production cleanup commits and logs**:
