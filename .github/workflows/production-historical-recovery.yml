@@ -5,15 +5,16 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "Inventory = no racing fact writes; execute requires separate approval"
+        description: "Inventory first, then backup-only approval, then separately approved execute"
         required: true
         type: choice
         options:
           - inventory
+          - backup
           - execute
         default: inventory
       approval:
-        description: "For execute only: type RESTORE_VERIFIED_SNAPSHOTS_ONLY"
+        description: "For backup: BACKUP_D1_ONLY; for execute: RESTORE_VERIFIED_SNAPSHOTS_ONLY"
         required: false
         type: string
       run_id:
@@ -55,6 +56,8 @@ jobs:
           test "$GITHUB_REF" = "refs/heads/main"
           if [ "$RECOVERY_MODE" = execute ]; then
             test "$APPROVAL" = RESTORE_VERIFIED_SNAPSHOTS_ONLY
+          elif [ "$RECOVERY_MODE" = backup ]; then
+            test "$APPROVAL" = BACKUP_D1_ONLY
           else
             test "$RECOVERY_MODE" = inventory
           fi
@@ -162,8 +165,8 @@ jobs:
           RUNNER_PHASE: initialize
         run: node scripts/run-production-historical-recovery.mjs
 
-      - name: Enable Cloudflare-only database export (no data enters GitHub)
-        if: ${{ inputs.mode == 'execute' && steps.initialize.outputs.phase != 'complete' && steps.initialize.outputs.phase != 'complete_with_quarantine' }}
+      - name: Enable separate backup-only Cloudflare export (no data enters GitHub)
+        if: ${{ inputs.mode == 'backup' && steps.initialize.outputs.phase == 'ready' }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -175,9 +178,9 @@ jobs:
           printf '%s\n' "$CLOUDFLARE_ACCOUNT_ID" \
             | npx --yes wrangler@4.114.0 secret put HISTORICAL_RECOVERY_ACCOUNT_ID --name "$WORKER_NAME"
 
-      - name: Export production D1 internally to private R2 and verify receipt
+      - name: Backup-only export from production D1 to private R2 (no restore)
         id: backup
-        if: ${{ inputs.mode == 'execute' && steps.initialize.outputs.phase != 'complete' && steps.initialize.outputs.phase != 'complete_with_quarantine' }}
+        if: ${{ inputs.mode == 'backup' && steps.initialize.outputs.phase == 'ready' }}
         env:
           WORKER_URL: ${{ steps.worker.outputs.worker_url }}
           CLEANUP_TOKEN: ${{ steps.read_token.outputs.token }}
@@ -185,9 +188,9 @@ jobs:
           RUNNER_PHASE: backup
         run: node scripts/run-production-historical-recovery.mjs
 
-      - name: Enable short-lived RESTORE ONLY capability after verified backup
+      - name: Enable short-lived RESTORE ONLY capability after separately verified backup
         id: write_token
-        if: ${{ inputs.mode == 'execute' && steps.backup.outputs.backup_verified == 'true' && steps.initialize.outputs.phase != 'complete' && steps.initialize.outputs.phase != 'complete_with_quarantine' }}
+        if: ${{ inputs.mode == 'execute' && steps.initialize.outputs.backup_verified == 'true' && steps.initialize.outputs.phase != 'complete' && steps.initialize.outputs.phase != 'complete_with_quarantine' }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -269,6 +272,7 @@ jobs:
           {
             echo "Historical recovery: only verified source-owned INSERTs are permitted."
             echo "Private D1 exports stay inside Cloudflare and stream to private R2."
+            echo "Backup and restoration require two separately approved workflow dispatches."
             echo "Every source is checked again against live original R2 facts and D1 provenance."
             echo "Unknown or contradictory histories remain quarantined; never delete or overwrite."
             echo "A queued continuation is NOT evidence that restoration is complete."
