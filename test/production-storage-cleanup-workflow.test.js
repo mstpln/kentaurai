@@ -115,6 +115,7 @@ test('read-only audit successor runs in a separate job after the shared producti
   assert.match(dispatch, /mode: 'dry-run'/);
   assert.match(dispatch, /confirmation: READ_ONLY_MARKER/);
   assert.match(dispatch, /continuation_session: ''/);
-  assert.match(dispatch, /status === 'queued' \|\| run\?\.status === 'pending'/);
+  assert.match(dispatch, /run\?\.status === 'in_progress'/);
+  assert.doesNotMatch(dispatch, /if \(run\?\.status === 'queued'/);
   assert.doesNotMatch(workflow, /schedule:/);
 });
