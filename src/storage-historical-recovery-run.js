@@ -184,8 +184,10 @@ export async function stepHistoricalRecoveryInventory(env,{runId}={}) {
       !report.revisionCounterMatchesProof || report.budget?.rowsWritten!==0||
       candidates.length>24)throw new Error('recovery_source_proof_incomplete');
   const shortfall=Number(report.ledgerShortfall);
-  const ready=report.auditLedgerVerified && report.originalVerified===1
-    ? candidates.length:0;
+  // Source observations cannot exceed the independently recomputed
+  // shortfall. A conflicting candidate population is quarantined in full.
+  const ready=report.auditLedgerVerified && report.originalVerified===1 &&
+    candidates.length<=shortfall ? candidates.length:0;
   const quarantined=Math.max(0,shortfall-ready);
   const finalEpoch=await epoch(env);
   verifyEpoch(run,finalEpoch);
