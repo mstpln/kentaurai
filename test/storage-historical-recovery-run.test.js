@@ -384,7 +384,7 @@ const CLOUD_EXPORT_BOOKMARK='00000085-0000024c-00004c6d-8e61117bf38d7adb71b934eb
 const CLOUD_EXPORT_URL='https://download.cloudflarestorage.com/private-synthetic-backup';
 
 async function withSyntheticCloudExport(pollResult,{downloadBody='SYNTHETIC SQL BACKUP'.repeat(90),
-  advertisedLength=null,omitLength=false}={},callback){
+  advertisedLength=null,omitLength=false,contentType=null}={},callback){
   const previous=globalThis.fetch;
   let downloaded=0;
   globalThis.fetch=async(url,options={})=>{
@@ -398,6 +398,7 @@ async function withSyntheticCloudExport(pollResult,{downloadBody='SYNTHETIC SQL 
       downloaded++;
       const headers=omitLength?{}:{'content-length':String(advertisedLength ??
         new TextEncoder().encode(downloadBody).byteLength)};
+      if(contentType)headers['content-type']=contentType;
       return new Response(downloadBody,{status:200,headers});
     }
     return previous(url,options);
@@ -414,6 +415,9 @@ test('Cloudflare D1 export status and nested signed URL must agree before backup
     ['explicit Cloudflare export failure',
       {type:'export',status:'error',error:'synthetic private failure',
         at_bookmark:CLOUD_EXPORT_BOOKMARK},/recovery_backup_export_api_failed/],
+    ['explicit nested Cloudflare export failure',
+      {type:'export',success:false,status:'complete',at_bookmark:CLOUD_EXPORT_BOOKMARK,
+        result:{signed_url:CLOUD_EXPORT_URL}},/recovery_backup_export_api_failed/],
     ['complete export missing its nested signed URL',
       {type:'export',status:'complete',at_bookmark:CLOUD_EXPORT_BOOKMARK},
       /recovery_backup_export_completion_invalid/],
@@ -443,7 +447,8 @@ test('backup must match signed file byte length before obtaining a valid R2 rece
     result:{filename:'private-d1.sql',signed_url:CLOUD_EXPORT_URL}};
   for(const scenario of [
     {omitLength:true,expected:/recovery_backup_length_unverifiable/},
-    {advertisedLength:2048,expected:/recovery_backup_r2_verification_failed/}
+    {advertisedLength:2048,expected:/recovery_backup_r2_verification_failed/},
+    {contentType:'text/html',expected:/recovery_backup_dump_unexpected_media_type/}
   ]){
     const f=await fixture();
     const {runId}=await scanned(f);
