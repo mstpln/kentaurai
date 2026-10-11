@@ -208,8 +208,12 @@ Historical Form prefers audited Step 1 lineage. KentaurAI rebuilds the pre-marke
 ## Storage cleanup safety
 
 The production GitHub storage workflow is **read-only (dry-run only)**.
-Destructive `execute` is disabled until a separately reviewed authorization
-boundary and explicit operator approval are implemented. A manually started
+Destructive `execute` is disabled in **both** the GitHub workflow and Worker
+HTTP API (including direct calls using ADMIN_TOKEN or the temporary audit token).
+The session/start, session/audit, session/checkpoint, snapshots/execute and
+raw/execute endpoints reject requests even when authenticated. A separately
+reviewed and protected authorization mechanism, plus explicit operator
+approval, is required before any execution routes may be restored. A manually started
 integrity audit can resume through bounded, source/revision-bound GitHub runs.
 Each request is subject to the existing D1 cost limits, and the 24-hour/48-run
 audit expiry and continuation caps are unchanged.

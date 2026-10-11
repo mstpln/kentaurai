@@ -1,3 +1,19 @@
+## 2026-10-11 follow-up: disable all HTTP cleanup execution (scoped review)
+
+- Release #169 and merged PR #304 were verified on `main` at
+  `9e91e691f62e59179fa35c39cf47fabe092179e9`. Its GitHub Actions
+  workflow is dry-run only and post-release production audit has not run.
+- Independent review found that ADMIN_TOKEN and temporary cleanup credentials
+  could still reach the session and execution HTTP routes. The workflow
+  prohibition alone did not provide a complete destructive-authorization boundary.
+- Both credential types now receive `403 storage_cleanup_execution_disabled`
+  on session start/audit/checkpoint and snapshot/raw execute routes; read-only
+  audit/status/planning remains available. No database migration is required.
+- Added regression tests for the credential boundary and a synthetic complete
+  22-target, three-continuation audit with read-only planning and no subsequent
+  dispatch. No production dry-run or cleanup is authorized by this follow-up.
+- Final CI/review/release status must be recorded from the exact merged commit.
+
 ## PR #304 security hardening review — implementation pending final CI
 
 - Read-only workflow no longer exposes `execute` behind a plain text

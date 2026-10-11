@@ -1,3 +1,13 @@
+## Disable destructive cleanup HTTP routes — 2026-10-11
+
+The public GitHub cleanup workflow being dry-run-only does not prevent direct
+authenticated calls to the Worker. Until a separately protected, reviewed
+execution mechanism and explicit approval exist, authenticated HTTP requests
+must receive 403 on storage-cleanup session start/audit/checkpoint and
+snapshot/raw execute. This applies to both permanent admin and temporary
+cleanup-only credentials. Only read-only audit, status and planning remain
+available. Do not silently re-enable execution with a mode flag or text phrase.
+
 ## Safe one-click audit continuation — 2026-10-10
 1. Manual `dry-run` is the only start of a new automatic audit chain. Every continuation is a separately cost-bounded, serialized GitHub Actions `workflow_dispatch` run using the repository-scoped `GITHUB_TOKEN` with `actions:write`. No cron or permanent cleanup scheduler is introduced.
 2. The continuation dispatcher sends only `mode=dry-run`, a fixed read-only marker, an existing source-bound audit identifier and a bounded dry-run batch size. An execute session is always empty. The worker rechecks source SHA and dataset revision at every start.
