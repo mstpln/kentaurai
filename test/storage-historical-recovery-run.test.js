@@ -301,3 +301,37 @@ test('stale original mapping pauses source restoration without touching immutabl
     "SELECT COUNT(*) AS n FROM horse_profile_snapshots WHERE source_record_id=?"
   ).get(SOURCE_CURRENT).n,0);
 });
+
+
+test('crash after final atomic source INSERT but before receipt close is idempotently finalized',async()=>{
+  const f=await fixture();
+  const {runId}=await ready(f);
+  f.env.HISTORICAL_REPAIR_ENABLED='true';
+  f.env.HISTORICAL_REPAIR_TOKEN=TOKEN;
+  const restored=await stepHistoricalRecoveryExecution(f.env,{
+    runId,approved:true,authorization:TOKEN
+  });
+  assert.equal(restored.inserted,1);
+  assert.equal(restored.restoredSourceFacts,1);
+  // Model the exact crash window: the source INSERT + journal checkpoint
+  // were committed, but the separate receipt-close operation was lost.
+  f.db.prepare(
+    "UPDATE historical_recovery_receipts SET status='ready'"+
+    " WHERE run_id=? AND family='horse_profile' AND source_record_id=?"
+  ).run(runId,SOURCE_CURRENT);
+  const next=await stepHistoricalRecoveryExecution(f.env,{
+    runId,approved:true,authorization:TOKEN
+  });
+  assert.equal(next.recoveredCommittedCheckpoint,true);
+  assert.equal(next.pageApplied,true);
+  assert.equal(next.inserted,0);
+  assert.equal(next.restoredSourceFacts,1);
+  assert.equal(next.quarantinedOrDeferredFacts,0);
+  assert.equal(f.db.prepare(
+    "SELECT status FROM historical_recovery_receipts WHERE run_id=?"+
+    " AND family='horse_profile' AND source_record_id=?"
+  ).get(runId,SOURCE_CURRENT).status,'applied');
+  assert.equal(f.db.prepare(
+    'SELECT COUNT(*) AS n FROM horse_profile_snapshots WHERE source_record_id=?'
+  ).get(SOURCE_CURRENT).n,1);
+});
