@@ -16,8 +16,14 @@ const sql=readFileSync(new URL(
 test('historical restore workflow requires manual approval and exact released main',()=>{
   assert.match(workflow,/workflow_dispatch:/);
   assert.match(workflow,/type: choice/);
-  assert.match(workflow,/options:\s*\n\s+- inventory\s*\n\s+- execute/);
+  assert.match(workflow,/options:\s*\n\s+- inventory\s*\n\s+- backup\s*\n\s+- execute/);
   assert.match(workflow,/RESTORE_VERIFIED_SNAPSHOTS_ONLY/);
+  assert.match(workflow,/BACKUP_D1_ONLY/);
+  assert.match(workflow,/inputs\.mode == 'backup'/);
+  assert.match(workflow,/steps\.initialize\.outputs\.backup_verified == 'true'/);
+  assert.doesNotMatch(workflow,/inputs\.mode == 'execute' && steps\.backup\.outputs\.backup_verified/);
+  assert.match(runner,/recovery_execute_needs_separately_completed_backup/);
+  assert.match(runner,/recovery_backup_cannot_run_restore_steps/);
   assert.match(workflow,/github\.ref == 'refs\/heads\/main'/);
   assert.match(workflow,/production-release-v060\.yml\/runs/);
   assert.match(workflow,/test ".+\$releases".*= "\$GITHUB_SHA"/);
@@ -28,11 +34,11 @@ test('historical restore workflow requires manual approval and exact released ma
 });
 
 test('backup is streamed from Cloudflare API to private Cloudflare R2, not via GitHub runner',()=>{
-  assert.match(workflow,/Enable Cloudflare-only database export/);
+  assert.match(workflow,/Enable separate backup-only Cloudflare export/);
   assert.match(workflow,/HISTORICAL_BACKUP_API_TOKEN/);
   assert.match(workflow,/HISTORICAL_RECOVERY_ACCOUNT_ID/);
   assert.match(workflow,/RUNNER_PHASE: backup/);
-  assert.match(workflow,/steps\.backup\.outputs\.backup_verified == 'true'/);
+  assert.match(workflow,/steps\.initialize\.outputs\.backup_verified == 'true'/);
   assert.doesNotMatch(workflow,/wrangler@[\d.]+ d1 export/);
   assert.doesNotMatch(workflow,/wrangler@[\d.]+ r2 object get/);
   assert.doesNotMatch(workflow,/upload-artifact/);
