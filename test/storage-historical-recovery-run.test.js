@@ -47,7 +47,7 @@ async function fixture() {
   return {...f,originalHash:hash};
 }
 
-async function ready(f) {
+async function scanned(f) {
   const started=await startHistoricalRecoveryRun(f.env);
   assert.equal(started.phase,'inventory');
   assert.equal(started.scannedDeficientSources,0);
@@ -64,6 +64,14 @@ async function ready(f) {
   assert.equal(report.phase,'ready');
   assert.equal(report.verifiedCandidateFacts,1);
   assert.equal(report.originallyMissingRepresentations,1);
+  f.env.HISTORICAL_RECOVERY_ACCOUNT_ID='b'.repeat(32);
+  f.env.HISTORICAL_RECOVERY_DATABASE_ID='d8189e0e-6127-4ef2-88cc-534cb2217340';
+  f.env.HISTORICAL_BACKUP_API_TOKEN='synthetic_only_private_export_token_for_D1_testing';
+  return started;
+}
+
+async function ready(f) {
+  const started=await scanned(f);
   f.env.HISTORICAL_RECOVERY_ACCOUNT_ID='b'.repeat(32);
   f.env.HISTORICAL_RECOVERY_DATABASE_ID='d8189e0e-6127-4ef2-88cc-534cb2217340';
   f.env.HISTORICAL_BACKUP_API_TOKEN='synthetic_only_private_export_token_for_D1_testing';
@@ -84,12 +92,15 @@ async function ready(f) {
       if(data.output_format==='polling' && data.current_bookmark===bookmark){
         polledExport=true;
         return new Response(JSON.stringify({success:true,result:{
-          signed_url:'https://download.cloudflarestorage.com/private-synthetic-backup'
+          type:'export',status:'complete',at_bookmark:bookmark,
+          result:{filename:'private-d1-export.sql',
+            signed_url:'https://download.cloudflarestorage.com/private-synthetic-backup'}
         }}),{status:200,headers:{'content-type':'application/json'}});
       }
     }
     if(String(url)==='https://download.cloudflarestorage.com/private-synthetic-backup'){
-      return new Response(backedUp,{status:200});
+      return new Response(backedUp,{status:200,
+        headers:{'content-length':String(new TextEncoder().encode(backedUp).byteLength)}});
     }
     return priorFetch(url,options);
   };
