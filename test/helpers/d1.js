@@ -153,7 +153,8 @@ export function createTestEnv() {
     '../../migrations/0064_cleanup_horse_record_source_page.sql',
     '../../migrations/0065_cleanup_person_stat_source_page.sql',
     '../../migrations/0066_cleanup_observation_source_page.sql',
-    '../../migrations/0067_cleanup_audit_atomic_fencing.sql'
+    '../../migrations/0067_cleanup_audit_atomic_fencing.sql',
+    '../../migrations/0068_historical_source_provenance_recovery.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }
