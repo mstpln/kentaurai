@@ -236,7 +236,31 @@ async function verifyResumableIntegrity(session) {
     if (costBudgetReached() || deadlineReached()) {
       return { ready: false, auditRunId, progressMade, audit };
     }
-    audit = await post('/v1/storage-cleanup/audit/step', { audit_run_id: auditRunId });
+    try {
+      audit = await post('/v1/storage-cleanup/audit/step', { audit_run_id: auditRunId });
+    } catch (error) {
+      // A network disconnect after a D1 commit has an unknown outcome. Read
+      // persisted state without incrementing the continuation counter, then
+      // STOP. Unknown D1 cost must never authorize unattended follow-up.
+      const reason = String(error?.message || '');
+      if (reason.includes('failed with HTTP') || reason.includes('tripped the D1 cost-safety stop')) {
+        throw error;
+      }
+      let persisted;
+      try {
+        persisted = await request('/v1/storage-cleanup/audit/status?audit_run_id='
+          + encodeURIComponent(auditRunId));
+      } catch {
+        throw new Error('Audit step response was lost and checkpoint status could not be confirmed; no automatic continuation.');
+      }
+      if (persisted?.auditRunId !== auditRunId
+        || persisted?.sourceSha !== SOURCE_SHA || persisted?.safetyStop === true) {
+        throw new Error('Audit step response was ambiguous and persisted proof did not match the requested source; continuation refused.');
+      }
+      console.warn('Read-only audit checkpoint was re-read after an ambiguous Worker response. '
+        + 'Its costs cannot be fully attributed to this caller, so unattended continuation is refused.');
+      throw new Error('Ambiguous audit page response; checkpoint retained but manual review required before further processing.');
+    }
     if (audit?.cumulativeSafetyStop === true || audit?.safetyStop === true
       || audit?.budgetBlocked === true) {
       return { ready: false, auditRunId, progressMade, audit };
