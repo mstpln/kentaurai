@@ -27,7 +27,10 @@ function ensure(){
 }
 async function call(path,method='GET',body=null){
   const controller=new AbortController();
-  const timeout=setTimeout(()=>controller.abort(),30000);
+  // Full, private D1 SQL export may take longer than ordinary status calls.
+  // Keep a strict finite limit while allowing R2-to-R2 streaming to finish.
+  const timeoutMs=PHASE==='backup' && path===base+'backup-poll' ? 180000 : 30000;
+  const timeout=setTimeout(()=>controller.abort(),timeoutMs);
   try{
     const response=await fetch(URL_BASE+path,{
       method,
