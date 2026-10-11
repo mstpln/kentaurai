@@ -4,7 +4,8 @@ import { createHash } from 'node:crypto';
 import { createTestEnv } from './helpers/d1.js';
 import {
   startHistoricalRecoveryRun, historicalRecoveryStatus,
-  stepHistoricalRecoveryInventory, attachHistoricalRecoveryBackup,
+  stepHistoricalRecoveryInventory, startHistoricalRecoveryCloudBackup,
+  pollHistoricalRecoveryCloudBackup,
   stepHistoricalRecoveryExecution, stepHistoricalRecoveryPostAudit
 } from '../src/storage-historical-recovery-run.js';
 import worker from '../src/index.js';
@@ -63,15 +64,49 @@ async function ready(f) {
   assert.equal(report.phase,'ready');
   assert.equal(report.verifiedCandidateFacts,1);
   assert.equal(report.originallyMissingRepresentations,1);
-  const backupText='SYNTHETIC SQL PRIVATE BACKUP'.repeat(60);
-  const sha=createHash('sha256').update(backupText).digest('hex');
-  const key='backups/historical-recovery/'+started.runId+'/'+sha+'.sql';
-  await f.env.RAW_BUCKET.put(key,backupText);
-  const backup=await attachHistoricalRecoveryBackup(f.env,{
-    runId:started.runId,key,sha256:sha,
-    size:new TextEncoder().encode(backupText).byteLength
-  });
-  assert.equal(backup.backupVerified,true);
+  f.env.HISTORICAL_RECOVERY_ACCOUNT_ID='b'.repeat(32);
+  f.env.HISTORICAL_RECOVERY_DATABASE_ID='d8189e0e-6127-4ef2-88cc-534cb2217340';
+  f.env.HISTORICAL_BACKUP_API_TOKEN='synthetic_only_private_export_token_for_D1_testing';
+  const bookmark='00000085-0000024c-00004c6d-8e61117bf38d7adb71b934ebbf891683';
+  const backedUp='SYNTHETIC SQL PRIVATE BACKUP'.repeat(60);
+  const priorFetch=globalThis.fetch;
+  let startedExport=false;
+  let polledExport=false;
+  globalThis.fetch=async (url,options={})=>{
+    if(String(url).startsWith('https://api.cloudflare.com/client/v4/accounts/')){
+      const data=JSON.parse(options.body);
+      if(data.output_format==='polling'){
+        startedExport=true;
+        return new Response(JSON.stringify({success:true,result:{at_bookmark:bookmark}}),{
+          status:200,headers:{'content-type':'application/json'}
+        });
+      }
+      if(data.current_bookmark===bookmark){
+        polledExport=true;
+        return new Response(JSON.stringify({success:true,result:{
+          signed_url:'https://download.cloudflarestorage.com/private-synthetic-backup'
+        }}),{status:200,headers:{'content-type':'application/json'}});
+      }
+    }
+    if(String(url)==='https://download.cloudflarestorage.com/private-synthetic-backup'){
+      return new Response(backedUp,{status:200});
+    }
+    return priorFetch(url,options);
+  };
+  let backup;
+  try{
+    const begun=await startHistoricalRecoveryCloudBackup(f.env,{runId:started.runId});
+    assert.equal(begun.backupPending,true);
+    backup=await pollHistoricalRecoveryCloudBackup(f.env,{runId:started.runId});
+    assert.equal(startedExport,true);
+    assert.equal(polledExport,true);
+    assert.equal(backup.backupVerified,true);
+  }finally{
+    globalThis.fetch=priorFetch;
+  }
+  const key='backups/historical-recovery/'+started.runId+'/'+bookmark+'.sql';
+  const raw=await f.env.RAW_BUCKET.get(key);
+  assert.equal(await raw.text(),backedUp);
   return {runId:started.runId,backupKey:key};
 }
 
