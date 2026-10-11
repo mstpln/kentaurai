@@ -1,8 +1,6 @@
 // Pure fact-level classification for historical snapshot recovery. This module
 // never writes, plans an insertion, or assumes current identity mappings existed
 // at the original observation time.
-import { stableId } from './ids.js';
-
 const FAMILIES = Object.freeze({
   horse_profile: { collection: 'horseProfiles', kind: 'horse', scope: (f) => 'profile', columns: (f) => ({ age_years: f.ageYears }) },
   horse_stat: { collection: 'horseStats', kind: 'horse', scope: (f) => f.snapshotScope,
@@ -50,10 +48,10 @@ export function reconcileSnapshotFacts({
     throw new Error('reconciliation_budget_exceeded');
   }
   const summary = Object.fromEntries(STATUSES.map((s) => [s, 0]));
-  const details = [];
+  let checked = 0;
   const seen = new Set();
   const referenceById = new Map(referencedSnapshots.map((row) => [row.id, row]));
-  for (const [rawKey, fact] of facts) {
+  for (const fact of facts.values()) {
     const identityKey = (definition.kind === 'person' ? fact.personType + ':' : '') + fact.externalId;
     const matches = identities.get(identityKey) || [];
     const mapped = matches.length === 1 ? matches[0] : null;
@@ -75,7 +73,7 @@ export function reconcileSnapshotFacts({
       const consistentLinks = links.filter((row) => {
         const ref = referenceById.get(row.snapshot_id) ||
           direct.find((candidate) => candidate.id === row.snapshot_id);
-        return ref && row.observed_at === source.fetched_at &&
+        return ref && ref.lineage_verified !== false && row.observed_at === source.fetched_at &&
           ref.entity_key === entityKey && ref.scope_key === scope &&
           validTime(ref.observed_at) && Date.parse(ref.observed_at) <= Date.parse(source.fetched_at) &&
           matchingColumns(ref, columns);
@@ -99,10 +97,10 @@ export function reconcileSnapshotFacts({
     summary[status]++;
     // Deliberately omit source IDs, canonical identities, raw keys and values:
     // only classifications are allowed to cross the private endpoint boundary.
-    details.push(status);
+    checked++;
   }
   return { family, expectedFacts: facts.size, classifications: summary,
-    classificationsComplete: details.length === facts.size, repairAuthorized: false };
+    classificationsComplete: checked === facts.size, repairAuthorized: false };
 }
 
 export const SNAPSHOT_RECONCILIATION_STATUSES = STATUSES;
