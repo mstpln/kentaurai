@@ -64,9 +64,16 @@ async function main(){
   ensure();
   if(PHASE==='initialize'){
     if(RUN_ID && !/^[a-f0-9-]{36}$/.test(RUN_ID))fail('recovery_run_identifier_invalid');
-    let report=RUN_ID
-      ? await call(base+'status?run_id='+encodeURIComponent(RUN_ID))
-      : await put(base+'start',{});
+    let report;
+    if(RUN_ID) report=await call(base+'status?run_id='+encodeURIComponent(RUN_ID));
+    else if(MODE==='execute') report=await call(base+'status');
+    else {
+      try{ report=await call(base+'status'); }
+      catch(error){
+        if(error.message!=='recovery_private_api_http_409')throw error;
+        report=await put(base+'start',{});
+      }
+    }
     report=checkResponse(report);
     if(MODE==='execute'&&!['ready','applying','verify_pending','complete','complete_with_quarantine'].includes(report.phase))
       fail('recovery_inventory_not_complete');
