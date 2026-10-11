@@ -357,6 +357,27 @@ function requireRepairPermission(env,{approved,authorization}) {
     throw new Error('historical_restoration_not_authorized');
   }
 }
+async function quarantineReceipt(env,run,receipt) {
+  const remaining=Math.max(0,Number(receipt.candidate_count)-Number(receipt.restored_count));
+  const result=await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE historical_recovery_receipts SET status='quarantined',updated_at=CURRENT_TIMESTAMP"+
+      " WHERE run_id=? AND family=? AND source_record_id=? AND status='ready'"+
+      ' AND (SELECT revision FROM historical_recovery_epoch WHERE singleton=1)=?'
+    ).bind(run.id,receipt.family,receipt.source_record_id,run.expected_epoch),
+    env.DB.prepare(
+      'UPDATE historical_recovery_runs SET ready_count=ready_count-?,'+
+      'quarantined_count=quarantined_count+?,updated_at=CURRENT_TIMESTAMP'+
+      " WHERE id=? AND phase='applying' AND expected_epoch=? AND ready_count>=?"+
+      ' AND changes()=1'
+    ).bind(remaining,remaining,run.id,run.expected_epoch,remaining)
+  ]);
+  if(result.some((part)=>Number(part.meta?.changes)!==1))
+    throw new Error('recovery_quarantine_checkpoint_conflict');
+  return {...totals(await loadRun(env,run.id)),pageFamily:receipt.family,
+    pageApplied:true,pageQuarantined:remaining,inserted:0,reused:0,
+    budget:{rowsRead:0,rowsWritten:2,r2BytesRead:0}};
+}
 async function readyReceipt(env,runId){
   return first(env,
     "SELECT * FROM historical_recovery_receipts WHERE run_id=? AND status='ready'"+
@@ -400,14 +421,17 @@ export async function stepHistoricalRecoveryExecution(env,{
   );
   const {candidates,report}=evidence;
   if(!report.liveSourceReverified || report.liveRevision!==current ||
-     !report.revisionCounterMatchesProof || !report.auditLedgerVerified ||
-     report.originalVerified!==1 || report.classifications.conflict!==0 ||
-     report.classifications.identity_ambiguous!==0 ||
-     report.classifications.invalid_evidence!==0 ||
-     candidates.length>Number(receipt.candidate_count) ||
-     Number(report.ledgerShortfall)>Number(receipt.missing_count)){
+     !report.revisionCounterMatchesProof ||
+     Number(report.ledgerShortfall)>Number(receipt.missing_count) ||
+     candidates.length>Number(receipt.candidate_count)){
     await markPaused(env,run.id);
     throw new Error('recovery_receipt_drift_or_ambiguous');
+  }
+  if(!report.auditLedgerVerified || report.originalVerified!==1 ||
+     report.classifications.conflict!==0 ||
+     report.classifications.identity_ambiguous!==0 ||
+     report.classifications.invalid_evidence!==0){
+    return quarantineReceipt(env,run,receipt);
   }
   const currentMeta=await first(env,'SELECT content_hash FROM source_records WHERE id=?',
     receipt.source_record_id);
