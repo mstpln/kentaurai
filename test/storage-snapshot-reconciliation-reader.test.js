@@ -390,6 +390,10 @@ test('verified same-value predecessor is an observation hint, not repair authori
     "VALUES ('earlier','complete','2026-09-10T10:00:00Z',1)"
   ).run();
   f.db.prepare(
+    "INSERT INTO storage_cleanup_audit_source_counts(audit_run_id,family,source_record_id,actual_count) " +
+    "VALUES (?,'horse_profile','earlier',1)"
+  ).run(AUDIT);
+  f.db.prepare(
     "INSERT INTO horse_profile_snapshots(id,horse_id,observed_at,age_years,source_record_id,quality_status) " +
     "VALUES ('earlier-h101','h101',?,5,'earlier','verified_official_snapshot')"
   ).run(before);
@@ -423,6 +427,10 @@ test('record scope and ordinal are respected by predecessor lookup', async () =>
     "INSERT INTO official_snapshot_source_sync(source_record_id,status,processed_at,horse_record_count) " +
     "VALUES ('earlier-record','complete','2026-09-10T10:00:00Z',1)"
   ).run();
+  f.db.prepare(
+    "INSERT INTO storage_cleanup_audit_source_counts(audit_run_id,family,source_record_id,actual_count) " +
+    "VALUES (?,'horse_record','earlier-record',1)"
+  ).run(AUDIT);
   f.db.prepare(
     "INSERT INTO horse_record_snapshots(id,horse_id,observed_at,record_scope,record_ordinal,code,source_record_id,quality_status) " +
     "VALUES ('rec-other','h101',?,'life',0,'aK','earlier-record','verified_official_snapshot')"
