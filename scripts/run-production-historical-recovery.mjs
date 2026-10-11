@@ -23,7 +23,7 @@ function ensure(){
   if(!URL_BASE?.startsWith('https://') ||
     !/^[a-zA-Z0-9._-]+$/.test(new URL(URL_BASE).hostname) ||
     !TOKEN || !['initialize','backup','run'].includes(PHASE) ||
-    !['inventory','execute'].includes(MODE)) fail('recovery_runner_configuration_invalid');
+    !['inventory','backup','execute'].includes(MODE)) fail('recovery_runner_configuration_invalid');
 }
 async function call(path,method='GET',body=null){
   const controller=new AbortController();
@@ -69,7 +69,7 @@ async function main(){
     if(RUN_ID && !/^[a-f0-9-]{36}$/.test(RUN_ID))fail('recovery_run_identifier_invalid');
     let report;
     if(RUN_ID) report=await call(base+'status?run_id='+encodeURIComponent(RUN_ID));
-    else if(MODE==='execute') report=await call(base+'status');
+    else if(MODE==='execute'||MODE==='backup') report=await call(base+'status');
     else {
       try{ report=await call(base+'status'); }
       catch(error){
@@ -82,6 +82,11 @@ async function main(){
       fail('recovery_inventory_not_complete');
     if(MODE==='inventory'&&!['inventory','ready','paused'].includes(report.phase))
       fail('recovery_inventory_phase_conflict');
+    if(MODE==='backup'&&report.phase!=='ready')
+      fail('recovery_backup_inventory_not_ready');
+    if(MODE==='execute'&&!report.backupVerified &&
+      !['complete','complete_with_quarantine'].includes(report.phase))
+      fail('recovery_execute_needs_separately_completed_backup');
     writeOutput('run_id',report.runId);
     writeOutput('phase',report.phase);
     writeOutput('backup_verified',report.backupVerified?'true':'false');
@@ -90,7 +95,7 @@ async function main(){
   }
   if(!RUN_ID)fail('recovery_run_identifier_required');
   if(PHASE==='backup'){
-    if(MODE!=='execute')fail('recovery_backup_execute_only');
+    if(MODE!=='backup')fail('recovery_backup_separate_approval_required');
     const deadline=Date.now()+4*60*1000;
     let report=checkResponse(await call(base+'status?run_id='+encodeURIComponent(RUN_ID)));
     if(report.backupVerified){
@@ -112,6 +117,7 @@ async function main(){
     summarize(report,polls);
     return;
   }
+  if(MODE==='backup')fail('recovery_backup_cannot_run_restore_steps');
   const started=Date.now();
   let steps=0;
   let totalD1RowsRead=0;
