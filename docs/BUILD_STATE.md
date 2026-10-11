@@ -1,3 +1,37 @@
+## Root-cause confirmed and selective history recovery designed — PR #315 (2026-10-11)
+
+- **Historical deletion defect confirmed from exact production cleanup commits and logs**:
+  successful execute runs 36317442527 and 36318615718 on 2026-09-27
+  deleted 18,717 duplicate direct snapshots (5,748 profiles; 1,976 horse
+  statistics; 5,663 horse records; 5,330 person statistics). Their executor
+  UPDATEd existing snapshot observations then DELETEd the source-owned
+  snapshot but **never INSERTed an observation for that deleted snapshot's
+  source**, leaving missing source representations. A later code change
+  corrected this; destructive cleanup routes remain disabled.
+- A **second potential cause** is historical snapshot importer
+  \`INSERT OR IGNORE\` suppression without checking changes/counts; later
+  importer fixes added strict source-count and ignored-write verification.
+  The September cleanup explains a proven failure mode, but **not necessarily
+  all 43,613** missing logical representations (across 13,473 source/family
+  comparisons). Do not equate the 18,717 deletions with 18,717 known missing.
+- Production run 38151111458 independently verified both current and
+  predecessor R2 SHA-256 originals. In four source/family samples, 25/25
+  missing representations had identical verified earlier original facts,
+  no conflict; zero D1 writes. All data/provenance stays private.
+- PR #315 adds a **source-owned, insert-only, idempotent** recovery
+  primitive for independently hash-verified raw source facts, synthetic
+  regression reproducing the exact September cleanup loss in all four
+  families, and an authenticated **read-only aggregate-only preview**.
+  Full QA and exact final-head review are required.
+- **No production historical repair is authorized by PR #315.** The
+  execution primitive has no HTTP route or schedule and requires a
+  separately provisioned repair flag/token and explicit approval. No
+  destructive cleanup is re-enabled.
+- Before any production write: take a private current recovery point,
+  implement durable cross-run progress and revision-aware auditing,
+  classify non-matching/ambiguous sources, and obtain separate explicit
+  authorization. No claim that all 43,613 entries are repaired.
+
 ## Read-only predecessor R2 verification — PR #314 (2026-10-11)
 
 - GitHub run `38149267670` on deployed source `19d7ebf09f4a2af5c7cf6f8101a6bd91ecbb0fcf`:
