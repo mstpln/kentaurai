@@ -550,6 +550,25 @@ test('older R2 original proves source fact but never historical identity or as-o
   assert.equal(report.predecessorHints.earlierOriginalUnverified, 1);
   assert.equal(report.predecessorHints.earlierOriginalVerifiedFacts, 0);
   assert.equal(report.repairAuthorized, false);
+
+  const manyStarts = Array.from({ length: 513 }, (_, i) =>
+    ({ horse: { id: i + 101, age: 5 } }));
+  const oversizedBody = JSON.stringify({ races: [{ starts: manyStarts }] });
+  const oversizedHash = createHash('sha256').update(oversizedBody).digest('hex');
+  const oversizedKey = 'raw/official_provider/' + oversizedHash + '.json';
+  f.db.prepare("UPDATE source_records SET raw_object_key=?,content_hash=? WHERE id='earlier-r2'")
+    .run(oversizedKey, oversizedHash);
+  await f.env.RAW_BUCKET.put(oversizedKey, oversizedBody, {
+    customMetadata: { contentHash: oversizedHash, sourceType: 'official_provider' }
+  });
+  report = await view();
+  assert.equal(report.predecessorHints.earlierOriginalVerifiedSources, 1);
+  assert.equal(report.predecessorHints.earlierOriginalVerifiedFacts, 0);
+  assert.equal(report.predecessorHints.earlierOriginalDeferred, 1);
+  assert.equal(report.predecessorHints.earlierOriginalFactMismatch, 0);
+  assert.equal(report.repairAuthorized, false);
+  assert.ok(report.budget.r2BytesRead <= 8 * 1024 * 1024);
+  assert.ok(report.budget.queries <= 40);
 });
 
 test('bounded manual workflow retries only a temporary 401 and keeps payload private', () => {

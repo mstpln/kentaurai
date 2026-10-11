@@ -268,7 +268,9 @@ function predecessorWhere(family, mapped, fact) {
 }
 
 function sameSourceIdentityAndScope(family, earlier, sought) {
-  if (String(earlier.externalId) !== String(sought.externalId)) return false;
+  if (earlier.externalId == null || sought.externalId == null ||
+      !String(earlier.externalId) || !String(sought.externalId) ||
+      String(earlier.externalId) !== String(sought.externalId)) return false;
   if (family === 'horse_profile') return true;
   if (family === 'horse_stat') return earlier.snapshotScope === sought.snapshotScope;
   if (family === 'horse_record') {
@@ -364,7 +366,12 @@ async function inspectPredecessorHints(reader, env, family, missing, cutoff, r2B
       verifiedSources.set(sourceId, original);
       if (original.status === 'verified') report.earlierOriginalVerifiedSources++;
     }
-    if (original.status === 'raw_deferred') {
+    // A hash-valid older original can still contain an excessively large
+    // fact collection. Quarantine it instead of making an unbounded
+    // source-to-fact comparison or misclassifying the missing representation.
+    if (original.status === 'verified' && original.facts[definition.facts].size > MAX_FACTS) {
+      report.earlierOriginalDeferred++;
+    } else if (original.status === 'raw_deferred') {
       report.earlierOriginalDeferred++;
     } else if (original.status !== 'verified') {
       report.earlierOriginalUnverified++;

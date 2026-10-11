@@ -100,9 +100,13 @@ immediately. Tokens, payloads and raw error responses are not logged.
 
 ## Safety and budgets
 
-Each endpoint invocation is bounded to one R2 original (at most **8 MiB**),
-a maximum 512 parsed facts, 1,024 source-owned direct rows, 1,024 observations,
-1,024 referenced snapshots, 24 predecessor hints and 40 SELECTs. D1 reads are capped at 250,000
+Each endpoint invocation reads at most **five R2 originals** (one current
+source and at most four distinct older sources), with a combined **8 MiB**
+limit. Fact-level comparison is bounded to at most 512 parsed facts per
+current source and at most 512 per compared older source; oversized older
+fact collections are deferred rather than treated as mismatches.
+D1 comparisons remain bounded to 1,024 source-owned direct rows, 1,024
+observations, 1,024 referenced snapshots, 24 predecessor hints and 40 SELECTs. D1 reads are capped at 250,000
 per query and 1,000,000 per request, and any D1 writes fail closed. No
 D1/R2 write/delete path exists in this stage.
 

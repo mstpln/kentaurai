@@ -1,4 +1,4 @@
-## Active read-only predecessor R2 verification (PR pending, 2026-10-11)
+## Read-only predecessor R2 verification — PR #314 (2026-10-11)
 
 - GitHub run `38149267670` on deployed source `19d7ebf09f4a2af5c7cf6f8101a6bd91ecbb0fcf`:
   the first attempt failed HTTP 401 immediately after a successful temporary
@@ -9,12 +9,12 @@
   Every one of those 25 had a matching older direct snapshot under the
   **current** canonical identity mapping. Zero factual conflicts and zero
   D1 writes in the successful sample. These are hints only.
-- The next draft adds capped cross-checks against older R2 originals
+- PR #314 adds capped cross-checks against older R2 originals
   (max four distinct predecessors and five objects/8 MiB total per request)
   and bounded HTTP 401-only retries in the manual workflow.
 - Historical identity mapping and complete as-of chronology are NOT
   proven, so no repair, automatic replay, backfill or deletion is authorized.
-  No production change is included until separately reviewed/approved.
+  The manual private production evidence run remains separately gated.
 
 ## Historical snapshot evidence — deployed facts and PR #313 follow-up (2026-10-11)
 
