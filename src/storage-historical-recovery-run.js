@@ -245,12 +245,26 @@ async function exportRequest(env,requestBody) {
   });
   if(!response.ok)throw new Error('recovery_backup_export_api_unavailable');
   const result=await response.json();
-  if(!result?.success || !result.result ||
-    (result.result.error && result.result.error!=='') ||
-    (Array.isArray(result.errors)&&result.errors.length)){
+  if(result?.success!==true || !result.result ||
+    (Array.isArray(result.errors)&&result.errors.length) ||
+    (result.result.error != null && result.result.error!=='') ||
+    result.result.status==='error' ||
+    (result.result.type != null && result.result.type!=='export')){
     throw new Error('recovery_backup_export_api_failed');
   }
-  return result.result;
+  // The documented API returns {result:{status, at_bookmark,
+  // result:{filename,signed_url}}}; an unsigned or unfinished response
+  // must never be promoted to a verified production backup.
+  const exportState=result.result;
+  if(exportState.status==='complete' &&
+    (typeof exportState.result?.signed_url!=='string' || !exportState.result.signed_url)){
+    throw new Error('recovery_backup_export_completion_invalid');
+  }
+  if(exportState.status!=='complete' &&
+    (exportState.result?.signed_url || exportState.signed_url)){
+    throw new Error('recovery_backup_export_state_conflict');
+  }
+  return exportState;
 }
 function validBookmark(value) {
   return typeof value==='string' && /^[a-zA-Z0-9_-]{16,180}$/.test(value);
@@ -304,10 +318,10 @@ export async function pollHistoricalRecoveryCloudBackup(env,{runId}={}) {
     return {...totals(run),backupVerified:true};
   }
   const result=await exportRequest(env,{output_format:'polling',current_bookmark:run.backup_bookmark});
-  if(result.at_bookmark && result.at_bookmark!==run.backup_bookmark)
+  if(result.at_bookmark!==run.backup_bookmark)
     throw new Error('recovery_backup_bookmark_conflict');
-  const signed=String(result.signed_url || result.result?.signed_url || '');
-  if(!signed)return {...totals(run),backupPending:true};
+  if(result.status!=='complete')return {...totals(run),backupPending:true};
+  const signed=result.result.signed_url;
   let download;
   try{
     const url=new URL(signed);
@@ -324,6 +338,15 @@ export async function pollHistoricalRecoveryCloudBackup(env,{runId}={}) {
   }
   if(!download.ok || !download.body)
     throw new Error('recovery_backup_dump_unavailable');
+  // A stream can end early, while a non-empty R2 ETag still looks valid.
+  // Require the signed export's declared byte length and match it against
+  // the stored R2 object before enabling any source-owned fact restoration.
+  const advertisedLength=download.headers.get('content-length');
+  const expectedBytes=advertisedLength!=null && /^\d+$/.test(advertisedLength)
+    ? Number(advertisedLength):NaN;
+  if(!Number.isSafeInteger(expectedBytes) || expectedBytes<1024 ||
+    expectedBytes>5*1024*1024*1024)
+    throw new Error('recovery_backup_length_unverifiable');
   const key=BACKUP_PREFIX+run.id+'/'+run.backup_bookmark+'.sql';
   await env.RAW_BUCKET.put(key,download.body,{
     httpMetadata:{contentType:'application/sql'},
@@ -331,7 +354,7 @@ export async function pollHistoricalRecoveryCloudBackup(env,{runId}={}) {
   });
   const head=await env.RAW_BUCKET.head(key);
   if(!head || !Number.isSafeInteger(Number(head.size)) ||
-    Number(head.size)<1024 || typeof head.etag!=='string' ||
+    Number(head.size)!==expectedBytes || typeof head.etag!=='string' ||
     head.etag.length<8 ||
     head.customMetadata?.backupBookmark!==run.backup_bookmark ||
     head.customMetadata?.recoveryRunId!==run.id){
