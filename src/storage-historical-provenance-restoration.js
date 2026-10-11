@@ -172,9 +172,26 @@ export async function applyVerifiedHistoricalRestoration(env, candidate, {
   if (row.source_record_id !== candidate.sourceId ||
       row.observed_at !== candidate.fetchedAt ||
       row.quality_status !== QUALITY ||
-      row[conf.idColumn] !== candidate.canonicalId) {
+      row[conf.idColumn] !== candidate.canonicalId ||
+      row.id !== conf.id(candidate.canonicalId, { id: candidate.sourceId }, {
+        personType: row.person_type, snapshotScope: row.snapshot_scope,
+        recordScope: row.record_scope, statYear: row.stat_year, ordinal: row.record_ordinal
+      })) {
     throw new Error('historical_restoration_candidate_mutated');
   }
+  // A verified duplicate replay is safe and should not change the audit
+  // revision. A same-ID row with different facts is a blocking conflict.
+  const existing = await env.DB.prepare(
+    'SELECT * FROM ' + candidate.table + ' WHERE id=? LIMIT 1'
+  ).bind(row.id).first();
+  if (existing) {
+    const isExact = Object.entries(row).every(([key, value]) =>
+      Object.is(existing[key] ?? null, value ?? null));
+    if (!isExact) throw new Error('historical_restoration_existing_snapshot_conflict');
+    return { restored: 0, reused: 1, snapshotsDeleted: 0,
+      unchangedFactsOverwritten: 0, oldAuditInvalidated: false };
+  }
+
   const keys = Object.keys(row);
   if (keys.some((key) => !/^[a-z_]+$/.test(key)) ||
       Object.keys(candidate.factualColumns).some((key) =>
