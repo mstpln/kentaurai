@@ -23,26 +23,34 @@ function projectedPriorIdentity(family, prior, currentFact, canonicalId) {
   throw new Error('historical_recovery_family_invalid');
 }
 
-async function planInternal(env, family, cursor) {
+export async function planInternalHistoricalRestoration(env, family, cursor = null, internalSourceId = null) {
   const candidates = [];
+  let discardedCandidates = 0;
   const report = await inspectPrivateSnapshotReconciliationPage(env, {
-    family, cursor,
+    family, cursor, internalSourceId,
     onVerifiedPredecessor: (record) => {
-      const normalized = projectedPriorIdentity(
-        family, record.priorSnapshot, record.currentFact, record.canonicalId
-      );
-      candidates.push(buildVerifiedHistoricalRestoration({
-        ...record, priorSnapshot: normalized,
-        currentOriginalVerified: true, priorOriginalVerified: true
-      }));
+      // A contradictory source is quarantined without discarding independently
+      // verified candidates from the same source.
+      try {
+        const normalized = projectedPriorIdentity(
+          family, record.priorSnapshot, record.currentFact, record.canonicalId
+        );
+        candidates.push(buildVerifiedHistoricalRestoration({
+          ...record, priorSnapshot: normalized,
+          currentOriginalVerified: true, priorOriginalVerified: true
+        }));
+      } catch {
+        discardedCandidates++;
+      }
     }
   });
   if (!report.revisionCounterMatchesProof || !report.classificationOnly ||
       report.repairAuthorized || candidates.length > MAX_WRITES_PER_PAGE ||
-      candidates.length > Number(report.predecessorHints?.earlierOriginalVerifiedFacts || 0)) {
+      candidates.length + discardedCandidates >
+        Number(report.predecessorHints?.earlierOriginalVerifiedFacts || 0)) {
     throw new Error('historical_recovery_source_evidence_incomplete');
   }
-  return { candidates, report };
+  return { candidates, report, discardedCandidates };
 }
 
 function sanitizedPlan(report, candidates, mode) {
@@ -71,7 +79,7 @@ function sanitizedPlan(report, candidates, mode) {
 // Read-only preview: returns only generic aggregate counters and an opaque
 // cursor. Safe for an authenticated private GitHub Actions workflow.
 export async function inspectHistoricalRestorationPage(env, { family, cursor = null } = {}) {
-  const { report, candidates } = await planInternal(env, family, cursor);
+  const { report, candidates } = await planInternalHistoricalRestoration(env, family, cursor);
   return sanitizedPlan(report, candidates, 'read_only_verified_restoration_preview');
 }
 
