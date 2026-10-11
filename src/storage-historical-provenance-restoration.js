@@ -145,15 +145,25 @@ export function buildVerifiedHistoricalRestoration({
 
 function nonempty(value) { return typeof value === 'string' && value.length > 0; }
 
+// A failed or cancelled Actions run cannot leave an indefinite write capability.
+// Enforce expiration at the data-writing primitive, not just at the HTTP route.
+export function hasFreshHistoricalRestorationCapability(env, { approved, authorization } = {}) {
+  const expires = Number(env?.HISTORICAL_REPAIR_EXPIRES_AT);
+  const now = Math.floor(Date.now() / 1000);
+  return approved === true && env?.HISTORICAL_REPAIR_ENABLED === 'true' &&
+    nonempty(env?.HISTORICAL_REPAIR_TOKEN) &&
+    env.HISTORICAL_REPAIR_TOKEN.length >= 32 &&
+    authorization === env.HISTORICAL_REPAIR_TOKEN &&
+    Number.isSafeInteger(expires) && expires > now && expires <= now + 1800;
+}
+
+
 // Only callable from an explicitly reviewed *future* recovery execution path.
 // This module has deliberately no public Worker route or automatic scheduler.
 export async function applyVerifiedHistoricalRestoration(env, candidate, {
   approved = false, authorization = null, runId = null, expectedEpoch = null
 } = {}) {
-  if (!approved || env?.HISTORICAL_REPAIR_ENABLED !== 'true' ||
-      !nonempty(env?.HISTORICAL_REPAIR_TOKEN) ||
-      env.HISTORICAL_REPAIR_TOKEN.length < 32 ||
-      authorization !== env.HISTORICAL_REPAIR_TOKEN) {
+  if (!hasFreshHistoricalRestorationCapability(env, { approved, authorization })) {
     throw new Error('historical_restoration_not_authorized');
   }
   if (!candidate || !CONFIG[candidate.family] ||
