@@ -58,8 +58,9 @@
   families, and an authenticated **read-only aggregate-only preview**.
   Full QA and exact final-head review are required.
 - **No production historical repair is authorized by PR #315.** The
-  execution primitive has no HTTP route or schedule and requires a
-  separately provisioned repair flag/token and explicit approval. No
+  complete build now has a **separately gated private apply-step route**,
+  unreachable without a short-lived repair flag/token and explicit approval;
+  no autonomous scheduler and no auto-repair upon merge or deploy. No
   destructive cleanup is re-enabled.
 - Before any production write: take a private current recovery point,
   implement durable cross-run progress and revision-aware auditing,
