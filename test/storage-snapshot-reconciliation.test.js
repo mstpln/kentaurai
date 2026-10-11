@@ -5,9 +5,9 @@ import { reconcileSnapshotFacts } from '../src/storage-snapshot-reconciliation.j
 const fetched_at = '2026-09-12T12:00:00Z';
 function inspect({ facts = new Map([['synthetic:1', { externalId: '123', ageYears: 4 }]]),
   identities = new Map([['123', ['horse-1']]]), direct = [], observations = [],
-  referencedSnapshots = [], chronology = [], historicalIdentityVerified = false, family = 'horse_profile' } = {}) {
+  referencedSnapshots = [], chronology = [], historicalIdentityVerified = false, chronologyVerified = false, family = 'horse_profile' } = {}) {
   return reconcileSnapshotFacts({ family, source: { id: 'source-1', fetched_at },
-    facts, identities, direct, observations, referencedSnapshots, chronology, historicalIdentityVerified });
+    facts, identities, direct, observations, referencedSnapshots, chronology, historicalIdentityVerified, chronologyVerified });
 }
 function status(result) {
   return Object.entries(result.classifications).filter(([, count]) => count).map(([name]) => name);
@@ -44,10 +44,10 @@ test('unknown historical identity is never treated as a repair authorization', (
   assert.deepEqual(status(inspect()), ['missing_unverified_chronology']);
 });
 test('even a verified identity with later chronological evidence requires manual evaluation', () => {
-  assert.deepEqual(status(inspect({ historicalIdentityVerified: true,
+  assert.deepEqual(status(inspect({ historicalIdentityVerified: true, chronologyVerified: true,
     chronology: [{ entity_key: 'horse-1', scope_key: 'profile',
       observed_at: '2026-09-14T00:00:00Z' }] })), ['missing_unverified_chronology']);
-  const candidate = inspect({ historicalIdentityVerified: true });
+  const candidate = inspect({ historicalIdentityVerified: true, chronologyVerified: true });
   assert.deepEqual(status(candidate), ['missing_candidate']);
   assert.equal(candidate.repairAuthorized, false);
 });
@@ -75,11 +75,15 @@ test('source fact count caps and malformed evidence fail closed', () => {
     identities: new Map() }), /reconciliation_invalid_input/);
 });
 test('aggregate-only report never includes original source identifiers or factual contents', () => {
-  const report = inspect({ historicalIdentityVerified: true });
+  const report = inspect({ historicalIdentityVerified: true, chronologyVerified: true });
   const serial = JSON.stringify(report);
   for (const privateText of ['source-1','horse-1','123','synthetic:1','ageYears']) {
     assert.equal(serial.includes(privateText), false);
   }
   assert.equal(report.classificationsComplete, true);
   assert.equal(report.expectedFacts, 1);
+});
+
+test('unknown completeness of earlier/later timeline blocks candidate classification', () => {
+  assert.deepEqual(status(inspect({ historicalIdentityVerified: true })), ['missing_unverified_chronology']);
 });
