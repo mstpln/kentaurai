@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createTestEnv } from './helpers/d1.js';
 import { inspectPrivateSnapshotReconciliationPage } from '../src/storage-snapshot-reconciliation-reader.js';
+import { inspectHistoricalRestorationPage, applyHistoricalRestorationPage } from '../src/storage-historical-recovery-page.js';
 import worker from '../src/index.js';
 import productionWorker from '../src/worker-v079.js';
 
@@ -645,4 +646,63 @@ test('four-distinct-older-source cap defers extra R2 originals without hiding ma
   assert.ok(result.budget.queries <= 40);
   assert.equal(result.budget.rowsWritten, 0);
   assert.equal(result.repairAuthorized, false);
+});
+
+
+test('source-bound restoration preview remains aggregate-only and cannot write', async () => {
+  const f = await fixture();
+  const report = await inspectHistoricalRestorationPage(f.env, { family: 'horse_profile' });
+  assert.equal(report.mode, 'read_only_verified_restoration_preview');
+  assert.equal(report.sourcePagesExamined, 1);
+  assert.equal(report.readyDirectSnapshotCandidates, 0);
+  assert.equal(report.nonCandidateMissingFacts, 1);
+  assert.equal(report.repairAuthorized, false);
+  assert.ok(report.cursor);
+  assert.equal(JSON.stringify(report).includes(f.first.id), false);
+  assert.equal(f.d1Metrics.runs, 0);
+  assert.equal(f.d1Metrics.batches, 0);
+  await assert.rejects(
+    () => applyHistoricalRestorationPage(f.env, {
+      family:'horse_profile', approved:true, authorization:'wrong'
+    }),
+    /historical_restoration_not_authorized/
+  );
+  assert.equal(f.d1Metrics.runs, 0);
+});
+
+test('verified older R2-source candidate is detected by pure source-level preview', async () => {
+  const f = await fixture();
+  const earlierAt = '2026-09-10T09:00:00Z';
+  const earlierBody = JSON.stringify({ races: [{ starts: [{
+    horse: { id: 101, age: 5 }
+  }] }] });
+  const hash = createHash('sha256').update(earlierBody).digest('hex');
+  const key = 'raw/official_provider/' + hash + '.json';
+  f.db.prepare(
+    'INSERT INTO source_records(id,source_type,fetched_at,raw_object_key,content_hash,quality_status)' +
+    " VALUES ('synthetic-prior-source','official_provider',?,?,?,'normalized_verified_subset')"
+  ).run(earlierAt,key,hash);
+  f.db.prepare(
+    "INSERT INTO official_snapshot_source_sync(source_record_id,status,processed_at,horse_profile_count)" +
+    " VALUES ('synthetic-prior-source','complete','2026-09-11T10:00:00Z',1)"
+  ).run();
+  f.db.prepare(
+    "INSERT INTO storage_cleanup_audit_source_counts(audit_run_id,family,source_record_id,actual_count)" +
+    " VALUES (?,'horse_profile','synthetic-prior-source',1)"
+  ).run(AUDIT);
+  f.db.prepare(
+    'INSERT INTO horse_profile_snapshots(id,horse_id,observed_at,age_years,source_record_id,quality_status)' +
+    " VALUES ('prior-h101','h101',?,5,'synthetic-prior-source','verified_official_snapshot')"
+  ).run(earlierAt);
+  await f.env.RAW_BUCKET.put(key, earlierBody, {
+    customMetadata:{ contentHash:hash, sourceType:'official_provider' }
+  });
+  const report = await inspectHistoricalRestorationPage(f.env, { family:'horse_profile' });
+  assert.equal(report.olderOriginalVerifiedFacts, 1);
+  assert.equal(report.readyDirectSnapshotCandidates, 1);
+  assert.equal(report.nonCandidateMissingFacts, 0);
+  assert.equal(report.repairAuthorized, false);
+  for (const secret of [hash,key,'prior-h101','h101','synthetic-prior-source',f.first.id]) {
+    assert.equal(JSON.stringify(report).includes(secret), false);
+  }
 });
