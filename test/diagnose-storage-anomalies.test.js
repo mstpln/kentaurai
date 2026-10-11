@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createTestEnv } from './helpers/d1.js';
 import {
   SNAPSHOT_DIAGNOSTIC_FAMILIES,
@@ -98,4 +99,22 @@ test('Cloudflare query client rejects SQL mutation, excessive read cost and nonz
   const expensive=createCloudflareReadonlyQuery(configuration,async()=>({ok:true,json:async()=>({success:true,result:[{success:true,results:[],meta:{rows_read:250001,rows_written:0}}]})}));
   await assert.rejects(()=>expensive.query('SELECT 1'),/read_only_D1_cost_budget_exhausted/);
   assert.throws(()=>createCloudflareReadonlyQuery({},mockFetch),/missing_cloudflare/);
+});
+
+
+test('production diagnostic workflow runs only on reviewed main, isolates Cloudflare secrets and shares safety lock', () => {
+  const workflow=readFileSync(new URL('../.github/workflows/production-storage-anomaly-diagnosis.yml', import.meta.url),'utf8');
+  assert.match(workflow,/workflow_dispatch:/);
+  assert.match(workflow,/push:\s*\n\s+branches: \[main\]\s*\n\s+paths:/);
+  assert.match(workflow,/group: kentaurai-production-operation/);
+  assert.match(workflow,/cancel-in-progress: false/);
+  const qa=workflow.split('      - name: Run QA on diagnostic code')[1]
+    ?.split('      - name: Read precomputed audit evidence')[0];
+  assert.ok(qa);
+  assert.doesNotMatch(qa,/CLOUDFLARE_API_TOKEN/);
+  const operation=workflow.split('      - name: Read precomputed audit evidence')[1]
+    ?.split('      - name: Report boundaries')[0];
+  assert.match(operation,/CLOUDFLARE_API_TOKEN: \$\{\{ secrets\.CLOUDFLARE_API_TOKEN \}\}/);
+  assert.match(operation,/run: node scripts\/diagnose-storage-anomalies\.mjs/);
+  assert.doesNotMatch(workflow,/\bwrangler\s+(?:deploy|d1 migrations|d1 execute)\b/);
 });
