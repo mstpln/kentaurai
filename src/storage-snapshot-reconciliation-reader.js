@@ -182,6 +182,24 @@ async function snapshotRows(reader, definition, sourceId, observations) {
     referencedSnapshots.push(...rows);
   }
   if (referencedSnapshots.length > MAX_ROWS) throw new Error('reconciliation_reference_limit');
+  // A timestamp in a snapshot row alone is not enough for as-of evidence.
+  // Verify that its own official source existed by that time and is complete.
+  const owners = [...new Set(referencedSnapshots.map((row) => row.source_record_id))];
+  const ownerEvidence = new Map();
+  for (const group of chunks(owners)) {
+    const rows = await readRows(reader,
+      'SELECT sr.id,sr.fetched_at,sr.source_type,sync.status AS sync_status FROM source_records sr' +
+      ' LEFT JOIN official_snapshot_source_sync sync ON sync.source_record_id=sr.id' +
+      ' WHERE sr.id IN (' + group.map(() => '?').join(',') + ')', ...group);
+    for (const row of rows) ownerEvidence.set(row.id, row);
+  }
+  for (const row of referencedSnapshots) {
+    const owner = ownerEvidence.get(row.source_record_id);
+    row.lineage_verified = !!owner &&
+      owner.source_type === 'official_provider' &&
+      owner.sync_status === 'complete' &&
+      owner.fetched_at === row.observed_at;
+  }
   return { direct, referencedSnapshots };
 }
 
