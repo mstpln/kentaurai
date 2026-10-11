@@ -113,7 +113,12 @@ async function findContinuationRun(env, fetchFn) {
 }
 
 function acceptedRunState(run) {
-  if (run?.status === 'in_progress') return true;
+  // The parent cleanup job releases the shared production-operation lock
+  // before this handoff. A successor may still be queued behind a release;
+  // waiting for in_progress inside the lock would deadlock the chain.
+  if (run?.status === 'queued' || run?.status === 'pending' || run?.status === 'in_progress') {
+    return true;
+  }
   return run?.status === 'completed' && run?.conclusion === 'success';
 }
 
@@ -173,8 +178,8 @@ export async function queueReadOnlyAudit(env, {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const result = await queueReadOnlyAudit(process.env);
-    console.log('Confirmed bounded READ-ONLY audit continuation run ' + result.runId
-      + '; NO cleanup was authorized.');
+    console.log('Observed the bounded READ-ONLY audit successor run ' + result.runId
+      + '. It may be queued behind the shared production lock; NO cleanup was authorized.');
   } catch (error) {
     // Do not log raw GitHub API response bodies, tokens or database identifiers.
     console.error('::error::' + error.message);
