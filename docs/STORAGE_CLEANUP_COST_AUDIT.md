@@ -138,7 +138,13 @@ full per-operation allowance; if that could exceed the workflow ceiling it
 leaves the audit running and requires an explicit continuation, which resets
 only the continuation counters. A page that trips read, write, duration or
 cumulative settlement is rejected and the persisted run cannot authorize
-cleanup. No threshold was raised.
+cleanup. A prospective worst-case reservation pause does NOT set the persisted
+cost-safety-stop flag: no page was attempted or cost exceeded, and verified
+progress may hand off automatically to the next bounded read-only GitHub run.
+A genuine persisted cost-safety-stop still blocks auto-continuation.
+Production dry-run #20 previously mislabeled this planned pause as a safety
+stop and prevented the next run; the distinction is now regression-tested.
+No threshold was raised.
 
 ## Mutation-to-revision matrix
 
