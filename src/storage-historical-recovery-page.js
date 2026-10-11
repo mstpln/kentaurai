@@ -94,7 +94,7 @@ export async function applyHistoricalRestorationPage(env, {
       authorization !== env.HISTORICAL_REPAIR_TOKEN) {
     throw new Error('historical_restoration_not_authorized');
   }
-  const { report, candidates } = await planInternal(env, family, cursor);
+  const { report, candidates } = await planInternalHistoricalRestoration(env, family, cursor);
   if (!report.auditLedgerVerified || report.originalVerified !== 1 ||
       report.classifications.conflict !== 0 ||
       report.classifications.invalid_evidence !== 0 ||
