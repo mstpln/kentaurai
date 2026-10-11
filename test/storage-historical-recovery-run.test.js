@@ -166,6 +166,7 @@ test('durable scan and source-owned restoration complete with independent source
 
 test('restore journal and snapshot INSERT roll back together on D1 batch failure',async()=>{
   const f=await fixture(); const {runId}=await ready(f);
+  f.env.HISTORICAL_REPAIR_EXPIRES_AT=String(Math.floor(Date.now()/1000)+1200);
   f.env.HISTORICAL_REPAIR_ENABLED='true';
   f.env.HISTORICAL_REPAIR_TOKEN=TOKEN;
   f.d1Faults.batchAfterStatement=0;
@@ -204,6 +205,7 @@ test('inventory halts safely when underlying official data changes between pages
 
 test('restore cannot start without a matching private R2 backup object',async()=>{
   const f=await fixture();const {runId,backupKey}=await ready(f);
+  f.env.HISTORICAL_REPAIR_EXPIRES_AT=String(Math.floor(Date.now()/1000)+1200);
   f.env.HISTORICAL_REPAIR_ENABLED='true';
   f.env.HISTORICAL_REPAIR_TOKEN=TOKEN;
   await f.env.RAW_BUCKET.delete(backupKey);
@@ -249,6 +251,7 @@ test('private recovery run API requires authentication and rejects writes withou
 test('changed private original after inventory is quarantined and independent audit reports remaining deficit',async()=>{
   const f=await fixture();
   const {runId}=await ready(f);
+  f.env.HISTORICAL_REPAIR_EXPIRES_AT=String(Math.floor(Date.now()/1000)+1200);
   f.env.HISTORICAL_REPAIR_ENABLED='true';
   f.env.HISTORICAL_REPAIR_TOKEN=TOKEN;
   const row=f.db.prepare(
@@ -285,6 +288,7 @@ test('changed private original after inventory is quarantined and independent au
 test('stale original mapping pauses source restoration without touching immutable facts',async()=>{
   const f=await fixture();
   const {runId}=await ready(f);
+  f.env.HISTORICAL_REPAIR_EXPIRES_AT=String(Math.floor(Date.now()/1000)+1200);
   f.env.HISTORICAL_REPAIR_ENABLED='true';
   f.env.HISTORICAL_REPAIR_TOKEN=TOKEN;
   f.db.prepare(
@@ -307,6 +311,7 @@ test('stale original mapping pauses source restoration without touching immutabl
 test('crash after final atomic source INSERT but before receipt close is idempotently finalized',async()=>{
   const f=await fixture();
   const {runId}=await ready(f);
+  f.env.HISTORICAL_REPAIR_EXPIRES_AT=String(Math.floor(Date.now()/1000)+1200);
   f.env.HISTORICAL_REPAIR_ENABLED='true';
   f.env.HISTORICAL_REPAIR_TOKEN=TOKEN;
   const restored=await stepHistoricalRecoveryExecution(f.env,{
@@ -341,6 +346,7 @@ test('crash after final atomic source INSERT but before receipt close is idempot
 test('expired recovery capability cannot restore historical facts',async()=>{
   const f=await fixture();
   const {runId}=await ready(f);
+  f.env.HISTORICAL_REPAIR_EXPIRES_AT=String(Math.floor(Date.now()/1000)+1200);
   f.env.HISTORICAL_REPAIR_ENABLED='true';
   f.env.HISTORICAL_REPAIR_TOKEN=TOKEN;
   f.env.HISTORICAL_REPAIR_EXPIRES_AT=String(Math.floor(Date.now()/1000)-1);
