@@ -144,9 +144,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Both routes must accept the same short-lived secret. A valid
-          # /auth-check alone did not prove /run/status auth consistency in
-          # the first production inventory attempt (HTTP 401).
+          # A successful /auth-check does not alone prove that /run/status
+          # has received a newly installed secret at every Cloudflare edge.
           confirmed=0
           for attempt in $(seq 1 20); do
             auth_status="$(curl --silent --show-error --max-time 12 \
@@ -159,24 +158,27 @@ jobs:
               "$WORKER_URL/v1/storage-cleanup/restoration/run/status" || true)"
             if [ "$auth_status" = 200 ] && jq -e \
               '.ok == true and .scope == "storage_cleanup"' \
-              "$RUNNER_TEMP/kentaurai-recovery-auth.json" > /dev/null 2>&1 &&
-              { { [ "$status_code" = 200 ] && jq -e \
+              "$RUNNER_TEMP/kentaurai-recovery-auth.json" > /dev/null 2>&1; then
+              if { [ "$status_code" = 200 ] && jq -e \
                 '.mode == "historical_provenance_recovery" and .sourceIdsReturned == false and .rawFactsReturned == false' \
                 "$RUNNER_TEMP/kentaurai-recovery-status.json" > /dev/null 2>&1; } ||
                 { [ "$status_code" = 409 ] && jq -e \
                   '.error == "historical_recovery_not_authorized_or_unavailable"' \
-                  "$RUNNER_TEMP/kentaurai-recovery-status.json" > /dev/null 2>&1; }; }; then
-              confirmed=$((confirmed + 1))
-              if [ "$confirmed" -ge 2 ]; then
-                echo "Private recovery route authorization verified twice."
-                exit 0
+                  "$RUNNER_TEMP/kentaurai-recovery-status.json" > /dev/null 2>&1; }; then
+                confirmed=$((confirmed + 1))
+              else
+                confirmed=0
               fi
             else
               confirmed=0
             fi
+            if [ "$confirmed" -ge 2 ]; then
+              echo "Recovery route authorization verified twice."
+              exit 0
+            fi
             sleep 2
           done
-          echo "::error::Private recovery route authorization could not be verified; no inventory started"
+          echo "::error::Recovery route authorization not established; no inventory started."
           exit 1
 
       - name: Begin or resume private recovery run
