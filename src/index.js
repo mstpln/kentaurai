@@ -8,6 +8,7 @@ import { syncOnePendingHorseStartPointSource } from './import/official-start-poi
 import { syncOnePendingOfficialSnapshotSource } from './import/official-snapshots.js';
 import { inspectPrivateRawSnapshotEvidence } from './storage-raw-source-diagnostic.js';
 import { inspectPrivateSnapshotReconciliationPage } from './storage-snapshot-reconciliation-reader.js';
+import { inspectHistoricalRestorationPage } from './storage-historical-recovery-page.js';
 import { normalizeCapturedXlabsRace } from './import/xlabs-telemetry.js';
 import {
   createXlabsPositionReconstructionJob,
@@ -420,6 +421,19 @@ async function handleFetch(request, env) {
       }));
     } catch {
       return json({ error: 'reconciliation_page_unavailable' }, 409);
+    }
+  }
+  // Dedicated READ-ONLY recovery preview. The restoration executor stays
+  // completely unreachable through HTTP, even with the permanent admin
+  // credential. Only a later separately approved release may add it.
+  if (request.method === 'GET' && path === '/v1/storage-cleanup/restoration/preview') {
+    try {
+      return json(await inspectHistoricalRestorationPage(env, {
+        family: url.searchParams.get('family'),
+        cursor: url.searchParams.get('cursor')
+      }));
+    } catch {
+      return json({ error: 'restoration_preview_unavailable' }, 409);
     }
   }
   if (request.method === 'GET' && path === '/v1/storage-cleanup/audit') {
