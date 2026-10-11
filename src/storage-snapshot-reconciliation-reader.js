@@ -286,7 +286,7 @@ function sameSourceIdentityAndScope(family, earlier, sought) {
 // The earlier raw source is checked independently of its current direct-row
 // metadata. This is still NOT a proof of historical canonical identity or
 // of the full as-of timeline.
-async function inspectPredecessorHints(reader, env, family, missing, cutoff, r2Budget) {
+async function inspectPredecessorHints(reader, env, family, missing, cutoff, r2Budget, currentSource, onVerified = null) {
   const report = {
     examined: 0,
     deferred: missing.length,
@@ -337,11 +337,12 @@ async function inspectPredecessorHints(reader, env, family, missing, cutoff, r2B
     else if (Number(rows[0].completed_lineage) !== 1) report.earlierUnconfirmedSource++;
     else if (snapshotFactMatches(family, rows[0], fact)) {
       report.earlierCompletedSourceSameFacts++;
-      matchingPredecessors.push({ row: rows[0], fact });
+      matchingPredecessors.push({ row: rows[0], fact, mapped });
     } else report.earlierCompletedSourceDifferentFacts++;
   }
   const verifiedSources = new Map();
-  for (const { row, fact } of matchingPredecessors) {
+  const verifiedMetadata = new Map();
+  for (const { row, fact, mapped } of matchingPredecessors) {
     const sourceId = row.source_record_id;
     let original;
     if (verifiedSources.has(sourceId)) {
@@ -356,6 +357,7 @@ async function inspectPredecessorHints(reader, env, family, missing, cutoff, r2B
         'SELECT id,source_type,fetched_at,raw_object_key,content_hash,quality_status' +
         ' FROM source_records WHERE id=? LIMIT 1', sourceId);
       const source = metadata[0];
+      if (source) verifiedMetadata.set(sourceId, source);
       if (!source || source.source_type !== 'official_provider' ||
           !Number.isFinite(Date.parse(source.fetched_at)) ||
           Date.parse(source.fetched_at) !== Date.parse(row.observed_at)) {
@@ -380,6 +382,18 @@ async function inspectPredecessorHints(reader, env, family, missing, cutoff, r2B
         sameSourceIdentityAndScope(family, candidate, fact));
       if (matches.length === 1 && snapshotFactMatches(family, row, matches[0])) {
         report.earlierOriginalVerifiedFacts++;
+        // This callback is deliberately private. Neither raw identity nor
+        // source metadata is ever added to the response/report.
+        if (onVerified) onVerified({
+          family, canonicalId: mapped, currentFact: fact, priorFact: matches[0],
+          priorSnapshot: row,
+          currentSource: {
+            id: currentSource.source_record_id, fetched_at: currentSource.fetched_at,
+            content_hash: currentSource.content_hash,
+            quality_status: currentSource.quality_status, source_type: 'official_provider'
+          },
+          priorSource: verifiedMetadata.get(sourceId)
+        });
       } else {
         report.earlierOriginalFactMismatch++;
       }
@@ -441,7 +455,10 @@ function selectSourceSql(family, withCursor) {
   ].join(' ');
 }
 
-export async function inspectPrivateSnapshotReconciliationPage(env, { family, cursor = null } = {}) {
+export async function inspectPrivateSnapshotReconciliationPage(env, { family, cursor = null, onVerifiedPredecessor = null } = {}) {
+  if (onVerifiedPredecessor != null && typeof onVerifiedPredecessor !== 'function') {
+    throw new Error('reconciliation_invalid_private_callback');
+  }
   if (!FAMILY[family]) throw new Error('reconciliation_invalid_family');
   if (!env?.DB || !env?.RAW_BUCKET) throw new Error('reconciliation_bindings_missing');
   const reader = readonlyReader(env.DB);
@@ -517,7 +534,8 @@ export async function inspectPrivateSnapshotReconciliationPage(env, { family, cu
         report.extractedFacts = comparison.expectedFacts;
         report.classifications = comparison.classifications;
         report.predecessorHints = await inspectPredecessorHints(
-          reader, env, family, missingInternal, source.fetched_at, r2Budget
+          reader, env, family, missingInternal, source.fetched_at,
+          r2Budget, source, onVerifiedPredecessor
         );
         // A source-owned direct row must be a verified official snapshot.
         // A quality anomaly invalidates this source's classification.
