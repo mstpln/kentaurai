@@ -564,3 +564,66 @@ test('bounded manual workflow retries only a temporary 401 and keeps payload pri
   const printed = workflow.split("            jq -c '{family,sourcesExamined")[1]?.split('"$output"')[0] || '';
   assert.doesNotMatch(printed, /raw_object_key|snapshot_id|source_record_id|\bcursor\b/);
 });
+
+
+test('four-distinct-older-source cap defers extra R2 originals without hiding matching direct hints', async () => {
+  const f = await fixture();
+  const starts = [{ horse: { id: 100, age: 4 } }];
+  for (let id = 101; id <= 105; id++) {
+    const horseId = 'h' + id;
+    const age = id === 101 ? 5 : 4;
+    if (id > 101) {
+      f.db.prepare('INSERT INTO horses(id,canonical_name) VALUES (?,?)')
+        .run(horseId, 'Synthetic Horse ' + id);
+      f.db.prepare(
+        "INSERT INTO horse_external_ids(horse_id,source_type,external_id) VALUES (?,'official',?)"
+      ).run(horseId, String(id));
+    }
+    starts.push({ horse: { id, age } });
+    const priorBody = JSON.stringify({ races: [{ starts: [{ horse: { id, age } }] }] });
+    const priorHash = createHash('sha256').update(priorBody).digest('hex');
+    const priorKey = 'raw/official_provider/' + priorHash + '.json';
+    const priorId = 'prior-' + id;
+    const past = '2026-09-10T08:00:00Z';
+    f.db.prepare(
+      'INSERT INTO source_records(id,source_type,fetched_at,raw_object_key,content_hash,quality_status)' +
+      " VALUES (?,'official_provider',?,?,?,'normalized_verified_subset')"
+    ).run(priorId, past, priorKey, priorHash);
+    f.db.prepare(
+      "INSERT INTO official_snapshot_source_sync(source_record_id,status,processed_at,horse_profile_count)" +
+      " VALUES (?,'complete','2026-09-11T08:00:00Z',1)"
+    ).run(priorId);
+    f.db.prepare(
+      "INSERT INTO storage_cleanup_audit_source_counts(audit_run_id,family,source_record_id,actual_count)" +
+      " VALUES (?,'horse_profile',?,1)"
+    ).run(AUDIT, priorId);
+    f.db.prepare(
+      "INSERT INTO horse_profile_snapshots(id,horse_id,observed_at,age_years,source_record_id,quality_status)" +
+      " VALUES (?,?,?,?,?,'verified_official_snapshot')"
+    ).run(priorId + ':snap', horseId, past, age, priorId);
+    await f.env.RAW_BUCKET.put(priorKey, priorBody, {
+      customMetadata: { contentHash: priorHash, sourceType: 'official_provider' }
+    });
+  }
+  const current = JSON.stringify({ races: [{ starts }] });
+  const hash = createHash('sha256').update(current).digest('hex');
+  const key = 'raw/official_provider/' + hash + '.json';
+  f.db.prepare('UPDATE source_records SET raw_object_key=?,content_hash=? WHERE id=?')
+    .run(key, hash, f.first.id);
+  f.db.prepare('UPDATE official_snapshot_source_sync SET horse_profile_count=6 WHERE source_record_id=?')
+    .run(f.first.id);
+  await f.env.RAW_BUCKET.put(key, current, {
+    customMetadata: { contentHash: hash, sourceType: 'official_provider' }
+  });
+  const result = await inspectPrivateSnapshotReconciliationPage(f.env, { family: 'horse_profile' });
+  assert.equal(result.classifications.missing_unverified_chronology, 5);
+  assert.equal(result.predecessorHints.earlierCompletedSourceSameFacts, 5);
+  assert.equal(result.predecessorHints.earlierOriginalVerifiedFacts, 4);
+  assert.equal(result.predecessorHints.earlierOriginalVerifiedSources, 4);
+  assert.equal(result.predecessorHints.earlierOriginalDeferred, 1);
+  assert.equal(result.budget.r2ObjectsRead, 5);
+  assert.ok(result.budget.r2BytesRead <= 8 * 1024 * 1024);
+  assert.ok(result.budget.queries <= 40);
+  assert.equal(result.budget.rowsWritten, 0);
+  assert.equal(result.repairAuthorized, false);
+});
