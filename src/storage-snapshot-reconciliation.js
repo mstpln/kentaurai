@@ -37,7 +37,7 @@ function validTime(v) { return typeof v === 'string' && Number.isFinite(Date.par
 // present-day mapping alone never proves the identity used by a legacy import.
 export function reconcileSnapshotFacts({
   family, source, facts, identities, direct = [], observations = [],
-  referencedSnapshots = [], chronology = [], historicalIdentityVerified = false
+  referencedSnapshots = [], chronology = [], historicalIdentityVerified = false, chronologyVerified = false
 }) {
   const definition = FAMILIES[family];
   if (!definition || !(facts instanceof Map)) throw new Error('reconciliation_invalid_family_or_facts');
@@ -84,7 +84,7 @@ export function reconcileSnapshotFacts({
         status = 'conflict';
       } else if (consistentDirect.length + consistentLinks.length > 0) {
         status = 'represented';
-      } else if (!historicalIdentityVerified) {
+      } else if (!historicalIdentityVerified || !chronologyVerified) {
         status = 'missing_unverified_chronology';
       } else {
         const timeline = chronology.filter((row) => row.entity_key === entityKey && row.scope_key === scope);
