@@ -427,6 +427,25 @@ export async function stepHistoricalRecoveryExecution(env,{
     await markPaused(env,run.id);
     throw new Error('recovery_receipt_drift_or_ambiguous');
   }
+  // Crash recovery: last source-owned INSERT may have committed together
+  // with its journal increment, while the subsequent receipt-close UPDATE
+  // never ran. If its source count is now balanced and every planned
+  // candidate is durably recorded, close the receipt without another write.
+  if(report.ledgerShortfall===0 &&
+     candidates.length===0 &&
+     Number(receipt.restored_count)===Number(receipt.candidate_count)){
+    const done=await env.DB.prepare(
+      "UPDATE historical_recovery_receipts SET status='applied',"+
+      "updated_at=CURRENT_TIMESTAMP WHERE run_id=? AND family=? AND source_record_id=?"+
+      " AND status='ready' AND restored_count=candidate_count"+
+      ' AND (SELECT revision FROM historical_recovery_epoch WHERE singleton=1)=?'
+    ).bind(run.id,receipt.family,receipt.source_record_id,current).run();
+    if(Number(done.meta?.changes)!==1)
+      throw new Error('recovery_receipt_completion_conflict');
+    return {...totals(await loadRun(env,run.id)),pageFamily:receipt.family,
+      inserted:0,reused:0,pageApplied:true,recoveredCommittedCheckpoint:true,
+      budget:report.budget};
+  }
   if(!report.auditLedgerVerified || report.originalVerified!==1 ||
      report.classifications.conflict!==0 ||
      report.classifications.identity_ambiguous!==0 ||
