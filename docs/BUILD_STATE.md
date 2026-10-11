@@ -1,3 +1,22 @@
+## Read-only production audit #20: normal budget checkpoint mislabeled as safety stop
+
+- Run #20 completed 54 bounded requests, checked 245,621 logical rows and
+  recorded 754,304 reads / 28,967 writes (below the 1M/100k run budget).
+  Backend reserved the next 250k-read operation and correctly paused rather
+  than starting an unsafe request.
+- The bug: the reserve-only pause also persisted
+  `continuation_budget_exhausted=1`, which appeared to the GitHub queue as a
+  hard `cumulativeSafetyStop`. This disabled all automatic continuations even
+  though the accepted checkpoint and current proof were safe.
+- Patch: normal reserve-only `budgetBlocked` leaves the persisted hard-stop
+  flag unchanged, so an accepted, progressing, source-bound dry-run may resume
+  with the same audit ID in the next run. Genuine over-budget, operation-safety,
+  integrity, stale revision, expired proof and ambiguous outcomes still stop.
+- Read/write reserve and real hard-stop distinction covered by synthetic
+  regression. This does not alter budgets, protected execution routes, raw
+  racing records, or physical R2 deletion; no production dry-run was triggered
+  by this patch.
+
 ## 2026-10-11 follow-up: disable all HTTP cleanup execution (scoped review)
 
 - Release #169 and merged PR #304 were verified on `main` at

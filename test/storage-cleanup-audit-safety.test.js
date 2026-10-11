@@ -2,10 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/index.js';
 import { createTestEnv } from './helpers/d1.js';
+import { buildReadOnlyAuditContinuation } from '../scripts/queue-production-storage-audit.mjs';
 import {
   applyStorageCleanupAuditPage,
   assertStorageCleanupAuthorization,
   bindStorageCleanupIntegrityAudit,
+  getStorageCleanupAuditRun,
   prepareStorageCleanupAuditStep,
   settleStorageCleanupAuditPage,
   startOrResumeStorageCleanupAudit,
@@ -177,32 +179,95 @@ test('cost stop on the final page persists failed proof for reads, writes and du
   }
 });
 
-test('cumulative continuation budget stops before another worst-case page and resumes explicitly', async () => {
+test('normal read/write reserve pause stays resumable and authorizes one read-only GitHub continuation', async () => {
+  for (const [label, rowsRead, rowsWritten] of [
+    ['read budget', 750001, 1],
+    ['write budget', 1, 75001]
+  ]) {
+    const { db, env } = createTestEnv();
+    const sourceSha = '8'.repeat(40);
+    const initial = await startOrResumeStorageCleanupAudit(env, { source_sha: sourceSha });
+    const accepted = await stepStorageCleanupAudit(env, { audit_run_id: initial.auditRunId });
+    assert.equal(accepted.page.accepted, true, label + ': accepted progress required for handoff');
+    db.prepare(`
+      UPDATE storage_cleanup_audit_runs
+      SET continuation_rows_read=?,continuation_rows_written=?
+      WHERE id=?
+    `).run(rowsRead, rowsWritten, initial.auditRunId);
+
+    const blocked = await prepareStorageCleanupAuditStep(env, { audit_run_id: initial.auditRunId });
+    assert.equal(blocked.budgetBlocked, true, label + ': next worst-case page is reserved');
+    assert.equal(blocked.status, 'running');
+    assert.equal(blocked.complete, false);
+    assert.equal(blocked.cumulativeSafetyStop, false,
+      label + ': a planned checkpoint must not masquerade as a safety failure');
+    const persisted = await getStorageCleanupAuditRun(env, initial.auditRunId);
+    assert.equal(persisted.cumulativeSafetyStop, false);
+    assert.equal(db.prepare(`SELECT continuation_budget_exhausted AS stopped
+      FROM storage_cleanup_audit_runs WHERE id=?`).get(initial.auditRunId).stopped, 0);
+    const secondBlocked = await prepareStorageCleanupAuditStep(env, { audit_run_id: initial.auditRunId });
+    assert.equal(secondBlocked.budgetBlocked, true, label + ': repeated read-only checkpoint is idempotent');
+
+    const next = buildReadOnlyAuditContinuation({
+      GITHUB_REPOSITORY: 'mstpln/kentaurai',
+      GITHUB_REF: 'refs/heads/main',
+      GITHUB_SHA: sourceSha,
+      GITHUB_RUN_ID: '38127737768',
+      MODE: 'dry-run',
+      CONFIRMATION: '',
+      AUDIT_INCOMPLETE: 'true',
+      PROGRESS_MADE: 'true',
+      COST_BUDGET_STOP: 'false',
+      AUDIT_SAFETY_STOP: String(persisted.cumulativeSafetyStop),
+      CLEANUP_SESSION_ID: '',
+      AUDIT_RUN_ID: initial.auditRunId,
+      AUDIT_CONTINUATION_COUNT: String(persisted.continuationCount),
+      AUDIT_MAX_CONTINUATIONS: String(persisted.maxContinuations),
+      AUDIT_EXPIRES_AT: persisted.expiresAt,
+      DRY_RUN_MAX_BATCHES: '50'
+    });
+    assert.equal(next.inputs.mode, 'dry-run');
+    assert.equal(next.inputs.continuation_audit, initial.auditRunId);
+    assert.equal(next.inputs.continuation_session, '');
+    await assert.rejects(
+      () => assertStorageCleanupAuthorization(env, {
+        audit_run_id: initial.auditRunId,
+        source_sha: sourceSha
+      }),
+      /complete cleanup integrity audit is required/
+    );
+
+    const resumed = await startOrResumeStorageCleanupAudit(env, {
+      source_sha: sourceSha,
+      audit_run_id: initial.auditRunId
+    });
+    assert.equal(resumed.continuationCount, 2);
+    assert.equal(resumed.cumulativeSafetyStop, false);
+    assert.deepEqual(resumed.continuationCost, { rowsRead: 0, rowsWritten: 0, durationMs: 0 });
+    assert.ok((await prepareStorageCleanupAuditStep(env, { audit_run_id: initial.auditRunId })).preparedPage);
+  }
+});
+
+test('persisted actual budget-stop flag remains non-continuable instead of being mistaken for a normal reserve pause', async () => {
   const { db, env } = createTestEnv();
-  const sourceSha = '8'.repeat(40);
+  const sourceSha = 'c'.repeat(40);
   const run = await startOrResumeStorageCleanupAudit(env, { source_sha: sourceSha });
-  db.prepare(`
-    UPDATE storage_cleanup_audit_runs
-    SET continuation_rows_read=750001
-    WHERE id=?
-  `).run(run.auditRunId);
+  db.prepare(`UPDATE storage_cleanup_audit_runs SET continuation_budget_exhausted=1 WHERE id=?`)
+    .run(run.auditRunId);
   const blocked = await prepareStorageCleanupAuditStep(env, { audit_run_id: run.auditRunId });
   assert.equal(blocked.budgetBlocked, true);
-  assert.equal(blocked.complete, false);
-  await assert.rejects(
-    () => assertStorageCleanupAuthorization(env, {
-      audit_run_id: run.auditRunId,
-      source_sha: sourceSha
-    }),
-    /complete cleanup integrity audit is required/
-  );
-  const resumed = await startOrResumeStorageCleanupAudit(env, {
-    source_sha: sourceSha,
-    audit_run_id: run.auditRunId
-  });
-  assert.equal(resumed.cumulativeSafetyStop, false);
-  assert.deepEqual(resumed.continuationCost, { rowsRead: 0, rowsWritten: 0, durationMs: 0 });
-  assert.ok((await prepareStorageCleanupAuditStep(env, { audit_run_id: run.auditRunId })).preparedPage);
+  assert.equal(blocked.cumulativeSafetyStop, true);
+  assert.equal(blocked.status, 'running');
+  assert.throws(() => buildReadOnlyAuditContinuation({
+    GITHUB_REPOSITORY: 'mstpln/kentaurai',
+    GITHUB_REF: 'refs/heads/main',
+    GITHUB_SHA: sourceSha,
+    MODE: 'dry-run',
+    AUDIT_INCOMPLETE: 'true',
+    PROGRESS_MADE: 'true',
+    COST_BUDGET_STOP: 'false',
+    AUDIT_SAFETY_STOP: 'true'
+  }), /cost\/safety stop/);
 });
 
 test('database acceptance deadline rejects a page whose final settlement arrives late', async () => {

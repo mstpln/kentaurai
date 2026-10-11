@@ -805,15 +805,17 @@ export async function prepareStorageCleanupAuditStep(env, options = {}) {
     await failStorageCleanupAuditRun(env, id, 'interrupted_unsettled_page');
     throw new Error('cleanup audit has an unsettled page; start a new audit');
   }
-  if (Number(run.continuation_budget_exhausted) === 1
-    || number(run.continuation_rows_read) + DEFAULT_COST_SAFETY_THRESHOLDS.rowsRead > STORAGE_CLEANUP_AUDIT_CONTINUATION_THRESHOLDS.rowsRead
+  // A persisted cost-safety stop is not a resumable checkpoint.
+  if (Number(run.continuation_budget_exhausted) === 1) {
+    return { ...auditResponse(run, progress), budgetBlocked: true };
+  }
+  // Reserving the worst-case next operation is a NORMAL bounded handoff:
+  // no work was attempted and no cost threshold was crossed. Do not write
+  // continuation_budget_exhausted here. That field is for actual safety stops;
+  // marking a planned pause as a stop prevents the safe GitHub continuation
+  // from ever being dispatched.
+  if (number(run.continuation_rows_read) + DEFAULT_COST_SAFETY_THRESHOLDS.rowsRead > STORAGE_CLEANUP_AUDIT_CONTINUATION_THRESHOLDS.rowsRead
     || number(run.continuation_rows_written) + DEFAULT_COST_SAFETY_THRESHOLDS.rowsWritten > STORAGE_CLEANUP_AUDIT_CONTINUATION_THRESHOLDS.rowsWritten) {
-    await env.DB.prepare(`
-      UPDATE storage_cleanup_audit_runs
-      SET continuation_budget_exhausted=1,updated_at=CURRENT_TIMESTAMP
-      WHERE id=? AND status='running'
-    `).bind(id).run();
-    run = await loadAuditRun(env, id);
     return { ...auditResponse(run, progress), budgetBlocked: true };
   }
   const target = progress.find((row) => Number(row.is_complete) !== 1);
