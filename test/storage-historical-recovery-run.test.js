@@ -10,6 +10,7 @@ import {
   stepHistoricalRecoveryExecution, stepHistoricalRecoveryPostAudit
 } from '../src/storage-historical-recovery-run.js';
 import worker from '../src/index.js';
+import productionWorker from '../src/worker-v079.js';
 
 const DEPLOY = 'a'.repeat(40);
 const EARLIER = '2026-09-10T10:00:00Z';
@@ -496,4 +497,46 @@ test('raw original with more unique facts than completed sync count is quarantin
   assert.equal(f.db.prepare(
     'SELECT COUNT(*) AS n FROM horse_profile_snapshots WHERE source_record_id=?'
   ).get(SOURCE_CURRENT).n,0);
+});
+
+test('production entrypoint accepts the same temporary token on auth-check and real recovery routes',async()=>{
+  const f=await fixture();
+  const prefix='https://synthetic.example.invalid/v1/storage-cleanup/';
+  const temporary=String(Date.now())+'.'+'a'.repeat(64);
+  f.env.STORAGE_CLEANUP_TOKEN=temporary;
+  const headers={authorization:'Bearer '+temporary};
+  const auth=await productionWorker.fetch(new Request(prefix+'auth-check',{headers}),f.env);
+  assert.equal(auth.status,200);
+  assert.deepEqual(await auth.json(),{ok:true,scope:'storage_cleanup'});
+  // With no active inventory, the route must give a protected 409, not 401.
+  const absent=await productionWorker.fetch(new Request(
+    prefix+'restoration/run/status',{headers}
+  ),f.env);
+  assert.equal(absent.status,409);
+  assert.deepEqual(await absent.json(),{
+    error:'historical_recovery_not_authorized_or_unavailable'
+  });
+  const started=await productionWorker.fetch(new Request(
+    prefix+'restoration/run/start',{
+      method:'POST',
+      headers:{...headers,'content-type':'application/json'},
+      body:'{}'
+    }
+  ),f.env);
+  assert.equal(started.status,200);
+  assert.equal((await started.json()).phase,'inventory');
+  const active=await productionWorker.fetch(new Request(
+    prefix+'restoration/run/status',{headers}
+  ),f.env);
+  assert.equal(active.status,200);
+  const state=await active.json();
+  assert.equal(state.mode,'historical_provenance_recovery');
+  assert.equal(state.sourceIdsReturned,false);
+  assert.equal(state.rawFactsReturned,false);
+  for(const path of ['auth-check','restoration/run/status']){
+    const denied=await productionWorker.fetch(new Request(prefix+path,{
+      headers:{authorization:'Bearer invalid-temporary-token'}
+    }),f.env);
+    assert.equal(denied.status,401);
+  }
 });
