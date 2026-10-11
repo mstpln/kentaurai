@@ -7,8 +7,10 @@ test('manual production storage cleanup is read-only, source-bound and bounded p
   const runner = readFileSync(new URL('../scripts/run-production-storage-cleanup.mjs', import.meta.url), 'utf8');
 
   assert.match(workflow, /workflow_dispatch:/);
-  const qaStep = workflow.split('      - name: Run QA before production operation\\n')[1]
-    ?.split('\\n      - name: ')[0] ?? '';
+  const qaStep = workflow.slice(
+    workflow.indexOf('      - name: Run QA before production operation'),
+    workflow.indexOf('      - name: Validate production credentials')
+  );
   assert.match(qaStep, /run: npm run qa/);
   for (const variable of [
     'CLEANUP_TRIGGER_CONFIRMATION',

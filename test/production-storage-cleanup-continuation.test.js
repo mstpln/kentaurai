@@ -92,7 +92,7 @@ test('synthetic runner environment ignores inherited workflow continuation metad
     CLEANUP_TRIGGER_CONFIRMATION: 'RESUME READ ONLY AUDIT',
     CLEANUP_AUDIT_RUN_ID: AUDIT_ID,
     CLEANUP_SESSION_ID: AUDIT_ID,
-    CLEANUP_CONTINUATION_REQUEST: '38128639988',
+    CLEANUP_CONTINUATION_REQUEST: '123456789',
     CLEANUP_SOFT_DEADLINE_MS: '2100000',
     CLEANUP_RUN_MAX_ROWS_READ: '250000',
     CLEANUP_RUN_MAX_ROWS_WRITTEN: '25000',
@@ -118,12 +118,12 @@ test('synthetic runner environment ignores inherited workflow continuation metad
   const intentionalContinuation = syntheticCleanupRunnerEnv({
     CLEANUP_TRIGGER_CONFIRMATION: 'RESUME READ ONLY AUDIT',
     CLEANUP_AUDIT_RUN_ID: AUDIT_ID,
-    CLEANUP_CONTINUATION_REQUEST: '38128639988',
+    CLEANUP_CONTINUATION_REQUEST: '123456789',
     CLEANUP_SESSION_ID: ''
   }, polluted);
   assert.equal(intentionalContinuation.CLEANUP_TRIGGER_CONFIRMATION, 'RESUME READ ONLY AUDIT');
   assert.equal(intentionalContinuation.CLEANUP_AUDIT_RUN_ID, AUDIT_ID);
-  assert.equal(intentionalContinuation.CLEANUP_CONTINUATION_REQUEST, '38128639988');
+  assert.equal(intentionalContinuation.CLEANUP_CONTINUATION_REQUEST, '123456789');
   assert.equal(intentionalContinuation.CLEANUP_SESSION_ID, '');
 });
 

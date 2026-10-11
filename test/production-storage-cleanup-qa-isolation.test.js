@@ -17,9 +17,9 @@ test('cleanup subprocess suites pass with an inherited real-world read-only cont
       ...process.env,
       MODE: 'dry-run',
       CLEANUP_TRIGGER_CONFIRMATION: 'RESUME READ ONLY AUDIT',
-      CLEANUP_AUDIT_RUN_ID: 'fbb5be3a-3caf-4c2e-9a0f-5f10629eae3e',
+      CLEANUP_AUDIT_RUN_ID: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
       CLEANUP_SESSION_ID: '',
-      CLEANUP_CONTINUATION_REQUEST: '38128639988',
+      CLEANUP_CONTINUATION_REQUEST: '123456789',
       DRY_RUN_MAX_BATCHES: '50',
       CLEANUP_SOFT_DEADLINE_MS: '2100000',
       CLEANUP_RUN_MAX_ROWS_READ: '1000000',
@@ -32,7 +32,7 @@ test('cleanup subprocess suites pass with an inherited real-world read-only cont
   });
   assert.equal(child.error, undefined, String(child.error));
   assert.equal(child.status, 0,
-    'Nested cleanup QA must be independent of inherited production state.\\n'
-      + (child.stderr || '') + '\\n' + (child.stdout || '').slice(-4000));
+    ['Nested cleanup QA must be independent of inherited production state.',
+      child.stderr || '', (child.stdout || '').slice(-4000)].join(String.fromCharCode(10)));
   assert.match(child.stdout, /# fail 0/);
 });
