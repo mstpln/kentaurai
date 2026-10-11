@@ -416,6 +416,7 @@ function emptySummary(family) {
     originalMissing: 0,
     originalInvalid: 0,
     originalFactCountInsufficient: 0,
+    originalFactCountExcess: 0,
     originalDeferred: 0,
     provenanceConflicts: 0,
     actualLogicalRepresentations: 0,
@@ -546,10 +547,13 @@ export async function inspectPrivateSnapshotReconciliationPage(env, { family, cu
       if (facts.size > MAX_FACTS) {
         report.originalDeferred++;
         report.originalVerified = 0;
-      } else if (facts.size < boundedInteger(source.expected_count)) {
-        // A genuine hash-verified original can disagree with a legacy import
-        // counter; this does not make the original itself corrupt.
-        report.originalFactCountInsufficient++;
+      } else if (facts.size !== boundedInteger(source.expected_count)) {
+        // Never restore from a raw-source fact population that disagrees
+        // with its completed importer count in either direction. The raw
+        // original is authentic but its legacy normalization is ambiguous.
+        if(facts.size < boundedInteger(source.expected_count))
+          report.originalFactCountInsufficient++;
+        else report.originalFactCountExcess++;
         report.extractedFacts = facts.size;
       } else {
         const observations = await readRows(reader,
