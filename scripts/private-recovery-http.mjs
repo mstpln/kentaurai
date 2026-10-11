@@ -21,14 +21,20 @@ export async function fetchPrivateRecoveryJson({
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetchImpl(url, {
-        method, redirect:'error', signal:controller.signal,
-        headers: {
-          authorization:'Bearer ' + token,
-          ...(serialized === undefined ? {} : {'content-type':'application/json'})
-        },
-        body:serialized
-      });
+      let response;
+      try {
+        response = await fetchImpl(url, {
+          method, redirect:'error', signal:controller.signal,
+          headers: {
+            authorization:'Bearer ' + token,
+            ...(serialized === undefined ? {} : {'content-type':'application/json'})
+          },
+          body:serialized
+        });
+      } catch {
+        // Ambiguous transport failure: no replay, no raw URL/error logging.
+        throw new Error('recovery_private_api_transport_unavailable');
+      }
       if (response.status === 401) {
         if (attempt === MAX_AUTH_ATTEMPTS)
           throw new Error('recovery_private_api_authorization_failed');
