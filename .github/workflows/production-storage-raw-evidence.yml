@@ -1,0 +1,161 @@
+name: Verify raw snapshot evidence (read-only)
+run-name: Verify original snapshot evidence — read-only
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  raw_evidence:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    concurrency:
+      group: kentaurai-production-operation
+      cancel-in-progress: false
+    env:
+      WORKER_NAME: kentaurai-api
+    steps:
+      - name: Checkout exact deployed main
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Require verified production release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          releases="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/production-release-v060.yml/runs?branch=main&status=success&per_page=1")"
+          test "$(printf '%s' "$releases" | jq -r '.workflow_runs[0].head_sha // empty')" = "$GITHUB_SHA"
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+
+      - name: Run full QA without Cloudflare credentials
+        run: npm run qa
+
+      - name: Remove orphaned previous cleanup-only secret
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          if npx --yes wrangler@4.114.0 secret list --name "$WORKER_NAME" --format json \
+            | jq -e '.[] | select(.name == "STORAGE_CLEANUP_TOKEN")' > /dev/null; then
+            printf 'y\n' | npx --yes wrangler@4.114.0 secret delete STORAGE_CLEANUP_TOKEN --name "$WORKER_NAME"
+          fi
+
+      - name: Create short-lived read-only credential
+        id: token
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          token="$(node -e "console.log(Date.now()+'.'+require('crypto').randomBytes(32).toString('hex'))")"
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$token" | npx --yes wrangler@4.114.0 secret put STORAGE_CLEANUP_TOKEN --name "$WORKER_NAME"
+
+      - name: Verify exact deployed Worker
+        id: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          subdomain="$(curl --fail --silent --show-error -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "$api/workers/subdomain" | jq -r '.result.subdomain // empty')"
+          test -n "$subdomain"
+          enabled="$(curl --fail --silent --show-error -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "$api/workers/scripts/$WORKER_NAME/subdomain" | jq -r '.result.enabled // false')"
+          test "$enabled" = true
+          worker_url="https://$WORKER_NAME.$subdomain.workers.dev"
+          curl --fail --silent --show-error "$worker_url/health" > "$RUNNER_TEMP/kentaurai-health.json"
+          jq -e --arg sha "$GITHUB_SHA" \
+            '.ok == true and .service == "kentaurai-api" and .deploymentSha == $sha' \
+            "$RUNNER_TEMP/kentaurai-health.json" > /dev/null
+          echo "worker_url=$worker_url" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for temporary credential
+        env:
+          WORKER_URL: ${{ steps.worker.outputs.worker_url }}
+          CLEANUP_TOKEN: ${{ steps.token.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 15); do
+            status="$(curl --silent --output "$RUNNER_TEMP/kentaurai-auth.json" --write-out '%{http_code}' \
+              -H "Authorization: Bearer $CLEANUP_TOKEN" \
+              "$WORKER_URL/v1/storage-cleanup/auth-check" || true)"
+            if [ "$status" = 200 ] && jq -e '.ok == true and .scope == "storage_cleanup"' \
+              "$RUNNER_TEMP/kentaurai-auth.json" > /dev/null 2>&1; then exit 0; fi
+            sleep 2
+          done
+          echo "::error::Temporary read-only auth did not propagate"
+          exit 1
+
+      - name: Verify bounded R2 originals without returning private facts
+        env:
+          WORKER_URL: ${{ steps.worker.outputs.worker_url }}
+          CLEANUP_TOKEN: ${{ steps.token.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $CLEANUP_TOKEN" \
+            "$WORKER_URL/v1/storage-cleanup/raw-evidence/sample" \
+            > "$RUNNER_TEMP/kentaurai-raw-evidence-aggregates.json"
+          jq -e '(.mode == "read_only_raw_evidence_sample") and
+            (.classificationOnly == true) and (.snapshotFactsNotRestored == true) and
+            (.sameDatasetRevision == true) and (.budget.rowsWritten == 0) and
+            ((.families | length) == 4)' \
+            "$RUNNER_TEMP/kentaurai-raw-evidence-aggregates.json" > /dev/null
+          jq -c '{mode,classificationOnly,families,budget}' \
+            "$RUNNER_TEMP/kentaurai-raw-evidence-aggregates.json"
+
+      - name: Remove temporary credential
+        if: ${{ always() && steps.token.outcome != 'skipped' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if npx --yes wrangler@4.114.0 secret list --name "$WORKER_NAME" --format json \
+            | jq -e '.[] | select(.name == "STORAGE_CLEANUP_TOKEN")' > /dev/null; then
+            printf 'y\n' | npx --yes wrangler@4.114.0 secret delete STORAGE_CLEANUP_TOKEN --name "$WORKER_NAME"
+          fi
+
+      - name: Verify production health after read-only check
+        if: ${{ always() && steps.worker.outcome == 'success' }}
+        env:
+          WORKER_URL: ${{ steps.worker.outputs.worker_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error "$WORKER_URL/health" > "$RUNNER_TEMP/kentaurai-health-after.json"
+          jq -e --arg sha "$GITHUB_SHA" \
+            '.ok == true and .service == "kentaurai-api" and .deploymentSha == $sha' \
+            "$RUNNER_TEMP/kentaurai-health-after.json" > /dev/null
+
+      - name: Confirm read-only boundary
+        if: ${{ always() }}
+        run: |
+          echo "READ-ONLY SAMPLE: no D1 writes, raw payload exports, restore/backfill or cleanup execution." >> "$GITHUB_STEP_SUMMARY"
+          echo "Results only indicate whether verifiable raw originals contain sufficient candidate facts; they do NOT authorize repair." >> "$GITHUB_STEP_SUMMARY"
