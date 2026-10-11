@@ -1,3 +1,35 @@
+## PR #304 security hardening review — implementation pending final CI
+
+- Read-only workflow no longer exposes `execute` behind a plain text
+  phrase. Destructive cleanup remains disabled pending a separately reviewed
+  protected authorization boundary.
+- Production release and audit Cloudflare operation jobs share the exact
+  `kentaurai-production-operation` job-level lock. The successor queue job
+  is separate and secretless and runs only after cleanup releases that lock.
+- An auto-dispatched audit carries only read-only marker, exact GitHub source,
+  prior run correlation and the same persisted Audit-ID. New input
+  `continuation_request` is declared in workflow_dispatch and displayed in
+  the run name for verifying the successor.
+- GitHub pending/queued successor runs are NOT accepted as successful
+  handoffs; only in_progress or completed/success verifies that the run was
+  not silently replaced by concurrency.
+- The release now injects `KENTAURAI_DEPLOY_SHA` into the Worker, whose
+  `/health` exposes `deploymentSha`. Cleanup checks the exact deployment SHA
+  before acquiring a cleanup-only token and after the operation.
+- A shared lock protects release vs cleanup. Cancelled/ambiguous runs may
+  leave a short-lived token; the next operation removes orphaned tokens before
+  creating another. Token removal is attempted after any creation attempt.
+- The audit status route is authenticated and read-only. If a Worker page
+  response is lost, the runner re-reads persisted status and stops without
+  dispatching an unverified continuation. Cost ambiguity cannot be
+  silently treated as successful progress.
+- Scheduled imports are NOT paused and may legitimately invalidate the
+  dataset-revision proof. No actual cleanup, dry-run, migration or production
+  data mutation was performed during development of this patch.
+- Confirm exact final PR head, targeted and full CI, and independent
+  security review before merge. A subsequent deployment requires normal
+  release workflow approval and production checks.
+
 ## One-click bounded cleanup audit continuation — implementation candidate
 - The fully deployed cleanup code resumed one source/revision-bound audit across dry-run #17, #18 and #19. Each run performed about 52–54 bounded audit requests (754k–763k D1 reads) without a safety-budget breach, but the GitHub workflow deliberately failed at the end of **every incomplete audit**, forcing the nontechnical operator to click "Run workflow" repeatedly. No racing data deletion occurred.
 - This branch allows one **manually initiated** dry-run to chain later **read-only** runs through the existing GitHub `workflow_dispatch` API. Each run has a fresh short-lived cleanup-only token and D1 restore bookmark; the prior token is removed and production health verified before the next continuation is queued.
