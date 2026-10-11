@@ -66,11 +66,47 @@ proofs remain false, and no repair is authorized. The endpoint's returned
 report remains aggregate-only: no record IDs, horses, raw values or keys.
 The same request-level D1 budget and final dataset-revision fence apply.
 
+
+## Older verified raw source evidence — limited follow-up
+
+For each of the at most 24 missing-fact predecessor hints, the Worker may
+also inspect the immutable R2 original for the predecessor's own source.
+It reads at most **four distinct predecessor source objects** plus the
+current source (five R2 object reads total), with a combined **8 MiB
+per request**. D1 remains limited to 40 SELECTs and its existing row
+budgets. Missing/oversized originals and exhausted budgets are reported
+separately, never interpreted as factual absence.
+
+The source original is SHA-256 checked and parsed using the same official
+fact parser as the current source. Identity is matched by *external source
+ID, person type and exact scope* (including record year and ordinal), and
+all comparable factual columns must equal the older direct snapshot.
+Aggregate-only counters distinguish verified older-original facts,
+older-original factual contradictions, unverified originals, skipped
+read-budget cases and independently hash-verified distinct older originals.
+
+**This does not prove that the historical canonical identity mapping was
+unchanged**, that an older snapshot was present in D1 as of the later
+source's original observation timestamp, or that no intervening
+observation changed its effective as-of value. The output retains
+\`historicalIdentityVerified=false\`,
+\`completeChronologyVerified=false\` and \`repairAuthorized=false\`.
+No historical recovery writes are enabled.
+
+The manual GitHub Actions workflow retries only HTTP 401 for a maximum of
+12 requests with short delay to tolerate eventual propagation of a freshly
+created temporary Cloudflare credential. Any other non-200 status fails
+immediately. Tokens, payloads and raw error responses are not logged.
+
 ## Safety and budgets
 
-Each endpoint invocation is bounded to one R2 original (at most **8 MiB**),
-a maximum 512 parsed facts, 1,024 source-owned direct rows, 1,024 observations,
-1,024 referenced snapshots, 24 predecessor hints and 40 SELECTs. D1 reads are capped at 250,000
+Each endpoint invocation reads at most **five R2 originals** (one current
+source and at most four distinct older sources), with a combined **8 MiB**
+limit. Fact-level comparison is bounded to at most 512 parsed facts per
+current source and at most 512 per compared older source; oversized older
+fact collections are deferred rather than treated as mismatches.
+D1 comparisons remain bounded to 1,024 source-owned direct rows, 1,024
+observations, 1,024 referenced snapshots, 24 predecessor hints and 40 SELECTs. D1 reads are capped at 250,000
 per query and 1,000,000 per request, and any D1 writes fail closed. No
 D1/R2 write/delete path exists in this stage.
 
