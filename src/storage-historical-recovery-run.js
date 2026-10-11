@@ -64,7 +64,7 @@ function totals(run) {
     postAuditRemainingMissing:Number(run.post_remaining_missing),
     postAuditExcess:Number(run.post_excess),
     scanDriftDetected:run.scan_drift===1,
-    backupVerified:Boolean(run.backup_key && run.backup_sha256),
+    backupVerified:Boolean(run.backup_key && run.backup_etag && run.backup_bookmark),
     sourceIdsReturned:false, rawFactsReturned:false
   };
 }
@@ -191,38 +191,134 @@ export async function stepHistoricalRecoveryInventory(env,{runId}={}) {
     budget:report.budget
   };
 }
+// D1 export content never enters GitHub Actions or ChatGPT. The Cloudflare
+// REST export returns a signed URL; this Worker streams that response directly
+// to the private Cloudflare R2 bucket, without logging or returning the bytes.
+function backupEndpoint(env) {
+  const account=String(env.HISTORICAL_RECOVERY_ACCOUNT_ID||'');
+  const database=String(env.HISTORICAL_RECOVERY_DATABASE_ID||'');
+  if(!/^[a-f0-9]{32}$/.test(account) ||
+     !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(database) ||
+     typeof env.HISTORICAL_BACKUP_API_TOKEN!=='string' ||
+     env.HISTORICAL_BACKUP_API_TOKEN.length<32) {
+    throw new Error('recovery_backup_cloud_credentials_unavailable');
+  }
+  return 'https://api.cloudflare.com/client/v4/accounts/'+account+
+    '/d1/database/'+database+'/export';
+}
+async function exportRequest(env,requestBody) {
+  const response=await fetch(backupEndpoint(env),{
+    method:'POST',redirect:'error',
+    headers:{
+      authorization:'Bearer '+env.HISTORICAL_BACKUP_API_TOKEN,
+      'content-type':'application/json'
+    },
+    body:JSON.stringify(requestBody)
+  });
+  if(!response.ok)throw new Error('recovery_backup_export_api_unavailable');
+  const result=await response.json();
+  if(!result?.success || !result.result ||
+    (result.result.error && result.result.error!=='') ||
+    (Array.isArray(result.errors)&&result.errors.length)){
+    throw new Error('recovery_backup_export_api_failed');
+  }
+  return result.result;
+}
+function validBookmark(value) {
+  return typeof value==='string' && /^[a-zA-Z0-9_-]{16,180}$/.test(value);
+}
 async function verifiedBackup(env,run) {
   const key=run.backup_key;
-  if(typeof key!=='string'||!key.startsWith(BACKUP_PREFIX) ||
-    key.includes('..') || !/^[a-zA-Z0-9_./-]+$/.test(key) ||
-    !validHash(run.backup_sha256) ||
-    !key.includes('/'+run.id+'/') || !key.endsWith('/'+run.backup_sha256+'.sql') ||
-    !Number.isSafeInteger(Number(run.backup_size)) || Number(run.backup_size)<1024) {
+  if(!validBookmark(run.backup_bookmark) ||
+    typeof key!=='string' ||
+    key!==BACKUP_PREFIX+run.id+'/'+run.backup_bookmark+'.sql' ||
+    typeof run.backup_etag!=='string'||run.backup_etag.length<8||
+    !Number.isSafeInteger(Number(run.backup_size)) || Number(run.backup_size)<1024){
     throw new Error('recovery_backup_not_verified');
   }
   const head=await env.RAW_BUCKET.head(key);
-  if(!head || Number(head.size)!==Number(run.backup_size))
+  if(!head || Number(head.size)!==Number(run.backup_size) ||
+    head.etag!==run.backup_etag ||
+    head.customMetadata?.backupBookmark!==run.backup_bookmark ||
+    head.customMetadata?.recoveryRunId!==run.id){
     throw new Error('recovery_backup_missing_or_changed');
+  }
 }
-export async function attachHistoricalRecoveryBackup(env,{
-  runId, key, sha256, size
-}={}) {
+export async function startHistoricalRecoveryCloudBackup(env,{runId}={}) {
   requireEnv(env);
   const run=await loadRun(env,runId);
-  if(run.phase!=='ready'||run.scan_drift===1)throw new Error('recovery_not_ready_for_backup');
+  if(run.phase!=='ready'||run.scan_drift===1 ||
+     run.backup_key)throw new Error('recovery_backup_not_ready');
   verifyEpoch(run,await epoch(env));
-  if(!validHash(sha256)||!nonnegative(size)||size<1024||
-    typeof key!=='string'||key!==BACKUP_PREFIX+run.id+'/'+sha256+'.sql'){
-    throw new Error('recovery_backup_invalid');
-  }
-  const head=await env.RAW_BUCKET.head(key);
-  if(!head||Number(head.size)!==size)throw new Error('recovery_backup_missing_or_changed');
-  const result=await env.DB.prepare(
-    'UPDATE historical_recovery_runs SET backup_key=?,backup_sha256=?,backup_size=?,'+
-    "updated_at=CURRENT_TIMESTAMP WHERE id=? AND phase='ready' AND expected_epoch=?" +
+  if(run.backup_bookmark) return {...totals(run),backupPending:true};
+  const result=await exportRequest(env,{output_format:'polling'});
+  if(!validBookmark(result.at_bookmark))
+    throw new Error('recovery_backup_invalid_bookmark');
+  const changed=await env.DB.prepare(
+    'UPDATE historical_recovery_runs SET backup_bookmark=?,'+
+    "updated_at=CURRENT_TIMESTAMP WHERE id=? AND phase='ready'"+
+    ' AND backup_bookmark IS NULL AND backup_key IS NULL AND expected_epoch=?'+
     ' AND (SELECT revision FROM historical_recovery_epoch WHERE singleton=1)=?'
-  ).bind(key,sha256,size,run.id,run.expected_epoch,run.expected_epoch).run();
-  if(Number(result.meta?.changes)!==1)throw new Error('recovery_backup_attach_conflict');
+  ).bind(result.at_bookmark,run.id,run.expected_epoch,run.expected_epoch).run();
+  if(Number(changed.meta?.changes)!==1)
+    throw new Error('recovery_backup_checkpoint_conflict');
+  return {...totals(await loadRun(env,run.id)),backupPending:true};
+}
+export async function pollHistoricalRecoveryCloudBackup(env,{runId}={}) {
+  requireEnv(env);
+  const run=await loadRun(env,runId);
+  if(run.phase!=='ready'||run.scan_drift===1 ||
+     !validBookmark(run.backup_bookmark))
+    throw new Error('recovery_backup_not_started');
+  verifyEpoch(run,await epoch(env));
+  if(run.backup_key){
+    await verifiedBackup(env,run);
+    return {...totals(run),backupVerified:true};
+  }
+  const result=await exportRequest(env,{current_bookmark:run.backup_bookmark});
+  if(result.at_bookmark && result.at_bookmark!==run.backup_bookmark)
+    throw new Error('recovery_backup_bookmark_conflict');
+  const signed=String(result.signed_url || result.result?.signed_url || '');
+  if(!signed)return {...totals(run),backupPending:true};
+  let download;
+  try{
+    const url=new URL(signed);
+    if(url.protocol!=='https:' || url.username || url.password ||
+      signed.length>4096 || !url.hostname ||
+      !(/(^|\.)cloudflare\.com$/i.test(url.hostname) ||
+        /(^|\.)cloudflarestorage\.com$/i.test(url.hostname) ||
+        /(^|\.)r2\.dev$/i.test(url.hostname))) {
+      throw new Error('recovery_backup_signed_url_invalid');
+    }
+    download=await fetch(signed,{redirect:'error'});
+  }catch{
+    throw new Error('recovery_backup_signed_url_unavailable');
+  }
+  if(!download.ok || !download.body)
+    throw new Error('recovery_backup_dump_unavailable');
+  const key=BACKUP_PREFIX+run.id+'/'+run.backup_bookmark+'.sql';
+  await env.RAW_BUCKET.put(key,download.body,{
+    httpMetadata:{contentType:'application/sql'},
+    customMetadata:{backupBookmark:run.backup_bookmark,recoveryRunId:run.id}
+  });
+  const head=await env.RAW_BUCKET.head(key);
+  if(!head || !Number.isSafeInteger(Number(head.size)) ||
+    Number(head.size)<1024 || typeof head.etag!=='string' ||
+    head.etag.length<8 ||
+    head.customMetadata?.backupBookmark!==run.backup_bookmark ||
+    head.customMetadata?.recoveryRunId!==run.id){
+    throw new Error('recovery_backup_r2_verification_failed');
+  }
+  const changed=await env.DB.prepare(
+    'UPDATE historical_recovery_runs SET backup_key=?,backup_etag=?,'+
+    'backup_size=?,updated_at=CURRENT_TIMESTAMP WHERE id=?'+
+    " AND phase='ready' AND backup_key IS NULL AND backup_bookmark=?"+
+    ' AND expected_epoch=?'+
+    ' AND (SELECT revision FROM historical_recovery_epoch WHERE singleton=1)=?'
+  ).bind(key,head.etag,Number(head.size),run.id,run.backup_bookmark,
+    run.expected_epoch,run.expected_epoch).run();
+  if(Number(changed.meta?.changes)!==1)
+    throw new Error('recovery_backup_checkpoint_conflict');
   return {...totals(await loadRun(env,run.id)),backupVerified:true};
 }
 function requireRepairPermission(env,{approved,authorization}) {
