@@ -1,19 +1,18 @@
 name: Production storage cleanup
-run-name: Production storage cleanup (${{ inputs.mode }}) — @${{ github.actor }}
+run-name: Production storage cleanup (${{ inputs.mode }}) — ${{ inputs.continuation_request != '' && format('continuation from {0}', inputs.continuation_request) || format('@{0}', github.actor) }}
 
 on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Dry-run only, or execute reviewed cleanup until complete
+        description: Read-only integrity audit and bounded planning; deletion is DISABLED
         required: true
         type: choice
         options:
           - dry-run
-          - execute
         default: dry-run
       confirmation:
-        description: For execute, type exactly EXECUTE REVIEWED STORAGE CLEANUP
+        description: "INTERNAL: leave blank; automated READ-ONLY continuations use a fixed marker."
         required: false
         type: string
       dry_run_max_batches:
@@ -31,33 +30,47 @@ on:
         required: false
         type: string
       continuation_session:
-        description: "EXECUTE ONLY: internal cleanup session. Always blank for dry-run."
+        description: "UNUSED: always leave blank (destructive execution disabled)."
+        required: false
+        type: string
+      continuation_request:
+        description: "INTERNAL: previous GitHub run number/id; leave blank when clicking Run workflow."
         required: false
         type: string
 
 permissions:
   contents: read
-  actions: write
-
-concurrency:
-  group: kentaurai-production-storage-cleanup
-  cancel-in-progress: false
+  actions: read
 
 jobs:
   cleanup:
-    if: ${{ inputs.mode == 'dry-run' || (inputs.mode == 'execute' && inputs.confirmation == 'EXECUTE REVIEWED STORAGE CLEANUP') }}
+    if: ${{ inputs.mode == 'dry-run' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    concurrency:
+      group: kentaurai-production-operation
+      cancel-in-progress: false
+    outputs:
+      audit_incomplete: ${{ steps.cleanup.outputs.audit_incomplete }}
+      progress_made: ${{ steps.cleanup.outputs.progress_made }}
+      cost_budget_stop: ${{ steps.cleanup.outputs.cost_budget_stop }}
+      audit_safety_stop: ${{ steps.cleanup.outputs.audit_safety_stop }}
+      audit_run_id: ${{ steps.cleanup.outputs.cleanup_audit_run_id }}
+      audit_continuation_count: ${{ steps.cleanup.outputs.audit_continuation_count }}
+      audit_max_continuations: ${{ steps.cleanup.outputs.audit_max_continuations }}
+      audit_expires_at: ${{ steps.cleanup.outputs.audit_expires_at }}
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-      MODE: ${{ inputs.mode }}
+      MODE: "dry-run"
       DRY_RUN_MAX_BATCHES: ${{ inputs.dry_run_max_batches }}
       CLEANUP_SOFT_DEADLINE_MS: "2100000"
       CLEANUP_RUN_MAX_ROWS_READ: "1000000"
       CLEANUP_RUN_MAX_ROWS_WRITTEN: "100000"
       CLEANUP_SESSION_ID: ${{ inputs.continuation_session }}
       CLEANUP_AUDIT_RUN_ID: ${{ inputs.continuation_audit }}
+      CLEANUP_TRIGGER_CONFIRMATION: ${{ inputs.confirmation }}
+      CLEANUP_CONTINUATION_REQUEST: ${{ inputs.continuation_request }}
       D1_DATABASE_ID: d8189e0e-6127-4ef2-88cc-534cb2217340
       WORKER_NAME: kentaurai-api
 
@@ -76,6 +89,19 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$MODE" = "dry-run" ]; then
+            case "$CLEANUP_TRIGGER_CONFIRMATION" in
+              ""|"RESUME READ ONLY AUDIT") ;;
+              *) echo "::error::Dry-run refuses execute confirmation or unknown marker."; exit 1 ;;
+            esac
+            if [ "$CLEANUP_TRIGGER_CONFIRMATION" = "RESUME READ ONLY AUDIT" ]; then
+              if [ -z "$CLEANUP_AUDIT_RUN_ID" ] || [ -n "$CLEANUP_SESSION_ID" ] || ! [[ "$CLEANUP_CONTINUATION_REQUEST" =~ ^[1-9][0-9]*$ ]]; then
+                echo "::error::Internal READ-ONLY continuation requires one audit ID and a valid parent run ID, never an execute session."
+                exit 1
+              fi
+            elif [ -n "$CLEANUP_CONTINUATION_REQUEST" ]; then
+              echo "::error::Manual dry-run may not impersonate an automated continuation."
+              exit 1
+            fi
             if [ -n "$CLEANUP_SESSION_ID" ] && [ -n "$CLEANUP_AUDIT_RUN_ID" ]; then
               echo "::error::Dry-run has two IDs. Fill only continuation_audit and leave continuation_session blank."
               exit 1
@@ -119,6 +145,18 @@ jobs:
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::CLOUDFLARE_ACCOUNT_ID is not configured"; exit 1; }
           echo "::add-mask::$CLOUDFLARE_API_TOKEN"
 
+      - name: Remove any orphaned previous cleanup-only Worker token
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Only one production operation can hold the shared job lock.
+          # Clean up credentials left by a cancelled/ambiguous prior run
+          # before installing a fresh token for this read-only check.
+          existing="$(npx --yes wrangler@4.114.0 secret list --name "$WORKER_NAME" --format json)"
+          if printf '%s' "$existing" | jq -e '.[] | select(.name == "STORAGE_CLEANUP_TOKEN")' >/dev/null; then
+            printf 'y\n' | npx --yes wrangler@4.114.0 secret delete STORAGE_CLEANUP_TOKEN --name "$WORKER_NAME"
+          fi
+
       - name: Create short-lived cleanup-only Worker token
         id: cleanup_token
         shell: bash
@@ -148,7 +186,7 @@ jobs:
 
           worker_url="https://$WORKER_NAME.$subdomain.workers.dev"
           curl --fail --silent --show-error --retry 3 --retry-delay 2 "$worker_url/health" > /tmp/health.json
-          jq -e '.ok == true and .service == "kentaurai-api"' /tmp/health.json >/dev/null
+          jq -e --arg expected "$GITHUB_SHA" '.ok == true and .service == "kentaurai-api" and .deploymentSha == $expected' /tmp/health.json >/dev/null
           echo "worker_url=$worker_url" >> "$GITHUB_OUTPUT"
 
       - name: Wait for cleanup auth to propagate
@@ -193,7 +231,7 @@ jobs:
         run: node scripts/run-production-storage-cleanup.mjs
 
       - name: Remove short-lived cleanup-only Worker token
-        if: ${{ always() && steps.cleanup_token.outcome == 'success' }}
+        if: ${{ always() && steps.cleanup_token.outcome != 'skipped' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -209,69 +247,90 @@ jobs:
         run: |
           set -euo pipefail
           curl --fail --silent --show-error --retry 3 --retry-delay 2 "$WORKER_URL/health" > /tmp/health-after.json
-          jq -e '.ok == true and .service == "kentaurai-api"' /tmp/health-after.json >/dev/null
+          jq -e --arg expected "$GITHUB_SHA" '.ok == true and .service == "kentaurai-api" and .deploymentSha == $expected' /tmp/health-after.json >/dev/null
           echo "Production health check passed."
 
-      - name: Refuse automatic continuation after cumulative cost stop
-        if: ${{ success() && env.MODE == 'execute' && steps.cleanup.outputs.cleanup_complete == 'false' && steps.cleanup.outputs.cost_budget_stop == 'true' }}
+      # Cost- or integrity-stopped runs must fail closed; they can never
+      # authorize follow-on GitHub dispatches or data mutations.
+      - name: Refuse unsafe or stalled read-only audit
+        if: ${{ steps.cleanup.outcome == 'success' && steps.cleanup.outputs.audit_incomplete == 'true' && (steps.cleanup.outputs.progress_made != 'true' || steps.cleanup.outputs.cost_budget_stop == 'true' || steps.cleanup.outputs.audit_safety_stop == 'true') }}
         shell: bash
         run: |
-          echo "::error::Cleanup reached the cumulative D1 run-cost budget; automatic continuation is disabled."
+          echo "::error::Read-only audit did not make safe progress or encountered a cost/integrity stop. Review before retrying."
           exit 1
-
-      - name: Require manual continuation for incomplete integrity audit
-        if: ${{ always() && steps.cleanup.outcome == 'success' && steps.cleanup.outputs.audit_incomplete == 'true' }}
-        shell: bash
-        run: |
-          echo "::error::The bounded integrity audit is incomplete. No cleanup planning or mutation ran. Resume manually with audit id ${{ steps.cleanup.outputs.cleanup_audit_run_id }}."
-          exit 1
-
-      - name: Refuse stalled execute continuation
-        if: ${{ success() && env.MODE == 'execute' && steps.cleanup.outputs.cleanup_complete == 'false' && steps.cleanup.outputs.progress_made != 'true' }}
-        shell: bash
-        run: |
-          echo "::error::Cleanup is incomplete but made no progress; automatic continuation is disabled."
-          exit 1
-
-      - name: Queue controlled continuation
-        if: ${{ success() && env.MODE == 'execute' && steps.cleanup.outputs.audit_incomplete != 'true' && steps.cleanup.outputs.cleanup_complete == 'false' && steps.cleanup.outputs.progress_made == 'true' && steps.cleanup.outputs.cost_budget_stop != 'true' && steps.cleanup.outputs.cleanup_session_id != '' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CLEANUP_SESSION_ID: ${{ steps.cleanup.outputs.cleanup_session_id }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          payload="$(jq -nc --arg session "$CLEANUP_SESSION_ID" '{ref:"main",inputs:{mode:"execute",confirmation:"EXECUTE REVIEWED STORAGE CLEANUP",dry_run_max_batches:"50",continuation_session:$session}}')"
-          curl --fail --silent --show-error \
-            --request POST \
-            --header "Authorization: Bearer $GH_TOKEN" \
-            --header "Accept: application/vnd.github+json" \
-            --header "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/production-storage-cleanup.yml/dispatches" \
-            --data "$payload"
-          echo "Queued the next source-bound cleanup continuation."
 
       - name: Cleanup summary
         if: ${{ always() }}
         shell: bash
         run: |
-          echo "Mode: $MODE"
-          echo "Dry-run maximum batches per family: $DRY_RUN_MAX_BATCHES"
-          echo "D1 restore point: ${{ steps.restore.outputs.restore_timestamp }}"
-          if [ "$MODE" = "dry-run" ]; then
-            if [ "${{ steps.cleanup.outputs.audit_incomplete }}" = "true" ]; then
-              echo "Integrity audit incomplete; no cleanup planning or mutation was authorized."
-              echo "Audit continuation id: ${{ steps.cleanup.outputs.cleanup_audit_run_id }}"
-            else
-              echo "No cleanup mutation was authorized."
-            fi
-          elif [ "${{ steps.cleanup.outputs.cleanup_complete }}" = "true" ]; then
-            echo "Cleanup completed snapshot work and raw reference normalization; physical R2 deletion remains deferred."
-          elif [ "${{ steps.cleanup.outputs.cost_budget_stop }}" = "true" ]; then
-            echo "Cleanup stopped at the cumulative D1 run-cost budget; no automatic continuation was queued."
-          elif [ "${{ steps.cleanup.outputs.progress_made }}" = "true" ]; then
-            echo "Cleanup checkpointed safely and a controlled continuation was queued."
-            echo "Continuation number: ${{ steps.cleanup.outputs.continuation_count }}"
+          echo "READ-ONLY audit and bounded planning only. NO execution or deletion is enabled."
+          echo "Max bounded batches per family: $DRY_RUN_MAX_BATCHES"
+          echo "D1 restore timestamp: ${{ steps.restore.outputs.restore_timestamp }}"
+          if [ "${{ steps.cleanup.outputs.audit_incomplete }}" = "true" ]; then
+            echo "Read-only audit checkpoint: ${{ steps.cleanup.outputs.audit_continuation_count }}/${{ steps.cleanup.outputs.audit_max_continuations }}"
+            echo "Audit is incomplete; successful checkpoints will be handed off only after the production job lock is released."
           else
-            echo "Cleanup did not complete and no continuation was queued."
+            echo "Audit/planning completed or was safely refused; review this run before authorizing any separate cleanup."
+          fi
+
+  queue_read_only:
+    name: Queue the next bounded read-only audit after releasing production lock
+    needs: cleanup
+    if: ${{ needs.cleanup.result == 'success' && needs.cleanup.outputs.audit_incomplete == 'true' && needs.cleanup.outputs.progress_made == 'true' && needs.cleanup.outputs.cost_budget_stop != 'true' && needs.cleanup.outputs.audit_safety_stop != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MODE: "dry-run"
+      CONFIRMATION: ${{ inputs.confirmation }}
+      DRY_RUN_MAX_BATCHES: ${{ inputs.dry_run_max_batches }}
+      CLEANUP_SESSION_ID: ""
+      AUDIT_INCOMPLETE: ${{ needs.cleanup.outputs.audit_incomplete }}
+      PROGRESS_MADE: ${{ needs.cleanup.outputs.progress_made }}
+      COST_BUDGET_STOP: ${{ needs.cleanup.outputs.cost_budget_stop }}
+      AUDIT_SAFETY_STOP: ${{ needs.cleanup.outputs.audit_safety_stop }}
+      AUDIT_RUN_ID: ${{ needs.cleanup.outputs.audit_run_id }}
+      AUDIT_CONTINUATION_COUNT: ${{ needs.cleanup.outputs.audit_continuation_count }}
+      AUDIT_MAX_CONTINUATIONS: ${{ needs.cleanup.outputs.audit_max_continuations }}
+      AUDIT_EXPIRES_AT: ${{ needs.cleanup.outputs.audit_expires_at }}
+    steps:
+      - name: Checkout reviewed main
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+
+      - name: Refuse a changed main or a different deployed release
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          main_sha="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/commits/main" | jq -r '.sha // empty')"
+          test "$main_sha" = "$GITHUB_SHA" || { echo "::error::Main changed; stopping the read-only audit chain."; exit 1; }
+          releases="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/production-release-v060.yml/runs?branch=main&status=success&per_page=1")"
+          deployed_sha="$(printf '%s' "$releases" | jq -r '.workflow_runs[0].head_sha // empty')"
+          test "$deployed_sha" = "$GITHUB_SHA" || { echo "::error::New production release detected; no continuation queued."; exit 1; }
+
+      - name: Queue next bounded READ-ONLY audit continuation
+        run: node scripts/queue-production-storage-audit.mjs
+
+      - name: Audit handoff summary
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "One bounded READ-ONLY audit successor was observed in GitHub Actions. It may wait for a shared production lock; no data cleanup was authorized." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No further continuation was verified. The saved audit remains read-only; review the failed handoff before trying again." >> "$GITHUB_STEP_SUMMARY"
           fi

@@ -1,3 +1,17 @@
+### Bounded audit continuation across GitHub runs (candidate)
+
+Real production dry-runs #17–#19 show 52–54 accepted requests per continuation
+and about 0.75 million D1 reads per run without violating safety budgets. They
+are incomplete because the audit spans more pages than fit within one 1M-read
+continuation. The GitHub job previously treated each expected checkpoint as an
+error requiring the user to manually restart. The proposed workflow continues
+a **single** source/revision-bound, read-only proof across independent GitHub
+runs; it does not restart pages or raise per-run/per-operation cost thresholds.
+It halts on safety stop, source change, stale proof, lack of progress, expiry
+or 48 continuations, and cannot authorize any destructive operation. Real
+Cloudflare dispatch and end-to-end completion must be proven by a controlled
+post-deployment read-only run, not inferred from synthetic CI.
+
 ### Final review: remaining performance and chronology boundaries
 
 - Raw-object planning now advances by bounded source-record **primary-key

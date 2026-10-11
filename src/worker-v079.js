@@ -48,6 +48,19 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
+    // Deployment identity is injected by the reviewed production release.
+    // A missing or different SHA fails the separate cleanup preflight closed.
+    if (request.method === 'GET' && path === '/health') {
+      const response = await worker.fetch(request, env, ctx);
+      if (!response.ok) return response;
+      const payload = await response.json();
+      const sha = String(env.KENTAURAI_DEPLOY_SHA || '');
+      return json({
+        ...payload,
+        deploymentSha: /^[a-f0-9]{40}$/.test(sha) ? sha : null
+      }, response.status);
+    }
+
     if (path === '/app/api/settings/drift' && request.method === 'GET') {
       const denied = await requireSession(request, env);
       if (denied) return denied;

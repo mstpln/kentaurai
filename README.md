@@ -207,9 +207,27 @@ Historical Form prefers audited Step 1 lineage. KentaurAI rebuilds the pre-marke
 
 ## Storage cleanup safety
 
-Production storage cleanup is manual, authenticated, dry-run first and
-fail-closed. Its full-history integrity proof is persisted as bounded keyset
-pages tied to an unchanged cleanup-relevant D1 dataset revision; incomplete or
-stale progress cannot authorize planning or execution. See
-[`docs/STORAGE_CLEANUP_COST_AUDIT.md`](docs/STORAGE_CLEANUP_COST_AUDIT.md) for
-the root-cause matrix, query plans and scale evidence.
+The production GitHub storage workflow is **read-only (dry-run only)**.
+Destructive `execute` is disabled until a separately reviewed authorization
+boundary and explicit operator approval are implemented. A manually started
+integrity audit can resume through bounded, source/revision-bound GitHub runs.
+Each request is subject to the existing D1 cost limits, and the 24-hour/48-run
+audit expiry and continuation caps are unchanged.
+
+Production releases and cleanup audits share an exclusive job lock. A
+separate *secretless* dispatch job runs only after the preceding cleanup
+operation and credential teardown have finished. The dispatcher must observe
+the next GitHub run actually starting; a replaceable pending run is not
+accepted as success. It stops safely on invalid or stale evidence, cost or
+integrity stops, lost/unreconciled responses, version mismatch, expiry, or
+failed handoff. GitHub may still require operator attention during outages,
+cancelled/replaced jobs, or official imports that invalidate evidence.
+
+The deployed Worker reports a release-injected commit SHA that must match
+the exact GitHub release before an audit runs. Scheduled official imports
+are not suppressed; if they change audit-relevant data, the integrity
+evidence becomes stale and cannot authorize cleanup. Read-only planning
+does not delete D1 rows or R2 objects. Physical R2 garbage collection remains
+separately deferred. See
+[`docs/STORAGE_CLEANUP_COST_AUDIT.md`](docs/STORAGE_CLEANUP_COST_AUDIT.md)
+for bounded audit and integrity details.

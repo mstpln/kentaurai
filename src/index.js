@@ -52,6 +52,7 @@ import {
   assertStorageCleanupAuthorization,
   applyStorageCleanupAuditPage,
   bindStorageCleanupIntegrityAudit,
+  getStorageCleanupAuditRun,
   prepareStorageCleanupAuditStep,
   recordStorageCleanupAuditStartCost,
   settleStorageCleanupAuditPage,
@@ -380,6 +381,16 @@ async function handleFetch(request, env) {
   }
   if (request.method === 'GET' && path === '/v1/storage-cleanup/audit') {
     return json({ error: 'use_resumable_cleanup_audit' }, 409);
+  }
+  // Authenticated read-only recovery endpoint. Does NOT increment
+  // continuation counters or approve any unsettled audit page.
+  if (request.method === 'GET' && path === '/v1/storage-cleanup/audit/status') {
+    const id = url.searchParams.get('audit_run_id');
+    const observed = await observeD1Operation(
+      env, 'storage_cleanup_integrity_audit:status',
+      (observedEnv) => getStorageCleanupAuditRun(observedEnv, id)
+    );
+    return json({ ...observed.value, cost: observed.metrics, safetyStop: observed.safetyStop });
   }
   if (request.method === 'POST' && path === '/v1/storage-cleanup/audit/start') {
     const body = await readJson(request);
