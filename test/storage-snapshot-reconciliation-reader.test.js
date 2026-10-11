@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { createTestEnv } from './helpers/d1.js';
 import { inspectPrivateSnapshotReconciliationPage } from '../src/storage-snapshot-reconciliation-reader.js';
 import worker from '../src/index.js';
+import productionWorker from '../src/worker-v079.js';
 
 const AUDIT = '11111111-1111-4111-8111-111111111111';
 const FETCHED = '2026-09-12T10:00:00Z';
@@ -323,4 +324,34 @@ test('the manual public Actions workflow does not print private cursor or run a 
   const printed = workflow.split('            jq -c ')[1]?.split(' "$output"')[0] || '';
   assert.doesNotMatch(printed, /\bcursor\b|\bsource_record_id\b|\braw_object_key\b/);
   assert.doesNotMatch(workflow, /\bwrangler (?:deploy|d1 execute|d1 migrations)\b/);
+});
+
+
+test('deployed Worker entrypoint enforces private API authentication before any D1/R2 reads', async () => {
+  const f = await fixture();
+  const url = 'https://example.invalid/v1/storage-cleanup/reconciliation/page?family=horse_profile';
+  const before = { ...f.d1Metrics };
+  const noAuth = await productionWorker.fetch(new Request(url), f.env);
+  assert.equal(noAuth.status, 401);
+  const body = await noAuth.json();
+  assert.equal(body.error, 'unauthorized');
+  assert.deepEqual(f.d1Metrics, before);
+
+  const authorized = await productionWorker.fetch(new Request(url, {
+    headers: { authorization: 'Bearer ' + f.env.ADMIN_TOKEN }
+  }), f.env);
+  assert.equal(authorized.status, 200);
+  const result = await authorized.json();
+  assert.equal(result.classificationOnly, true);
+  assert.equal(result.repairAuthorized, false);
+  assert.equal(f.d1Metrics.runs, 0);
+  assert.equal(f.d1Metrics.batches, 0);
+});
+
+test('production release verifies unauthenticated reconciliation route on exact deployed Worker', () => {
+  const workflow = readFileSync(
+    new URL('../.github/workflows/production-release-v060.yml', import.meta.url), 'utf8'
+  );
+  assert.match(workflow, /'\/v1\/storage-cleanup\/reconciliation\/page\?family=horse_profile'/);
+  assert.match(workflow, /Expected \$path to return 401 without authorization/);
 });
