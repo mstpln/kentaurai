@@ -137,23 +137,46 @@ jobs:
             "$RUNNER_TEMP/kentaurai-recovery-health.json" > /dev/null
           echo "worker_url=$worker_url" >> "$GITHUB_OUTPUT"
 
-      - name: Wait for private status credential propagation
+      - name: Wait for recovery route credential propagation
         env:
           WORKER_URL: ${{ steps.worker.outputs.worker_url }}
           CLEANUP_TOKEN: ${{ steps.read_token.outputs.token }}
         shell: bash
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 15); do
-            status="$(curl --silent --output "$RUNNER_TEMP/kentaurai-recovery-auth.json" \
+          # Both routes must accept the same short-lived secret. A valid
+          # /auth-check alone did not prove /run/status auth consistency in
+          # the first production inventory attempt (HTTP 401).
+          confirmed=0
+          for attempt in $(seq 1 20); do
+            auth_status="$(curl --silent --show-error --max-time 12 \
+              --output "$RUNNER_TEMP/kentaurai-recovery-auth.json" \
               --write-out '%{http_code}' -H "Authorization: Bearer $CLEANUP_TOKEN" \
               "$WORKER_URL/v1/storage-cleanup/auth-check" || true)"
-            if [ "$status" = 200 ] && jq -e \
+            status_code="$(curl --silent --show-error --max-time 12 \
+              --output "$RUNNER_TEMP/kentaurai-recovery-status.json" \
+              --write-out '%{http_code}' -H "Authorization: Bearer $CLEANUP_TOKEN" \
+              "$WORKER_URL/v1/storage-cleanup/restoration/run/status" || true)"
+            if [ "$auth_status" = 200 ] && jq -e \
               '.ok == true and .scope == "storage_cleanup"' \
-              "$RUNNER_TEMP/kentaurai-recovery-auth.json" > /dev/null 2>&1; then exit 0; fi
+              "$RUNNER_TEMP/kentaurai-recovery-auth.json" > /dev/null 2>&1 &&
+              { { [ "$status_code" = 200 ] && jq -e \
+                '.mode == "historical_provenance_recovery" and .sourceIdsReturned == false and .rawFactsReturned == false' \
+                "$RUNNER_TEMP/kentaurai-recovery-status.json" > /dev/null 2>&1; } ||
+                { [ "$status_code" = 409 ] && jq -e \
+                  '.error == "historical_recovery_not_authorized_or_unavailable"' \
+                  "$RUNNER_TEMP/kentaurai-recovery-status.json" > /dev/null 2>&1; }; }; then
+              confirmed=$((confirmed + 1))
+              if [ "$confirmed" -ge 2 ]; then
+                echo "Private recovery route authorization verified twice."
+                exit 0
+              fi
+            else
+              confirmed=0
+            fi
             sleep 2
           done
-          echo "::error::Private recovery auth propagation timed out"
+          echo "::error::Private recovery route authorization could not be verified; no inventory started"
           exit 1
 
       - name: Begin or resume private recovery run
