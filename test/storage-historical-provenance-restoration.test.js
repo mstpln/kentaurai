@@ -173,7 +173,8 @@ test('selective restorer recreates exact source-owned facts across four families
       'SELECT COUNT(*) AS n FROM ' + f.table + ' WHERE source_record_id=?'
     ).get(f.current.id).n, 0);
 
-    f.env.HISTORICAL_REPAIR_ENABLED = 'true';
+    f.env.HISTORICAL_REPAIR_EXPIRES_AT = String(Math.floor(Date.now()/1000)+1200);
+  f.env.HISTORICAL_REPAIR_ENABLED = 'true';
     f.env.HISTORICAL_REPAIR_TOKEN = 'synthetic_recovery_token_with_at_least_32_chars';
     const revisionBefore = f.db.prepare(
       'SELECT revision FROM storage_cleanup_dataset_revision WHERE singleton=1'
@@ -241,6 +242,7 @@ test('restoration fails closed when earlier source metadata or mapping changes',
   const f = await setup('horse_profile');
   legacyBrokenCleanup(f, 'horse_profile');
   const proposal = f.proposal();
+  f.env.HISTORICAL_REPAIR_EXPIRES_AT = String(Math.floor(Date.now()/1000)+1200);
   f.env.HISTORICAL_REPAIR_ENABLED = 'true';
   f.env.HISTORICAL_REPAIR_TOKEN = 'synthetic_recovery_token_with_at_least_32_chars';
   f.db.prepare(
@@ -258,6 +260,7 @@ test('direct snapshot restoration cannot run without a separately enabled secret
   const f = await setup('horse_record');
   legacyBrokenCleanup(f, 'horse_record');
   const proposal = f.proposal();
+  f.env.HISTORICAL_REPAIR_EXPIRES_AT = String(Math.floor(Date.now()/1000)+1200);
   f.env.HISTORICAL_REPAIR_ENABLED = 'true';
   f.env.HISTORICAL_REPAIR_TOKEN = 'synthetic_recovery_token_with_at_least_32_chars';
   for (const [approval,token] of [[false, f.env.HISTORICAL_REPAIR_TOKEN],[true,'wrong'],[true,null]]) {
@@ -273,6 +276,7 @@ test('direct snapshot restoration cannot run without a separately enabled secret
 test('guarded restorer rejects altered dynamic SQL identifiers or fact projection', async () => {
   const f = await setup('horse_stat');
   legacyBrokenCleanup(f, 'horse_stat');
+  f.env.HISTORICAL_REPAIR_EXPIRES_AT = String(Math.floor(Date.now()/1000)+1200);
   f.env.HISTORICAL_REPAIR_ENABLED = 'true';
   f.env.HISTORICAL_REPAIR_TOKEN = 'synthetic_recovery_token_with_at_least_32_chars';
   const original = f.proposal();
@@ -308,6 +312,7 @@ test('idempotent restored row cannot bypass later source/hash/mapping drift chec
   const f = await setup('horse_profile');
   legacyBrokenCleanup(f,'horse_profile');
   const proposal = f.proposal();
+  f.env.HISTORICAL_REPAIR_EXPIRES_AT = String(Math.floor(Date.now()/1000)+1200);
   f.env.HISTORICAL_REPAIR_ENABLED = 'true';
   f.env.HISTORICAL_REPAIR_TOKEN = 'synthetic_recovery_token_with_at_least_32_chars';
   const exec = () => applyVerifiedHistoricalRestoration(f.env, proposal, {
