@@ -168,6 +168,19 @@ export async function applyVerifiedHistoricalRestoration(env, candidate, {
   if (!env?.DB?.prepare || !env?.DB?.batch) throw new Error('historical_restoration_db_missing');
 
   const conf = CONFIG[candidate.family];
+  const personType = candidate.direct.person_type;
+  const canonicalExternalTable = candidate.family !== 'person_stat' ?
+    conf.externalTable : personType === 'driver' ? 'driver_external_ids' :
+      personType === 'trainer' ? 'trainer_external_ids' : null;
+  const canonicalExternalColumn = candidate.family !== 'person_stat' ?
+    conf.idColumn : personType === 'driver' ? 'driver_id' :
+      personType === 'trainer' ? 'trainer_id' : null;
+  if (!canonicalExternalTable || candidate.externalTable !== canonicalExternalTable ||
+      candidate.externalIdColumn !== canonicalExternalColumn ||
+      candidate.entityKey !== (candidate.family === 'person_stat'
+        ? personType + ':' + candidate.canonicalId : candidate.canonicalId)) {
+    throw new Error('historical_restoration_external_mapping_conflict');
+  }
   const row = candidate.direct;
   // Ensure the proposal is exactly an official immutable source-owned row.
   if (row.source_record_id !== candidate.sourceId ||
@@ -194,8 +207,25 @@ export async function applyVerifiedHistoricalRestoration(env, candidate, {
   }
 
   const keys = Object.keys(row);
+  const factKeys = Object.keys(candidate.factualColumns);
+  const expectedFactKeys = Object.keys(conf.values({
+    ageYears: row.age_years, snapshotScope: row.snapshot_scope,
+    recordScope: row.record_scope, statYear: row.stat_year,
+    ordinal: row.record_ordinal, code: row.code,
+    startMethod: row.start_method, distanceGroup: row.distance_group,
+    timeMinutes: row.time_minutes, timeSeconds: row.time_seconds,
+    timeTenths: row.time_tenths, place: row.place,
+    starts: row.starts, earningsRaw: row.earnings_raw, wins: row.wins,
+    seconds: row.seconds, thirds: row.thirds,
+    winPercentageRaw: row.win_percentage_raw,
+    placePercentageRaw: row.place_percentage_raw,
+    earningsPerStartRaw: row.earnings_per_start_raw,
+    startPoints: row.start_points
+  }));
   if (keys.some((key) => !/^[a-z_]+$/.test(key)) ||
-      Object.keys(candidate.factualColumns).some((key) =>
+      factKeys.length !== expectedFactKeys.length ||
+      expectedFactKeys.some((key) => !Object.hasOwn(candidate.factualColumns, key)) ||
+      factKeys.some((key) => !/^[a-z_]+$/.test(key) ||
         !Object.is(row[key] ?? null, candidate.factualColumns[key] ?? null))) {
     throw new Error('historical_restoration_candidate_mutated');
   }
@@ -257,7 +287,7 @@ export async function applyVerifiedHistoricalRestoration(env, candidate, {
   const results = await env.DB.batch([
     env.DB.prepare(query).bind(...bindings),
     env.DB.prepare(
-      'UPDATE storage_cleanup_dataset_revision SET revision=revision+changes(),updated_at=CURRENT_TIMESTAMP WHERE singleton=1'
+      'UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1 AND changes()=1'
     )
   ]);
   const inserted = Number(results?.[0]?.meta?.changes ?? -1);
