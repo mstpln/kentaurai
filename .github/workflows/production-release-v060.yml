@@ -421,6 +421,7 @@ jobs:
             '/v1/statistics/backfill/status' \
             '/v1/statistics/backfill/step' \
             '/v1/storage-cleanup/audit' \
+            '/v1/storage-cleanup/reconciliation/page?family=horse_profile' \
             '/v1/storage-cleanup/session/audit' \
             '/v1/storage-cleanup/session/start' \
             '/v1/storage-cleanup/session/checkpoint'; do

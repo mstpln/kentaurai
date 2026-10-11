@@ -1,3 +1,27 @@
+## Active read-only historical fact reconciliation — PR #312 (draft)
+
+- Production baseline remains release #175 at commit
+  \`c76269dbf18db15fd7efd0b3b3dea02ec0de35d3\`; no historical
+  repair, cleanup or deployment has been authorized by this work.
+- The read-only D1 audit reported 43,613 missing logical representations,
+  and the 13-file R2 sample independently validated 13/13 original hashes.
+  These remain **evidence**, not a complete recovery inventory.
+- PR #312 adds exact per-fact comparison of verified original payloads
+  against D1 source-owned snapshots and source-linked observations in all
+  four snapshot families. Historical canonical identity and full chronology
+  remain unverified, so suspected missing facts cannot be repaired yet.
+- The new private endpoint uses a short bounded source page, encrypted
+  source-bound continuation cursor, strict D1/R2 read limits, and aggregate
+  sanitized output. A new **manual**, release-pinned and read-only GitHub
+  Actions workflow can sample one source per family after a separately
+  approved reviewed deployment.
+- No storage-cleanup execute route is re-enabled. No migrations, DB writes,
+  automatic workflow dispatch, production R2 export or changes to model
+  predictions are introduced.
+- Next gate: exact final-head CI/review, permission to merge and deploy,
+  permission for a bounded **read-only production sample**, then evidence-based
+  expansion of historical identity/chronology checks before designing repair.
+
 ## Production #42 raw snapshot evidence follow-up (review candidate)
 
 - Previous read-only D1 diagnosis established exact independent ledger

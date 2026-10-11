@@ -7,6 +7,7 @@ import { captureUpcomingOfficialGames, normalizeNextPendingOfficialGame } from '
 import { syncOnePendingHorseStartPointSource } from './import/official-start-points.js';
 import { syncOnePendingOfficialSnapshotSource } from './import/official-snapshots.js';
 import { inspectPrivateRawSnapshotEvidence } from './storage-raw-source-diagnostic.js';
+import { inspectPrivateSnapshotReconciliationPage } from './storage-snapshot-reconciliation-reader.js';
 import { normalizeCapturedXlabsRace } from './import/xlabs-telemetry.js';
 import {
   createXlabsPositionReconstructionJob,
@@ -406,6 +407,19 @@ async function handleFetch(request, env) {
       return json(await inspectPrivateRawSnapshotEvidence(env));
     } catch {
       return json({ error: 'raw_evidence_sample_unavailable' }, 409);
+    }
+  }
+  // Private factual comparison: verified R2 originals versus exact D1
+  // representations. Its cursor is opaque and never written to public logs.
+  // No mutation or approval is reachable through this endpoint.
+  if (request.method === 'GET' && path === '/v1/storage-cleanup/reconciliation/page') {
+    try {
+      return json(await inspectPrivateSnapshotReconciliationPage(env, {
+        family: url.searchParams.get('family'),
+        cursor: url.searchParams.get('cursor')
+      }));
+    } catch {
+      return json({ error: 'reconciliation_page_unavailable' }, 409);
     }
   }
   if (request.method === 'GET' && path === '/v1/storage-cleanup/audit') {
