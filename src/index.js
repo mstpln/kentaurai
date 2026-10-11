@@ -6,6 +6,7 @@ import { normalizeCapturedOfficialGameSequential } from './import/official-live-
 import { captureUpcomingOfficialGames, normalizeNextPendingOfficialGame } from './import/official-live-scheduled.js';
 import { syncOnePendingHorseStartPointSource } from './import/official-start-points.js';
 import { syncOnePendingOfficialSnapshotSource } from './import/official-snapshots.js';
+import { inspectPrivateRawSnapshotEvidence } from './storage-raw-source-diagnostic.js';
 import { normalizeCapturedXlabsRace } from './import/xlabs-telemetry.js';
 import {
   createXlabsPositionReconstructionJob,
@@ -397,6 +398,15 @@ async function handleFetch(request, env) {
   }
   if (request.method === 'GET' && path === '/v1/statistics/backfill/status') {
     return json(await getStatisticsDataBackfillStatus(env));
+  }
+  // Private, bounded, READ-ONLY R2 evidence verification. No repair, no raw
+  // payload, no source identifiers, and no cleanup authorization is returned.
+  if (request.method === 'GET' && path === '/v1/storage-cleanup/raw-evidence/sample') {
+    try {
+      return json(await inspectPrivateRawSnapshotEvidence(env));
+    } catch {
+      return json({ error: 'raw_evidence_sample_unavailable' }, 409);
+    }
   }
   if (request.method === 'GET' && path === '/v1/storage-cleanup/audit') {
     return json({ error: 'use_resumable_cleanup_audit' }, 409);
