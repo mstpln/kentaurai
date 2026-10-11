@@ -291,3 +291,60 @@ test('HTTP audit response without a settled page is not treated as forward progr
   assert.match(result.stdout, /"progressMade":false/);
   assert.equal(result.calls.filter((x) => x.path.includes('/execute')).length, 0);
 });
+
+test('lost Worker reply is checked against persisted read-only audit and cannot auto-continue', async () => {
+  const state = {
+    auditRunId: AUDIT_ID,
+    sourceSha: SOURCE_SHA,
+    datasetRevision: 10,
+    status: 'running',
+    complete: false,
+    ok: false,
+    continuationCount: 2,
+    maxContinuations: 48,
+    expiresAt: '2099-01-01T00:00:00.000Z',
+    families: [], operations: { complete: false },
+    cost: { rowsRead: 30, rowsWritten: 0, durationMs: 2 }
+  };
+  let statusCalls = 0;
+  const result = await invokeRunner({}, async ({ path, res }) => {
+    if (path === '/v1/storage-cleanup/audit/start') return reply(res, state);
+    if (path === '/v1/storage-cleanup/audit/step') {
+      // Simulate a D1 page committed but response lost in transit.
+      res.destroy();
+      return;
+    }
+    if (path === '/v1/storage-cleanup/audit/status') {
+      statusCalls++;
+      return reply(res, state);
+    }
+    reply(res, { error: 'forbidden_route' }, 500);
+  });
+  assert.notEqual(result.code, 0);
+  assert.equal(statusCalls, 1);
+  assert.match(result.stderr, /Ambiguous audit page response/);
+  assert.equal(result.calls.filter(c => c.path.includes('/plan') || c.path.includes('/execute')).length, 0);
+});
+
+test('lost Worker reply with mismatched persisted source proof fails closed', async () => {
+  const start = {
+    auditRunId: AUDIT_ID,
+    sourceSha: SOURCE_SHA,
+    status: 'running', complete: false, ok: false,
+    families: [], operations: {}
+  };
+  const result = await invokeRunner({}, async ({ path, res }) => {
+    if (path === '/v1/storage-cleanup/audit/start') return reply(res, start);
+    if (path === '/v1/storage-cleanup/audit/step') {
+      res.destroy();
+      return;
+    }
+    if (path === '/v1/storage-cleanup/audit/status') {
+      return reply(res, { ...start, sourceSha: 'b'.repeat(40) });
+    }
+    reply(res, { error: 'unapproved' }, 500);
+  });
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /persisted proof did not match/);
+  assert.equal(result.calls.filter(c => c.path.includes('/execute')).length, 0);
+});
