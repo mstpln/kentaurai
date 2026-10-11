@@ -2,7 +2,7 @@
 // Source IDs, snapshot IDs and raw facts live only in private D1/R2. HTTP
 // responses contain aggregate counters, never private identities or payloads.
 import { planInternalHistoricalRestoration } from './storage-historical-recovery-page.js';
-import { applyVerifiedHistoricalRestoration } from './storage-historical-provenance-restoration.js';
+import { applyVerifiedHistoricalRestoration, hasFreshHistoricalRestorationCapability } from './storage-historical-provenance-restoration.js';
 
 const FAMILIES = Object.freeze(['horse_profile','horse_stat','horse_record','person_stat']);
 const TABLES = Object.freeze({
@@ -350,10 +350,7 @@ export async function pollHistoricalRecoveryCloudBackup(env,{runId}={}) {
   return {...totals(await loadRun(env,run.id)),backupVerified:true};
 }
 function requireRepairPermission(env,{approved,authorization}) {
-  if(approved!==true || env.HISTORICAL_REPAIR_ENABLED!=='true' ||
-    typeof env.HISTORICAL_REPAIR_TOKEN!=='string' ||
-    env.HISTORICAL_REPAIR_TOKEN.length<32 ||
-    authorization!==env.HISTORICAL_REPAIR_TOKEN) {
+  if(!hasFreshHistoricalRestorationCapability(env,{approved,authorization})) {
     throw new Error('historical_restoration_not_authorized');
   }
 }
