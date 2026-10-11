@@ -1,3 +1,21 @@
+## Active read-only predecessor R2 verification (PR pending, 2026-10-11)
+
+- GitHub run `38149267670` on deployed source `19d7ebf09f4a2af5c7cf6f8101a6bd91ecbb0fcf`:
+  the first attempt failed HTTP 401 immediately after a successful temporary
+  auth check. A single read-only rerun succeeded; cleanup token deletion and
+  production health verification passed.
+- All four sampled R2 originals remained verified, yielding 226 factual
+  observations: 201 already represented, 25 without source representation.
+  Every one of those 25 had a matching older direct snapshot under the
+  **current** canonical identity mapping. Zero factual conflicts and zero
+  D1 writes in the successful sample. These are hints only.
+- The next draft adds capped cross-checks against older R2 originals
+  (max four distinct predecessors and five objects/8 MiB total per request)
+  and bounded HTTP 401-only retries in the manual workflow.
+- Historical identity mapping and complete as-of chronology are NOT
+  proven, so no repair, automatic replay, backfill or deletion is authorized.
+  No production change is included until separately reviewed/approved.
+
 ## Historical snapshot evidence — deployed facts and PR #313 follow-up (2026-10-11)
 
 - PR #312 was merged and deployed through the reviewed v0.6.0 release at

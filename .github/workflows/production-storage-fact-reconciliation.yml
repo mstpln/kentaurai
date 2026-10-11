@@ -121,10 +121,24 @@ jobs:
           total_bytes=0
           for family in horse_profile horse_stat horse_record person_stat; do
             output="$RUNNER_TEMP/kentaurai-fact-$family.json"
-            curl --fail --silent --show-error \
-              -H "Authorization: Bearer $CLEANUP_TOKEN" \
-              --get --data-urlencode "family=$family" \
-              "$WORKER_URL/v1/storage-cleanup/reconciliation/page" > "$output"
+            ready=0
+            for attempt in $(seq 1 12); do
+              status="$(curl --silent --show-error \
+                --output "$output" --write-out '%{http_code}' \
+                -H "Authorization: Bearer $CLEANUP_TOKEN" \
+                --get --data-urlencode "family=$family" \
+                "$WORKER_URL/v1/storage-cleanup/reconciliation/page" || true)"
+              if [ "$status" = 200 ]; then ready=1; break; fi
+              if [ "$status" != 401 ]; then
+                echo "::error::Read-only request stopped with HTTP $status"
+                exit 1
+              fi
+              if (( attempt < 12 )); then sleep 2; fi
+            done
+            if (( ready != 1 )); then
+              echo "::error::Read-only authentication not ready after bounded retry"
+              exit 1
+            fi
             jq -e --arg family "$family" \
               '.mode == "read_only_snapshot_fact_reconciliation" and
               .family == $family and .classificationOnly == true and
@@ -138,9 +152,13 @@ jobs:
                 (.predecessorHints.examined <= 24 and
                  .predecessorHints.historicalIdentityVerified == false and
                  .predecessorHints.completeChronologyVerified == false and
-                 .predecessorHints.repairAuthorized == false)) and
+                 .predecessorHints.repairAuthorized == false and
+                 .predecessorHints.earlierOriginalVerifiedFacts >= 0 and
+                 .predecessorHints.earlierOriginalFactMismatch >= 0 and
+                 .predecessorHints.earlierOriginalDeferred >= 0 and
+                 .predecessorHints.earlierOriginalVerifiedSources <= 4)) and
               (.budget.rowsRead <= 1000000) and
-              (.budget.r2ObjectsRead <= 1) and
+              (.budget.r2ObjectsRead <= 5) and
               (.budget.r2BytesRead <= 8388608)' "$output" > /dev/null
             reads="$(jq -r '.budget.rowsRead' "$output")"
             bytes="$(jq -r '.budget.r2BytesRead' "$output")"

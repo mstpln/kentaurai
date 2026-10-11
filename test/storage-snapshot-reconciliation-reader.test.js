@@ -366,6 +366,11 @@ test('all four families keep predecessor reports aggregate-only and explicitly u
       earlierCompletedSourceSameFacts: 0,
       earlierCompletedSourceDifferentFacts: 0,
       earlierUnconfirmedSource: 0,
+      earlierOriginalVerifiedFacts: 0,
+      earlierOriginalFactMismatch: 0,
+      earlierOriginalUnverified: 0,
+      earlierOriginalDeferred: 0,
+      earlierOriginalVerifiedSources: 0,
       historicalIdentityVerified: false,
       completeChronologyVerified: false,
       repairAuthorized: false
@@ -482,4 +487,80 @@ test('predecessor hints stop at 24 lookups and defer remaining facts without wri
   assert.equal(f.d1Metrics.runs, 0);
   assert.equal(f.d1Metrics.batches, 0);
   assert.equal(JSON.stringify(result).includes(f.first.id), false);
+});
+
+
+
+test('older R2 original proves source fact but never historical identity or as-of state', async () => {
+  const f = await fixture();
+  const previousTime = '2026-09-10T09:00:00Z';
+  const earlierBody = JSON.stringify({ races: [{ starts: [
+    { horse: { id: 101, age: 5 } }
+  ] }] });
+  const sha = createHash('sha256').update(earlierBody).digest('hex');
+  const key = 'raw/official_provider/' + sha + '.json';
+  f.db.prepare(
+    'INSERT INTO source_records(id,source_type,fetched_at,raw_object_key,content_hash,quality_status) ' +
+    "VALUES ('earlier-r2','official_provider',?,?,?,'normalized_verified_subset')"
+  ).run(previousTime, key, sha);
+  f.db.prepare(
+    "INSERT INTO official_snapshot_source_sync(source_record_id,status,processed_at,horse_profile_count) " +
+    "VALUES ('earlier-r2','complete','2026-09-12T11:00:00Z',1)"
+  ).run();
+  f.db.prepare(
+    "INSERT INTO storage_cleanup_audit_source_counts(audit_run_id,family,source_record_id,actual_count) " +
+    "VALUES (?,'horse_profile','earlier-r2',1)"
+  ).run(AUDIT);
+  f.db.prepare(
+    'INSERT INTO horse_profile_snapshots(id,horse_id,observed_at,age_years,source_record_id,quality_status) ' +
+    "VALUES ('old-r2','h101',?,5,'earlier-r2','verified_official_snapshot')"
+  ).run(previousTime);
+  const earlierOpts = { customMetadata: { contentHash: sha, sourceType: 'official_provider' } };
+  await f.env.RAW_BUCKET.put(key, earlierBody, earlierOpts);
+  const view = () => inspectPrivateSnapshotReconciliationPage(f.env, { family:'horse_profile' });
+  let report = await view();
+  assert.equal(report.predecessorHints.earlierCompletedSourceSameFacts, 1);
+  assert.equal(report.predecessorHints.earlierOriginalVerifiedFacts, 1);
+  assert.equal(report.predecessorHints.earlierOriginalVerifiedSources, 1);
+  assert.equal(report.predecessorHints.earlierOriginalFactMismatch, 0);
+  assert.equal(report.predecessorHints.historicalIdentityVerified, false);
+  assert.equal(report.predecessorHints.completeChronologyVerified, false);
+  assert.equal(report.predecessorHints.repairAuthorized, false);
+  assert.equal(report.budget.r2ObjectsRead, 2);
+  assert.equal(report.budget.rowsWritten, 0);
+
+  const differentBody = JSON.stringify({ races: [{ starts: [
+    { horse: { id: 101, age: 6 } }
+  ] }] });
+  const differentSha = createHash('sha256').update(differentBody).digest('hex');
+  const differentKey = 'raw/official_provider/' + differentSha + '.json';
+  f.db.prepare("UPDATE source_records SET raw_object_key=?,content_hash=? WHERE id='earlier-r2'")
+    .run(differentKey, differentSha);
+  await f.env.RAW_BUCKET.put(differentKey, differentBody, {
+    customMetadata: { contentHash: differentSha, sourceType: 'official_provider' }
+  });
+  report = await view();
+  assert.equal(report.predecessorHints.earlierOriginalVerifiedFacts, 0);
+  assert.equal(report.predecessorHints.earlierOriginalFactMismatch, 1);
+
+  f.db.prepare("UPDATE source_records SET raw_object_key=?,content_hash=? WHERE id='earlier-r2'")
+    .run(key, sha);
+  await f.env.RAW_BUCKET.put(key, earlierBody + ' ', earlierOpts);
+  report = await view();
+  assert.equal(report.predecessorHints.earlierOriginalUnverified, 1);
+  assert.equal(report.predecessorHints.earlierOriginalVerifiedFacts, 0);
+  assert.equal(report.repairAuthorized, false);
+});
+
+test('bounded manual workflow retries only a temporary 401 and keeps payload private', () => {
+  const workflow = readFileSync(
+    new URL('../.github/workflows/production-storage-fact-reconciliation.yml', import.meta.url), 'utf8'
+  );
+  assert.match(workflow, /for attempt in \\$\\(seq 1 12\\); do/);
+  assert.match(workflow, /if \\[ "\\$status" != 401 \\]; then/);
+  assert.match(workflow, /Read-only authentication not ready after bounded retry/);
+  assert.match(workflow, /\\.budget\\.r2ObjectsRead <= 5/);
+  assert.match(workflow, /\\.predecessorHints\\.earlierOriginalVerifiedFacts >= 0/);
+  const printed = workflow.split("            jq -c '{family,sourcesExamined")[1]?.split('"$output"')[0] || '';
+  assert.doesNotMatch(printed, /raw_object_key|snapshot_id|source_record_id|\\bcursor\\b/);
 });

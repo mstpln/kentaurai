@@ -45,6 +45,9 @@ const MAX_FACTS = 512;
 const MAX_ROWS = 1024;
 const MAX_IDS_PER_QUERY = 75;
 const MAX_PREDECESSOR_CHECKS = 24;
+const MAX_PREDECESSOR_R2_SOURCES = 4;
+const MAX_R2_READS = 5; // one current original and at most four earlier originals
+const MAX_R2_TOTAL_BYTES = 8 * 1024 * 1024;
 
 function boundedInteger(value) {
   const number = Number(value);
@@ -215,7 +218,9 @@ async function verifiedOriginal(env, source, r2Budget) {
   catch { return { status: 'raw_unavailable' }; }
   if (!meta) return { status: 'raw_missing' };
   const size = Number(meta.size);
-  if (!Number.isSafeInteger(size) || size < 1 || size > MAX_OBJECT_BYTES) {
+  if (!Number.isSafeInteger(size) || size < 1 || size > MAX_OBJECT_BYTES ||
+      r2Budget.objectsRead >= MAX_R2_READS ||
+      r2Budget.bytesRead + size > MAX_R2_TOTAL_BYTES) {
     return { status: 'raw_deferred' };
   }
   r2Budget.objectsRead++;
@@ -262,7 +267,24 @@ function predecessorWhere(family, mapped, fact) {
   throw new Error('reconciliation_unsupported_predecessor_family');
 }
 
-async function inspectPredecessorHints(reader, family, missing, cutoff) {
+function sameSourceIdentityAndScope(family, earlier, sought) {
+  if (String(earlier.externalId) !== String(sought.externalId)) return false;
+  if (family === 'horse_profile') return true;
+  if (family === 'horse_stat') return earlier.snapshotScope === sought.snapshotScope;
+  if (family === 'horse_record') {
+    return earlier.recordScope === sought.recordScope &&
+      earlier.statYear === sought.statYear && earlier.ordinal === sought.ordinal;
+  }
+  if (family === 'person_stat') {
+    return earlier.personType === sought.personType && earlier.statYear === sought.statYear;
+  }
+  return false;
+}
+
+// The earlier raw source is checked independently of its current direct-row
+// metadata. This is still NOT a proof of historical canonical identity or
+// of the full as-of timeline.
+async function inspectPredecessorHints(reader, env, family, missing, cutoff, r2Budget) {
   const report = {
     examined: 0,
     deferred: missing.length,
@@ -270,6 +292,11 @@ async function inspectPredecessorHints(reader, family, missing, cutoff) {
     earlierCompletedSourceSameFacts: 0,
     earlierCompletedSourceDifferentFacts: 0,
     earlierUnconfirmedSource: 0,
+    earlierOriginalVerifiedFacts: 0,
+    earlierOriginalFactMismatch: 0,
+    earlierOriginalUnverified: 0,
+    earlierOriginalDeferred: 0,
+    earlierOriginalVerifiedSources: 0,
     historicalIdentityVerified: false,
     completeChronologyVerified: false,
     repairAuthorized: false
@@ -279,6 +306,7 @@ async function inspectPredecessorHints(reader, family, missing, cutoff) {
   const remainingQueries = Math.max(0, MAX_D1_QUERIES - reader.cost().queries - 1);
   const take = Math.min(missing.length, MAX_PREDECESSOR_CHECKS, remainingQueries);
   const definition = FAMILY[family];
+  const matchingPredecessors = [];
   for (let i = 0; i < take; i++) {
     const { mapped, fact } = missing[i];
     const predicate = predecessorWhere(family, mapped, fact);
@@ -305,8 +333,50 @@ async function inspectPredecessorHints(reader, family, missing, cutoff) {
     report.deferred--;
     if (!rows.length) report.noEarlierDirect++;
     else if (Number(rows[0].completed_lineage) !== 1) report.earlierUnconfirmedSource++;
-    else if (snapshotFactMatches(family, rows[0], fact)) report.earlierCompletedSourceSameFacts++;
-    else report.earlierCompletedSourceDifferentFacts++;
+    else if (snapshotFactMatches(family, rows[0], fact)) {
+      report.earlierCompletedSourceSameFacts++;
+      matchingPredecessors.push({ row: rows[0], fact });
+    } else report.earlierCompletedSourceDifferentFacts++;
+  }
+  const verifiedSources = new Map();
+  for (const { row, fact } of matchingPredecessors) {
+    const sourceId = row.source_record_id;
+    let original;
+    if (verifiedSources.has(sourceId)) {
+      original = verifiedSources.get(sourceId);
+    } else {
+      if (verifiedSources.size >= MAX_PREDECESSOR_R2_SOURCES ||
+          reader.cost().queries >= MAX_D1_QUERIES - 1) {
+        report.earlierOriginalDeferred++;
+        continue;
+      }
+      const metadata = await readRows(reader,
+        'SELECT id,source_type,fetched_at,raw_object_key,content_hash,quality_status' +
+        ' FROM source_records WHERE id=? LIMIT 1', sourceId);
+      const source = metadata[0];
+      if (!source || source.source_type !== 'official_provider' ||
+          !Number.isFinite(Date.parse(source.fetched_at)) ||
+          Date.parse(source.fetched_at) !== Date.parse(row.observed_at)) {
+        original = { status: 'provenance_conflict' };
+      } else {
+        original = await verifiedOriginal(env, source, r2Budget);
+      }
+      verifiedSources.set(sourceId, original);
+      if (original.status === 'verified') report.earlierOriginalVerifiedSources++;
+    }
+    if (original.status === 'raw_deferred') {
+      report.earlierOriginalDeferred++;
+    } else if (original.status !== 'verified') {
+      report.earlierOriginalUnverified++;
+    } else {
+      const matches = [...original.facts[definition.facts].values()].filter((candidate) =>
+        sameSourceIdentityAndScope(family, candidate, fact));
+      if (matches.length === 1 && snapshotFactMatches(family, row, matches[0])) {
+        report.earlierOriginalVerifiedFacts++;
+      } else {
+        report.earlierOriginalFactMismatch++;
+      }
+    }
   }
   return report;
 }
@@ -440,7 +510,7 @@ export async function inspectPrivateSnapshotReconciliationPage(env, { family, cu
         report.extractedFacts = comparison.expectedFacts;
         report.classifications = comparison.classifications;
         report.predecessorHints = await inspectPredecessorHints(
-          reader, family, missingInternal, source.fetched_at
+          reader, env, family, missingInternal, source.fetched_at, r2Budget
         );
         // A source-owned direct row must be a verified official snapshot.
         // A quality anomaly invalidates this source's classification.
