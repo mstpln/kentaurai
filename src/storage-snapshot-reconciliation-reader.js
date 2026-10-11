@@ -185,7 +185,7 @@ async function snapshotRows(reader, definition, sourceId, observations) {
   return { direct, referencedSnapshots };
 }
 
-async function verifiedOriginal(env, source) {
+async function verifiedOriginal(env, source, r2Budget) {
   if (!source.raw_object_key || !/^[a-f0-9]{64}$/.test(String(source.content_hash || '')) ||
       source.quality_status !== 'normalized_verified_subset') return { status: 'provenance_conflict' };
   if (typeof env.RAW_BUCKET.head !== 'function' || typeof env.RAW_BUCKET.get !== 'function') {
@@ -199,6 +199,8 @@ async function verifiedOriginal(env, source) {
   if (!Number.isSafeInteger(size) || size < 1 || size > MAX_OBJECT_BYTES) {
     return { status: 'raw_deferred' };
   }
+  r2Budget.objectsRead++;
+  r2Budget.bytesRead += size;
   try { object = await env.RAW_BUCKET.get(source.raw_object_key); }
   catch { return { status: 'raw_unavailable' }; }
   if (!object) return { status: 'raw_missing' };
@@ -230,6 +232,7 @@ function emptySummary(family) {
     originalVerified: 0,
     originalMissing: 0,
     originalInvalid: 0,
+    originalFactCountInsufficient: 0,
     originalDeferred: 0,
     provenanceConflicts: 0,
     actualLogicalRepresentations: 0,
@@ -293,13 +296,14 @@ export async function inspectPrivateSnapshotReconciliationPage(env, { family, cu
   const rows = await reader.query(selectSourceSql(family, after != null),
     audit.proof_id, family, audit.completed_at, ...(after == null ? [] : [after]));
   const report = emptySummary(family);
+  const r2Budget = { objectsRead: 0, bytesRead: 0 };
   if (rows.length > 1) throw new Error('reconciliation_source_limit');
   if (rows.length) {
     const source = rows[0];
     report.sourcesExamined = 1;
     report.ledgerShortfall = boundedInteger(source.expected_count) - boundedInteger(source.ledger_count);
     if (report.ledgerShortfall <= 0) throw new Error('reconciliation_invalid_source_deficit');
-    const raw = await verifiedOriginal(env, source);
+    const raw = await verifiedOriginal(env, source, r2Budget);
     if (raw.status !== 'verified') classifyRawStatus(report, raw.status);
     else {
       report.originalVerified = 1;
@@ -308,8 +312,10 @@ export async function inspectPrivateSnapshotReconciliationPage(env, { family, cu
         report.originalDeferred++;
         report.originalVerified = 0;
       } else if (facts.size < boundedInteger(source.expected_count)) {
-        report.originalInvalid++;
-        report.originalVerified = 0;
+        // A genuine hash-verified original can disagree with a legacy import
+        // counter; this does not make the original itself corrupt.
+        report.originalFactCountInsufficient++;
+        report.extractedFacts = facts.size;
       } else {
         const observations = await readRows(reader,
           'SELECT source_record_id,snapshot_family,entity_key,scope_key,observed_at,snapshot_id,factual_changed' +
@@ -355,6 +361,7 @@ export async function inspectPrivateSnapshotReconciliationPage(env, { family, cu
     throw new Error('reconciliation_dataset_revision_changed');
   }
   report.revisionCounterMatchesProof = true;
-  report.budget = { ...reader.cost(), r2ObjectsRead: rows.length ? 1 : 0 };
+  report.budget = { ...reader.cost(), r2ObjectsRead: r2Budget.objectsRead,
+    r2BytesRead: r2Budget.bytesRead };
   return report;
 }
