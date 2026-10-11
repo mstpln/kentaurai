@@ -10,7 +10,7 @@ CREATE TABLE historical_recovery_runs (
   id TEXT PRIMARY KEY,
   source_sha TEXT NOT NULL CHECK (length(source_sha)=40),
   phase TEXT NOT NULL DEFAULT 'inventory'
-    CHECK (phase IN ('inventory','ready','applying','verify_pending','complete','paused','failed')),
+    CHECK (phase IN ('inventory','ready','applying','verify_pending','complete','complete_with_quarantine','paused','failed')),
   family_index INTEGER NOT NULL DEFAULT 0 CHECK (family_index BETWEEN 0 AND 4),
   after_source_id TEXT NOT NULL DEFAULT '',
   expected_epoch INTEGER NOT NULL CHECK (expected_epoch >= 0),
@@ -22,6 +22,8 @@ CREATE TABLE historical_recovery_runs (
   ready_count INTEGER NOT NULL DEFAULT 0 CHECK (ready_count >= 0),
   quarantined_count INTEGER NOT NULL DEFAULT 0 CHECK (quarantined_count >= 0),
   restored_count INTEGER NOT NULL DEFAULT 0 CHECK (restored_count >= 0),
+  post_remaining_missing INTEGER NOT NULL DEFAULT 0 CHECK(post_remaining_missing >= 0),
+  post_excess INTEGER NOT NULL DEFAULT 0 CHECK(post_excess >= 0),
   backup_key TEXT,
   backup_sha256 TEXT,
   backup_size INTEGER,
