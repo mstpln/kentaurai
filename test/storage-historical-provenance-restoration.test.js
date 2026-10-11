@@ -302,3 +302,27 @@ test('guarded restorer rejects altered dynamic SQL identifiers or fact projectio
   ).get(f.current.id).n, 0);
   assert.equal(f.d1Metrics.batches, 0);
 });
+
+
+test('idempotent restored row cannot bypass later source/hash/mapping drift checks', async () => {
+  const f = await setup('horse_profile');
+  legacyBrokenCleanup(f,'horse_profile');
+  const proposal = f.proposal();
+  f.env.HISTORICAL_REPAIR_ENABLED = 'true';
+  f.env.HISTORICAL_REPAIR_TOKEN = 'synthetic_recovery_token_with_at_least_32_chars';
+  const exec = () => applyVerifiedHistoricalRestoration(f.env, proposal, {
+    approved:true, authorization:f.env.HISTORICAL_REPAIR_TOKEN
+  });
+  assert.equal((await exec()).restored,1);
+  f.db.prepare('UPDATE source_records SET content_hash=? WHERE id=?')
+    .run('f'.repeat(64),f.current.id);
+  await assert.rejects(exec,/historical_restoration_replay_lineage_conflict/);
+  f.db.prepare('UPDATE source_records SET content_hash=? WHERE id=?')
+    .run(f.current.content_hash,f.current.id);
+  f.db.prepare("UPDATE horse_external_ids SET external_id='999' WHERE horse_id='h100'").run();
+  await assert.rejects(exec,/historical_restoration_replay_lineage_conflict/);
+  assert.equal(f.db.prepare(
+    'SELECT COUNT(*) AS n FROM horse_profile_snapshots WHERE source_record_id=?'
+  ).get(f.current.id).n,1);
+  assert.equal(f.d1Metrics.batches,1);
+});
