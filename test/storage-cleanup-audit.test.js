@@ -405,7 +405,7 @@ test('session-bound cleanup audit does not mark a session when provenance integr
 });
 
 
-test('session-bound cleanup audit route is private and persists verification', async () => {
+test('session-bound cleanup audit route is private and disabled until protected execution authorization exists', async () => {
   const { db, env } = createTestEnv();
   const sourceSha = 'e'.repeat(40);
   const sessionId = '44444444-4444-4444-8444-444444444444';
@@ -435,14 +435,11 @@ test('session-bound cleanup audit route is private and persists verification', a
     },
     body
   }), env);
-  assert.equal(response.status, 200);
-  const payload = await response.json();
-  assert.equal(payload.ok, true);
-  assert.equal(payload.auditVerified, true);
-  assert.equal(payload.safetyStop, false);
+  assert.equal(response.status, 403);
+  assert.deepEqual(await response.json(), { error: 'storage_cleanup_execution_disabled' });
   assert.equal(
     db.prepare('SELECT COUNT(*) AS n FROM storage_cleanup_session_audits WHERE session_id=?').get(sessionId).n,
-    1
+    0
   );
 });
 

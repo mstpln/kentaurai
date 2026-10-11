@@ -67,6 +67,19 @@ const DAILY_XLABS_BATCH_RUNS = 3;
 const MAX_REFERENCE_IMPORT_BYTES = 1024 * 1024;
 const MAX_REFERENCE_MULTIPART_BYTES = MAX_REFERENCE_IMPORT_BYTES + 64 * 1024;
 
+// A read-only GitHub workflow is not a sufficient execution boundary: both
+// persistent admin and temporary audit credentials can reach Worker routes.
+// Until a separately protected, reviewed execution mechanism exists, no
+// HTTP request may start or advance a destructive cleanup session or execute
+// a snapshot/raw cleanup batch.
+const DISABLED_STORAGE_CLEANUP_MUTATION_PATHS = new Set([
+  '/v1/storage-cleanup/session/start',
+  '/v1/storage-cleanup/session/audit',
+  '/v1/storage-cleanup/session/checkpoint',
+  '/v1/storage-cleanup/snapshots/execute',
+  '/v1/storage-cleanup/raw/execute'
+]);
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
     status,
@@ -243,6 +256,12 @@ async function handleFetch(request, env) {
       ? requireStorageCleanupAdmin(request, env)
       : requireAdmin(request, env);
     if (denied) return denied;
+  }
+  // The source-bound audit may still perform read-only checks and planning.
+  // Destructive session and execute routes are disabled for ALL credentials,
+  // including the persistent ADMIN_TOKEN and temporary cleanup-only token.
+  if (DISABLED_STORAGE_CLEANUP_MUTATION_PATHS.has(path)) {
+    return json({ error: 'storage_cleanup_execution_disabled' }, 403);
   }
   if (request.method === 'GET' && path === '/v1/storage-cleanup/auth-check') {
     return json({ ok: true, scope: 'storage_cleanup' });
