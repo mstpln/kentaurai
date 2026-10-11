@@ -1,3 +1,21 @@
+## Temporary recovery credential propagation — 2026-10-11
+
+1. A successful `/v1/storage-cleanup/auth-check` call cannot alone establish
+   that a newly installed Cloudflare Worker secret has reached the private
+   historical `/restoration/run/status` route. Explicitly check the latter
+   twice before starting an inventory.
+2. Distinguish transient HTTP 401 authorization rejection from ambiguous
+   transport, timeout, 409 or other failures. Only a strict pre-dispatch
+   401 may be retried with the same credential and identical request, for a
+   bounded number of attempts. Never fall back to persistent ADMIN_TOKEN,
+   bypass the Worker authorization guard or emit request/response contents.
+3. The observed 401 in Actions run `38166317380` was safely blocked before
+   recovery operations. Do not assert a proven Cloudflare propagation cause
+   without evidence from a subsequent successful route-level preflight.
+4. Inventory, private backup and historical fact restoration remain
+   independently approved, fail-closed operations. A release or auth fix
+   alone never starts an operation or authorizes data changes.
+
 ## Single-build historical provenance recovery — 2026-10-11
 
 1. The confirmed September 27 cleanup bug destroyed some historical

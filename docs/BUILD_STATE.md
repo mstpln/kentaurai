@@ -1,3 +1,23 @@
+## Historical recovery inventory auth propagation hardening (2026-10-11)
+
+- First production `inventory` attempt, GitHub Actions run `38166317380`,
+  stopped safely at initial status lookup: private `/auth-check` returned
+  success but `/restoration/run/status` returned HTTP 401 immediately after.
+  QA, exact-release SHA, temporary token cleanup, health and non-mutation
+  checks passed. No inventory, backup, restore or racing-fact writes completed.
+- The error alone does **not** prove which Cloudflare routing/secret propagation
+  layer rejected the request. The previous preflight only validated the
+  generic auth route, and the Node transport made one un-retried request.
+- Harden the *same* historical recovery workflow: require the actual private
+  status route to authorize twice; retry only explicit 401 rejections with
+  a finite 10-attempt cap, identical request, no credential fallback, and
+  no replay on ambiguous transport/timeout/409 or other HTTP failures.
+  Regression tests use the complete production Worker entrypoint with
+  an expiring synthetic temporary cleanup token and mocked 401 sequences.
+- After review, merge and production release, the inventory must be re-run
+  before any separate private D1 backup or independently approved restore.
+  Never treat green CI as evidence that historical production data is repaired.
+
 ## Comprehensive historical provenance recovery build — PR #315 (2026-10-11)
 
 - Confirmed historical snapshot cleanup defect from exact 2026-09-27 production

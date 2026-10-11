@@ -3,6 +3,7 @@
 // capability tokens or private API error bodies.
 import { appendFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { fetchPrivateRecoveryJson } from './private-recovery-http.mjs';
 
 const URL_BASE=process.env.WORKER_URL;
 const TOKEN=process.env.CLEANUP_TOKEN;
@@ -26,22 +27,13 @@ function ensure(){
     !['inventory','backup','execute'].includes(MODE)) fail('recovery_runner_configuration_invalid');
 }
 async function call(path,method='GET',body=null){
-  const controller=new AbortController();
-  // Full, private D1 SQL export may take longer than ordinary status calls.
-  // Keep a strict finite limit while allowing R2-to-R2 streaming to finish.
+  // A newly installed Cloudflare Worker secret may reach different edges
+  // at different times. Retry ONLY explicit 401 rejections, never uncertain
+  // transport failures or non-authenticated writes.
   const timeoutMs=PHASE==='backup' && path===base+'backup-poll' ? 180000 : 30000;
-  const timeout=setTimeout(()=>controller.abort(),timeoutMs);
-  try{
-    const response=await fetch(URL_BASE+path,{
-      method,
-      headers:{authorization:'Bearer '+TOKEN,
-        ...(body==null?{}:{'content-type':'application/json'})},
-      body:body==null?undefined:JSON.stringify(body),
-      signal:controller.signal
-    });
-    if(!response.ok) fail('recovery_private_api_http_'+response.status);
-    return await response.json();
-  }finally{clearTimeout(timeout);}
+  return fetchPrivateRecoveryJson({
+    url:URL_BASE+path,token:TOKEN,method,body,timeoutMs
+  });
 }
 const put=(path,body)=>call(path,'POST',body);
 const base='/v1/storage-cleanup/restoration/run/';
