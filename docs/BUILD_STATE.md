@@ -1,26 +1,31 @@
-## Active read-only historical fact reconciliation — PR #312 (draft)
+## Historical snapshot evidence — deployed facts and PR #313 follow-up (2026-10-11)
 
-- Production baseline remains release #175 at commit
-  \`c76269dbf18db15fd7efd0b3b3dea02ec0de35d3\`; no historical
-  repair, cleanup or deployment has been authorized by this work.
-- The read-only D1 audit reported 43,613 missing logical representations,
-  and the 13-file R2 sample independently validated 13/13 original hashes.
-  These remain **evidence**, not a complete recovery inventory.
-- PR #312 adds exact per-fact comparison of verified original payloads
-  against D1 source-owned snapshots and source-linked observations in all
-  four snapshot families. Historical canonical identity and full chronology
-  remain unverified, so suspected missing facts cannot be repaired yet.
-- The new private endpoint uses a short bounded source page, encrypted
-  source-bound continuation cursor, strict D1/R2 read limits, and aggregate
-  sanitized output. A new **manual**, release-pinned and read-only GitHub
-  Actions workflow can sample one source per family after a separately
-  approved reviewed deployment.
-- No storage-cleanup execute route is re-enabled. No migrations, DB writes,
-  automatic workflow dispatch, production R2 export or changes to model
-  predictions are introduced.
-- Next gate: exact final-head CI/review, permission to merge and deploy,
-  permission for a bounded **read-only production sample**, then evidence-based
-  expansion of historical identity/chronology checks before designing repair.
+- PR #312 was merged and deployed through the reviewed v0.6.0 release at
+  `514fccb78bd023005414ab4f17462130cec8a6c6`. GitHub Actions
+  read-only production run `38146281684` completed successfully; its
+  temporary credential was deleted and production health reverified.
+- The original 43,613 anomalies are **missing logical representations**,
+  not a confirmed count of lost unique racing facts. Earlier R2 sampling
+  verified 13/13 originals by SHA-256.
+- In the four-family factual sample, four verified R2 originals provided
+  226 extracted facts. Exactly 201 matched D1 source representations and
+  25 were classified as missing with *unverified historical chronology*;
+  no factual conflicts or unknown current identities were detected.
+  D1 writes were zero. These samples are not an exhaustive inventory.
+- PR #313 (review candidate) extends the private read-only classifier with
+  aggregate hints for at most 24 earlier **direct** snapshots per source.
+  These hints separate a matching predecessor, differing predecessor,
+  unconfirmed earlier source, no earlier direct row, and deferred cases.
+  Current identity mappings and unverified earlier raw source contents
+  are **not** historical identity/chronology proof and never authorize repair.
+- No migrations, production writes, snapshot backfills, deletion, changes to
+  model weights or automatic production diagnosis are included. The workflow
+  remains manually initiated, production-locked, release-SHA-bound and
+  read-budget-capped. Destructive cleanup routes remain disabled.
+- Gate: verify PR #313 exact final-head CI and privacy/cost/data review,
+  then separately merge/release with authorization. A new bounded manual
+  read-only production sample and full historical proof are distinct later
+  operations. No restoration is authorized.
 
 ## Production #42 raw snapshot evidence follow-up (review candidate)
 
