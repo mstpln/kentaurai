@@ -126,6 +126,12 @@ stale failed-audit ledger, SHA-verifies source originals, checks older
 independently verified originals where available, and records eligible and
 quarantined counts **in private D1 only**.
 
+A source is quarantined if its SHA-verified original yields either **fewer or
+more unique facts** than the completed historical source-sync count.
+Eligible candidates must also never exceed the independently measured
+representation shortfall; neither mismatch is silently repaired by
+changing historical source counts.
+
 Only separately approved \`apply-step\` can add source-owned facts. It
 checks the live facts again, revalidates current source hashes and identity,
 refuses missing/changed private backups, and atomically checkpoints each
