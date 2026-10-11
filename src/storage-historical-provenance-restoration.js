@@ -193,19 +193,6 @@ export async function applyVerifiedHistoricalRestoration(env, candidate, {
       })) {
     throw new Error('historical_restoration_candidate_mutated');
   }
-  // A verified duplicate replay is safe and should not change the audit
-  // revision. A same-ID row with different facts is a blocking conflict.
-  const existing = await env.DB.prepare(
-    'SELECT * FROM ' + candidate.table + ' WHERE id=? LIMIT 1'
-  ).bind(row.id).first();
-  if (existing) {
-    const isExact = Object.entries(row).every(([key, value]) =>
-      Object.is(existing[key] ?? null, value ?? null));
-    if (!isExact) throw new Error('historical_restoration_existing_snapshot_conflict');
-    return { restored: 0, reused: 1, snapshotsDeleted: 0,
-      unchangedFactsOverwritten: 0, oldAuditInvalidated: false };
-  }
-
   const keys = Object.keys(row);
   const factKeys = Object.keys(candidate.factualColumns);
   const expectedFactKeys = Object.keys(conf.values({
@@ -228,6 +215,62 @@ export async function applyVerifiedHistoricalRestoration(env, candidate, {
       factKeys.some((key) => !/^[a-z_]+$/.test(key) ||
         !Object.is(row[key] ?? null, candidate.factualColumns[key] ?? null))) {
     throw new Error('historical_restoration_candidate_mutated');
+  }
+
+  // Idempotent replay must also revalidate its source/identity lineage.
+  // An equal-looking row is NOT reusable evidence if the older source,
+  // current source or official canonical mapping has since changed.
+  const existing = await env.DB.prepare(
+    'SELECT * FROM ' + candidate.table + ' WHERE id=? LIMIT 1'
+  ).bind(row.id).first();
+  if (existing) {
+    const isExact = Object.entries(row).every(([key, value]) =>
+      Object.is(existing[key] ?? null, value ?? null));
+    if (!isExact) throw new Error('historical_restoration_existing_snapshot_conflict');
+    const priorRow = await env.DB.prepare(
+      'SELECT * FROM ' + candidate.table + ' WHERE id=? LIMIT 1'
+    ).bind(candidate.priorSnapshotId).first();
+    const mappingRows = await env.DB.prepare(
+      'SELECT ' + candidate.externalIdColumn + ' AS mapped FROM ' + candidate.externalTable +
+      " WHERE source_type='official' AND external_id=? LIMIT 2"
+    ).bind(candidate.externalId).all();
+    const currentSource = await env.DB.prepare(
+      'SELECT source_type,quality_status,content_hash,fetched_at FROM source_records WHERE id=?'
+    ).bind(candidate.sourceId).first();
+    const olderSource = await env.DB.prepare(
+      'SELECT source_type,quality_status,content_hash,fetched_at FROM source_records WHERE id=?'
+    ).bind(candidate.priorSourceId).first();
+    const currentSync = await env.DB.prepare(
+      'SELECT status FROM official_snapshot_source_sync WHERE source_record_id=?'
+    ).bind(candidate.sourceId).first();
+    const earlierSync = await env.DB.prepare(
+      'SELECT status FROM official_snapshot_source_sync WHERE source_record_id=?'
+    ).bind(candidate.priorSourceId).first();
+    const priorIdentity = conf.identity(candidate.canonicalId, {
+      personType: row.person_type, snapshotScope: row.snapshot_scope,
+      recordScope: row.record_scope, statYear: row.stat_year, ordinal: row.record_ordinal
+    });
+    if (!priorRow || priorRow.source_record_id !== candidate.priorSourceId ||
+        priorRow.quality_status !== QUALITY ||
+        priorRow.observed_at !== candidate.priorFetchedAt ||
+        Object.entries(priorIdentity).some(([k,v]) => !Object.is(priorRow[k] ?? null, v ?? null)) ||
+        Object.entries(candidate.factualColumns).some(([k,v]) =>
+          !Object.is(priorRow[k] ?? null, v ?? null)) ||
+        mappingRows.results?.length !== 1 ||
+        mappingRows.results[0].mapped !== candidate.canonicalId ||
+        currentSync?.status !== 'complete' || earlierSync?.status !== 'complete' ||
+        currentSource?.source_type !== SOURCE_TYPE ||
+        olderSource?.source_type !== SOURCE_TYPE ||
+        currentSource?.quality_status !== SOURCE_QUALITY ||
+        olderSource?.quality_status !== SOURCE_QUALITY ||
+        currentSource?.content_hash !== candidate.sourceHash ||
+        olderSource?.content_hash !== candidate.priorSourceHash ||
+        currentSource?.fetched_at !== candidate.fetchedAt ||
+        olderSource?.fetched_at !== candidate.priorFetchedAt) {
+      throw new Error('historical_restoration_replay_lineage_conflict');
+    }
+    return { restored: 0, reused: 1, snapshotsDeleted: 0,
+      unchangedFactsOverwritten: 0, oldAuditInvalidated: false };
   }
 
   const priorChecks = Object.entries(candidate.factualColumns)
