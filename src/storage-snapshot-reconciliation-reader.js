@@ -2,7 +2,7 @@
 // The returned cursor is AES-GCM encrypted; the underlying source id never
 // leaves the Worker as plaintext. Treat its presence as pagination, not proof.
 import { collectOfficialSnapshotFacts } from './import/official-snapshots.js';
-import { reconcileSnapshotFacts, SNAPSHOT_RECONCILIATION_STATUSES } from './storage-snapshot-reconciliation.js';
+import { reconcileSnapshotFacts, snapshotFactMatches, SNAPSHOT_RECONCILIATION_STATUSES } from './storage-snapshot-reconciliation.js';
 
 const FAMILY = Object.freeze({
   horse_profile: Object.freeze({
@@ -44,6 +44,7 @@ const MAX_OBJECT_BYTES = 8 * 1024 * 1024;
 const MAX_FACTS = 512;
 const MAX_ROWS = 1024;
 const MAX_IDS_PER_QUERY = 75;
+const MAX_PREDECESSOR_CHECKS = 24;
 
 function boundedInteger(value) {
   const number = Number(value);
@@ -237,6 +238,79 @@ async function verifiedOriginal(env, source, r2Budget) {
   catch { return { status: 'raw_invalid' }; }
 }
 
+// A predecessor hint is NOT an as-of proof: it uses today's canonical mapping,
+// checks at most one earlier direct snapshot per missing fact, and only verifies
+// the previous snapshot's source metadata/status (not its R2 hash). Missing
+// observations, older indirect events and remapped identities remain unknown.
+function predecessorWhere(family, mapped, fact) {
+  if (family === 'horse_profile') return { where: 'horse_id=?', params: [mapped] };
+  if (family === 'horse_stat') {
+    return { where: 'horse_id=? AND snapshot_scope=?', params: [mapped, fact.snapshotScope] };
+  }
+  if (family === 'horse_record') {
+    return {
+      where: 'horse_id=? AND record_scope=? AND stat_year IS ? AND record_ordinal=?',
+      params: [mapped, fact.recordScope, fact.statYear, fact.ordinal]
+    };
+  }
+  if (family === 'person_stat') {
+    return {
+      where: 'person_type=? AND person_id=? AND stat_year=?',
+      params: [fact.personType, mapped, fact.statYear]
+    };
+  }
+  throw new Error('reconciliation_unsupported_predecessor_family');
+}
+
+async function inspectPredecessorHints(reader, family, missing, cutoff) {
+  const report = {
+    examined: 0,
+    deferred: missing.length,
+    noEarlierDirect: 0,
+    earlierCompletedSourceSameFacts: 0,
+    earlierCompletedSourceDifferentFacts: 0,
+    earlierUnconfirmedSource: 0,
+    historicalIdentityVerified: false,
+    completeChronologyVerified: false,
+    repairAuthorized: false
+  };
+  // Reserve one query for final dataset-fence verification. A request cannot
+  // exceed the existing 40-query limit even when mappings are numerous.
+  const remainingQueries = Math.max(0, MAX_D1_QUERIES - reader.cost().queries - 1);
+  const take = Math.min(missing.length, MAX_PREDECESSOR_CHECKS, remainingQueries);
+  const definition = FAMILY[family];
+  for (let i = 0; i < take; i++) {
+    const { mapped, fact } = missing[i];
+    const predicate = predecessorWhere(family, mapped, fact);
+    const table = definition.table;
+    const lineageSql =
+      'EXISTS (SELECT 1 FROM source_records original_source ' +
+      'JOIN official_snapshot_source_sync earlier_sync ' +
+      'ON earlier_sync.source_record_id=original_source.id ' +
+      'WHERE original_source.id=' + table + '.source_record_id ' +
+      "AND original_source.source_type='official_provider' " +
+      "AND original_source.quality_status='normalized_verified_subset' " +
+      "AND earlier_sync.status='complete' " +
+      'AND julianday(original_source.fetched_at)=julianday(' + table + '.observed_at))';
+    const rows = await readRows(reader,
+      'SELECT ' + definition.select + ', ' +
+      "CASE WHEN quality_status='verified_official_snapshot' AND " +
+      lineageSql + ' THEN 1 ELSE 0 END AS completed_lineage ' +
+      'FROM ' + table + ' WHERE ' + predicate.where +
+      ' AND julianday(observed_at)<julianday(?)' +
+      ' ORDER BY julianday(observed_at) DESC,id DESC LIMIT 1',
+      ...predicate.params, cutoff
+    );
+    report.examined++;
+    report.deferred--;
+    if (!rows.length) report.noEarlierDirect++;
+    else if (Number(rows[0].completed_lineage) !== 1) report.earlierUnconfirmedSource++;
+    else if (snapshotFactMatches(family, rows[0], fact)) report.earlierCompletedSourceSameFacts++;
+    else report.earlierCompletedSourceDifferentFacts++;
+  }
+  return report;
+}
+
 function emptySummary(family) {
   return {
     mode: 'read_only_snapshot_fact_reconciliation',
@@ -256,6 +330,7 @@ function emptySummary(family) {
     actualLogicalRepresentations: 0,
     ledgerShortfall: 0,
     extractedFacts: 0,
+    predecessorHints: null,
     classifications: Object.fromEntries(SNAPSHOT_RECONCILIATION_STATUSES.map((status) => [status, 0])),
     cursor: null,
     done: false,
@@ -351,13 +426,22 @@ export async function inspectPrivateSnapshotReconciliationPage(env, { family, cu
         }
         report.auditLedgerVerified = true;
         const identities = await identitiesForFacts(reader, family, facts);
+        const missingInternal = [];
         const comparison = reconcileSnapshotFacts({
           family, facts, source: { id: source.source_record_id, fetched_at: source.fetched_at },
           identities, direct, observations, referencedSnapshots,
-          historicalIdentityVerified: false, chronologyVerified: false
+          historicalIdentityVerified: false, chronologyVerified: false,
+          onFactClassified: ({ status, fact, mapped }) => {
+            if (status === 'missing_unverified_chronology' && mapped) {
+              missingInternal.push({ fact, mapped });
+            }
+          }
         });
         report.extractedFacts = comparison.expectedFacts;
         report.classifications = comparison.classifications;
+        report.predecessorHints = await inspectPredecessorHints(
+          reader, family, missingInternal, source.fetched_at
+        );
         // A source-owned direct row must be a verified official snapshot.
         // A quality anomaly invalidates this source's classification.
         if (direct.some((row) => row.quality_status !== 'verified_official_snapshot') ||
