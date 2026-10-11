@@ -45,6 +45,8 @@ test('restore capability is minted after confirmed backup and deleted in all exi
   assert.ok(backupStep>0&&writeStep>backupStep);
   assert.match(workflow,/secret put HISTORICAL_REPAIR_ENABLED/);
   assert.match(workflow,/secret put HISTORICAL_REPAIR_TOKEN/);
+  assert.match(workflow,/secret put HISTORICAL_REPAIR_EXPIRES_AT/);
+  assert.match(workflow,/HISTORICAL_REPAIR_TOKEN HISTORICAL_REPAIR_EXPIRES_AT/);
   assert.match(workflow,/secret delete "\$name"/);
   assert.match(workflow,/if: \$\{\{ always\(\) && steps\.read_token\.outcome != 'skipped' \}\}/);
   assert.match(workflow,/Automatically resume unfinished private work/);
