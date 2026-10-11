@@ -266,12 +266,12 @@ async function mappedId(env, table, idColumn, externalId) {
 
 async function insertHorseProfile(env, source, horseId, fact) {
   const previous = await env.DB.prepare(`
-    SELECT id,age_years FROM horse_profile_snapshots
+    SELECT id,age_years,source_record_id FROM horse_profile_snapshots
     WHERE horse_id=? AND julianday(observed_at)<=julianday(?)
     ORDER BY julianday(observed_at) DESC,id DESC LIMIT 1
   `).bind(horseId, source.fetched_at).first();
   if (previous && sameColumns(previous, { age_years: fact.ageYears })) {
-    await recordSnapshotObservation(env, source, 'horse_profile', horseId, 'profile', previous.id, false);
+    await recordSnapshotObservation(env, source, 'horse_profile', horseId, 'profile', previous.id, previous.source_record_id === source.id);
     return { inserted: false, snapshotId: previous.id };
   }
   const snapshotId = stableId('horse-profile-snapshot', horseId, source.id);
@@ -290,7 +290,7 @@ async function insertHorseProfile(env, source, horseId, fact) {
 
 async function insertHorseStat(env, source, horseId, fact) {
   const previous = await env.DB.prepare(`
-    SELECT id,stat_year,starts,earnings_raw,wins,seconds,thirds,win_percentage_raw,place_percentage_raw,earnings_per_start_raw,start_points
+    SELECT id,stat_year,starts,earnings_raw,wins,seconds,thirds,win_percentage_raw,place_percentage_raw,earnings_per_start_raw,start_points,source_record_id
     FROM horse_stat_snapshots
     WHERE horse_id=? AND snapshot_scope=? AND julianday(observed_at)<=julianday(?)
     ORDER BY julianday(observed_at) DESC,id DESC LIMIT 1
@@ -302,7 +302,7 @@ async function insertHorseStat(env, source, horseId, fact) {
     start_points: fact.startPoints
   };
   if (previous && sameColumns(previous, values)) {
-    await recordSnapshotObservation(env, source, 'horse_stat', horseId, fact.snapshotScope, previous.id, false);
+    await recordSnapshotObservation(env, source, 'horse_stat', horseId, fact.snapshotScope, previous.id, previous.source_record_id === source.id);
     return { inserted: false, snapshotId: previous.id };
   }
   const snapshotId = stableId('horse-stat-snapshot', horseId, source.id, fact.snapshotScope);
@@ -332,7 +332,7 @@ async function insertHorseRecord(env, source, horseId, fact) {
   const scopeKey = fact.recordScope === 'year' ? `year:${fact.statYear}` : fact.recordScope;
   const comparisonScope = `${scopeKey}:${fact.ordinal}`;
   const previous = await env.DB.prepare(`
-    SELECT id,code,start_method,distance_group,time_minutes,time_seconds,time_tenths,place
+    SELECT id,code,start_method,distance_group,time_minutes,time_seconds,time_tenths,place,source_record_id
     FROM horse_record_snapshots
     WHERE horse_id=? AND record_scope=? AND stat_year IS ? AND record_ordinal=?
       AND julianday(observed_at)<=julianday(?)
@@ -343,7 +343,7 @@ async function insertHorseRecord(env, source, horseId, fact) {
     time_minutes: fact.timeMinutes, time_seconds: fact.timeSeconds, time_tenths: fact.timeTenths, place: fact.place
   };
   if (previous && sameColumns(previous, values)) {
-    await recordSnapshotObservation(env, source, 'horse_record', horseId, comparisonScope, previous.id, false);
+    await recordSnapshotObservation(env, source, 'horse_record', horseId, comparisonScope, previous.id, previous.source_record_id === source.id);
     return { inserted: false, snapshotId: previous.id };
   }
   const snapshotId = stableId('horse-record-snapshot', horseId, source.id, scopeKey, fact.ordinal);
@@ -372,7 +372,7 @@ async function insertHorseRecord(env, source, horseId, fact) {
 async function insertPersonStat(env, source, personId, fact) {
   const entityKey = `${fact.personType}:${personId}`;
   const previous = await env.DB.prepare(`
-    SELECT id,starts,earnings_raw,wins,seconds,thirds,win_percentage_raw
+    SELECT id,starts,earnings_raw,wins,seconds,thirds,win_percentage_raw,source_record_id
     FROM person_stat_snapshots
     WHERE person_type=? AND person_id=? AND stat_year=? AND julianday(observed_at)<=julianday(?)
     ORDER BY julianday(observed_at) DESC,id DESC LIMIT 1
@@ -382,7 +382,7 @@ async function insertPersonStat(env, source, personId, fact) {
     thirds: fact.thirds, win_percentage_raw: fact.winPercentageRaw
   };
   if (previous && sameColumns(previous, values)) {
-    await recordSnapshotObservation(env, source, 'person_stat', entityKey, String(fact.statYear), previous.id, false);
+    await recordSnapshotObservation(env, source, 'person_stat', entityKey, String(fact.statYear), previous.id, previous.source_record_id === source.id);
     return { inserted: false, snapshotId: previous.id };
   }
   const snapshotId = stableId('person-stat-snapshot', fact.personType, personId, source.id, fact.statYear);
