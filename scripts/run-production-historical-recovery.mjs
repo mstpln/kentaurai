@@ -111,6 +111,8 @@ async function main(){
   }
   const started=Date.now();
   let steps=0;
+  let totalD1RowsRead=0;
+  let totalR2Bytes=0;
   let report=checkResponse(await call(base+'status?run_id='+encodeURIComponent(RUN_ID)));
   if(MODE==='execute'&&!REPAIR_TOKEN&&!['complete','complete_with_quarantine'].includes(report.phase))
     fail('recovery_execute_secret_missing');
@@ -131,7 +133,18 @@ async function main(){
       }else fail('recovery_run_not_approved_for_execute');
     }
     steps++;
+    const cost=report.budget||{};
+    const rows=Number(cost.rowsRead||0);
+    const bytes=Number(cost.r2BytesRead||0);
+    if(!Number.isSafeInteger(rows)||rows<0||!Number.isSafeInteger(bytes)||bytes<0)
+      fail('recovery_invalid_query_cost_receipt');
+    totalD1RowsRead+=rows;
+    totalR2Bytes+=bytes;
+    if(totalD1RowsRead>1000000||totalR2Bytes>33554432)
+      fail('recovery_cumulative_safety_budget_exceeded');
     if(steps%30===0) summarize(report,steps);
+    // Reserve at least 25% of the cumulative budget for a safe stop.
+    if(totalD1RowsRead>=750000 || totalR2Bytes>=25165824)break;
   }
   report=checkResponse(await call(base+'status?run_id='+encodeURIComponent(RUN_ID)));
   const done=MODE==='inventory'?report.phase==='ready':
