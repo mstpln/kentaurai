@@ -214,3 +214,52 @@ test('workflow-run lookup permission and rate-limit failures stop before dispatc
     assert.equal(postCount, 0);
   }
 });
+
+test('a queued successor counts as a verified handoff without waiting for it to enter the locked production job', async () => {
+  let lookupCount = 0;
+  let posted = 0;
+  const result = await queueReadOnlyAudit(permittedEnv(), {
+    nowMs: NOW,
+    sleepFn: async () => {},
+    discoveryAttempts: 2,
+    fetchFn: async (url) => {
+      if (url.endsWith('/dispatches')) {
+        posted++;
+        return { status: 204 };
+      }
+      lookupCount++;
+      return { status: 200, json: async () => ({
+        workflow_runs: lookupCount === 1 ? [] : [{
+          id: 90001,
+          event: 'workflow_dispatch',
+          name: continuationRunName(permittedEnv().GITHUB_RUN_ID),
+          head_sha: permittedEnv().GITHUB_SHA,
+          status: 'queued',
+          conclusion: null
+        }]
+      }) };
+    }
+  });
+  assert.equal(posted, 1);
+  assert.deepEqual(result, { queued: true, runId: 90001, alreadyExisted: false });
+});
+
+test('a cancelled, superseded or failed correlated successor is never called successful', async () => {
+  for (const conclusion of ['cancelled', 'failure', 'skipped']) {
+    let dispatched = 0;
+    await assert.rejects(() => queueReadOnlyAudit(permittedEnv(), {
+      nowMs: NOW,
+      fetchFn: async (url) => {
+        if (url.endsWith('/dispatches')) dispatched++;
+        return { status: 200, json: async () => ({
+          workflow_runs: [{
+            id: 90002, name: continuationRunName(permittedEnv().GITHUB_RUN_ID),
+            event: 'workflow_dispatch', head_sha: permittedEnv().GITHUB_SHA,
+            status: 'completed', conclusion
+          }]
+        }) };
+      }
+    }), /successor already finished unsuccessfully/);
+    assert.equal(dispatched, 0);
+  }
+});
