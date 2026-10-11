@@ -11,7 +11,8 @@ import { inspectPrivateSnapshotReconciliationPage } from './storage-snapshot-rec
 import { inspectHistoricalRestorationPage } from './storage-historical-recovery-page.js';
 import {
   startHistoricalRecoveryRun, historicalRecoveryStatus,
-  stepHistoricalRecoveryInventory, attachHistoricalRecoveryBackup,
+  stepHistoricalRecoveryInventory, startHistoricalRecoveryCloudBackup,
+  pollHistoricalRecoveryCloudBackup,
   stepHistoricalRecoveryExecution, stepHistoricalRecoveryPostAudit
 } from './storage-historical-recovery-run.js';
 import { normalizeCapturedXlabsRace } from './import/xlabs-telemetry.js';
@@ -457,8 +458,11 @@ async function handleFetch(request, env) {
         if(path.endsWith('/scan-step')) return json(await stepHistoricalRecoveryInventory(env,{
           runId:body.run_id
         }));
-        if(path.endsWith('/backup')) return json(await attachHistoricalRecoveryBackup(env,{
-          runId:body.run_id,key:body.key,sha256:body.sha256,size:body.size
+        if(path.endsWith('/backup-start')) return json(await startHistoricalRecoveryCloudBackup(env,{
+          runId:body.run_id
+        }));
+        if(path.endsWith('/backup-poll')) return json(await pollHistoricalRecoveryCloudBackup(env,{
+          runId:body.run_id
         }));
         if(path.endsWith('/apply-step')) return json(await stepHistoricalRecoveryExecution(env,{
           runId:body.run_id,approved:body.approved===true,authorization:body.authorization
@@ -469,7 +473,7 @@ async function handleFetch(request, env) {
       }
       return json({error:'not_found'},404);
     } catch(error) {
-      console.error('private historical recovery stopped',String(error?.message||'error').slice(0,100));
+      console.error('private historical recovery stopped');
       return json({error:'historical_recovery_not_authorized_or_unavailable'},409);
     }
   }
