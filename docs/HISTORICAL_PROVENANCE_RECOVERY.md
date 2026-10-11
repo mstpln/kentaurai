@@ -164,6 +164,35 @@ full database dumps are exposed to public logs or CI artifacts.
 This build does not add any blanket date-based UPDATE, destructive cleanup,
 table replacement, automatic backfill, or AI/model-weight adjustment.
 
+## Backup verification and limitations (2026-10-11 follow-up)
+
+Cloudflare's documented D1 export protocol has a nested completion payload:
+`result.status == "complete"` and `result.result.signed_url`. A polling
+bookmark on its own is **not** a finished backup. The Worker now requires
+the completed status, the **same** export bookmark, a restricted HTTPS
+signed URL, a declared download Content-Length between 1 KiB and 5 GiB
+(the R2 single-PUT limit), and a private R2 HEAD confirming exactly that
+size, ETag and run/bookmark metadata. Pending, errored, inconsistent,
+incomplete-length or length-mismatched responses **fail closed**.
+No backup bytes, signed URLs, source IDs or SQL are returned to GitHub.
+
+A recovery write capability now also has a separate short expiry. GitHub
+Actions provisions it for at most 20 minutes per execution interval and
+deletes it on cleanup; **both** the private route and the underlying SQL
+write primitive reject missing or expired permission, including after a
+cancelled or crashed workflow.
+
+CI tests use *synthetic Cloudflare responses* matching the vendor's nested
+API, error/pending/truncated downloads and a test-only SQL dump successfully
+re-imported into an isolated in-memory SQLite database. These are
+implementation tests, **not an actual Cloudflare production backup or an
+independent restore drill using a real private export**. Only a separately
+approved private operational rehearsal can establish real-world
+restoreability. The export operation can temporarily interrupt D1 queries
+while in progress; it must not run as a hidden read-only check or without
+explicit production approval. A database larger than the bounded single-PUT
+limit is deliberately unsupported and must stop without enabling repairs.
+
 ## Production approval and completion contract
 
 The PR **must not be merged or deployed without explicit user approval**.
