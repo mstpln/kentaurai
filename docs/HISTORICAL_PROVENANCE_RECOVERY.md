@@ -102,8 +102,10 @@ object key or source hash is in its response.
 **Production execution is NOT enabled by this PR.** The internal guarded
 executor also requires a separate explicit approval, a short-lived
 \`HISTORICAL_REPAIR_TOKEN\` and \`HISTORICAL_REPAIR_ENABLED=true\`.
-Neither key/flag is provisioned by this change, and no HTTP execution route
-or scheduled repair task is created.
+Neither key/flag is provisioned by a merge or deployment. The separate,
+explicitly approved manual `execute` GitHub workflow temporarily provisions
+them only after a private verified backup and can then use the gated private
+`/restoration/run/apply-step` route. No autonomous schedule is created.
 
 ## One-build source-inventory and recovery runner (PR #315)
 
