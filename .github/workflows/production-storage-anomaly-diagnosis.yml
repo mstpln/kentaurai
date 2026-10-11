@@ -3,6 +3,12 @@ run-name: Snapshot anomaly diagnosis — read-only
 
 on:
   workflow_dispatch:
+  # One bounded read-only diagnostic is launched by the approved merge that
+  # introduces this workflow. Later normal code/release pushes do not trigger it.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/production-storage-anomaly-diagnosis.yml'
 
 permissions:
   contents: read
