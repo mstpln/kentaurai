@@ -429,9 +429,9 @@ async function handleFetch(request, env) {
       return json({ error: 'reconciliation_page_unavailable' }, 409);
     }
   }
-  // Dedicated READ-ONLY recovery preview. The restoration executor stays
-  // completely unreachable through HTTP, even with the permanent admin
-  // credential. Only a later separately approved release may add it.
+  // Dedicated READ-ONLY preview. A separate /run/apply-step route below
+  // requires an explicit short-lived restoration capability plus a verified
+  // private backup; this preview never performs restoration.
   if (request.method === 'GET' && path === '/v1/storage-cleanup/restoration/preview') {
     try {
       return json(await inspectHistoricalRestorationPage(env, {
