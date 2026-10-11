@@ -16,10 +16,6 @@ jobs:
     concurrency:
       group: kentaurai-production-operation
       cancel-in-progress: false
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-      D1_DATABASE_ID: d8189e0e-6127-4ef2-88cc-534cb2217340
     steps:
       - name: Checkout exact main
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -31,8 +27,6 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/main"
-          test -n "$CLOUDFLARE_API_TOKEN"
-          test -n "$CLOUDFLARE_ACCOUNT_ID"
           release="$(curl --fail --silent --show-error \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
@@ -48,6 +42,10 @@ jobs:
         run: npm run qa
 
       - name: Read precomputed audit evidence and independently recount 20 sources per family
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          D1_DATABASE_ID: d8189e0e-6127-4ef2-88cc-534cb2217340
         run: node scripts/diagnose-storage-anomalies.mjs
 
       - name: Report boundaries
