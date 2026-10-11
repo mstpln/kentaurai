@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { createTestEnv } from './helpers/d1.js';
 import { inspectPrivateSnapshotReconciliationPage } from '../src/storage-snapshot-reconciliation-reader.js';
 import worker from '../src/index.js';
@@ -152,7 +153,9 @@ test('encrypted cursor supports deterministic pagination without disclosing sour
   await assert.rejects(() => inspectPrivateSnapshotReconciliationPage(f.env, {
     family: 'horse_stat', cursor: first.cursor
   }), /reconciliation_cursor_not_current/);
-  const altered = first.cursor.slice(0, -1) + (first.cursor.endsWith('A') ? 'B' : 'A');
+  const position = 24;
+  const altered = first.cursor.slice(0, position) +
+    (first.cursor[position] === 'A' ? 'B' : 'A') + first.cursor.slice(position + 1);
   await assert.rejects(() => inspectPrivateSnapshotReconciliationPage(f.env, {
     family: 'horse_profile', cursor: altered
   }), /reconciliation_cursor_invalid/);
@@ -241,4 +244,61 @@ test('private Worker route needs auth, returns generic aggregates and cannot wri
   assert.equal(report.repairAuthorized, false);
   assert.equal(f.d1Metrics.runs, 0);
   assert.equal(f.d1Metrics.batches, 0);
+});
+
+
+test('historical cross-source observation is read and value-matched by snapshot id', async () => {
+  const f = await fixture();
+  f.db.prepare(
+    "INSERT INTO source_records(id,source_type,fetched_at,quality_status) " +
+    "VALUES ('src-prior','official_provider','2026-09-10T10:00:00Z','normalized_verified_subset')"
+  ).run();
+  f.db.prepare("DELETE FROM horse_profile_snapshots WHERE id='src-a:profile'").run();
+  f.db.prepare(
+    'INSERT INTO horse_profile_snapshots(id,horse_id,observed_at,age_years,source_record_id) ' +
+    "VALUES ('old-snapshot','h100','2026-09-10T10:00:00Z',4,'src-prior')"
+  ).run();
+  f.db.prepare(
+    "INSERT INTO official_snapshot_observations(source_record_id,snapshot_family,entity_key,scope_key,observed_at,snapshot_id,factual_changed) " +
+    "VALUES ('src-a','horse_profile','h100','profile',?,'old-snapshot',0)"
+  ).run(FETCHED);
+  const report = await inspectPrivateSnapshotReconciliationPage(f.env, { family: 'horse_profile' });
+  assert.equal(report.auditLedgerVerified, true);
+  assert.equal(report.actualLogicalRepresentations, 1);
+  assert.equal(report.classifications.represented, 1);
+  assert.equal(report.classifications.missing_unverified_chronology, 1);
+
+  f.db.prepare("UPDATE horse_profile_snapshots SET age_years=7 WHERE id='old-snapshot'").run();
+  const conflict = await inspectPrivateSnapshotReconciliationPage(f.env, { family: 'horse_profile' });
+  assert.equal(conflict.classifications.conflict, 1);
+  assert.equal(conflict.classifications.represented, 0);
+});
+
+test('historical identity drift never authorizes reconstruction against a different horse', async () => {
+  const f = await fixture();
+  f.db.prepare("UPDATE horse_external_ids SET external_id='901' WHERE external_id='100'").run();
+  const report = await inspectPrivateSnapshotReconciliationPage(f.env, { family: 'horse_profile' });
+  assert.equal(report.classifications.missing_identity, 1);
+  assert.equal(report.classifications.missing_candidate, 0);
+});
+
+test('the manual public Actions workflow does not print private cursor or run a write command', () => {
+  const workflow = readFileSync(
+    new URL('../.github/workflows/production-storage-fact-reconciliation.yml', import.meta.url), 'utf8'
+  );
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
+  assert.match(workflow, /group: kentaurai-production-operation/);
+  assert.match(workflow, /\.workflow_runs\[0\]\.head_sha/);
+  assert.match(workflow, /Run full QA without Cloudflare credentials/);
+  assert.match(workflow, /Remove temporary credential/);
+  assert.match(workflow, /always\(\)/);
+  assert.match(workflow, /secret delete STORAGE_CLEANUP_TOKEN/);
+  assert.match(workflow, /repairAuthorized == false/);
+  assert.match(workflow, /revisionCounterMatchesProof == true/);
+  assert.match(workflow, /historicalIdentityProofEstablished == false/);
+  assert.match(workflow, /jq -c '\{family,sourcesExamined/);
+  const printed = workflow.split('            jq -c ')[1]?.split(' "$output"')[0] || '';
+  assert.doesNotMatch(printed, /\bcursor\b|\bsource_record_id\b|\braw_object_key\b/);
+  assert.doesNotMatch(workflow, /\bwrangler (?:deploy|d1 execute|d1 migrations)\b/);
 });
