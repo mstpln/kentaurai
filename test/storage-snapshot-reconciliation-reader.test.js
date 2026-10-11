@@ -731,3 +731,58 @@ test('private recovery preview exposes only aggregates and has no mutation metho
   assert.equal(f.d1Metrics.runs, 0);
 });
 
+
+
+test('private approved recovery page restores a verified single missing source representation', async () => {
+  const f = await fixture();
+  const earlierAt = '2026-09-10T09:00:00Z';
+  const earlierBody = JSON.stringify({ races: [{ starts: [{ horse:{id:101,age:5} }] }] });
+  const hash = createHash('sha256').update(earlierBody).digest('hex');
+  const key = 'raw/official_provider/' + hash + '.json';
+  f.db.prepare(
+    "INSERT INTO source_records(id,source_type,fetched_at,raw_object_key,content_hash,quality_status)" +
+    " VALUES ('old-recovery','official_provider',?,?,?,'normalized_verified_subset')"
+  ).run(earlierAt,key,hash);
+  f.db.prepare(
+    "INSERT INTO official_snapshot_source_sync(source_record_id,status,processed_at,horse_profile_count)" +
+    " VALUES ('old-recovery','complete','2026-09-11T12:00:00Z',1)"
+  ).run();
+  f.db.prepare(
+    "INSERT INTO storage_cleanup_audit_source_counts(audit_run_id,family,source_record_id,actual_count)" +
+    " VALUES (?,'horse_profile','old-recovery',1)"
+  ).run(AUDIT);
+  f.db.prepare(
+    "INSERT INTO horse_profile_snapshots(id,horse_id,observed_at,age_years,source_record_id,quality_status)" +
+    " VALUES ('old-recovery:h101','h101',?,5,'old-recovery','verified_official_snapshot')"
+  ).run(earlierAt);
+  await f.env.RAW_BUCKET.put(key,earlierBody,{
+    customMetadata:{contentHash:hash,sourceType:'official_provider'}
+  });
+  const plan = await inspectHistoricalRestorationPage(f.env,{family:'horse_profile'});
+  assert.equal(plan.readyDirectSnapshotCandidates,1);
+  assert.equal(plan.repairAuthorized,false);
+  assert.equal(f.d1Metrics.batches,0);
+  f.env.HISTORICAL_REPAIR_ENABLED='true';
+  f.env.HISTORICAL_REPAIR_TOKEN='synthetic_recovery_token_at_least_32_chars_long';
+  const applied = await applyHistoricalRestorationPage(f.env,{
+    family:'horse_profile',approved:true,
+    authorization:f.env.HISTORICAL_REPAIR_TOKEN
+  });
+  assert.equal(applied.eligible,1);
+  assert.equal(applied.restored,1);
+  assert.equal(applied.reused,0);
+  assert.equal(applied.snapshotsDeleted,0);
+  assert.equal(applied.factsOverwritten,0);
+  const sourceRows = f.db.prepare(
+    "SELECT horse_id,age_years FROM horse_profile_snapshots WHERE source_record_id='src-a' ORDER BY horse_id"
+  ).all();
+  assert.deepEqual(sourceRows,[{horse_id:'h100',age_years:4},{horse_id:'h101',age_years:5}]);
+  assert.equal(f.d1Metrics.batches,1);
+  await assert.rejects(
+    () => inspectHistoricalRestorationPage(f.env,{family:'horse_profile'}),
+    /reconciliation_proof_not_current/
+  );
+  for (const secret of [hash,key,'old-recovery','src-a','h101']) {
+    assert.equal(JSON.stringify(applied).includes(secret),false);
+  }
+});
