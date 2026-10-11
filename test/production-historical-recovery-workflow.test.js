@@ -33,6 +33,19 @@ test('historical restore workflow requires manual approval and exact released ma
   assert.match(workflow,/cancel-in-progress: false/);
 });
 
+test('recovery credential preflight verifies the real status route, not only auth-check',()=>{
+  const preflight=workflow.split('name: Wait for recovery route credential propagation')[1]
+    .split('name: Begin or resume private recovery run')[0];
+  assert.match(preflight,/\/v1\/storage-cleanup\/auth-check/);
+  assert.match(preflight,/\/v1\/storage-cleanup\/restoration\/run\/status/);
+  assert.match(preflight,/confirmed=\$\(\(confirmed \+ 1\)\)/);
+  assert.match(preflight,/\[ "\$confirmed" -ge 2 \]/);
+  assert.match(preflight,/historical_recovery_not_authorized_or_unavailable/);
+  assert.doesNotMatch(preflight,/ADMIN_TOKEN|echo.*CLEANUP_TOKEN/);
+  assert.match(runner,/fetchPrivateRecoveryJson/);
+  assert.doesNotMatch(runner,/authorization:'Bearer '\+TOKEN/);
+});
+
 test('backup is streamed from Cloudflare API to private Cloudflare R2, not via GitHub runner',()=>{
   assert.match(workflow,/Enable separate backup-only Cloudflare export/);
   assert.match(workflow,/HISTORICAL_BACKUP_API_TOKEN/);
