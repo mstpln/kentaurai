@@ -80,7 +80,7 @@ export function reconcileSnapshotFacts({
           validTime(ref.observed_at) && Date.parse(ref.observed_at) <= Date.parse(source.fetched_at) &&
           matchingColumns(ref, columns);
       });
-      if (exact.length + links.length && consistentDirect.length + consistentLinks.length === 0) {
+      if (exact.length + links.length > consistentDirect.length + consistentLinks.length) {
         status = 'conflict';
       } else if (consistentDirect.length + consistentLinks.length > 0) {
         status = 'represented';
