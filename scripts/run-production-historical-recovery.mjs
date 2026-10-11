@@ -22,7 +22,7 @@ function writeOutput(name,value){
 function ensure(){
   if(!URL_BASE?.startsWith('https://') ||
     !/^[a-zA-Z0-9._-]+$/.test(new URL(URL_BASE).hostname) ||
-    !TOKEN || !['initialize','run'].includes(PHASE) ||
+    !TOKEN || !['initialize','backup','run'].includes(PHASE) ||
     !['inventory','execute'].includes(MODE)) fail('recovery_runner_configuration_invalid');
 }
 async function call(path,method='GET',body=null){
@@ -79,6 +79,29 @@ async function main(){
     return;
   }
   if(!RUN_ID)fail('recovery_run_identifier_required');
+  if(PHASE==='backup'){
+    if(MODE!=='execute')fail('recovery_backup_execute_only');
+    const deadline=Date.now()+4*60*1000;
+    let report=checkResponse(await call(base+'status?run_id='+encodeURIComponent(RUN_ID)));
+    if(report.backupVerified){
+      writeOutput('backup_verified','true');
+      writeOutput('continue','false');
+      summarize(report,0);
+      return;
+    }
+    const startedBackup=checkResponse(await put(base+'backup-start',{run_id:RUN_ID}));
+    report=startedBackup;
+    let polls=0;
+    while(!report.backupVerified&&Date.now()<deadline&&polls<36){
+      report=checkResponse(await put(base+'backup-poll',{run_id:RUN_ID}));
+      polls++;
+      if(!report.backupVerified)await new Promise(resolve=>setTimeout(resolve,4000));
+    }
+    writeOutput('backup_verified',report.backupVerified?'true':'false');
+    writeOutput('continue',report.backupVerified?'false':'true');
+    summarize(report,polls);
+    return;
+  }
   const started=Date.now();
   let steps=0;
   let report=checkResponse(await call(base+'status?run_id='+encodeURIComponent(RUN_ID)));
