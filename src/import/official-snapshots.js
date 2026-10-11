@@ -112,12 +112,73 @@ function sameColumns(row, values) {
   return Object.entries(values).every(([column, value]) => Object.is(row?.[column] ?? null, value ?? null));
 }
 
+const SNAPSHOT_IMPORT_FAMILIES = Object.freeze([
+  ['horse_profile', 'horse_profile_snapshots', 'horseProfiles'],
+  ['horse_stat', 'horse_stat_snapshots', 'horseStats'],
+  ['horse_record', 'horse_record_snapshots', 'horseRecords'],
+  ['person_stat', 'person_stat_snapshots', 'personStats']
+]);
+
+const SNAPSHOT_TABLES = new Set(SNAPSHOT_IMPORT_FAMILIES.map((definition) => definition[1]));
+
+// INSERT OR IGNORE can suppress a genuine conflict as well as an idempotent
+// retry. Never claim a changed snapshot was stored unless the row exists with
+// the same source, entity, timestamp, scope and factual content.
+async function verifySnapshotWrite(env, table, snapshotId, expected, writeResult) {
+  if (!SNAPSHOT_TABLES.has(table)) throw new Error('unsupported official snapshot table');
+  const changes = Number(writeResult?.meta?.changes);
+  if (changes === 1) return;
+  if (changes !== 0) throw new Error('official snapshot insert outcome is unknown');
+  const columns = Object.keys(expected);
+  if (!columns.length || columns.some((column) => !/^[a-z_]+$/.test(column))) {
+    throw new Error('official snapshot verification columns are invalid');
+  }
+  const sql = 'SELECT 1 AS valid FROM ' + table + ' WHERE id=? AND ' +
+    columns.map((column) => column + ' IS ?').join(' AND ') + ' LIMIT 1';
+  const matching = await env.DB.prepare(sql).bind(snapshotId, ...Object.values(expected)).first();
+  if (!matching) throw new Error('official snapshot write was ignored or conflicted');
+}
+
+// Completed import counts must match one logical representation per accepted
+// fact: a direct snapshot owned by the source OR an observation referencing
+// an older snapshot. Never count a direct row and its own observation twice.
+async function verifySnapshotSourceCounts(env, sourceRecordId, expected) {
+  for (const [family, table, countField] of SNAPSHOT_IMPORT_FAMILIES) {
+    const expectedCount = Number(expected?.[countField]);
+    if (!Number.isSafeInteger(expectedCount) || expectedCount < 0) {
+      throw new Error('official snapshot source count is invalid');
+    }
+    const sql = 'SELECT ' +
+      '(SELECT COUNT(*) FROM ' + table + ' direct_snapshot WHERE direct_snapshot.source_record_id=?) +' +
+      '(SELECT COUNT(*) FROM official_snapshot_observations observation ' +
+      ' WHERE observation.source_record_id=? AND observation.snapshot_family=? ' +
+      ' AND NOT EXISTS (SELECT 1 FROM ' + table + ' owned ' +
+      ' WHERE owned.id=observation.snapshot_id AND owned.source_record_id=observation.source_record_id)) ' +
+      'AS actual_count';
+    const row = await env.DB.prepare(sql).bind(sourceRecordId, sourceRecordId, family).first();
+    if (Number(row?.actual_count) !== expectedCount) {
+      throw new Error('official snapshot source representation count mismatch: ' + family);
+    }
+  }
+}
+
 async function recordSnapshotObservation(env, source, family, entityKey, scopeKey, snapshotId, factualChanged) {
-  await env.DB.prepare(`
+  const write = await env.DB.prepare(`
     INSERT OR IGNORE INTO official_snapshot_observations
       (source_record_id,snapshot_family,entity_key,scope_key,observed_at,snapshot_id,factual_changed)
     VALUES (?,?,?,?,?,?,?)
   `).bind(source.id, family, entityKey, scopeKey, source.fetched_at, snapshotId, factualChanged ? 1 : 0).run();
+  const changes = Number(write?.meta?.changes);
+  if (changes === 1) return;
+  if (changes !== 0) throw new Error('official observation insert outcome is unknown');
+  const previous = await env.DB.prepare(`
+    SELECT observed_at,snapshot_id,factual_changed FROM official_snapshot_observations
+    WHERE source_record_id=? AND snapshot_family=? AND entity_key=? AND scope_key=?
+  `).bind(source.id, family, entityKey, scopeKey).first();
+  if (!previous || previous.observed_at !== source.fetched_at ||
+      previous.snapshot_id !== snapshotId || Number(previous.factual_changed) !== (factualChanged ? 1 : 0)) {
+    throw new Error('official observation write was ignored or conflicted');
+  }
 }
 
 function collectUnique(map, key, fact, label) {
@@ -214,11 +275,15 @@ async function insertHorseProfile(env, source, horseId, fact) {
     return { inserted: false, snapshotId: previous.id };
   }
   const snapshotId = stableId('horse-profile-snapshot', horseId, source.id);
-  await env.DB.prepare(`
+  const writeResult = await env.DB.prepare(`
     INSERT OR IGNORE INTO horse_profile_snapshots
       (id, horse_id, observed_at, age_years, source_record_id, quality_status)
     VALUES (?, ?, ?, ?, ?, ?)
   `).bind(snapshotId, horseId, source.fetched_at, fact.ageYears, source.id, SNAPSHOT_QUALITY).run();
+  await verifySnapshotWrite(env, 'horse_profile_snapshots', snapshotId, {
+    horse_id: horseId, observed_at: source.fetched_at, age_years: fact.ageYears,
+    source_record_id: source.id, quality_status: SNAPSHOT_QUALITY
+  }, writeResult);
   await recordSnapshotObservation(env, source, 'horse_profile', horseId, 'profile', snapshotId, true);
   return { inserted: true, snapshotId };
 }
@@ -241,7 +306,7 @@ async function insertHorseStat(env, source, horseId, fact) {
     return { inserted: false, snapshotId: previous.id };
   }
   const snapshotId = stableId('horse-stat-snapshot', horseId, source.id, fact.snapshotScope);
-  await env.DB.prepare(`
+  const writeResult = await env.DB.prepare(`
     INSERT OR IGNORE INTO horse_stat_snapshots
       (id, horse_id, observed_at, snapshot_scope, stat_year, starts, earnings_raw, wins, seconds, thirds,
        win_percentage_raw, place_percentage_raw, earnings_per_start_raw, start_points, source_record_id, quality_status)
@@ -251,6 +316,14 @@ async function insertHorseStat(env, source, horseId, fact) {
     fact.snapshotScope, fact.statYear, fact.starts, fact.earningsRaw, fact.wins, fact.seconds, fact.thirds,
     fact.winPercentageRaw, fact.placePercentageRaw, fact.earningsPerStartRaw, fact.startPoints, source.id, SNAPSHOT_QUALITY
   ).run();
+  await verifySnapshotWrite(env, 'horse_stat_snapshots', snapshotId, {
+    horse_id: horseId, observed_at: source.fetched_at, snapshot_scope: fact.snapshotScope,
+    stat_year: fact.statYear, starts: fact.starts, earnings_raw: fact.earningsRaw,
+    wins: fact.wins, seconds: fact.seconds, thirds: fact.thirds,
+    win_percentage_raw: fact.winPercentageRaw, place_percentage_raw: fact.placePercentageRaw,
+    earnings_per_start_raw: fact.earningsPerStartRaw, start_points: fact.startPoints,
+    source_record_id: source.id, quality_status: SNAPSHOT_QUALITY
+  }, writeResult);
   await recordSnapshotObservation(env, source, 'horse_stat', horseId, fact.snapshotScope, snapshotId, true);
   return { inserted: true, snapshotId };
 }
@@ -274,7 +347,7 @@ async function insertHorseRecord(env, source, horseId, fact) {
     return { inserted: false, snapshotId: previous.id };
   }
   const snapshotId = stableId('horse-record-snapshot', horseId, source.id, scopeKey, fact.ordinal);
-  await env.DB.prepare(`
+  const writeResult = await env.DB.prepare(`
     INSERT OR IGNORE INTO horse_record_snapshots
       (id, horse_id, observed_at, record_scope, stat_year, record_ordinal, code, start_method, distance_group,
        time_minutes, time_seconds, time_tenths, place, source_record_id, quality_status)
@@ -284,6 +357,14 @@ async function insertHorseRecord(env, source, horseId, fact) {
     fact.recordScope, fact.statYear, fact.ordinal, fact.code, fact.startMethod, fact.distanceGroup,
     fact.timeMinutes, fact.timeSeconds, fact.timeTenths, fact.place, source.id, SNAPSHOT_QUALITY
   ).run();
+  await verifySnapshotWrite(env, 'horse_record_snapshots', snapshotId, {
+    horse_id: horseId, observed_at: source.fetched_at, record_scope: fact.recordScope,
+    stat_year: fact.statYear, record_ordinal: fact.ordinal, code: fact.code,
+    start_method: fact.startMethod, distance_group: fact.distanceGroup,
+    time_minutes: fact.timeMinutes, time_seconds: fact.timeSeconds,
+    time_tenths: fact.timeTenths, place: fact.place,
+    source_record_id: source.id, quality_status: SNAPSHOT_QUALITY
+  }, writeResult);
   await recordSnapshotObservation(env, source, 'horse_record', horseId, comparisonScope, snapshotId, true);
   return { inserted: true, snapshotId };
 }
@@ -305,7 +386,7 @@ async function insertPersonStat(env, source, personId, fact) {
     return { inserted: false, snapshotId: previous.id };
   }
   const snapshotId = stableId('person-stat-snapshot', fact.personType, personId, source.id, fact.statYear);
-  await env.DB.prepare(`
+  const writeResult = await env.DB.prepare(`
     INSERT OR IGNORE INTO person_stat_snapshots
       (id, person_type, person_id, observed_at, stat_year, starts, earnings_raw, wins, seconds, thirds,
        win_percentage_raw, source_record_id, quality_status)
@@ -315,6 +396,13 @@ async function insertPersonStat(env, source, personId, fact) {
     source.fetched_at, fact.statYear, fact.starts, fact.earningsRaw, fact.wins, fact.seconds, fact.thirds,
     fact.winPercentageRaw, source.id, SNAPSHOT_QUALITY
   ).run();
+  await verifySnapshotWrite(env, 'person_stat_snapshots', snapshotId, {
+    person_type: fact.personType, person_id: personId, observed_at: source.fetched_at,
+    stat_year: fact.statYear, starts: fact.starts, earnings_raw: fact.earningsRaw,
+    wins: fact.wins, seconds: fact.seconds, thirds: fact.thirds,
+    win_percentage_raw: fact.winPercentageRaw,
+    source_record_id: source.id, quality_status: SNAPSHOT_QUALITY
+  }, writeResult);
   await recordSnapshotObservation(env, source, 'person_stat', entityKey, String(fact.statYear), snapshotId, true);
   return { inserted: true, snapshotId };
 }
@@ -346,8 +434,15 @@ export async function syncOfficialSnapshotsFromSource(env, sourceRecordId) {
   const id = String(sourceRecordId || '').trim();
   if (!id) throw new Error('source_record_id is required');
 
-  const existingSync = await env.DB.prepare('SELECT status FROM official_snapshot_source_sync WHERE source_record_id = ? LIMIT 1').bind(id).first();
-  if (existingSync?.status === 'complete') return { sourceRecordId: id, status: 'complete', reused: true };
+  const existingSync = await env.DB.prepare(`
+    SELECT status,horse_profile_count AS horseProfiles,horse_stat_count AS horseStats,
+      horse_record_count AS horseRecords,person_stat_count AS personStats
+    FROM official_snapshot_source_sync WHERE source_record_id=? LIMIT 1
+  `).bind(id).first();
+  if (existingSync?.status === 'complete') {
+    await verifySnapshotSourceCounts(env, id, existingSync);
+    return { sourceRecordId: id, status: 'complete', reused: true };
+  }
 
   const source = await env.DB.prepare(`
     SELECT id, source_type, fetched_at, raw_object_key, quality_status
@@ -397,6 +492,7 @@ export async function syncOfficialSnapshotsFromSource(env, sourceRecordId) {
       await insertPersonStat(env, source, personId, fact); counts.personStats += 1;
     }
 
+    await verifySnapshotSourceCounts(env, id, counts);
     await markSource(env, id, 'complete', counts);
     return { sourceRecordId: id, status: 'complete', ...counts, reused: false };
   } catch (error) {

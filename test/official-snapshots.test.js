@@ -459,3 +459,48 @@ test('legacy base snapshots remain visible before a later identical observation 
   );
   assert.equal(afterDriver.get('driver-a').sourceRecordId, 'same-later-source');
 });
+
+
+test('colliding normalized source IDs cannot silently reuse another source snapshot', async () => {
+  const { db, env } = createTestEnv();
+  seedEntities(db);
+  // Distinct immutable source IDs produce the same canonical snapshot ID.
+  addSource(db, 'synthetic.source', '2026-09-10T10:00:00Z', 'collision-a');
+  addSource(db, 'synthetic_source', '2026-09-11T10:00:00Z', 'collision-b');
+  await putPayload(env, 'collision-a', payload({ age: 4 }));
+  await putPayload(env, 'collision-b', payload({ age: 5 }));
+  assert.equal((await syncOfficialSnapshotsFromSource(env, 'synthetic.source')).status, 'complete');
+  await assert.rejects(() => syncOfficialSnapshotsFromSource(env, 'synthetic_source'),
+    /official snapshot write was ignored or conflicted/);
+  const row = db.prepare("SELECT age_years,source_record_id FROM horse_profile_snapshots WHERE horse_id='horse-a'").get();
+  assert.equal(row.age_years, 4);
+  assert.equal(row.source_record_id, 'synthetic.source');
+  assert.equal(db.prepare("SELECT status FROM official_snapshot_source_sync WHERE source_record_id='synthetic_source'").get().status, 'failed');
+});
+
+test('complete source cannot be silently reused if recorded source counts are wrong', async () => {
+  const { db, env } = createTestEnv();
+  seedEntities(db);
+  addSource(db, 'count-source', '2026-09-10T10:00:00Z', 'count-raw');
+  await putPayload(env, 'count-raw', payload());
+  const result = await syncOfficialSnapshotsFromSource(env, 'count-source');
+  assert.equal(result.status,'complete');
+  const observedCount = db.prepare("SELECT horse_profile_count AS count FROM official_snapshot_source_sync WHERE source_record_id='count-source'").get().count;
+  db.prepare("UPDATE official_snapshot_source_sync SET horse_profile_count=horse_profile_count+1 WHERE source_record_id='count-source'").run();
+  await assert.rejects(() => syncOfficialSnapshotsFromSource(env, 'count-source'),
+    /official snapshot source representation count mismatch: horse_profile/);
+  assert.equal(db.prepare("SELECT status FROM official_snapshot_source_sync WHERE source_record_id='count-source'").get().status,'complete');
+  assert.equal(db.prepare("SELECT horse_profile_count AS count FROM official_snapshot_source_sync WHERE source_record_id='count-source'").get().count, observedCount+1);
+});
+
+test('idempotent retry from failed sync safely reuses matching partial snapshots', async () => {
+  const { db, env } = createTestEnv();
+  seedEntities(db);
+  addSource(db, 'partial-source', '2026-09-10T10:00:00Z', 'partial-raw');
+  await putPayload(env, 'partial-raw', payload());
+  assert.equal((await syncOfficialSnapshotsFromSource(env, 'partial-source')).status, 'complete');
+  // Mark failed to simulate recovery after the facts were successfully stored.
+  db.prepare("UPDATE official_snapshot_source_sync SET status='failed' WHERE source_record_id='partial-source'").run();
+  assert.equal((await syncOfficialSnapshotsFromSource(env, 'partial-source')).status,'complete');
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM horse_profile_snapshots WHERE source_record_id='partial-source'").get().n,1);
+});
