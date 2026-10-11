@@ -466,3 +466,34 @@ test('backup must match signed file byte length before obtaining a valid R2 rece
     });
   }
 });
+
+
+test('raw original with more unique facts than completed sync count is quarantined',async()=>{
+  const f=await fixture();
+  const expandedBody=JSON.stringify({races:[{starts:[
+    {horse:{id:101,age:5}},
+    {horse:{id:202,age:6}}
+  ]}]});
+  const changedHash=createHash('sha256').update(expandedBody).digest('hex');
+  const key='raw/official_provider/'+changedHash+'.json';
+  await f.env.RAW_BUCKET.put(key,expandedBody,{
+    customMetadata:{contentHash:changedHash,sourceType:'official_provider'}
+  });
+  f.db.prepare('UPDATE source_records SET raw_object_key=?,content_hash=? WHERE id=?')
+    .run(key,changedHash,SOURCE_CURRENT);
+  const started=await startHistoricalRecoveryRun(f.env);
+  const page=await stepHistoricalRecoveryInventory(f.env,{runId:started.runId});
+  assert.equal(page.pageDeficit,1);
+  assert.equal(page.pageVerified,0);
+  assert.equal(page.pageQuarantined,1);
+  assert.equal(page.verifiedCandidateFacts,0);
+  const receipt=f.db.prepare(
+    'SELECT status,missing_count,candidate_count FROM historical_recovery_receipts WHERE run_id=?'
+  ).get(started.runId);
+  assert.equal(receipt.status,'quarantined');
+  assert.equal(receipt.missing_count,1);
+  assert.equal(receipt.candidate_count,0);
+  assert.equal(f.db.prepare(
+    'SELECT COUNT(*) AS n FROM horse_profile_snapshots WHERE source_record_id=?'
+  ).get(SOURCE_CURRENT).n,0);
+});
