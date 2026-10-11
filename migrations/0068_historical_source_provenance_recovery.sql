@@ -10,7 +10,7 @@ CREATE TABLE historical_recovery_runs (
   id TEXT PRIMARY KEY,
   source_sha TEXT NOT NULL CHECK (length(source_sha)=40),
   phase TEXT NOT NULL DEFAULT 'inventory'
-    CHECK (phase IN ('inventory','ready','applying','complete','paused','failed')),
+    CHECK (phase IN ('inventory','ready','applying','verify_pending','complete','paused','failed')),
   family_index INTEGER NOT NULL DEFAULT 0 CHECK (family_index BETWEEN 0 AND 4),
   after_source_id TEXT NOT NULL DEFAULT '',
   expected_epoch INTEGER NOT NULL CHECK (expected_epoch >= 0),
@@ -31,7 +31,7 @@ CREATE TABLE historical_recovery_runs (
 );
 CREATE UNIQUE INDEX idx_historical_recovery_one_active
   ON historical_recovery_runs ((1))
-  WHERE phase IN ('inventory','ready','applying');
+  WHERE phase IN ('inventory','ready','applying','verify_pending');
 CREATE INDEX idx_historical_recovery_state
   ON historical_recovery_runs(phase,updated_at);
 
