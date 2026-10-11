@@ -76,7 +76,7 @@ test('schema and persistent mutation fence cover all four source and identity fa
       assert.ok(row,'missing revision fence: '+name);
     }
   }
-  assert.match(sql,/status IN \('inventory','ready','applying','verify_pending'\)/);
+  assert.match(sql,/phase IN \('inventory','ready','applying','verify_pending'\)/);
   assert.match(sql,/CREATE UNIQUE INDEX idx_historical_recovery_one_active/);
   assert.match(sql,/backup_etag TEXT/);
   assert.doesNotMatch(sql,/DROP TABLE|DELETE FROM horse_profile_snapshots/i);
