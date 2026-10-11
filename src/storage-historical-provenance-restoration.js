@@ -1,5 +1,6 @@
 // Recovery primitive for loss of a source's logical snapshot representation.
-// Intentionally NOT reachable from an HTTP route or production schedule.
+// Reachable only through the separately authorized private recovery run.
+// No scheduled trigger or ordinary admin path may execute restoration.
 // A direct source-owned snapshot restores truthful as-of provenance without
 // guessing whether the value was unchanged across an incomplete timeline.
 import { stableId } from './ids.js';
@@ -158,8 +159,8 @@ export function hasFreshHistoricalRestorationCapability(env, { approved, authori
 }
 
 
-// Only callable from an explicitly reviewed *future* recovery execution path.
-// This module has deliberately no public Worker route or automatic scheduler.
+// Called only by the guarded, short-lived private recovery capability.
+// No public or scheduled recovery executor is enabled.
 export async function applyVerifiedHistoricalRestoration(env, candidate, {
   approved = false, authorization = null, runId = null, expectedEpoch = null
 } = {}) {
