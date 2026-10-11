@@ -185,7 +185,8 @@ test('manual R2 workflow enforces deploy identity, scoped secrets and secret rem
   assert.doesNotMatch(workflow, /push:\s*\n\s+branches/);
   assert.match(workflow, /group: kentaurai-production-operation/);
   assert.match(workflow, /cancel-in-progress: false/);
-  assert.match(workflow, /test "\$\([^"]+\)" = "\$GITHUB_SHA"/);
+  assert.match(workflow, /\.workflow_runs\[0\]\.head_sha/);
+  assert.match(workflow, /= "\$GITHUB_SHA"/);
   assert.match(workflow, /Run full QA without Cloudflare credentials/);
   const qaBlock = workflow.split('      - name: Run full QA without Cloudflare credentials')[1]
     ?.split('      - name: Remove orphaned previous cleanup-only secret')[0];
