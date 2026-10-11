@@ -243,3 +243,61 @@ test('private recovery run API requires authentication and rejects writes withou
     error:'historical_recovery_not_authorized_or_unavailable'
   });
 });
+
+
+test('changed private original after inventory is quarantined and independent audit reports remaining deficit',async()=>{
+  const f=await fixture();
+  const {runId}=await ready(f);
+  f.env.HISTORICAL_REPAIR_ENABLED='true';
+  f.env.HISTORICAL_REPAIR_TOKEN=TOKEN;
+  const row=f.db.prepare(
+    'SELECT raw_object_key FROM source_records WHERE id=?'
+  ).get(SOURCE_CURRENT);
+  await f.env.RAW_BUCKET.delete(row.raw_object_key);
+  const executed=await stepHistoricalRecoveryExecution(f.env,{
+    runId,approved:true,authorization:TOKEN
+  });
+  assert.equal(executed.phase,'applying');
+  assert.equal(executed.pageQuarantined,1);
+  assert.equal(executed.inserted,0);
+  assert.equal(executed.quarantinedOrDeferredFacts,1);
+  assert.equal(f.db.prepare(
+    "SELECT COUNT(*) AS n FROM horse_profile_snapshots WHERE source_record_id=?"
+  ).get(SOURCE_CURRENT).n,0);
+  const transitioned=await stepHistoricalRecoveryExecution(f.env,{
+    runId,approved:true,authorization:TOKEN
+  });
+  assert.equal(transitioned.phase,'verify_pending');
+  let report=transitioned;
+  for(let i=0;i<12&&report.phase==='verify_pending';i++){
+    report=await stepHistoricalRecoveryPostAudit(f.env,{runId});
+  }
+  assert.equal(report.phase,'complete_with_quarantine');
+  assert.equal(report.postAuditRemainingMissing,1);
+  assert.equal(report.postAuditExcess,0);
+  assert.equal(report.restoredSourceFacts,0);
+  assert.equal(f.db.prepare(
+    "SELECT status FROM historical_recovery_receipts WHERE run_id=? AND family='horse_profile'"
+  ).get(runId).status,'quarantined');
+});
+
+test('stale original mapping pauses source restoration without touching immutable facts',async()=>{
+  const f=await fixture();
+  const {runId}=await ready(f);
+  f.env.HISTORICAL_REPAIR_ENABLED='true';
+  f.env.HISTORICAL_REPAIR_TOKEN=TOKEN;
+  f.db.prepare(
+    "UPDATE horse_external_ids SET external_id='999' WHERE horse_id='horse001'"
+  ).run();
+  await assert.rejects(
+    () => stepHistoricalRecoveryExecution(f.env,{
+      runId,approved:true,authorization:TOKEN
+    }), /recovery_external_mutation_paused/
+  );
+  const state=await historicalRecoveryStatus(f.env,{runId});
+  assert.equal(state.phase,'paused');
+  assert.equal(state.scanDriftDetected,true);
+  assert.equal(f.db.prepare(
+    "SELECT COUNT(*) AS n FROM horse_profile_snapshots WHERE source_record_id=?"
+  ).get(SOURCE_CURRENT).n,0);
+});
