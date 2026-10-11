@@ -118,7 +118,16 @@ export async function startHistoricalRecoveryRun(env) {
 }
 export async function historicalRecoveryStatus(env,{runId}={}) {
   requireEnv(env);
-  return totals(await loadRun(env,runId));
+  let chosen=runId;
+  if(!chosen){
+    const latest=await first(env,
+      "SELECT id FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending')" +
+      ' ORDER BY created_at DESC,id DESC LIMIT 1'
+    );
+    if(!latest)throw new Error('recovery_no_active_run');
+    chosen=latest.id;
+  }
+  return totals(await loadRun(env,chosen));
 }
 export async function stepHistoricalRecoveryInventory(env,{runId}={}) {
   requireEnv(env);
