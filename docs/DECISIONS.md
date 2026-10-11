@@ -1,3 +1,33 @@
+## Historical source-provenance recovery: source-owned insert only — 2026-10-11
+
+- The 2026-09-27 destructive cleanup executor could delete a source's
+  redundant direct snapshot without creating its own
+  \`official_snapshot_observations\` link. Two completed production runs
+  removed 18,717 snapshots. The historical logic has since been fixed,
+  and destructive cleanup routes stay disabled.
+- Preserve every original source's factual \`as_of\` evidence, not just the
+  latest equal-value snapshot. Never infer historical identity/time
+  correctness solely from today's external-ID mapping.
+- Where both current and older original R2 payloads are hash-verified,
+  match the source-native identity, exact family/scope/ordinal and factual
+  columns, and verify the older D1 source snapshot. For independently
+  authorized recovery, reconstruct a **source-owned direct snapshot**,
+  not an assumed unchanged-observation link: it is correct even if an
+  intervening historical change-point is not yet fully reconstructed.
+- A repair is append-only to missing D1 snapshot facts, idempotent and
+  source-bounded. Never run legacy DELETE/UPDATE cleanup or Cloudflare D1
+  point-in-time restoration against live production: either can lose
+  later legitimate data.
+- The current code may expose aggregate-only read-only preview without a
+  repair HTTP route; separate production backup, full inventory,
+  revision-aware durable progress, reviewed execution authorization,
+  quarantine and post-repair independent audit are required before any
+  production write.
+- Four verified sampled source/family comparisons total 25 missing
+  representations with 25 older matching hash-verified originals. This
+  evidence does not prove the complete 43,613 logical shortfall has the
+  same cause or is all automatically recoverable.
+
 ## Disable destructive cleanup HTTP routes — 2026-10-11
 
 The public GitHub cleanup workflow being dry-run-only does not prevent direct
