@@ -147,6 +147,7 @@ function blankFamily(family) {
     rawBelowRecordedFacts: 0,
     originalAbsent: 0,
     originalInvalid: 0,
+    rawReadFailures: 0,
     provenanceConflict: 0,
     deferredByBudget: 0,
     rawBindingUnavailable: 0
@@ -178,12 +179,15 @@ export async function inspectPrivateRawSnapshotEvidence(env) {
         if (kind === 'without_ledger') summary.noLedger++;
         else summary.partial++;
         const inspection = await inspectRawObject(env, source, budget);
-        if (inspection.status === 'object_budget_exhausted') {
+        if (inspection.status === 'object_budget_exhausted'
+            || inspection.status === 'raw_object_too_large') {
           summary.deferredByBudget++;
         } else if (inspection.status === 'raw_binding_unavailable') {
           summary.rawBindingUnavailable++;
         } else if (['missing_raw_reference','raw_object_missing'].includes(inspection.status)) {
           summary.originalAbsent++;
+        } else if (inspection.status === 'raw_read_error') {
+          summary.rawReadFailures++;
         } else if (inspection.status !== 'hash_verified') {
           summary.originalInvalid++;
         } else if (!/^[a-f0-9]{64}$/.test(String(source.content_hash || ''))

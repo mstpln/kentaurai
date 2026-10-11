@@ -154,7 +154,8 @@ test('oversized R2 original is never downloaded, parsed or mistaken for evidence
     get: async (key) => { gets++; return raw.get(key); }
   };
   const report = await inspectPrivateRawSnapshotEvidence(f.env);
-  assert.equal(report.families[0].originalInvalid, 1);
+  assert.equal(report.families[0].deferredByBudget, 1);
+  assert.equal(report.families[0].originalInvalid, 0);
   assert.equal(report.families[0].rawHashVerified, 1);
   assert.equal(gets, 1, 'only the other valid original may be downloaded');
   assert.equal(report.budget.r2ObjectsRead, 1);
