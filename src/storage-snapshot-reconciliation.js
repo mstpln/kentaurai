@@ -73,8 +73,10 @@ export function reconcileSnapshotFacts({
       const consistentLinks = links.filter((row) => {
         const ref = referenceById.get(row.snapshot_id) ||
           direct.find((candidate) => candidate.id === row.snapshot_id);
+        const expectedChangeMarker = ref?.source_record_id === source.id ? 1 : 0;
         return ref && ref.lineage_verified !== false && row.observed_at === source.fetched_at &&
           ref.entity_key === entityKey && ref.scope_key === scope &&
+          (row.factual_changed == null || Number(row.factual_changed) === expectedChangeMarker) &&
           validTime(ref.observed_at) && Date.parse(ref.observed_at) <= Date.parse(source.fetched_at) &&
           matchingColumns(ref, columns);
       });
