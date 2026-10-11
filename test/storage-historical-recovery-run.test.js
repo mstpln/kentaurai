@@ -121,6 +121,7 @@ test('durable scan and source-owned restoration complete with independent source
     () => stepHistoricalRecoveryExecution(f.env,{runId,approved:true,authorization:TOKEN}),
     /historical_restoration_not_authorized/
   );
+  f.env.HISTORICAL_REPAIR_EXPIRES_AT=String(Math.floor(Date.now()/1000)+1200);
   f.env.HISTORICAL_REPAIR_ENABLED='true';
   f.env.HISTORICAL_REPAIR_TOKEN=TOKEN;
   let applied=await stepHistoricalRecoveryExecution(f.env,{
@@ -334,4 +335,17 @@ test('crash after final atomic source INSERT but before receipt close is idempot
   assert.equal(f.db.prepare(
     'SELECT COUNT(*) AS n FROM horse_profile_snapshots WHERE source_record_id=?'
   ).get(SOURCE_CURRENT).n,1);
+});
+
+
+test('expired recovery capability cannot restore historical facts',async()=>{
+  const f=await fixture();
+  const {runId}=await ready(f);
+  f.env.HISTORICAL_REPAIR_ENABLED='true';
+  f.env.HISTORICAL_REPAIR_TOKEN=TOKEN;
+  f.env.HISTORICAL_REPAIR_EXPIRES_AT=String(Math.floor(Date.now()/1000)-1);
+  await assert.rejects(()=>stepHistoricalRecoveryExecution(f.env,{
+    runId,approved:true,authorization:TOKEN
+  }),/historical_restoration_not_authorized/);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM horse_profile_snapshots WHERE source_record_id=?').get(SOURCE_CURRENT).n,0);
 });
