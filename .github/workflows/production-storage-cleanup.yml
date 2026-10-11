@@ -70,6 +70,7 @@ jobs:
       CLEANUP_SESSION_ID: ${{ inputs.continuation_session }}
       CLEANUP_AUDIT_RUN_ID: ${{ inputs.continuation_audit }}
       CLEANUP_TRIGGER_CONFIRMATION: ${{ inputs.confirmation }}
+      CLEANUP_CONTINUATION_REQUEST: ${{ inputs.continuation_request }}
       D1_DATABASE_ID: d8189e0e-6127-4ef2-88cc-534cb2217340
       WORKER_NAME: kentaurai-api
 
@@ -93,11 +94,11 @@ jobs:
               *) echo "::error::Dry-run refuses execute confirmation or unknown marker."; exit 1 ;;
             esac
             if [ "$CLEANUP_TRIGGER_CONFIRMATION" = "RESUME READ ONLY AUDIT" ]; then
-              if [ -z "$CLEANUP_AUDIT_RUN_ID" ] || [ -n "$CLEANUP_SESSION_ID" ] || ! [[ "${{ inputs.continuation_request }}" =~ ^[1-9][0-9]*$ ]]; then
+              if [ -z "$CLEANUP_AUDIT_RUN_ID" ] || [ -n "$CLEANUP_SESSION_ID" ] || ! [[ "$CLEANUP_CONTINUATION_REQUEST" =~ ^[1-9][0-9]*$ ]]; then
                 echo "::error::Internal READ-ONLY continuation requires one audit ID and a valid parent run ID, never an execute session."
                 exit 1
               fi
-            elif [ -n "${{ inputs.continuation_request }}" ]; then
+            elif [ -n "$CLEANUP_CONTINUATION_REQUEST" ]; then
               echo "::error::Manual dry-run may not impersonate an automated continuation."
               exit 1
             fi
@@ -143,6 +144,18 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::CLOUDFLARE_API_TOKEN is not configured"; exit 1; }
           test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::CLOUDFLARE_ACCOUNT_ID is not configured"; exit 1; }
           echo "::add-mask::$CLOUDFLARE_API_TOKEN"
+
+      - name: Remove any orphaned previous cleanup-only Worker token
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Only one production operation can hold the shared job lock.
+          # Clean up credentials left by a cancelled/ambiguous prior run
+          # before installing a fresh token for this read-only check.
+          existing="$(npx --yes wrangler@4.114.0 secret list --name "$WORKER_NAME" --format json)"
+          if printf '%s' "$existing" | jq -e '.[] | select(.name == "STORAGE_CLEANUP_TOKEN")' >/dev/null; then
+            printf 'y\n' | npx --yes wrangler@4.114.0 secret delete STORAGE_CLEANUP_TOKEN --name "$WORKER_NAME"
+          fi
 
       - name: Create short-lived cleanup-only Worker token
         id: cleanup_token
