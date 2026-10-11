@@ -1,25 +1,3 @@
-## Guard new official snapshot imports against silent source-count mismatch
-
-The official snapshot importer incremented expected counts even when
-\`INSERT OR IGNORE\` suppressed a write. A complete source could also be
-reused without verifying its expected-vs-actual representation counts.
-This was a code-level integrity weakness; its contribution to the existing
-production shortfall cannot be established without the separate read-only
-D1 diagnostic.
-
-The proposed importer checks suppressed snapshot/observation writes against
-the exact expected source/entity/facts, then independently validates one
-direct-or-observation logical representation per processed fact **before**
-marking a source complete. Repeated complete-source requests also verify
-their recorded counts before returning \`reused\`. A discrepancy fails closed
-without overwriting observed source facts, and partial \`failed\` sync data
-remains available for source-authenticated retry. Tests cover normalized
-source-ID collisions, misleading complete counts and idempotent replay.
-
-This is a preventive code guard, **not** authorization to rewrite old
-snapshots or perform any cleanup. Production D1/R2 data, schema, budgets,
-AI model, paid editorial and cleanup execution routes remain unchanged.
-
 ## Read-only audit continuation #22: isolate QA from active workflow inputs
 
 - GitHub run #21 correctly accepted bounded read-only progress and automatically
@@ -673,3 +651,25 @@ The external-analysis production release was accepted after:
 - Settlement finalization repairs only the verified closing market required for post-race statistics, persists final payout/result facts, and does not re-run full participant normalization after all eight factual winners are already known.
 - Scheduled live normalization excludes settlement-owned final sources so both pipelines cannot normalize the same source concurrently.
 - Chunked official normalization now uses the same horse-first race-entry identity rules as whole-game normalization and preserves existing stored horse/source-start identity on remaps.
+
+## Guard new official snapshot imports against silent source-count mismatch
+
+The official snapshot importer incremented expected counts even when
+`INSERT OR IGNORE` suppressed a write. A complete source could also be
+reused without verifying its expected-vs-actual representation counts.
+This was a code-level integrity weakness; its contribution to the existing
+production shortfall cannot be established without the separate read-only
+D1 diagnostic.
+
+The proposed importer checks suppressed snapshot/observation writes against
+the exact expected source/entity/facts, then independently validates one
+direct-or-observation logical representation per processed fact **before**
+marking a source complete. Repeated complete-source requests also verify
+their recorded counts before returning `reused`. A discrepancy fails closed
+without overwriting observed source facts, and partial `failed` sync data
+remains available for source-authenticated retry. Tests cover normalized
+source-ID collisions, misleading complete counts and idempotent replay.
+
+This is a preventive code guard, **not** authorization to rewrite old
+snapshots or perform any cleanup. Production D1/R2 data, schema, budgets,
+AI model, paid editorial and cleanup execution routes remain unchanged.
