@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   READ_ONLY_MARKER,
   buildReadOnlyAuditContinuation,
+  continuationRunName,
   queueReadOnlyAudit
 } from '../scripts/queue-production-storage-audit.mjs';
 
@@ -14,6 +15,7 @@ function permittedEnv() {
     GITHUB_REPOSITORY: 'mstpln/kentaurai',
     GITHUB_REF: 'refs/heads/main',
     GITHUB_SHA: 'a'.repeat(40),
+    GITHUB_RUN_ID: '38070000123',
     GH_TOKEN: 'synthetic-github-token',
     MODE: 'dry-run',
     CONFIRMATION: '',
@@ -25,7 +27,7 @@ function permittedEnv() {
     AUDIT_RUN_ID: ID,
     AUDIT_CONTINUATION_COUNT: '3',
     AUDIT_MAX_CONTINUATIONS: '48',
-    AUDIT_EXPIRES_AT: new Date(NOW + 10 * 60 * 1000).toISOString(),
+    AUDIT_EXPIRES_AT: new Date(NOW + 60 * 60 * 1000).toISOString(),
     DRY_RUN_MAX_BATCHES: '50'
   };
 }
@@ -39,7 +41,8 @@ test('automatic continuation always dispatches the SAME read-only audit, never e
       confirmation: READ_ONLY_MARKER,
       dry_run_max_batches: '50',
       continuation_audit: ID,
-      continuation_session: ''
+      continuation_session: '',
+      continuation_request: '38070000123'
     }
   });
   assert.doesNotMatch(JSON.stringify(payload), /EXECUTE REVIEWED STORAGE CLEANUP/);
@@ -59,6 +62,7 @@ test('fail closed for exhausted, stale, costly, stalled and ambiguous continuati
     ['foreign repo', { GITHUB_REPOSITORY: 'another/repo' }, /KentaurAI main/],
     ['foreign branch', { GITHUB_REF: 'refs/heads/unsafe' }, /KentaurAI main/],
     ['invalid source SHA', { GITHUB_SHA: 'not-a-hash' }, /KentaurAI main/],
+    ['missing parent run', { GITHUB_RUN_ID: '' }, /parent GitHub run ID/],
     ['complete audit', { AUDIT_INCOMPLETE: 'false' }, /progressing/],
     ['no progress', { PROGRESS_MADE: 'false' }, /progressing/],
     ['run cost exceeded', { COST_BUDGET_STOP: 'true' }, /cost\/safety stop/],
@@ -83,21 +87,35 @@ test('fail closed for exhausted, stale, costly, stalled and ambiguous continuati
 
 test('GitHub dispatch makes one authenticated workflow_dispatch and never logs a token or response', async () => {
   const env = permittedEnv();
-  let callCount = 0;
+  let postCount = 0;
+  let lookupCount = 0;
   const fetchFn = async (url, options) => {
-    callCount++;
-    assert.equal(url, 'https://api.github.com/repos/mstpln/kentaurai/actions/workflows/production-storage-cleanup.yml/dispatches');
-    assert.equal(options.method, 'POST');
     assert.equal(options.headers.Authorization, 'Bearer synthetic-github-token');
-    assert.equal(options.headers['X-GitHub-Api-Version'], '2022-11-28');
-    assert.equal(JSON.parse(options.body).inputs.mode, 'dry-run');
-    assert.equal(JSON.parse(options.body).inputs.confirmation, READ_ONLY_MARKER);
-    assert.equal(JSON.parse(options.body).inputs.continuation_session, '');
-    return { status: 204 };
+    if (url.endsWith('/dispatches')) {
+      postCount++;
+      assert.equal(options.method, 'POST');
+      assert.equal(options.headers['X-GitHub-Api-Version'], '2022-11-28');
+      assert.equal(JSON.parse(options.body).inputs.mode, 'dry-run');
+      assert.equal(JSON.parse(options.body).inputs.confirmation, READ_ONLY_MARKER);
+      assert.equal(JSON.parse(options.body).inputs.continuation_session, '');
+      assert.equal(JSON.parse(options.body).inputs.continuation_request, env.GITHUB_RUN_ID);
+      return { status: 204 };
+    }
+    lookupCount++;
+    return { status: 200, json: async () => ({ workflow_runs: lookupCount > 1 ? [{
+      id: 7001,
+      name: continuationRunName(env.GITHUB_RUN_ID),
+      event: 'workflow_dispatch',
+      head_sha: env.GITHUB_SHA,
+      status: 'in_progress'
+    }] : [] }) };
   };
-  const result = await queueReadOnlyAudit(env, { fetchFn, nowMs: NOW });
-  assert.deepEqual(result, { queued: true });
-  assert.equal(callCount, 1);
+  const result = await queueReadOnlyAudit(env, {
+    fetchFn, nowMs: NOW, sleepFn: async () => {}, discoveryAttempts: 2
+  });
+  assert.deepEqual(result, { queued: true, runId: 7001, alreadyExisted: false });
+  assert.equal(postCount, 1);
+  assert.equal(lookupCount, 2);
 });
 
 test('failed dispatch does not silently claim success or expose provider details', async () => {
@@ -105,7 +123,9 @@ test('failed dispatch does not silently claim success or expose provider details
   await assert.rejects(
     () => queueReadOnlyAudit(env, {
       nowMs: NOW,
-      fetchFn: async () => ({ status: 403, text: async () => 'private-auth-error-body' })
+      fetchFn: async (url) => url.includes('/runs?')
+        ? { status: 200, json: async () => ({ workflow_runs: [] }) }
+        : { status: 403, text: async () => 'private-auth-error-body' }
     }),
     (error) => /HTTP 403/.test(error.message) && !error.message.includes('private-auth-error-body')
   );
@@ -122,4 +142,75 @@ test('failed dispatch does not silently claim success or expose provider details
     () => queueReadOnlyAudit({ ...env, GH_TOKEN: '' }, { nowMs: NOW }),
     /write token missing/
   );
+});
+
+test('an observed successor makes a job retry idempotent without a duplicate dispatch', async () => {
+  const env = permittedEnv();
+  let postCount = 0;
+  let lookupCount = 0;
+  const result = await queueReadOnlyAudit(env, {
+    nowMs: NOW,
+    sleepFn: async () => {},
+    discoveryAttempts: 2,
+    fetchFn: async (url) => {
+      if (url.endsWith('/dispatches')) {
+        postCount++;
+        return { status: 204 };
+      }
+      lookupCount++;
+      return { status: 200, json: async () => ({ workflow_runs: [{
+        id: 7002,
+        name: continuationRunName(env.GITHUB_RUN_ID),
+        event: 'workflow_dispatch',
+        head_sha: env.GITHUB_SHA,
+        status: lookupCount === 1 ? 'queued' : 'in_progress'
+      }] }) };
+    }
+  });
+  assert.deepEqual(result, { queued: true, runId: 7002, alreadyExisted: true });
+  assert.equal(postCount, 0);
+});
+
+test('ambiguous dispatch never retries POST and reports an unknown outcome', async () => {
+  const env = permittedEnv();
+  let postCount = 0;
+  await assert.rejects(() => queueReadOnlyAudit(env, {
+    nowMs: NOW,
+    fetchFn: async (url) => {
+      if (url.includes('/runs?')) return { status: 200, json: async () => ({ workflow_runs: [] }) };
+      postCount++;
+      throw new Error('socket closed after request upload');
+    }
+  }), /outcome is unknown/);
+  assert.equal(postCount, 1);
+});
+
+test('a 204 without an observable successor is a clear failure, not false success', async () => {
+  const env = permittedEnv();
+  let postCount = 0;
+  await assert.rejects(() => queueReadOnlyAudit(env, {
+    nowMs: NOW,
+    discoveryAttempts: 3,
+    sleepFn: async () => {},
+    fetchFn: async (url) => {
+      if (url.includes('/runs?')) return { status: 200, json: async () => ({ workflow_runs: [] }) };
+      postCount++;
+      return { status: 204 };
+    }
+  }), /successor run was not observed/);
+  assert.equal(postCount, 1);
+});
+
+test('workflow-run lookup permission and rate-limit failures stop before dispatch', async () => {
+  for (const status of [403, 429, 500]) {
+    let postCount = 0;
+    await assert.rejects(() => queueReadOnlyAudit(permittedEnv(), {
+      nowMs: NOW,
+      fetchFn: async (url) => {
+        if (url.endsWith('/dispatches')) postCount++;
+        return { status };
+      }
+    }), new RegExp('HTTP ' + status));
+    assert.equal(postCount, 0);
+  }
 });
