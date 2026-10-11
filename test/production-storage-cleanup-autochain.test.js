@@ -215,13 +215,13 @@ test('workflow-run lookup permission and rate-limit failures stop before dispatc
   }
 });
 
-test('a queued successor counts as a verified handoff without waiting for it to enter the locked production job', async () => {
+test('a queued successor is not trusted until it starts after the production lock is released', async () => {
   let lookupCount = 0;
   let posted = 0;
   const result = await queueReadOnlyAudit(permittedEnv(), {
     nowMs: NOW,
     sleepFn: async () => {},
-    discoveryAttempts: 2,
+    discoveryAttempts: 3,
     fetchFn: async (url) => {
       if (url.endsWith('/dispatches')) {
         posted++;
@@ -234,7 +234,7 @@ test('a queued successor counts as a verified handoff without waiting for it to 
           event: 'workflow_dispatch',
           name: continuationRunName(permittedEnv().GITHUB_RUN_ID),
           head_sha: permittedEnv().GITHUB_SHA,
-          status: 'queued',
+          status: lookupCount < 3 ? 'queued' : 'in_progress',
           conclusion: null
         }]
       }) };
@@ -262,4 +262,30 @@ test('a cancelled, superseded or failed correlated successor is never called suc
     }), /successor already finished unsuccessfully/);
     assert.equal(dispatched, 0);
   }
+});
+
+test('a successor that remains pending cannot silently report success', async () => {
+  let posted = 0;
+  await assert.rejects(() => queueReadOnlyAudit(permittedEnv(), {
+    nowMs: NOW,
+    sleepFn: async () => {},
+    discoveryAttempts: 3,
+    fetchFn: async (url) => {
+      if (url.endsWith('/dispatches')) {
+        posted++;
+        return { status: 204 };
+      }
+      return { status: 200, json: async () => ({
+        workflow_runs: [{
+          id: 90003,
+          event: 'workflow_dispatch',
+          name: continuationRunName(permittedEnv().GITHUB_RUN_ID),
+          head_sha: permittedEnv().GITHUB_SHA,
+          status: 'pending',
+          conclusion: null
+        }]
+      }) };
+    }
+  }), /not observed running/);
+  assert.equal(posted, 0, 'no duplicate dispatch for existing pending successor');
 });
