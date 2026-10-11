@@ -776,7 +776,9 @@ test('private approved recovery page restores a verified single missing source r
   const sourceRows = f.db.prepare(
     "SELECT horse_id,age_years FROM horse_profile_snapshots WHERE source_record_id='src-a' ORDER BY horse_id"
   ).all();
-  assert.deepEqual(sourceRows,[{horse_id:'h100',age_years:4},{horse_id:'h101',age_years:5}]);
+  assert.deepEqual(sourceRows.map(row => ({...row})),[
+    {horse_id:'h100',age_years:4},{horse_id:'h101',age_years:5}
+  ]);
   assert.equal(f.d1Metrics.batches,1);
   await assert.rejects(
     () => inspectHistoricalRestorationPage(f.env,{family:'horse_profile'}),
