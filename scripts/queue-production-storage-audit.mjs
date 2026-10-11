@@ -9,7 +9,7 @@ export const WORKFLOW = 'production-storage-cleanup.yml';
 // A successor may spend up to 45 minutes in its production job. Do not queue
 // one unless the persisted proof can survive that entire bounded lifecycle.
 const MIN_TIME_REMAINING_MS = 50 * 60 * 1000;
-const RUN_DISCOVERY_ATTEMPTS = 12;
+const RUN_DISCOVERY_ATTEMPTS = 30;
 const RUN_DISCOVERY_DELAY_MS = 2000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -113,13 +113,11 @@ async function findContinuationRun(env, fetchFn) {
 }
 
 function acceptedRunState(run) {
-  // The parent cleanup job releases the shared production-operation lock
-  // before this handoff. A successor may still be queued behind a release;
-  // waiting for in_progress inside the lock would deadlock the chain.
-  if (run?.status === 'queued' || run?.status === 'pending' || run?.status === 'in_progress') {
-    return true;
-  }
-  return run?.status === 'completed' && run?.conclusion === 'success';
+  // A queued/pending successor can be replaced by GitHub Actions concurrency.
+  // This dispatch job runs after the previous cleanup job released its lock,
+  // so we can wait for a real in_progress/complete state safely.
+  return run?.status === 'in_progress'
+    || (run?.status === 'completed' && run?.conclusion === 'success');
 }
 
 function terminalRunFailure(run) {
@@ -172,14 +170,14 @@ export async function queueReadOnlyAudit(env, {
     }
   }
   throw new Error((existing ? 'The correlated successor' : 'GitHub accepted the dispatch but the successor run')
-    + ' was not observed running; inspect Actions before retrying this job');
+    + ' was not observed running; it may have stayed pending or been replaced. Inspect Actions before retrying this job');
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const result = await queueReadOnlyAudit(process.env);
-    console.log('Observed the bounded READ-ONLY audit successor run ' + result.runId
-      + '. It may be queued behind the shared production lock; NO cleanup was authorized.');
+    console.log('Verified READ-ONLY audit successor run ' + result.runId
+      + ' started or completed successfully; NO cleanup was authorized.');
   } catch (error) {
     // Do not log raw GitHub API response bodies, tokens or database identifiers.
     console.error('::error::' + error.message);
