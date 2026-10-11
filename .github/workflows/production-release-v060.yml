@@ -423,6 +423,13 @@ jobs:
             '/v1/storage-cleanup/audit' \
             '/v1/storage-cleanup/reconciliation/page?family=horse_profile' \
             '/v1/storage-cleanup/restoration/preview?family=horse_profile' \
+            '/v1/storage-cleanup/restoration/run/status' \
+            '/v1/storage-cleanup/restoration/run/start' \
+            '/v1/storage-cleanup/restoration/run/scan-step' \
+            '/v1/storage-cleanup/restoration/run/backup-start' \
+            '/v1/storage-cleanup/restoration/run/backup-poll' \
+            '/v1/storage-cleanup/restoration/run/apply-step' \
+            '/v1/storage-cleanup/restoration/run/post-audit-step' \
             '/v1/storage-cleanup/session/audit' \
             '/v1/storage-cleanup/session/start' \
             '/v1/storage-cleanup/session/checkpoint'; do
