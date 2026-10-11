@@ -247,6 +247,7 @@ async function exportRequest(env,requestBody) {
   const result=await response.json();
   if(result?.success!==true || !result.result ||
     (Array.isArray(result.errors)&&result.errors.length) ||
+    result.result.success===false ||
     (result.result.error != null && result.result.error!=='') ||
     result.result.status==='error' ||
     (result.result.type != null && result.result.type!=='export')){
@@ -338,6 +339,9 @@ export async function pollHistoricalRecoveryCloudBackup(env,{runId}={}) {
   }
   if(!download.ok || !download.body)
     throw new Error('recovery_backup_dump_unavailable');
+  const mediaType=download.headers.get('content-type')||'';
+  if(/^\s*(?:text\/html|application\/json)(?:\s*;|\s*$)/i.test(mediaType))
+    throw new Error('recovery_backup_dump_unexpected_media_type');
   // A stream can end early, while a non-empty R2 ETag still looks valid.
   // Require the signed export's declared byte length and match it against
   // the stored R2 object before enabling any source-owned fact restoration.
