@@ -130,7 +130,8 @@ export function buildVerifiedHistoricalRestoration({
 
   return Object.freeze({
     family, table: conf.table, scopeKey: conf.scope(currentFact),
-    externalTable, externalIdColumn: conf.idColumn,
+    externalTable, externalIdColumn: family === 'person_stat' ?
+      (currentFact.personType === 'driver' ? 'driver_id' : 'trainer_id') : conf.idColumn,
     sourceId: currentSource.id, sourceHash: currentSource.content_hash,
     fetchedAt: currentSource.fetched_at, priorSourceId: priorSource.id,
     priorSourceHash: priorSource.content_hash,
