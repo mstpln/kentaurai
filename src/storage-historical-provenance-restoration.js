@@ -148,7 +148,7 @@ function nonempty(value) { return typeof value === 'string' && value.length > 0;
 // Only callable from an explicitly reviewed *future* recovery execution path.
 // This module has deliberately no public Worker route or automatic scheduler.
 export async function applyVerifiedHistoricalRestoration(env, candidate, {
-  approved = false, authorization = null
+  approved = false, authorization = null, runId = null, expectedEpoch = null
 } = {}) {
   if (!approved || env?.HISTORICAL_REPAIR_ENABLED !== 'true' ||
       !nonempty(env?.HISTORICAL_REPAIR_TOKEN) ||
@@ -292,10 +292,20 @@ export async function applyVerifiedHistoricalRestoration(env, candidate, {
     recordScope: row.record_scope, statYear: row.stat_year, ordinal: row.record_ordinal
   }));
   const currentValues = identKinds.map(k => row[k]);
+  const journalled = runId !== null;
+  if (journalled && (!nonempty(runId) || !Number.isSafeInteger(expectedEpoch) ||
+      expectedEpoch < 0)) throw new Error('historical_restoration_journal_invalid');
   const query = [
     'INSERT INTO ' + candidate.table + ' (' + keys.join(',') + ')',
     'SELECT ' + keys.map(() => '?').join(','),
     'FROM source_records current',
+    ...(journalled ? [
+      'JOIN historical_recovery_runs recovery ON recovery.id=?',
+      "AND recovery.phase='applying' AND recovery.expected_epoch=?",
+      'JOIN historical_recovery_epoch rev ON rev.singleton=1 AND rev.revision=recovery.expected_epoch',
+      'JOIN historical_recovery_receipts receipt ON receipt.run_id=recovery.id',
+      "AND receipt.status='ready' AND receipt.family=? AND receipt.source_record_id=current.id"
+    ] : []),
     'JOIN official_snapshot_source_sync sync ON sync.source_record_id=current.id AND sync.status=?',
     'JOIN source_records older ON older.id=? AND older.source_type=? AND older.quality_status=?',
     'JOIN official_snapshot_source_sync earlier_sync ON earlier_sync.source_record_id=older.id AND earlier_sync.status=?',
@@ -315,7 +325,8 @@ export async function applyVerifiedHistoricalRestoration(env, candidate, {
     'WHERE existing.source_record_id=current.id AND ' + existingScope + ')'
   ].join(' ');
   const bindings = [
-    ...Object.values(row), 'complete', candidate.priorSourceId, SOURCE_TYPE, SOURCE_QUALITY, 'complete',
+    ...Object.values(row), ...(journalled ? [runId,expectedEpoch,candidate.family] : []),
+    'complete', candidate.priorSourceId, SOURCE_TYPE, SOURCE_QUALITY, 'complete',
     candidate.priorSnapshotId, candidate.sourceId, SOURCE_TYPE, SOURCE_QUALITY,
     candidate.sourceHash, candidate.fetchedAt, candidate.priorSourceHash, candidate.priorFetchedAt,
     QUALITY, ...Object.values(candidate.factualColumns), ...identityValues,
@@ -327,14 +338,31 @@ export async function applyVerifiedHistoricalRestoration(env, candidate, {
   // D1 batch is one transaction. No DELETE, UPDATE of snapshots, replacement,
   // or source-count mutation. The dataset revision fence invalidates old audit
   // evidence after successful inserts. A failed guard yields zero insertions.
-  const results = await env.DB.batch([
-    env.DB.prepare(query).bind(...bindings),
-    env.DB.prepare(
-      'UPDATE storage_cleanup_dataset_revision SET revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE singleton=1 AND changes()=1'
-    )
-  ]);
+  const statements = [env.DB.prepare(query).bind(...bindings)];
+  if (journalled) {
+    statements.push(env.DB.prepare(
+      'UPDATE historical_recovery_runs SET expected_epoch=expected_epoch+1,' +
+      'restored_count=restored_count+1,updated_at=CURRENT_TIMESTAMP' +
+      " WHERE id=? AND phase='applying' AND expected_epoch=?" +
+      ' AND (SELECT revision FROM historical_recovery_epoch WHERE singleton=1)=?' +
+      ' AND changes()=1'
+    ).bind(runId, expectedEpoch, expectedEpoch + 1));
+    statements.push(env.DB.prepare(
+      'UPDATE historical_recovery_receipts SET restored_count=restored_count+1,' +
+      'updated_at=CURRENT_TIMESTAMP WHERE run_id=? AND family=?' +
+      " AND source_record_id=? AND status='ready' AND changes()=1"
+    ).bind(runId, candidate.family, candidate.sourceId));
+  }
+  statements.push(env.DB.prepare(
+    'UPDATE storage_cleanup_dataset_revision SET revision=revision+1,' +
+    'updated_at=CURRENT_TIMESTAMP WHERE singleton=1 AND changes()=1'
+  ));
+  const results = await env.DB.batch(statements);
   const inserted = Number(results?.[0]?.meta?.changes ?? -1);
-  if (inserted !== 1) throw new Error('historical_restoration_guard_failed');
+  if (inserted !== 1 || results.slice(1).some((part) =>
+    Number(part?.meta?.changes ?? -1) !== 1)) {
+    throw new Error('historical_restoration_guard_failed');
+  }
   return { restored: 1, unchangedFactsOverwritten: 0, snapshotsDeleted: 0,
     oldAuditInvalidated: true };
 }
