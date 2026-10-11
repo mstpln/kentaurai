@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=5a92773003fa376068374cd004b7e89d675f8c19
-release_nonce=2026-10-10-pr303-dry-run-audit-continuation-fix
+source_main=8c3f68a6e6f4da552fafa62c0cb49e7a5a307fbf
+release_nonce=2026-10-11-pr304-read-only-audit-orchestrator
