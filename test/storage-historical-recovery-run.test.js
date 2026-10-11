@@ -366,3 +366,86 @@ test('expired recovery capability cannot restore historical facts',async()=>{
   }),/historical_restoration_not_authorized/);
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM horse_profile_snapshots WHERE source_record_id=?').get(SOURCE_CURRENT).n,0);
 });
+
+
+const CLOUD_EXPORT_BOOKMARK='00000085-0000024c-00004c6d-8e61117bf38d7adb71b934ebbf891683';
+const CLOUD_EXPORT_URL='https://download.cloudflarestorage.com/private-synthetic-backup';
+
+async function withSyntheticCloudExport(pollResult,{downloadBody='SYNTHETIC SQL BACKUP'.repeat(90),
+  advertisedLength=null,omitLength=false}={},callback){
+  const previous=globalThis.fetch;
+  let downloaded=0;
+  globalThis.fetch=async(url,options={})=>{
+    if(String(url).startsWith('https://api.cloudflare.com/client/v4/accounts/')){
+      const body=JSON.parse(options.body);
+      return new Response(JSON.stringify({success:true,result:body.current_bookmark ?
+        pollResult : {type:'export',at_bookmark:CLOUD_EXPORT_BOOKMARK}}),{status:200,
+        headers:{'content-type':'application/json'}});
+    }
+    if(String(url)===CLOUD_EXPORT_URL){
+      downloaded++;
+      const headers=omitLength?{}:{'content-length':String(advertisedLength ??
+        new TextEncoder().encode(downloadBody).byteLength)};
+      return new Response(downloadBody,{status:200,headers});
+    }
+    return previous(url,options);
+  };
+  try{return await callback(()=>downloaded);}
+  finally{globalThis.fetch=previous;}
+}
+
+test('Cloudflare D1 export status and nested signed URL must agree before backup creation',async()=>{
+  const invalid=[
+    ['signed URL on an unfinished export',
+      {type:'export',at_bookmark:CLOUD_EXPORT_BOOKMARK,
+        result:{signed_url:CLOUD_EXPORT_URL}},/recovery_backup_export_state_conflict/],
+    ['explicit Cloudflare export failure',
+      {type:'export',status:'error',error:'synthetic private failure',
+        at_bookmark:CLOUD_EXPORT_BOOKMARK},/recovery_backup_export_api_failed/],
+    ['complete export missing its nested signed URL',
+      {type:'export',status:'complete',at_bookmark:CLOUD_EXPORT_BOOKMARK},
+      /recovery_backup_export_completion_invalid/],
+    ['completed export for a different bookmark',
+      {type:'export',status:'complete',at_bookmark:'other-valid-bookmark-12345',
+        result:{signed_url:CLOUD_EXPORT_URL}},/recovery_backup_bookmark_conflict/]
+  ];
+  for(const [label,pollResult,expectedError] of invalid){
+    const f=await fixture();
+    const {runId}=await scanned(f);
+    await withSyntheticCloudExport(pollResult,{},async(downloaded)=>{
+      await startHistoricalRecoveryCloudBackup(f.env,{runId});
+      await assert.rejects(()=>pollHistoricalRecoveryCloudBackup(f.env,{runId}),
+        expectedError,label);
+      assert.equal(downloaded(),0,label);
+      const row=f.db.prepare(
+        'SELECT backup_key,backup_etag FROM historical_recovery_runs WHERE id=?'
+      ).get(runId);
+      assert.equal(row.backup_key,null,label);
+      assert.equal(row.backup_etag,null,label);
+    });
+  }
+});
+
+test('backup must match signed file byte length before obtaining a valid R2 receipt',async()=>{
+  const complete={type:'export',status:'complete',at_bookmark:CLOUD_EXPORT_BOOKMARK,
+    result:{filename:'private-d1.sql',signed_url:CLOUD_EXPORT_URL}};
+  for(const scenario of [
+    {omitLength:true,expected:/recovery_backup_length_unverifiable/},
+    {advertisedLength:2048,expected:/recovery_backup_r2_verification_failed/}
+  ]){
+    const f=await fixture();
+    const {runId}=await scanned(f);
+    await withSyntheticCloudExport(complete,scenario,async(downloaded)=>{
+      await startHistoricalRecoveryCloudBackup(f.env,{runId});
+      await assert.rejects(()=>pollHistoricalRecoveryCloudBackup(f.env,{runId}),
+        scenario.expected);
+      assert.equal(downloaded(),1);
+      const stored=f.db.prepare(
+        'SELECT backup_key,backup_etag,backup_size FROM historical_recovery_runs WHERE id=?'
+      ).get(runId);
+      assert.equal(stored.backup_key,null);
+      assert.equal(stored.backup_etag,null);
+      assert.equal(stored.backup_size,null);
+    });
+  }
+});
