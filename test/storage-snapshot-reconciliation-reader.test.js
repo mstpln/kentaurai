@@ -762,6 +762,7 @@ test('private approved recovery page restores a verified single missing source r
   assert.equal(plan.readyDirectSnapshotCandidates,1);
   assert.equal(plan.repairAuthorized,false);
   assert.equal(f.d1Metrics.batches,0);
+  f.env.HISTORICAL_REPAIR_EXPIRES_AT=String(Math.floor(Date.now()/1000)+1200);
   f.env.HISTORICAL_REPAIR_ENABLED='true';
   f.env.HISTORICAL_REPAIR_TOKEN='synthetic_recovery_token_at_least_32_chars_long';
   const applied = await applyHistoricalRestorationPage(f.env,{
