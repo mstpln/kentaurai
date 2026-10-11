@@ -556,11 +556,11 @@ test('bounded manual workflow retries only a temporary 401 and keeps payload pri
   const workflow = readFileSync(
     new URL('../.github/workflows/production-storage-fact-reconciliation.yml', import.meta.url), 'utf8'
   );
-  assert.match(workflow, /for attempt in \\$\\(seq 1 12\\); do/);
-  assert.match(workflow, /if \\[ "\\$status" != 401 \\]; then/);
+  assert.match(workflow, /for attempt in \$\(seq 1 12\); do/);
+  assert.match(workflow, /if \[ "\$status" != 401 \]; then/);
   assert.match(workflow, /Read-only authentication not ready after bounded retry/);
-  assert.match(workflow, /\\.budget\\.r2ObjectsRead <= 5/);
-  assert.match(workflow, /\\.predecessorHints\\.earlierOriginalVerifiedFacts >= 0/);
+  assert.match(workflow, /\.budget\.r2ObjectsRead <= 5/);
+  assert.match(workflow, /\.predecessorHints\.earlierOriginalVerifiedFacts >= 0/);
   const printed = workflow.split("            jq -c '{family,sourcesExamined")[1]?.split('"$output"')[0] || '';
-  assert.doesNotMatch(printed, /raw_object_key|snapshot_id|source_record_id|\\bcursor\\b/);
+  assert.doesNotMatch(printed, /raw_object_key|snapshot_id|source_record_id|\bcursor\b/);
 });
