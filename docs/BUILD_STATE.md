@@ -12,7 +12,7 @@
   25 were classified as missing with *unverified historical chronology*;
   no factual conflicts or unknown current identities were detected.
   D1 writes were zero. These samples are not an exhaustive inventory.
-- PR #313 (review candidate) extends the private read-only classifier with
+- PR #313 extends the private read-only classifier with
   aggregate hints for at most 24 earlier **direct** snapshots per source.
   These hints separate a matching predecessor, differing predecessor,
   unconfirmed earlier source, no earlier direct row, and deferred cases.
@@ -22,10 +22,10 @@
   model weights or automatic production diagnosis are included. The workflow
   remains manually initiated, production-locked, release-SHA-bound and
   read-budget-capped. Destructive cleanup routes remain disabled.
-- Gate: verify PR #313 exact final-head CI and privacy/cost/data review,
-  then separately merge/release with authorization. A new bounded manual
-  read-only production sample and full historical proof are distinct later
-  operations. No restoration is authorized.
+- Gate: merge and release this change only after exact-head CI and
+  privacy/cost/data review and explicit authorization. Even after deployment,
+  a new bounded manual read-only production sample remains a distinct later
+  action; full historical proof is still required. No restoration is authorized.
 
 ## Production #42 raw snapshot evidence follow-up (review candidate)
 
