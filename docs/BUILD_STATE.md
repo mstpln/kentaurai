@@ -1,3 +1,14 @@
+## Production #42 raw snapshot evidence follow-up (review candidate)
+
+- Previous read-only D1 diagnosis established exact independent ledger
+  agreement in all 80 sampled deficient sources. It did not inspect R2.
+- Add a **manual, production-locked, authenticated, bounded, read-only**
+  R2 provenance sample. It checks object existence, hash, parsing and raw
+  fact-count upper bounds without exposing private material or writing D1.
+- Existing cleanup execute routes remain disabled. No repair/replay/backfill
+  or production deployment is approved by this code change. See
+  \`docs/STORAGE_RAW_EVIDENCE_RECOVERY.md\` for scope and next gates.
+
 ## Production #42 snapshot anomaly investigation (read-only; PR pending)
 
 The completed source/revision-bound dry-run #42 reported 43,613 missing logical
