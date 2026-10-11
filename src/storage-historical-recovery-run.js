@@ -158,9 +158,27 @@ export async function stepHistoricalRecoveryInventory(env,{runId}={}) {
       budget:{rowsRead:queryRowsRead,rowsWritten:0,r2BytesRead:0}};
   }
   const item=rows[0];
-  const { candidates,report,discardedCandidates }=await planInternalHistoricalRestoration(
-    env,family,null,item.source_record_id
-  );
+  let candidates=[], report=null, discardedCandidates=0;
+  try{
+    ({candidates,report,discardedCandidates}=await planInternalHistoricalRestoration(
+      env,family,null,item.source_record_id
+    ));
+  }catch(error){
+    // Oversized/unmappable individual sources are quarantined, not repaired.
+    // Never silently skip an arbitrary SQL, epoch, or system failure.
+    if(!['reconciliation_row_limit','reconciliation_reference_limit',
+      'reconciliation_snapshot_quality_conflict',
+      'reconciliation_audit_count_disagrees',
+      'historical_recovery_source_evidence_incomplete'
+    ].includes(String(error?.message||'')))throw error;
+    report={
+      liveSourceReverified:true,liveRevision:current,sourcesExamined:1,
+      ledgerShortfall:Math.max(0,Number(item.expected_count)-Number(item.actual_count)),
+      originalVerified:0,auditLedgerVerified:false,revisionCounterMatchesProof:true,
+      predecessorHints:null,budget:{rowsRead:0,rowsWritten:0,r2BytesRead:0},
+      evidenceQuarantined:true
+    };
+  }
   if(!report.liveSourceReverified||report.liveRevision!==current ||
       report.sourcesExamined!==1||report.ledgerShortfall<=0||
       !report.revisionCounterMatchesProof || report.budget?.rowsWritten!==0||
