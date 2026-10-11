@@ -144,21 +144,25 @@ deficits or excesses remain. Otherwise it finishes with an explicit
 
 The GitHub Actions workflow
 \`.github/workflows/production-historical-recovery.yml\` can run this
-from two manually selected modes:
+from **three distinct manually approved modes**, with no automatic
+transition from backup to fact restoration:
 
-- \`inventory\`: read-only as to existing horse/racing facts, persists only
-  private progress/receipt rows, and automatically resumes in small bounded
-  intervals. It never enables repair capabilities.
-- \`execute\`: requires typed \`RESTORE_VERIFIED_SNAPSHOTS_ONLY\` confirmation,
-  a previously completed matching inventory, and creates a complete
-  **Cloudflare-only** D1 SQL export to private R2 before any fact writes.
-  The Worker itself polls Cloudflare's D1 export REST API and streams the
-  signed SQL dump directly into Cloudflare R2; GitHub never downloads it.
-  The private backup's source bookmark, R2 ETag and size are verified and
-  kept in private D1. Ephemeral restoration capability secrets are only
-  installed after backup verification and are removed on all exit paths.
-  Production execution is off until explicitly enabled by the manual
-  approved workflow.
+- `inventory`: read-only as to existing horse/racing facts, persists only
+  private progress/receipt rows, and resumes in bounded intervals. It never
+  enables repair capabilities.
+- `backup`: requires the separately typed `BACKUP_D1_ONLY` confirmation
+  and a completed, unchanged inventory. The Worker polls Cloudflare's D1
+  export API and streams the SQL file directly into private R2; GitHub
+  does not download it. The backup bookmark, R2 ETag and byte count are
+  verified and stored privately in D1. It never installs a fact-write token,
+  and **stops after backup** even when successful.
+- `execute`: requires a **second** separately typed
+  `RESTORE_VERIFIED_SNAPSHOTS_ONLY` confirmation, the previously completed
+  inventory, and an already completed backup receipt. It does **not**
+  initiate or bypass the backup phase. The Worker checks private R2 metadata
+  again before any fact insertion and uses temporary expiring restore
+  credentials that are removed on cleanup. Production execution is
+  unavailable until explicitly initiated after reviewing backup results.
 
 The same GitHub workflow self-dispatches bounded continuations; it is
 not an automatic background cron. Every continuation verifies exact
