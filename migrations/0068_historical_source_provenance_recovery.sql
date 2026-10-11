@@ -59,152 +59,152 @@ CREATE INDEX idx_historical_recovery_receipts_pending
 -- while a recovery is active. The condition keeps normal daily ingestion
 -- free of additional epoch writes when no inventory is running.
 CREATE TRIGGER historical_recovery_epoch_source_records_insert AFTER INSERT ON source_records
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_source_records_update AFTER UPDATE ON source_records
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_source_records_delete AFTER DELETE ON source_records
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_official_snapshot_source_sync_insert AFTER INSERT ON official_snapshot_source_sync
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_official_snapshot_source_sync_update AFTER UPDATE ON official_snapshot_source_sync
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_official_snapshot_source_sync_delete AFTER DELETE ON official_snapshot_source_sync
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_official_snapshot_observations_insert AFTER INSERT ON official_snapshot_observations
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_official_snapshot_observations_update AFTER UPDATE ON official_snapshot_observations
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_official_snapshot_observations_delete AFTER DELETE ON official_snapshot_observations
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_horse_profile_snapshots_insert AFTER INSERT ON horse_profile_snapshots
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_horse_profile_snapshots_update AFTER UPDATE ON horse_profile_snapshots
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_horse_profile_snapshots_delete AFTER DELETE ON horse_profile_snapshots
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_horse_stat_snapshots_insert AFTER INSERT ON horse_stat_snapshots
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_horse_stat_snapshots_update AFTER UPDATE ON horse_stat_snapshots
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_horse_stat_snapshots_delete AFTER DELETE ON horse_stat_snapshots
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_horse_record_snapshots_insert AFTER INSERT ON horse_record_snapshots
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_horse_record_snapshots_update AFTER UPDATE ON horse_record_snapshots
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_horse_record_snapshots_delete AFTER DELETE ON horse_record_snapshots
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_person_stat_snapshots_insert AFTER INSERT ON person_stat_snapshots
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_person_stat_snapshots_update AFTER UPDATE ON person_stat_snapshots
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_person_stat_snapshots_delete AFTER DELETE ON person_stat_snapshots
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_horse_external_ids_insert AFTER INSERT ON horse_external_ids
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_horse_external_ids_update AFTER UPDATE ON horse_external_ids
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_horse_external_ids_delete AFTER DELETE ON horse_external_ids
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_driver_external_ids_insert AFTER INSERT ON driver_external_ids
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_driver_external_ids_update AFTER UPDATE ON driver_external_ids
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_driver_external_ids_delete AFTER DELETE ON driver_external_ids
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_trainer_external_ids_insert AFTER INSERT ON trainer_external_ids
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_trainer_external_ids_update AFTER UPDATE ON trainer_external_ids
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
 CREATE TRIGGER historical_recovery_epoch_trainer_external_ids_delete AFTER DELETE ON trainer_external_ids
-WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying'))
+WHEN EXISTS(SELECT 1 FROM historical_recovery_runs WHERE phase IN ('inventory','ready','applying','verify_pending'))
 BEGIN
   UPDATE historical_recovery_epoch SET revision=revision+1 WHERE singleton=1;
 END;
