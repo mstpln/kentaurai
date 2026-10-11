@@ -6,7 +6,7 @@ representations, dangling observations, identity mismatches, timestamp
 mismatches, stranded raw batches, or active cleanup batches. It failed closed
 and did not delete anything.
 
-A separate manual-only GitHub workflow now enables aggregate investigation
+A separate read-only workflow (triggered once by its reviewed merge, with manual rerun available) enables aggregate investigation
 **without a new costly 4.7M-row audit**. It queries the already persisted
 failed audit ledger and completed source-import metadata inside private D1.
 No source IDs, horse/person IDs, raw object keys, provider payloads, sample
