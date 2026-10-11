@@ -44,11 +44,11 @@
   source-bounded. Never run legacy DELETE/UPDATE cleanup or Cloudflare D1
   point-in-time restoration against live production: either can lose
   later legitimate data.
-- The current code may expose aggregate-only read-only preview without a
-  repair HTTP route; separate production backup, full inventory,
-  revision-aware durable progress, reviewed execution authorization,
-  quarantine and post-repair independent audit are required before any
-  production write.
+- The build exposes aggregate-only preview and a **separately gated
+  private restoration/apply-step route**. Its use requires a completed
+  inventory, fully private verified Cloudflare backup, ephemeral capability,
+  manual user approval, revision-aware journal, quarantine and a new
+  independent post-repair audit. Merge/deploy alone never executes it.
 - Four verified sampled source/family comparisons total 25 missing
   representations with 25 older matching hash-verified originals. This
   evidence does not prove the complete 43,613 logical shortfall has the
