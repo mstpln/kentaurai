@@ -253,6 +253,10 @@ test('historical cross-source observation is read and value-matched by snapshot 
     "INSERT INTO source_records(id,source_type,fetched_at,quality_status) " +
     "VALUES ('src-prior','official_provider','2026-09-10T10:00:00Z','normalized_verified_subset')"
   ).run();
+  f.db.prepare(
+    "INSERT INTO official_snapshot_source_sync(source_record_id,status,processed_at,horse_profile_count) " +
+    "VALUES ('src-prior','complete','2026-09-20 10:00:00',1)"
+  ).run();
   f.db.prepare("DELETE FROM horse_profile_snapshots WHERE id='src-a:profile'").run();
   f.db.prepare(
     'INSERT INTO horse_profile_snapshots(id,horse_id,observed_at,age_years,source_record_id) ' +
@@ -272,6 +276,13 @@ test('historical cross-source observation is read and value-matched by snapshot 
   const conflict = await inspectPrivateSnapshotReconciliationPage(f.env, { family: 'horse_profile' });
   assert.equal(conflict.classifications.conflict, 1);
   assert.equal(conflict.classifications.represented, 0);
+
+  f.db.prepare("UPDATE horse_profile_snapshots SET age_years=4 WHERE id='old-snapshot'").run();
+  f.db.prepare(
+    "UPDATE source_records SET fetched_at='2026-09-13T00:00:00Z' WHERE id='src-prior'"
+  ).run();
+  const invalidLineage = await inspectPrivateSnapshotReconciliationPage(f.env, { family: 'horse_profile' });
+  assert.equal(invalidLineage.classifications.conflict, 1);
 });
 
 test('historical identity drift never authorizes reconstruction against a different horse', async () => {
