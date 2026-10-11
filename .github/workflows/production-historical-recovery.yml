@@ -199,6 +199,8 @@ jobs:
           echo "token=$token" >> "$GITHUB_OUTPUT"
           printf '%s\n' "$token" | npx --yes wrangler@4.114.0 secret put HISTORICAL_REPAIR_TOKEN --name "$WORKER_NAME"
           printf 'true\n' | npx --yes wrangler@4.114.0 secret put HISTORICAL_REPAIR_ENABLED --name "$WORKER_NAME"
+          expires_at="$(node -e "console.log(Math.floor(Date.now()/1000)+1200)")"
+          printf '%s\n' "$expires_at" | npx --yes wrangler@4.114.0 secret put HISTORICAL_REPAIR_EXPIRES_AT --name "$WORKER_NAME"
 
       - name: Advance one cost-bounded recovery interval
         id: advance
