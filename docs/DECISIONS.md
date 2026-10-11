@@ -1,3 +1,59 @@
+## Single-build historical provenance recovery — 2026-10-11
+
+1. The confirmed September 27 cleanup bug destroyed some historical
+   *source representations*, not necessarily unique factual values.
+   Restoration must be append-only, source-owned and supported by both
+   independently SHA-256-verified private R2 originals and their corresponding
+   older direct D1 snapshot, not by today's mapping alone.
+2. Use a durable, source-scoped private D1 recovery journal rather than
+   repeatedly reusing the failed old integrity audit's revision proof.
+   The recovery epoch fences snapshots, source records, observations and
+   identity mappings; concurrent changes pause the run. Every insert and
+   journal checkpoint must be transactional and idempotent.
+3. Inventory is completely separate from execution. Inventory may store
+   private run progress but must never modify racing facts.
+4. Before any restore, stream the entire Cloudflare D1 export **within
+   Cloudflare** to private R2 and verify its bookmark/object receipt.
+   Never send the SQL payload to GitHub Actions, logs, or user-visible output.
+   Never use D1 point-in-time restore against the live database.
+5. Actual writes require manual execute mode with explicit typed confirmation
+   plus short-lived Cloudflare capability secrets installed only after
+   backup. Cleanup execution remains disabled.
+6. If exact source/provenance proof is insufficient, quarantine. Completion
+   requires a new independent four-family count audit; report remaining
+   count anomalies separately, never declare them repaired.
+7. PR merges and production deployment remain explicitly user-gated.
+
+## Historical source-provenance recovery: source-owned insert only — 2026-10-11
+
+- The 2026-09-27 destructive cleanup executor could delete a source's
+  redundant direct snapshot without creating its own
+  \`official_snapshot_observations\` link. Two completed production runs
+  removed 18,717 snapshots. The historical logic has since been fixed,
+  and destructive cleanup routes stay disabled.
+- Preserve every original source's factual \`as_of\` evidence, not just the
+  latest equal-value snapshot. Never infer historical identity/time
+  correctness solely from today's external-ID mapping.
+- Where both current and older original R2 payloads are hash-verified,
+  match the source-native identity, exact family/scope/ordinal and factual
+  columns, and verify the older D1 source snapshot. For independently
+  authorized recovery, reconstruct a **source-owned direct snapshot**,
+  not an assumed unchanged-observation link: it is correct even if an
+  intervening historical change-point is not yet fully reconstructed.
+- A repair is append-only to missing D1 snapshot facts, idempotent and
+  source-bounded. Never run legacy DELETE/UPDATE cleanup or Cloudflare D1
+  point-in-time restoration against live production: either can lose
+  later legitimate data.
+- The build exposes aggregate-only preview and a **separately gated
+  private restoration/apply-step route**. Its use requires a completed
+  inventory, fully private verified Cloudflare backup, ephemeral capability,
+  manual user approval, revision-aware journal, quarantine and a new
+  independent post-repair audit. Merge/deploy alone never executes it.
+- Four verified sampled source/family comparisons total 25 missing
+  representations with 25 older matching hash-verified originals. This
+  evidence does not prove the complete 43,613 logical shortfall has the
+  same cause or is all automatically recoverable.
+
 ## Disable destructive cleanup HTTP routes — 2026-10-11
 
 The public GitHub cleanup workflow being dry-run-only does not prevent direct

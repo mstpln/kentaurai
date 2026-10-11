@@ -298,6 +298,18 @@ jobs:
           grep -q 'idx_external_horse_stats_horse_context_time' /tmp/external-schema-check.txt
           grep -q 'idx_external_horse_stats_round' /tmp/external-schema-check.txt
 
+      - name: Verify private historical provenance recovery schema
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote \
+            --command "SELECT id,phase,expected_epoch,backup_bookmark FROM historical_recovery_runs LIMIT 0; SELECT family,source_record_id,status FROM historical_recovery_receipts LIMIT 0; SELECT revision FROM historical_recovery_epoch WHERE singleton=1;" \
+            > "$RUNNER_TEMP/kentaurai-recovery-schema-check.txt"
+          grep -q 'revision' "$RUNNER_TEMP/kentaurai-recovery-schema-check.txt"
+
       - name: Deploy Worker
         id: deploy
         shell: bash
@@ -422,6 +434,14 @@ jobs:
             '/v1/statistics/backfill/step' \
             '/v1/storage-cleanup/audit' \
             '/v1/storage-cleanup/reconciliation/page?family=horse_profile' \
+            '/v1/storage-cleanup/restoration/preview?family=horse_profile' \
+            '/v1/storage-cleanup/restoration/run/status' \
+            '/v1/storage-cleanup/restoration/run/start' \
+            '/v1/storage-cleanup/restoration/run/scan-step' \
+            '/v1/storage-cleanup/restoration/run/backup-start' \
+            '/v1/storage-cleanup/restoration/run/backup-poll' \
+            '/v1/storage-cleanup/restoration/run/apply-step' \
+            '/v1/storage-cleanup/restoration/run/post-audit-step' \
             '/v1/storage-cleanup/session/audit' \
             '/v1/storage-cleanup/session/start' \
             '/v1/storage-cleanup/session/checkpoint'; do

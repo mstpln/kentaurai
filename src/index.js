@@ -8,6 +8,13 @@ import { syncOnePendingHorseStartPointSource } from './import/official-start-poi
 import { syncOnePendingOfficialSnapshotSource } from './import/official-snapshots.js';
 import { inspectPrivateRawSnapshotEvidence } from './storage-raw-source-diagnostic.js';
 import { inspectPrivateSnapshotReconciliationPage } from './storage-snapshot-reconciliation-reader.js';
+import { inspectHistoricalRestorationPage } from './storage-historical-recovery-page.js';
+import {
+  startHistoricalRecoveryRun, historicalRecoveryStatus,
+  stepHistoricalRecoveryInventory, startHistoricalRecoveryCloudBackup,
+  pollHistoricalRecoveryCloudBackup,
+  stepHistoricalRecoveryExecution, stepHistoricalRecoveryPostAudit
+} from './storage-historical-recovery-run.js';
 import { normalizeCapturedXlabsRace } from './import/xlabs-telemetry.js';
 import {
   createXlabsPositionReconstructionJob,
@@ -420,6 +427,54 @@ async function handleFetch(request, env) {
       }));
     } catch {
       return json({ error: 'reconciliation_page_unavailable' }, 409);
+    }
+  }
+  // Dedicated READ-ONLY preview. A separate /run/apply-step route below
+  // requires an explicit short-lived restoration capability plus a verified
+  // private backup; this preview never performs restoration.
+  if (request.method === 'GET' && path === '/v1/storage-cleanup/restoration/preview') {
+    try {
+      return json(await inspectHistoricalRestorationPage(env, {
+        family: url.searchParams.get('family'),
+        cursor: url.searchParams.get('cursor')
+      }));
+    } catch {
+      return json({ error: 'restoration_preview_unavailable' }, 409);
+    }
+  }
+  // Recovery run state is private, source IDs and evidence remain in D1.
+  // Only the explicitly reviewed restoration execution step may insert
+  // source-owned facts; it requires a separate capability and private backup.
+  if (path.startsWith('/v1/storage-cleanup/restoration/run/')) {
+    try {
+      if (request.method === 'GET' && path.endsWith('/status')) {
+        return json(await historicalRecoveryStatus(env,{
+          runId:url.searchParams.get('run_id')
+        }));
+      }
+      if (request.method === 'POST') {
+        const body=await readJson(request);
+        if(path.endsWith('/start')) return json(await startHistoricalRecoveryRun(env));
+        if(path.endsWith('/scan-step')) return json(await stepHistoricalRecoveryInventory(env,{
+          runId:body.run_id
+        }));
+        if(path.endsWith('/backup-start')) return json(await startHistoricalRecoveryCloudBackup(env,{
+          runId:body.run_id
+        }));
+        if(path.endsWith('/backup-poll')) return json(await pollHistoricalRecoveryCloudBackup(env,{
+          runId:body.run_id
+        }));
+        if(path.endsWith('/apply-step')) return json(await stepHistoricalRecoveryExecution(env,{
+          runId:body.run_id,approved:body.approved===true,authorization:body.authorization
+        }));
+        if(path.endsWith('/post-audit-step')) return json(await stepHistoricalRecoveryPostAudit(env,{
+          runId:body.run_id
+        }));
+      }
+      return json({error:'not_found'},404);
+    } catch(error) {
+      console.error('private historical recovery stopped');
+      return json({error:'historical_recovery_not_authorized_or_unavailable'},409);
     }
   }
   if (request.method === 'GET' && path === '/v1/storage-cleanup/audit') {

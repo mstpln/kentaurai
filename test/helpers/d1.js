@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 
 const D1_MAX_BOUND_PARAMETERS = 100;
 const D1_MAX_COMPOUND_SELECT_TERMS = 5;
@@ -153,7 +154,8 @@ export function createTestEnv() {
     '../../migrations/0064_cleanup_horse_record_source_page.sql',
     '../../migrations/0065_cleanup_person_stat_source_page.sql',
     '../../migrations/0066_cleanup_observation_source_page.sql',
-    '../../migrations/0067_cleanup_audit_atomic_fencing.sql'
+    '../../migrations/0067_cleanup_audit_atomic_fencing.sql',
+    '../../migrations/0068_historical_source_provenance_recovery.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }
@@ -172,12 +174,16 @@ export function createTestEnv() {
       V86_LINE_PRICE_SEK: '0.25',
       RAW_BUCKET: {
         async put(key, body, options = {}) {
-          objects.set(key, { body, options });
+          const storedBody = body && typeof body.getReader === 'function'
+            ? new Uint8Array(await new Response(body).arrayBuffer()) : body;
+          objects.set(key, { body: storedBody, options });
         },
         async head(key) {
           const stored = objects.get(key);
           const bytes = stored && (typeof stored.body === 'string' ? new TextEncoder().encode(stored.body) : stored.body);
-          return stored ? { key, size: bytes.byteLength, customMetadata: stored.options.customMetadata, httpMetadata: stored.options.httpMetadata } : null;
+          return stored ? { key, size: bytes.byteLength,
+            etag: createHash('md5').update(bytes).digest('hex'),
+            customMetadata: stored.options.customMetadata, httpMetadata: stored.options.httpMetadata } : null;
         },
         async get(key) {
           const stored = objects.get(key);

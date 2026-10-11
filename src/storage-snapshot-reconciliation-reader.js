@@ -286,7 +286,7 @@ function sameSourceIdentityAndScope(family, earlier, sought) {
 // The earlier raw source is checked independently of its current direct-row
 // metadata. This is still NOT a proof of historical canonical identity or
 // of the full as-of timeline.
-async function inspectPredecessorHints(reader, env, family, missing, cutoff, r2Budget) {
+async function inspectPredecessorHints(reader, env, family, missing, cutoff, r2Budget, currentSource, onVerified = null) {
   const report = {
     examined: 0,
     deferred: missing.length,
@@ -337,11 +337,12 @@ async function inspectPredecessorHints(reader, env, family, missing, cutoff, r2B
     else if (Number(rows[0].completed_lineage) !== 1) report.earlierUnconfirmedSource++;
     else if (snapshotFactMatches(family, rows[0], fact)) {
       report.earlierCompletedSourceSameFacts++;
-      matchingPredecessors.push({ row: rows[0], fact });
+      matchingPredecessors.push({ row: rows[0], fact, mapped });
     } else report.earlierCompletedSourceDifferentFacts++;
   }
   const verifiedSources = new Map();
-  for (const { row, fact } of matchingPredecessors) {
+  const verifiedMetadata = new Map();
+  for (const { row, fact, mapped } of matchingPredecessors) {
     const sourceId = row.source_record_id;
     let original;
     if (verifiedSources.has(sourceId)) {
@@ -356,6 +357,7 @@ async function inspectPredecessorHints(reader, env, family, missing, cutoff, r2B
         'SELECT id,source_type,fetched_at,raw_object_key,content_hash,quality_status' +
         ' FROM source_records WHERE id=? LIMIT 1', sourceId);
       const source = metadata[0];
+      if (source) verifiedMetadata.set(sourceId, source);
       if (!source || source.source_type !== 'official_provider' ||
           !Number.isFinite(Date.parse(source.fetched_at)) ||
           Date.parse(source.fetched_at) !== Date.parse(row.observed_at)) {
@@ -380,6 +382,18 @@ async function inspectPredecessorHints(reader, env, family, missing, cutoff, r2B
         sameSourceIdentityAndScope(family, candidate, fact));
       if (matches.length === 1 && snapshotFactMatches(family, row, matches[0])) {
         report.earlierOriginalVerifiedFacts++;
+        // This callback is deliberately private. Neither raw identity nor
+        // source metadata is ever added to the response/report.
+        if (onVerified) onVerified({
+          family, canonicalId: mapped, currentFact: fact, priorFact: matches[0],
+          priorSnapshot: row,
+          currentSource: {
+            id: currentSource.source_record_id, fetched_at: currentSource.fetched_at,
+            content_hash: currentSource.content_hash,
+            quality_status: currentSource.quality_status, source_type: 'official_provider'
+          },
+          priorSource: verifiedMetadata.get(sourceId)
+        });
       } else {
         report.earlierOriginalFactMismatch++;
       }
@@ -402,6 +416,7 @@ function emptySummary(family) {
     originalMissing: 0,
     originalInvalid: 0,
     originalFactCountInsufficient: 0,
+    originalFactCountExcess: 0,
     originalDeferred: 0,
     provenanceConflicts: 0,
     actualLogicalRepresentations: 0,
@@ -441,20 +456,63 @@ function selectSourceSql(family, withCursor) {
   ].join(' ');
 }
 
-export async function inspectPrivateSnapshotReconciliationPage(env, { family, cursor = null } = {}) {
+// The recovery scanner does not depend on a failed/expired historical audit.
+// Each private source is freshly counted with the same indexed logical-count
+// definition as the production integrity audit. Its source ID is never
+// accepted from a public route and never leaves the aggregate response.
+function selectLiveRecoverySourceSql(family) {
+  const definition = FAMILY[family];
+  return [
+    'SELECT sync.source_record_id,sync.' + definition.count + ' AS expected_count,',
+    '(',
+    'SELECT COUNT(*) FROM ' + definition.table +
+      ' direct INDEXED BY idx_' + definition.table + '_source_record' +
+      ' WHERE direct.source_record_id=sync.source_record_id',
+    ') + (',
+    'SELECT COUNT(*) FROM official_snapshot_observations obs',
+      'INDEXED BY sqlite_autoindex_official_snapshot_observations_1',
+    'WHERE obs.source_record_id=sync.source_record_id AND obs.snapshot_family=?',
+    'AND NOT EXISTS (SELECT 1 FROM ' + definition.table +
+      ' owned WHERE owned.id=obs.snapshot_id',
+    'AND owned.source_record_id=obs.source_record_id)',
+    ') AS ledger_count,',
+    'sr.fetched_at,sr.raw_object_key,sr.content_hash,sr.quality_status',
+    'FROM official_snapshot_source_sync sync',
+    'JOIN source_records sr ON sr.id=sync.source_record_id',
+    "WHERE sync.status='complete' AND sr.source_type='official_provider'",
+    'AND sync.source_record_id=? LIMIT 1'
+  ].join(' ');
+}
+
+export async function inspectPrivateSnapshotReconciliationPage(env, { family, cursor = null, onVerifiedPredecessor = null, internalSourceId = null } = {}) {
+  if (onVerifiedPredecessor != null && typeof onVerifiedPredecessor !== 'function') {
+    throw new Error('reconciliation_invalid_private_callback');
+  }
   if (!FAMILY[family]) throw new Error('reconciliation_invalid_family');
   if (!env?.DB || !env?.RAW_BUCKET) throw new Error('reconciliation_bindings_missing');
   const reader = readonlyReader(env.DB);
-  const proof = await reader.query(PROOF_SQL);
-  if (proof.length !== 1 || boundedInteger(proof[0].target_count) !== 22 ||
+  const live = internalSourceId != null;
+  if (live && (typeof internalSourceId !== 'string' || internalSourceId.length > 256 ||
+      !internalSourceId || cursor != null)) {
+    throw new Error('reconciliation_internal_source_invalid');
+  }
+  const initialEpoch = live ? await reader.query(
+    'SELECT revision FROM historical_recovery_epoch WHERE singleton=1'
+  ) : null;
+  if (live && (initialEpoch.length !== 1 ||
+      !Number.isSafeInteger(Number(initialEpoch[0].revision)))) {
+    throw new Error('reconciliation_recovery_epoch_missing');
+  }
+  const proof = live ? null : await reader.query(PROOF_SQL);
+  if (!live && (proof.length !== 1 || boundedInteger(proof[0].target_count) !== 22 ||
       boundedInteger(proof[0].unfinished) !== 0 || boundedInteger(proof[0].unsettled) !== 0 ||
-      boundedInteger(proof[0].dataset_revision) !== boundedInteger(proof[0].current_revision)) {
+      boundedInteger(proof[0].dataset_revision) !== boundedInteger(proof[0].current_revision))) {
     throw new Error('reconciliation_proof_not_current');
   }
-  const audit = proof[0];
-  const key = await cursorKey(env);
+  const audit = live ? null : proof[0];
+  const key = live ? null : await cursorKey(env);
   let after = null;
-  if (cursor != null) {
+  if (!live && cursor != null) {
     const decoded = await decryptCursor(key, cursor);
     if (decoded?.v !== 1 || decoded.family !== family || decoded.proof !== audit.proof_id ||
         decoded.revision !== audit.dataset_revision || typeof decoded.after !== 'string' ||
@@ -463,8 +521,10 @@ export async function inspectPrivateSnapshotReconciliationPage(env, { family, cu
     }
     after = decoded.after;
   }
-  const rows = await reader.query(selectSourceSql(family, after != null),
-    audit.proof_id, family, audit.completed_at, ...(after == null ? [] : [after]));
+  const rows = live
+    ? await reader.query(selectLiveRecoverySourceSql(family), family, internalSourceId)
+    : await reader.query(selectSourceSql(family, after != null),
+      audit.proof_id, family, audit.completed_at, ...(after == null ? [] : [after]));
   const report = emptySummary(family);
   const r2Budget = { objectsRead: 0, bytesRead: 0 };
   if (rows.length > 1) throw new Error('reconciliation_source_limit');
@@ -472,19 +532,28 @@ export async function inspectPrivateSnapshotReconciliationPage(env, { family, cu
     const source = rows[0];
     report.sourcesExamined = 1;
     report.ledgerShortfall = boundedInteger(source.expected_count) - boundedInteger(source.ledger_count);
-    if (report.ledgerShortfall <= 0) throw new Error('reconciliation_invalid_source_deficit');
-    const raw = await verifiedOriginal(env, source, r2Budget);
-    if (raw.status !== 'verified') classifyRawStatus(report, raw.status);
+    if (report.ledgerShortfall <= 0 && !live) throw new Error('reconciliation_invalid_source_deficit');
+    const raw = live && report.ledgerShortfall <= 0
+      ? { status: 'not_needed' } : await verifiedOriginal(env, source, r2Budget);
+    if (live && report.ledgerShortfall <= 0) {
+      // Full-inventory scan: a source without deficit needs no raw download.
+      // Excess representations are counted separately and quarantined.
+      if (report.ledgerShortfall < 0) report.provenanceConflicts++;
+      report.auditLedgerVerified = report.ledgerShortfall === 0;
+    } else if (raw.status !== 'verified') classifyRawStatus(report, raw.status);
     else {
       report.originalVerified = 1;
       const facts = raw.facts[FAMILY[family].facts];
       if (facts.size > MAX_FACTS) {
         report.originalDeferred++;
         report.originalVerified = 0;
-      } else if (facts.size < boundedInteger(source.expected_count)) {
-        // A genuine hash-verified original can disagree with a legacy import
-        // counter; this does not make the original itself corrupt.
-        report.originalFactCountInsufficient++;
+      } else if (facts.size !== boundedInteger(source.expected_count)) {
+        // Never restore from a raw-source fact population that disagrees
+        // with its completed importer count in either direction. The raw
+        // original is authentic but its legacy normalization is ambiguous.
+        if(facts.size < boundedInteger(source.expected_count))
+          report.originalFactCountInsufficient++;
+        else report.originalFactCountExcess++;
         report.extractedFacts = facts.size;
       } else {
         const observations = await readRows(reader,
@@ -517,7 +586,8 @@ export async function inspectPrivateSnapshotReconciliationPage(env, { family, cu
         report.extractedFacts = comparison.expectedFacts;
         report.classifications = comparison.classifications;
         report.predecessorHints = await inspectPredecessorHints(
-          reader, env, family, missingInternal, source.fetched_at, r2Budget
+          reader, env, family, missingInternal, source.fetched_at,
+          r2Budget, source, onVerifiedPredecessor
         );
         // A source-owned direct row must be a verified official snapshot.
         // A quality anomaly invalidates this source's classification.
@@ -527,17 +597,23 @@ export async function inspectPrivateSnapshotReconciliationPage(env, { family, cu
         }
       }
     }
-    report.cursor = await encryptCursor(key, {
+    if (!live) report.cursor = await encryptCursor(key, {
       v: 1, family, proof: audit.proof_id, revision: audit.dataset_revision,
       after: source.source_record_id
     });
   } else {
     report.done = true;
   }
-  const finalRevision = await reader.query('SELECT revision FROM storage_cleanup_dataset_revision WHERE singleton=1');
+  const finalRevision = live
+    ? await reader.query('SELECT revision FROM historical_recovery_epoch WHERE singleton=1')
+    : await reader.query('SELECT revision FROM storage_cleanup_dataset_revision WHERE singleton=1');
   if (finalRevision.length !== 1 || boundedInteger(finalRevision[0].revision) !==
-      boundedInteger(audit.dataset_revision)) {
+      boundedInteger(live ? initialEpoch[0].revision : audit.dataset_revision)) {
     throw new Error('reconciliation_dataset_revision_changed');
+  }
+  if (live) {
+    report.liveSourceReverified = true;
+    report.liveRevision = boundedInteger(finalRevision[0].revision);
   }
   report.revisionCounterMatchesProof = true;
   report.budget = { ...reader.cost(), r2ObjectsRead: r2Budget.objectsRead,
