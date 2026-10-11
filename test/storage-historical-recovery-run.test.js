@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 import { createTestEnv } from './helpers/d1.js';
 import {
   startHistoricalRecoveryRun, historicalRecoveryStatus,
@@ -76,7 +77,11 @@ async function ready(f) {
   f.env.HISTORICAL_RECOVERY_DATABASE_ID='d8189e0e-6127-4ef2-88cc-534cb2217340';
   f.env.HISTORICAL_BACKUP_API_TOKEN='synthetic_only_private_export_token_for_D1_testing';
   const bookmark='00000085-0000024c-00004c6d-8e61117bf38d7adb71b934ebbf891683';
-  const backedUp='SYNTHETIC SQL PRIVATE BACKUP'.repeat(60);
+  const backedUp='BEGIN TRANSACTION;\\n' +
+    'CREATE TABLE restore_probe(value INTEGER PRIMARY KEY);\\n' +
+    'INSERT INTO restore_probe(value) VALUES (42);\\n' +
+    '-- SYNTHETIC BACKUP CONTENT ONLY\\n'.repeat(70) +
+    'COMMIT;\\n';
   const priorFetch=globalThis.fetch;
   let startedExport=false;
   let polledExport=false;
@@ -118,6 +123,13 @@ async function ready(f) {
   const key='backups/historical-recovery/'+started.runId+'/'+bookmark+'.sql';
   const raw=await f.env.RAW_BUCKET.get(key);
   assert.equal(await raw.text(),backedUp);
+  // Rehearse a restore into an isolated synthetic SQLite database; no
+  // production data is downloaded or written by this test.
+  const rehearsed=new DatabaseSync(':memory:');
+  try {
+    rehearsed.exec(await raw.text());
+    assert.equal(rehearsed.prepare('SELECT value FROM restore_probe').get().value,42);
+  } finally { rehearsed.close(); }
   return {runId:started.runId,backupKey:key};
 }
 
