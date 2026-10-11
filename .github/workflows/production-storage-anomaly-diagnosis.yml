@@ -1,0 +1,61 @@
+name: Production snapshot anomaly diagnosis (read-only)
+run-name: Snapshot anomaly diagnosis — read-only
+
+on:
+  workflow_dispatch:
+  # One bounded read-only diagnostic is launched by the approved merge that
+  # introduces this workflow. Later normal code/release pushes do not trigger it.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/production-storage-anomaly-diagnosis.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  diagnose:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    concurrency:
+      group: kentaurai-production-operation
+      cancel-in-progress: false
+    steps:
+      - name: Checkout exact main
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Require main branch and healthy production release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          release="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/production-release-v060.yml/runs?branch=main&status=success&per_page=1")"
+          test "$(printf '%s' "$release" | jq -r '.workflow_runs[0].conclusion // empty')" = "success"
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+
+      - name: Run QA on diagnostic code
+        run: npm run qa
+
+      - name: Read precomputed audit evidence and independently recount 20 sources per family
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          D1_DATABASE_ID: d8189e0e-6127-4ef2-88cc-534cb2217340
+        run: node scripts/diagnose-storage-anomalies.mjs
+
+      - name: Report boundaries
+        if: ${{ always() }}
+        run: |
+          echo "READ-ONLY aggregate diagnostic; no private source identifiers, raw payloads, D1 writes, Worker changes or R2 operations." >> "$GITHUB_STEP_SUMMARY"
+          echo "Historical import-processing cohort is approximate; exact causality requires private source-level reconciliation." >> "$GITHUB_STEP_SUMMARY"
