@@ -706,3 +706,28 @@ test('verified older R2-source candidate is detected by pure source-level previe
     assert.equal(JSON.stringify(report).includes(secret), false);
   }
 });
+
+test('private recovery preview exposes only aggregates and has no mutation method', async () => {
+  const f = await fixture();
+  const url = 'https://example.invalid/v1/storage-cleanup/restoration/preview?family=horse_profile';
+  const noAuth = await worker.fetch(new Request(url), f.env);
+  assert.equal(noAuth.status, 401);
+  assert.equal(f.d1Metrics.runs, 0);
+  const good = await worker.fetch(new Request(url, {
+    headers: { authorization: 'Bearer ' + f.env.ADMIN_TOKEN }
+  }), f.env);
+  assert.equal(good.status, 200);
+  const result = await good.json();
+  assert.equal(result.mode, 'read_only_verified_restoration_preview');
+  assert.equal(result.repairAuthorized, false);
+  assert.equal(result.readyDirectSnapshotCandidates, 0);
+  assert.equal(f.d1Metrics.runs, 0);
+  assert.equal(f.d1Metrics.batches, 0);
+  const post = await worker.fetch(new Request(url, {
+    method:'POST', headers: { authorization: 'Bearer ' + f.env.ADMIN_TOKEN,
+      'content-type':'application/json' }, body: '{}'
+  }), f.env);
+  assert.equal(post.status, 404);
+  assert.equal(f.d1Metrics.runs, 0);
+});
+
