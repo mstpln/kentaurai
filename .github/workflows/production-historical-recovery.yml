@@ -91,7 +91,7 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           names="$(npx --yes wrangler@4.114.0 secret list --name "$WORKER_NAME" --format json)"
-          for name in HISTORICAL_REPAIR_ENABLED HISTORICAL_REPAIR_TOKEN \
+          for name in HISTORICAL_REPAIR_ENABLED HISTORICAL_REPAIR_TOKEN HISTORICAL_REPAIR_EXPIRES_AT \
             HISTORICAL_BACKUP_API_TOKEN HISTORICAL_RECOVERY_ACCOUNT_ID STORAGE_CLEANUP_TOKEN; do
             if printf '%s' "$names" | jq -e --arg key "$name" \
               '.[] | select(.name == $key)' > /dev/null; then
@@ -222,7 +222,7 @@ jobs:
         run: |
           set -euo pipefail
           names="$(npx --yes wrangler@4.114.0 secret list --name "$WORKER_NAME" --format json)"
-          for name in HISTORICAL_REPAIR_ENABLED HISTORICAL_REPAIR_TOKEN \
+          for name in HISTORICAL_REPAIR_ENABLED HISTORICAL_REPAIR_TOKEN HISTORICAL_REPAIR_EXPIRES_AT \
             HISTORICAL_BACKUP_API_TOKEN HISTORICAL_RECOVERY_ACCOUNT_ID STORAGE_CLEANUP_TOKEN; do
             if printf '%s' "$names" | jq -e --arg key "$name" \
               '.[] | select(.name == $key)' > /dev/null; then
