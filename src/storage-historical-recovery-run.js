@@ -303,7 +303,7 @@ export async function pollHistoricalRecoveryCloudBackup(env,{runId}={}) {
     await verifiedBackup(env,run);
     return {...totals(run),backupVerified:true};
   }
-  const result=await exportRequest(env,{current_bookmark:run.backup_bookmark});
+  const result=await exportRequest(env,{output_format:'polling',current_bookmark:run.backup_bookmark});
   if(result.at_bookmark && result.at_bookmark!==run.backup_bookmark)
     throw new Error('recovery_backup_bookmark_conflict');
   const signed=String(result.signed_url || result.result?.signed_url || '');
