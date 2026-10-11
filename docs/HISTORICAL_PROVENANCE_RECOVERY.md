@@ -207,8 +207,10 @@ limit is deliberately unsupported and must stop without enabling repairs.
 
 The PR **must not be merged or deployed without explicit user approval**.
 No source-restoration production run is initiated by merging this PR.
-A separate explicit production execution approval is necessary after a
-successful source inventory and before backup/restore operations.
+After a successful source inventory, starting the disruptive D1 export
+requires its own explicit `backup` approval. A **different** explicit
+`execute` approval is needed after that backup is completed and reviewed;
+the two operations never chain automatically.
 
 "Complete" means the independent post-repair audit's four-family **logical
 count** deficits and excesses equal zero. It is not a claim that every
