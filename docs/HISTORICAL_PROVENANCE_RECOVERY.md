@@ -105,27 +105,73 @@ executor also requires a separate explicit approval, a short-lived
 Neither key/flag is provisioned by this change, and no HTTP execution route
 or scheduled repair task is created.
 
-## Full recovery gates, before any production modification
+## One-build source-inventory and recovery runner (PR #315)
 
-1. Independently export/secure a private current-production recovery point
-   in private Cloudflare storage, without exposing contents in GitHub.
-2. Implement and review the cost-capped, source-by-source private recovery
-   orchestration with resilient encrypted cursors, bounded per-run D1/R2
-   budgets, and a durable revision-aware checkpoint. **Do not** execute
-   a page and then silently reuse the stale failed-audit proof as if it
-   were still current: the deliberate revision bump invalidates it.
-3. Validate all 43,613 historic representation anomalies by origin, source
-   native identity, immutable R2 content and as-of conflict rules.
-   Quarantine missing/unverifiable originals, drifted identity mappings,
-   contradictory values and all out-of-budget cases.
-4. Obtain separate explicit operator approval for the reviewed,
-   restore-only execution flow, including production backup and rollback.
-5. Apply safe candidates in transactions, never re-enable destructive
-   cleanup, preserve conflict provenance and rerun a **new** complete
-   source-bound integrity audit. The acceptance criterion is zero proven
-   missing representations for recoverable sources, with all exclusions
-   explicitly counted, rather than an invented "all data fixed" claim.
+Migration \`0068_historical_source_provenance_recovery.sql\` introduces private
+source-by-source recovery runs, receipts and a versioned D1 epoch. SQLite
+triggers fence concurrent changes to official source records, source syncs,
+all four snapshot families, observations and official external ID mappings
+while a run is active. No additional ongoing trigger writes occur when
+recovery is not active.
 
-No code in this PR automatically executes production recovery or
-authorizes a merge. Keep the PR open pending exact-head CI/review and
-explicit approval.
+The recovery interface is private and requires the short-lived cleanup
+credential. \`/v1/storage-cleanup/restoration/run/start\`, \`scan-step\`,
+\`status\` and \`post-audit-step\` persist bounded progress. It examines
+**every source/family with a count deficit**, not just the four original
+samples. For each affected source, the live reader recalculates the source
+representation count using the current indexed D1 rows rather than a
+stale failed-audit ledger, SHA-verifies source originals, checks older
+independently verified originals where available, and records eligible and
+quarantined counts **in private D1 only**.
+
+Only separately approved \`apply-step\` can add source-owned facts. It
+checks the live facts again, revalidates current source hashes and identity,
+refuses missing/changed private backups, and atomically checkpoints each
+successful fact insertion and associated revision. A lost HTTP response
+therefore does not cause silent duplicate writes or missed progress.
+\`post-audit-step\` performs a new independent bounded source-count audit
+across all four families, reporting a clean finish only if no count
+deficits or excesses remain. Otherwise it finishes with an explicit
+\`complete_with_quarantine\` status and the remaining counts.
+
+The GitHub Actions workflow
+\`.github/workflows/production-historical-recovery.yml\` can run this
+from two manually selected modes:
+
+- \`inventory\`: read-only as to existing horse/racing facts, persists only
+  private progress/receipt rows, and automatically resumes in small bounded
+  intervals. It never enables repair capabilities.
+- \`execute\`: requires typed \`RESTORE_VERIFIED_SNAPSHOTS_ONLY\` confirmation,
+  a previously completed matching inventory, and creates a complete
+  **Cloudflare-only** D1 SQL export to private R2 before any fact writes.
+  The Worker itself polls Cloudflare's D1 export REST API and streams the
+  signed SQL dump directly into Cloudflare R2; GitHub never downloads it.
+  The private backup's source bookmark, R2 ETag and size are verified and
+  kept in private D1. Ephemeral restoration capability secrets are only
+  installed after backup verification and are removed on all exit paths.
+  Production execution is off until explicitly enabled by the manual
+  approved workflow.
+
+The same GitHub workflow self-dispatches bounded continuations; it is
+not an automatic background cron. Every continuation verifies exact
+deployed release SHA, full QA, private auth and final Worker health. Failed
+budget/proof/epoch checks stop the chain rather than skipping forward.
+No real source IDs, original payloads, hashes, R2 keys, paid sources or
+full database dumps are exposed to public logs or CI artifacts.
+
+This build does not add any blanket date-based UPDATE, destructive cleanup,
+table replacement, automatic backfill, or AI/model-weight adjustment.
+
+## Production approval and completion contract
+
+The PR **must not be merged or deployed without explicit user approval**.
+No source-restoration production run is initiated by merging this PR.
+A separate explicit production execution approval is necessary after a
+successful source inventory and before backup/restore operations.
+
+"Complete" means the independent post-repair audit's four-family **logical
+count** deficits and excesses equal zero. It is not a claim that every
+legacy as-of chronology, historical external-ID mapping or raw-original
+conflict was recoverable. Such cases must remain quarantined, with exact
+aggregated counts and no invented facts. Any discrepancy after the
+post-audit means \`complete_with_quarantine\` rather than success.
