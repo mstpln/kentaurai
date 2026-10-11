@@ -34,7 +34,7 @@ async function allBounded(env,query,...bind) {
   if (!response?.success && response?.success !== undefined) throw new Error('recovery_query_failed');
   const rows = nonnegative(response?.meta?.rows_read);
   if (rows === null || rows > D1_READ_LIMIT) throw new Error('recovery_query_budget_exceeded');
-  return response.results || [];
+  return {rows:response.results || [],rowsRead:rows};
 }
 async function epoch(env) {
   const row = await first(env,'SELECT revision FROM historical_recovery_epoch WHERE singleton=1');
@@ -141,7 +141,7 @@ export async function stepHistoricalRecoveryInventory(env,{runId}={}) {
   const index=Number(run.family_index);
   if(index>=FAMILIES.length)throw new Error('recovery_inventory_cursor_invalid');
   const family=FAMILIES[index];
-  const rows=await allBounded(env,selector(family,true,1),
+  const {rows,rowsRead:queryRowsRead}=await allBounded(env,selector(family,true,1),
     family,run.after_source_id, family);
   if(!rows.length){
     const finalEpoch=await epoch(env);
@@ -154,7 +154,8 @@ export async function stepHistoricalRecoveryInventory(env,{runId}={}) {
       ' AND (SELECT revision FROM historical_recovery_epoch WHERE singleton=1)=?'
     ).bind(last?'ready':'inventory',run.id,index,current,current).run();
     if(Number(result.meta?.changes)!==1)throw new Error('recovery_checkpoint_conflict');
-    return {...totals(await loadRun(env,run.id)),pageFamily:family,pageDone:true};
+    return {...totals(await loadRun(env,run.id)),pageFamily:family,pageDone:true,
+      budget:{rowsRead:queryRowsRead,rowsWritten:0,r2BytesRead:0}};
   }
   const item=rows[0];
   const { candidates,report,discardedCandidates }=await planInternalHistoricalRestoration(
@@ -197,7 +198,7 @@ export async function stepHistoricalRecoveryInventory(env,{runId}={}) {
     pageDeficit:shortfall,pageVerified:ready,pageQuarantined:quarantined,
     examinedOlderOriginals:report.predecessorHints?.earlierOriginalVerifiedSources??0,
     dismissedContradictoryCandidates:discardedCandidates,
-    budget:report.budget
+    budget:{...report.budget,rowsRead:report.budget.rowsRead+queryRowsRead}
   };
 }
 // D1 export content never enters GitHub Actions or ChatGPT. The Cloudflare
@@ -441,7 +442,7 @@ export async function stepHistoricalRecoveryPostAudit(env,{runId}={}) {
   const index=Number(run.family_index);
   if(index>=FAMILIES.length)throw new Error('recovery_post_audit_cursor_invalid');
   const family=FAMILIES[index];
-  const rows=await allBounded(env,selector(family,false,MAX_VERIFY_PAGE),
+  const {rows,rowsRead:queryRowsRead}=await allBounded(env,selector(family,false,MAX_VERIFY_PAGE),
     family,run.after_source_id);
   const complete=rows.length===0;
   const missing=rows.reduce((sum,row)=>sum+
@@ -467,5 +468,5 @@ export async function stepHistoricalRecoveryPostAudit(env,{runId}={}) {
   if(Number(changed.meta?.changes)!==1)throw new Error('recovery_post_audit_checkpoint_conflict');
   return {...totals(await loadRun(env,run.id)),pageFamily:family,
     postAuditSourcesChecked:rows.length,pageMissing:missing,pageExcess:excess,
-    pageDone:complete};
+    pageDone:complete,budget:{rowsRead:queryRowsRead,rowsWritten:0,r2BytesRead:0}};
 }
