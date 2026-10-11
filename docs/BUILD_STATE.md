@@ -1,3 +1,40 @@
+## Production #42 snapshot anomaly investigation (read-only; PR pending)
+
+The completed source/revision-bound dry-run #42 reported 43,613 missing logical
+representations across four snapshot families. The audit found zero excess
+representations, dangling observations, identity mismatches, timestamp
+mismatches, stranded raw batches, or active cleanup batches. It failed closed
+and did not delete anything.
+
+A separate manual-only GitHub workflow now enables aggregate investigation
+**without a new costly 4.7M-row audit**. It queries the already persisted
+failed audit ledger and completed source-import metadata inside private D1.
+No source IDs, horse/person IDs, raw object keys, provider payloads, sample
+rows, or private audit IDs are returned in output. It reports per-family
+shortfall pattern (entire vs partial), coarse last-processed date cohort,
+missing raw references, whether the ledger has an entry, and an independent
+indexed recount of up to 20 deficient sources per family. Cohort cutoff at
+2026-09-28 is a rough implementation-era delimiter, **not** proof of a
+production deployment boundary or import time. The SQL is static and read-only,
+the remote client enforces zero D1 writes and unchanged 250k read/operation,
+1M read/run caps, and the workflow shares the production-operation lock.
+
+Identified importer design risks awaiting proof-based remediation:
+- \`INSERT OR IGNORE\` plus unconditional processed-fact counters can mask
+  ignored writes or conflicting deterministic identifiers.
+- A \`complete\` sync is returned as reusable without reconciling its count.
+- A \`failed\` source can leave partial snapshot/observation writes, while the
+  scheduled picker only considers sources with **no** sync row.
+- Older direct-snapshot imports predate observation/change-point storage.
+  This history alone does not explain deficiencies because each successfully
+  inserted legacy fact had a direct row.
+
+Do not repair or reset sync statuses merely from counts: first verify whether
+the independent recount matches the audit ledger, whether original private
+raw payloads and entity mappings support reconstruction, and whether any
+representation was superseded, skipped, or genuinely lost. No automatic
+production write/backfill or cleanup is authorized by this diagnostic build.
+
 ## Read-only audit continuation #22: isolate QA from active workflow inputs
 
 - GitHub run #21 correctly accepted bounded read-only progress and automatically
