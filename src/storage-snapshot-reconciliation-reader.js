@@ -532,7 +532,8 @@ export async function inspectPrivateSnapshotReconciliationPage(env, { family, cu
     report.sourcesExamined = 1;
     report.ledgerShortfall = boundedInteger(source.expected_count) - boundedInteger(source.ledger_count);
     if (report.ledgerShortfall <= 0 && !live) throw new Error('reconciliation_invalid_source_deficit');
-    const raw = await verifiedOriginal(env, source, r2Budget);
+    const raw = live && report.ledgerShortfall <= 0
+      ? { status: 'not_needed' } : await verifiedOriginal(env, source, r2Budget);
     if (live && report.ledgerShortfall <= 0) {
       // Full-inventory scan: a source without deficit needs no raw download.
       // Excess representations are counted separately and quarantined.
