@@ -9,7 +9,8 @@ reported shortfalls were in the historical import cohort; raw-object
 The next safe gate is the private endpoint
 \`GET /v1/storage-cleanup/raw-evidence/sample\`. This route requires existing
 cleanup/admin authentication, reads the latest settled integrity-failed audit
-and rejects changed dataset revisions, incomplete proof and unsettled audit
+and checks the stored revision counter (a failed audit's counter is not an
+absolute guarantee against later untracked changes), incomplete proof and unsettled audit
 pages. It selects at most four deficient sources per family (one without an
 audit-ledger representation and three partial discrepancies), verifies R2
 objects via bounded head/get, SHA-256 and source metadata, and parses their

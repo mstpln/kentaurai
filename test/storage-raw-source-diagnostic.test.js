@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { createTestEnv } from './helpers/d1.js';
 import { inspectPrivateRawSnapshotEvidence } from '../src/storage-raw-source-diagnostic.js';
 import worker from '../src/index.js';
@@ -72,6 +73,7 @@ test('read-only R2 verification checks hashes, parses original facts and outputs
   const report = await inspectPrivateRawSnapshotEvidence(f.env);
   assert.equal(report.mode, 'read_only_raw_evidence_sample');
   assert.equal(report.classificationOnly, true);
+  assert.equal(report.revisionCounterMatchesProof, true);
   assert.equal(report.snapshotFactsNotRestored, true);
   assert.equal(report.families.length, 4);
   const horse = report.families[0];
@@ -136,4 +138,61 @@ test('read-only endpoint rejects unauthorized callers and returns sanitized aggr
   assert.equal(body.budget.rowsWritten, 0);
   assert.equal(JSON.stringify(body).includes(f.partial.key), false);
   assert.equal(f.d1Metrics.runs, 0);
+});
+
+
+test('oversized R2 original is never downloaded, parsed or mistaken for evidence', async () => {
+  const f = await fixture();
+  const oversized = 'x'.repeat(8 * 1024 * 1024 + 1);
+  await f.env.RAW_BUCKET.put(f.never.key, oversized, {
+    customMetadata: { contentHash: f.never.digest, sourceType: 'official_provider' }
+  });
+  let gets = 0;
+  const raw = f.env.RAW_BUCKET;
+  f.env.RAW_BUCKET = {
+    head: (key) => raw.head(key),
+    get: async (key) => { gets++; return raw.get(key); }
+  };
+  const report = await inspectPrivateRawSnapshotEvidence(f.env);
+  assert.equal(report.families[0].originalInvalid, 1);
+  assert.equal(report.families[0].rawHashVerified, 1);
+  assert.equal(gets, 1, 'only the other valid original may be downloaded');
+  assert.equal(report.budget.r2ObjectsRead, 1);
+});
+
+test('D1 query read-cap violations fail closed before R2 access', async () => {
+  const f = await fixture();
+  const normalDb = f.env.DB;
+  f.env.DB = {
+    prepare: (sql) => ({
+      bind: (...values) => ({
+        all: async () => {
+          const result = await normalDb.prepare(sql).bind(...values).all();
+          return { ...result, meta: { ...result.meta, rows_read: 250001 } };
+        }
+      })
+    })
+  };
+  await assert.rejects(() => inspectPrivateRawSnapshotEvidence(f.env), /raw_diagnostic_D1_budget_stop/);
+  assert.equal(f.d1Metrics.runs, 0);
+});
+
+test('manual R2 workflow enforces deploy identity, scoped secrets and secret removal', () => {
+  const workflow = readFileSync(
+    new URL('../.github/workflows/production-storage-raw-evidence.yml', import.meta.url), 'utf8'
+  );
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.doesNotMatch(workflow, /push:\s*\n\s+branches/);
+  assert.match(workflow, /group: kentaurai-production-operation/);
+  assert.match(workflow, /cancel-in-progress: false/);
+  assert.match(workflow, /test "\$\([^"]+\)" = "\$GITHUB_SHA"/);
+  assert.match(workflow, /Run full QA without Cloudflare credentials/);
+  const qaBlock = workflow.split('      - name: Run full QA without Cloudflare credentials')[1]
+    ?.split('      - name: Remove orphaned previous cleanup-only secret')[0];
+  assert.ok(qaBlock);
+  assert.doesNotMatch(qaBlock, /CLOUDFLARE_API_TOKEN/);
+  assert.match(workflow, /Remove temporary credential/);
+  assert.match(workflow, /always\(\)/);
+  assert.match(workflow, /secret delete STORAGE_CLEANUP_TOKEN/);
+  assert.doesNotMatch(workflow, /\bwrangler (?:deploy|d1 execute|d1 migrations)\b/);
 });

@@ -215,7 +215,7 @@ export async function inspectPrivateRawSnapshotEvidence(env) {
     mode: 'read_only_raw_evidence_sample',
     classificationOnly: true,
     snapshotFactsNotRestored: true,
-    sameDatasetRevision: true,
+    revisionCounterMatchesProof: true,
     sampleRule: 'first_deficient_source_per_family_without_ledger_plus_first_three_partial_sources',
     families,
     budget: {

@@ -123,7 +123,7 @@ jobs:
             > "$RUNNER_TEMP/kentaurai-raw-evidence-aggregates.json"
           jq -e '(.mode == "read_only_raw_evidence_sample") and
             (.classificationOnly == true) and (.snapshotFactsNotRestored == true) and
-            (.sameDatasetRevision == true) and (.budget.rowsWritten == 0) and
+            (.revisionCounterMatchesProof == true) and (.budget.rowsWritten == 0) and
             ((.families | length) == 4)' \
             "$RUNNER_TEMP/kentaurai-raw-evidence-aggregates.json" > /dev/null
           jq -c '{mode,classificationOnly,families,budget}' \
