@@ -441,3 +441,45 @@ test('record scope and ordinal are respected by predecessor lookup', async () =>
   report = await inspectPrivateSnapshotReconciliationPage(f.env, { family:'horse_record' });
   assert.equal(report.predecessorHints.earlierCompletedSourceSameFacts, 1);
 });
+
+
+test('predecessor hints stop at 24 lookups and defer remaining facts without writes', async () => {
+  const f = await fixture();
+  const starts = [];
+  for (let i = 0; i < 28; i++) {
+    const external = String(100 + i);
+    const canonical = 'h' + external;
+    if (i >= 2) {
+      f.db.prepare('INSERT INTO horses(id,canonical_name) VALUES (?,?)')
+        .run(canonical, 'Synthetic Additional Horse ' + i);
+      f.db.prepare(
+        "INSERT INTO horse_external_ids(horse_id,source_type,external_id) VALUES (?,'official',?)"
+      ).run(canonical, external);
+    }
+    starts.push({ horse: { id: Number(external), age: i === 1 ? 5 : 4 } });
+  }
+  const body = JSON.stringify({ races: [{ starts }] });
+  const hash = createHash('sha256').update(body).digest('hex');
+  const key = 'raw/official_provider/' + hash + '.json';
+  f.db.prepare('UPDATE source_records SET content_hash=?,raw_object_key=? WHERE id=?')
+    .run(hash, key, f.first.id);
+  f.db.prepare(
+    'UPDATE official_snapshot_source_sync SET horse_profile_count=28 WHERE source_record_id=?'
+  ).run(f.first.id);
+  await f.env.RAW_BUCKET.put(key, body, {
+    customMetadata: { contentHash: hash, sourceType: 'official_provider' }
+  });
+  const result = await inspectPrivateSnapshotReconciliationPage(f.env, { family: 'horse_profile' });
+  assert.equal(result.originalVerified, 1);
+  assert.equal(result.classifications.represented, 1);
+  assert.equal(result.classifications.missing_unverified_chronology, 27);
+  assert.equal(result.predecessorHints.examined, 24);
+  assert.equal(result.predecessorHints.deferred, 3);
+  assert.equal(result.predecessorHints.noEarlierDirect, 24);
+  assert.equal(result.predecessorHints.repairAuthorized, false);
+  assert.equal(result.budget.rowsWritten, 0);
+  assert.ok(result.budget.queries <= 40);
+  assert.equal(f.d1Metrics.runs, 0);
+  assert.equal(f.d1Metrics.batches, 0);
+  assert.equal(JSON.stringify(result).includes(f.first.id), false);
+});
