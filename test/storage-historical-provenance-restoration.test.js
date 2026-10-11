@@ -268,3 +268,37 @@ test('direct snapshot restoration cannot run without a separately enabled secret
     );
   }
 });
+
+
+test('guarded restorer rejects altered dynamic SQL identifiers or fact projection', async () => {
+  const f = await setup('horse_stat');
+  legacyBrokenCleanup(f, 'horse_stat');
+  f.env.HISTORICAL_REPAIR_ENABLED = 'true';
+  f.env.HISTORICAL_REPAIR_TOKEN = 'synthetic_recovery_token_with_at_least_32_chars';
+  const original = f.proposal();
+  const apply = (candidate) => applyVerifiedHistoricalRestoration(f.env, candidate, {
+    approved: true, authorization: f.env.HISTORICAL_REPAIR_TOKEN
+  });
+  await assert.rejects(
+    () => apply({ ...original, externalTable: 'horse_external_ids WHERE 1=1--' }),
+    /historical_restoration_external_mapping_conflict/
+  );
+  await assert.rejects(
+    () => apply({ ...original, externalIdColumn: 'driver_id' }),
+    /historical_restoration_external_mapping_conflict/
+  );
+  await assert.rejects(
+    () => apply({ ...original, factualColumns: { starts: 10 } }),
+    /historical_restoration_candidate_mutated/
+  );
+  await assert.rejects(
+    () => apply({ ...original, factualColumns: {
+      ...original.factualColumns, 'starts OR 1=1': 10
+    } }),
+    /historical_restoration_candidate_mutated/
+  );
+  assert.equal(f.db.prepare(
+    'SELECT COUNT(*) AS n FROM horse_stat_snapshots WHERE source_record_id=?'
+  ).get(f.current.id).n, 0);
+  assert.equal(f.d1Metrics.batches, 0);
+});
