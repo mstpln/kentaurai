@@ -9,6 +9,11 @@ import { syncOnePendingOfficialSnapshotSource } from './import/official-snapshot
 import { inspectPrivateRawSnapshotEvidence } from './storage-raw-source-diagnostic.js';
 import { inspectPrivateSnapshotReconciliationPage } from './storage-snapshot-reconciliation-reader.js';
 import { inspectHistoricalRestorationPage } from './storage-historical-recovery-page.js';
+import {
+  startHistoricalRecoveryRun, historicalRecoveryStatus,
+  stepHistoricalRecoveryInventory, attachHistoricalRecoveryBackup,
+  stepHistoricalRecoveryExecution, stepHistoricalRecoveryPostAudit
+} from './storage-historical-recovery-run.js';
 import { normalizeCapturedXlabsRace } from './import/xlabs-telemetry.js';
 import {
   createXlabsPositionReconstructionJob,
@@ -434,6 +439,38 @@ async function handleFetch(request, env) {
       }));
     } catch {
       return json({ error: 'restoration_preview_unavailable' }, 409);
+    }
+  }
+  // Recovery run state is private, source IDs and evidence remain in D1.
+  // Only the explicitly reviewed restoration execution step may insert
+  // source-owned facts; it requires a separate capability and private backup.
+  if (path.startsWith('/v1/storage-cleanup/restoration/run/')) {
+    try {
+      if (request.method === 'GET' && path.endsWith('/status')) {
+        return json(await historicalRecoveryStatus(env,{
+          runId:url.searchParams.get('run_id')
+        }));
+      }
+      if (request.method === 'POST') {
+        const body=await readJson(request);
+        if(path.endsWith('/start')) return json(await startHistoricalRecoveryRun(env));
+        if(path.endsWith('/scan-step')) return json(await stepHistoricalRecoveryInventory(env,{
+          runId:body.run_id
+        }));
+        if(path.endsWith('/backup')) return json(await attachHistoricalRecoveryBackup(env,{
+          runId:body.run_id,key:body.key,sha256:body.sha256,size:body.size
+        }));
+        if(path.endsWith('/apply-step')) return json(await stepHistoricalRecoveryExecution(env,{
+          runId:body.run_id,approved:body.approved===true,authorization:body.authorization
+        }));
+        if(path.endsWith('/post-audit-step')) return json(await stepHistoricalRecoveryPostAudit(env,{
+          runId:body.run_id
+        }));
+      }
+      return json({error:'not_found'},404);
+    } catch(error) {
+      console.error('private historical recovery stopped',String(error?.message||'error').slice(0,100));
+      return json({error:'historical_recovery_not_authorized_or_unavailable'},409);
     }
   }
   if (request.method === 'GET' && path === '/v1/storage-cleanup/audit') {
