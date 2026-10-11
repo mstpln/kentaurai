@@ -38,11 +38,39 @@ token invalidates old cursors. The cursor binds to the family, exact failed
 audit ID and dataset revision. The private response contains only generic
 classifications and an opaque cursor; the Actions log omits the cursor.
 
+
+## Historical predecessor hints (new bounded follow-up)
+
+The private sample now performs **at most 24 additional read-only SELECTs**
+against direct predecessor snapshots for facts already classified as missing
+with today's one-to-one mapping. It checks the nearest **strictly earlier**
+direct snapshot in the same entity, family and exact scope (including record
+year and ordinal). It then compares every factual field of that predecessor
+against the source fact, distinguishing:
+
+- \`earlierCompletedSourceSameFacts\`: nearest earlier direct row has matching
+  facts and an official completed-sync source record.
+- \`earlierCompletedSourceDifferentFacts\`: that row has different facts.
+- \`earlierUnconfirmedSource\`: nearest earlier row exists but the source/sync
+  provenance or snapshot quality is not confirmed.
+- \`noEarlierDirect\`: no earlier direct row in this index for the **current**
+  canonical mapping.
+- \`deferred\`: facts not examined due to 24-hint or 40-query hard caps.
+
+These counts are hints for choosing which import/history failure to inspect,
+**not confirmation** that the missing representation is an observation rather
+than a snapshot. The predecessor's original R2 bytes are not rehashed in this
+follow-up, and the lookup does not reconstruct indirect observation events or
+historical identity mappings. Both historical-identity and full-chronology
+proofs remain false, and no repair is authorized. The endpoint's returned
+report remains aggregate-only: no record IDs, horses, raw values or keys.
+The same request-level D1 budget and final dataset-revision fence apply.
+
 ## Safety and budgets
 
 Each endpoint invocation is bounded to one R2 original (at most **8 MiB**),
 a maximum 512 parsed facts, 1,024 source-owned direct rows, 1,024 observations,
-1,024 referenced snapshots and 40 SELECTs. D1 reads are capped at 250,000
+1,024 referenced snapshots, 24 predecessor hints and 40 SELECTs. D1 reads are capped at 250,000
 per query and 1,000,000 per request, and any D1 writes fail closed. No
 D1/R2 write/delete path exists in this stage.
 

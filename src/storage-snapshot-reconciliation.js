@@ -30,12 +30,28 @@ function matchingColumns(record, columns) {
 }
 function validTime(v) { return typeof v === 'string' && Number.isFinite(Date.parse(v)); }
 
+// Use exactly the same fact columns as the reconciliation classifier when
+// comparing a bounded historical predecessor. Missing SQL projections fail
+// closed instead of treating undefined as a factual null.
+export function snapshotFactMatches(family, record, fact) {
+  const definition = FAMILIES[family];
+  if (!definition || !record || typeof record !== 'object' || !fact || typeof fact !== 'object') {
+    throw new Error('reconciliation_invalid_predecessor');
+  }
+  const columns = definition.columns(fact);
+  if (Object.keys(columns).some((key) => !Object.prototype.hasOwnProperty.call(record, key))) {
+    throw new Error('reconciliation_incomplete_projection');
+  }
+  return matchingColumns(record, columns);
+}
+
 // All inputs must be read from verified originals and read-only D1 queries.
 // identityEvidence must explicitly establish stable historical mapping; a
 // present-day mapping alone never proves the identity used by a legacy import.
 export function reconcileSnapshotFacts({
   family, source, facts, identities, direct = [], observations = [],
-  referencedSnapshots = [], chronology = [], historicalIdentityVerified = false, chronologyVerified = false
+  referencedSnapshots = [], chronology = [], historicalIdentityVerified = false, chronologyVerified = false,
+  onFactClassified = null
 }) {
   const definition = FAMILIES[family];
   if (!definition || !(facts instanceof Map)) throw new Error('reconciliation_invalid_family_or_facts');
@@ -43,6 +59,7 @@ export function reconcileSnapshotFacts({
       !validTime(source.fetched_at) || !Array.isArray(direct) || !Array.isArray(observations) ||
       !Array.isArray(referencedSnapshots) || !Array.isArray(chronology) ||
       !(identities instanceof Map)) throw new Error('reconciliation_invalid_input');
+  if (onFactClassified != null && typeof onFactClassified !== 'function') throw new Error('reconciliation_invalid_callback');
   if (facts.size > 512 || direct.length > 1024 || observations.length > 1024 ||
       referencedSnapshots.length > 1024 || chronology.length > 2048) {
     throw new Error('reconciliation_budget_exceeded');
@@ -97,6 +114,8 @@ export function reconcileSnapshotFacts({
       }
     }
     summary[status]++;
+    // Called only from the private Worker: never return this detail or log it.
+    if (onFactClassified) onFactClassified({ status, fact, mapped, entityKey, scope });
     // Deliberately omit source IDs, canonical identities, raw keys and values:
     // only classifications are allowed to cross the private endpoint boundary.
     checked++;

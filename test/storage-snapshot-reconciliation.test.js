@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { reconcileSnapshotFacts } from '../src/storage-snapshot-reconciliation.js';
+import { reconcileSnapshotFacts, snapshotFactMatches } from '../src/storage-snapshot-reconciliation.js';
 
 const fetched_at = '2026-09-12T12:00:00Z';
 function inspect({ facts = new Map([['synthetic:1', { externalId: '123', ageYears: 4 }]]),
@@ -86,4 +86,32 @@ test('aggregate-only report never includes original source identifiers or factua
 
 test('unknown completeness of earlier/later timeline blocks candidate classification', () => {
   assert.deepEqual(status(inspect({ historicalIdentityVerified: true })), ['missing_unverified_chronology']);
+});
+
+
+test('private status callback does not change public classification or return facts', () => {
+  const observed = [];
+  const base = inspect();
+  const result = reconcileSnapshotFacts({
+    family:'horse_profile',
+    source:{ id:'source-1', fetched_at },
+    facts:new Map([['a',{ externalId:'123', ageYears:4 }]]),
+    identities:new Map([['123',['horse-1']]]),
+    onFactClassified:({status,mapped,fact})=>observed.push({status,mapped,fact})
+  });
+  assert.deepEqual(result,base);
+  assert.equal(observed[0].status,'missing_unverified_chronology');
+  assert.equal(observed[0].fact.ageYears,4);
+  assert.equal(JSON.stringify(result).includes('horse-1'),false);
+  assert.throws(() => reconcileSnapshotFacts({
+    family:'horse_profile',source:{id:'source-1',fetched_at},
+    facts:new Map(),identities:new Map(),onFactClassified:true
+  }), /reconciliation_invalid_callback/);
+});
+
+test('predecessor comparison is exact and rejects a missing projection', () => {
+  assert.equal(snapshotFactMatches('horse_profile',{age_years:5},{ageYears:5}),true);
+  assert.equal(snapshotFactMatches('horse_profile',{age_years:7},{ageYears:5}),false);
+  assert.throws(() => snapshotFactMatches('horse_profile',{}, {ageYears:null}),
+    /reconciliation_incomplete_projection/);
 });

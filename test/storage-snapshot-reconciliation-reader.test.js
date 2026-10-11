@@ -355,3 +355,81 @@ test('production release verifies unauthenticated reconciliation route on exact 
   assert.match(workflow, /'\/v1\/storage-cleanup\/reconciliation\/page\?family=horse_profile'/);
   assert.match(workflow, /Expected \$path to return 401 without authorization/);
 });
+
+
+test('all four families keep predecessor reports aggregate-only and explicitly unverified', async () => {
+  const f = await fixture();
+  for (const family of FAMILIES) {
+    const report = await inspectPrivateSnapshotReconciliationPage(f.env, { family });
+    assert.deepEqual(report.predecessorHints, {
+      examined: 1, deferred: 0, noEarlierDirect: 1,
+      earlierCompletedSourceSameFacts: 0,
+      earlierCompletedSourceDifferentFacts: 0,
+      earlierUnconfirmedSource: 0,
+      historicalIdentityVerified: false,
+      completeChronologyVerified: false,
+      repairAuthorized: false
+    });
+    assert.equal(report.budget.rowsWritten, 0);
+    assert.ok(report.budget.queries <= 40);
+    for (const secret of [f.first.id, 'h101', 't601', 'Synthetic Horse']) {
+      assert.equal(JSON.stringify(report).includes(secret), false);
+    }
+  }
+});
+
+test('verified same-value predecessor is an observation hint, not repair authorization', async () => {
+  const f = await fixture();
+  const before = '2026-09-10T09:00:00Z';
+  f.db.prepare(
+    "INSERT INTO source_records(id,source_type,fetched_at,quality_status) " +
+    "VALUES ('earlier','official_provider',?,'normalized_verified_subset')"
+  ).run(before);
+  f.db.prepare(
+    "INSERT INTO official_snapshot_source_sync(source_record_id,status,processed_at,horse_profile_count) " +
+    "VALUES ('earlier','complete','2026-09-10T10:00:00Z',1)"
+  ).run();
+  f.db.prepare(
+    "INSERT INTO horse_profile_snapshots(id,horse_id,observed_at,age_years,source_record_id,quality_status) " +
+    "VALUES ('earlier-h101','h101',?,5,'earlier','verified_official_snapshot')"
+  ).run(before);
+  const view = () => inspectPrivateSnapshotReconciliationPage(f.env, { family:'horse_profile' });
+  let report = await view();
+  assert.equal(report.predecessorHints.earlierCompletedSourceSameFacts, 1);
+  assert.equal(report.predecessorHints.earlierCompletedSourceDifferentFacts, 0);
+  assert.equal(report.classifications.missing_unverified_chronology, 1);
+  assert.equal(report.classifications.missing_candidate, 0);
+  assert.equal(report.predecessorHints.repairAuthorized, false);
+
+  f.db.prepare("UPDATE horse_profile_snapshots SET age_years=6 WHERE id='earlier-h101'").run();
+  report = await view();
+  assert.equal(report.predecessorHints.earlierCompletedSourceDifferentFacts, 1);
+  assert.equal(report.predecessorHints.earlierCompletedSourceSameFacts, 0);
+
+  f.db.prepare("UPDATE official_snapshot_source_sync SET status='failed' WHERE source_record_id='earlier'").run();
+  report = await view();
+  assert.equal(report.predecessorHints.earlierUnconfirmedSource, 1);
+  assert.equal(report.predecessorHints.earlierCompletedSourceDifferentFacts, 0);
+});
+
+test('record scope and ordinal are respected by predecessor lookup', async () => {
+  const f = await fixture();
+  const before = '2026-09-10T09:00:00Z';
+  f.db.prepare(
+    "INSERT INTO source_records(id,source_type,fetched_at,quality_status) " +
+    "VALUES ('earlier-record','official_provider',?,'normalized_verified_subset')"
+  ).run(before);
+  f.db.prepare(
+    "INSERT INTO official_snapshot_source_sync(source_record_id,status,processed_at,horse_record_count) " +
+    "VALUES ('earlier-record','complete','2026-09-10T10:00:00Z',1)"
+  ).run();
+  f.db.prepare(
+    "INSERT INTO horse_record_snapshots(id,horse_id,observed_at,record_scope,record_ordinal,code,source_record_id,quality_status) " +
+    "VALUES ('rec-other','h101',?,'life',0,'aK','earlier-record','verified_official_snapshot')"
+  ).run(before);
+  let report = await inspectPrivateSnapshotReconciliationPage(f.env, { family:'horse_record' });
+  assert.equal(report.predecessorHints.noEarlierDirect, 1);
+  f.db.prepare("UPDATE horse_record_snapshots SET record_scope='current' WHERE id='rec-other'").run();
+  report = await inspectPrivateSnapshotReconciliationPage(f.env, { family:'horse_record' });
+  assert.equal(report.predecessorHints.earlierCompletedSourceSameFacts, 1);
+});

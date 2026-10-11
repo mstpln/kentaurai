@@ -134,6 +134,11 @@ jobs:
               .revisionCounterMatchesProof == true and
               (.sourcesExamined <= 1) and
               (.budget.rowsWritten == 0) and
+              (.predecessorHints == null or
+                (.predecessorHints.examined <= 24 and
+                 .predecessorHints.historicalIdentityVerified == false and
+                 .predecessorHints.completeChronologyVerified == false and
+                 .predecessorHints.repairAuthorized == false)) and
               (.budget.rowsRead <= 1000000) and
               (.budget.r2ObjectsRead <= 1) and
               (.budget.r2BytesRead <= 8388608)' "$output" > /dev/null
@@ -150,7 +155,7 @@ jobs:
             jq -c '{family,sourcesExamined,originalVerified,originalMissing,
               originalInvalid,originalFactCountInsufficient,originalDeferred,
               provenanceConflicts,auditLedgerVerified,ledgerShortfall,
-              extractedFacts,classifications,budget}' "$output"
+              extractedFacts,classifications,predecessorHints,budget}' "$output"
             if (( total_reads > 750000 )); then
               echo "Read-only reserve safety stop: no additional families requested."
               break
