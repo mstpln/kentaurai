@@ -435,3 +435,39 @@ A single race must not directly change model weights. Candidate learnings are re
 7. Audit page reads do not directly mutate authorization evidence. A unique page/version receipt, source-count delta and cursor transition commit in one guarded D1 batch; the receipt remains pending until its complete cost is accepted. Pending, rejected or ambiguously interrupted pages can never finalize or authorize an audit.
 8. The cleanup dataset fence covers source records, snapshot rows, observations, source-sync state and cleanup batches. An authorized cleanup batch may rebase only its exact bound audit/session, and only inside a revision-guarded transaction after reaching a verified safe state.
 9. Observation paging must be driven by the family-first cleanup index. A matching-row LIMIT on the source-first primary key is not a read bound because unrelated families may occupy an arbitrarily long prefix.
+
+## Production cleanup automation security boundary (2026-10-11)
+
+1. The public GitHub cleanup workflow is **strictly read-only**. The old
+   typed-phrase `execute` option is not an adequate protected approval
+   boundary; actual D1/R2 cleanup remains DISABLED. A separately reviewed
+   protected workflow/environment and explicit user authorization are required
+   before ever re-enabling destructive operations.
+2. Worker releases and cleanup run jobs share one exclusive GitHub production
+   operation lock. The continuation dispatcher runs in a separate secretless
+   job **after** the cleanup job releases that lock, so waiting for a real
+   successor run cannot deadlock on its own predecessor.
+3. Auto-dispatch is allowed only for accepted, source/revision-bound,
+   cost-bounded read-only audit pages, never for pending/failed proof, missing
+   progress, deadline/cap expiry, cost stop, ambiguous transport responses or
+   unverified deployment SHA. A queued/pending workflow run is not treated as
+   confirmed success because GitHub may replace a pending run.
+4. Each reviewed production deployment injects its exact GitHub commit SHA
+   into the Worker via a runtime binding. The cleanup health gates require
+   an exact match. Neither a caller-supplied SHA nor an earlier successful
+   release alone proves that the currently deployed Worker matches main.
+5. The cleanup-only Worker token is ephemeral. A new locked operation first
+   removes possible orphaned prior tokens; token cleanup runs after any
+   token-creation attempt, and cleanup success requires healthy production.
+   Unavoidable cancellation/cloud errors fail closed; never assume teardown
+   without verification.
+6. A lost response after a D1 audit page may leave durable progress. Inspect
+   the authenticated read-only audit status without starting a new
+   continuation and **do not auto-dispatch** while its caller-side costs are
+   ambiguous. Human review can safely resume persisted bounded progress.
+7. The 05:15 UTC importer remains enabled. It can invalidate a read-only
+   audit's dataset revision; this is a safe stop, not permission to skip
+   official data ingestion or to authorize stale cleanup proof.
+8. One-click automation is best-effort under GitHub Actions availability.
+   No code may silently bypass 24h/48-run expiry, D1 cost limits, independent
+   release checks, or allow cleanup mutations for UX convenience.
