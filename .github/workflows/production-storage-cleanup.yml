@@ -135,6 +135,13 @@ jobs:
           node-version: 22
 
       - name: Run QA before production operation
+        # The actual continuation identity is used later by "Run cleanup".
+        # QA subprocesses must not inherit that live control-plane identity.
+        env:
+          CLEANUP_TRIGGER_CONFIRMATION: ""
+          CLEANUP_AUDIT_RUN_ID: ""
+          CLEANUP_SESSION_ID: ""
+          CLEANUP_CONTINUATION_REQUEST: ""
         run: npm run qa
 
       - name: Validate production credentials

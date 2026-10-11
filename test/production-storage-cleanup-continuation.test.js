@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
+import { syntheticCleanupRunnerEnv } from './helpers/cleanup-runner-env.js';
 
 const AUDIT_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
 const SOURCE_SHA = 'a'.repeat(40);
@@ -37,8 +38,7 @@ async function invokeRunner(extraEnv, responder) {
   const address = server.address();
   const script = fileURLToPath(new URL('../scripts/run-production-storage-cleanup.mjs', import.meta.url));
   const child = spawn(process.execPath, [script], {
-    env: {
-      ...process.env,
+    env: syntheticCleanupRunnerEnv({
       MODE: 'dry-run',
       CLEANUP_SESSION_ID: '',
       CLEANUP_AUDIT_RUN_ID: '',
@@ -49,7 +49,7 @@ async function invokeRunner(extraEnv, responder) {
       GITHUB_SHA: SOURCE_SHA,
       GITHUB_OUTPUT: '',
       ...extraEnv
-    },
+    }),
     stdio: ['ignore', 'pipe', 'pipe']
   });
   let stdout = '';
@@ -84,6 +84,48 @@ async function normalDryRunRoute({ path, body, res }) {
     reply(res, { error: 'unexpected_execution_route' }, 500);
   }
 }
+
+test('synthetic runner environment ignores inherited workflow continuation metadata but honors explicit test cases', () => {
+  const polluted = {
+    PATH: '/synthetic-path',
+    MODE: 'execute',
+    CLEANUP_TRIGGER_CONFIRMATION: 'RESUME READ ONLY AUDIT',
+    CLEANUP_AUDIT_RUN_ID: AUDIT_ID,
+    CLEANUP_SESSION_ID: AUDIT_ID,
+    CLEANUP_CONTINUATION_REQUEST: '123456789',
+    CLEANUP_SOFT_DEADLINE_MS: '2100000',
+    CLEANUP_RUN_MAX_ROWS_READ: '250000',
+    CLEANUP_RUN_MAX_ROWS_WRITTEN: '25000',
+    DRY_RUN_MAX_BATCHES: '250',
+    GITHUB_OUTPUT: '/invalid/parent-output'
+  };
+  const ordinary = syntheticCleanupRunnerEnv({ GITHUB_SHA: SOURCE_SHA }, polluted);
+  assert.equal(ordinary.PATH, '/synthetic-path');
+  assert.equal(ordinary.MODE, 'dry-run');
+  assert.equal(ordinary.GITHUB_SHA, SOURCE_SHA);
+  for (const field of [
+    'CLEANUP_TRIGGER_CONFIRMATION',
+    'CLEANUP_AUDIT_RUN_ID',
+    'CLEANUP_SESSION_ID',
+    'CLEANUP_CONTINUATION_REQUEST',
+    'GITHUB_OUTPUT'
+  ]) assert.equal(ordinary[field], '', field + ' must not leak from the GitHub job');
+  assert.equal(ordinary.DRY_RUN_MAX_BATCHES, '25');
+  assert.equal(ordinary.CLEANUP_SOFT_DEADLINE_MS, '300000');
+  assert.equal(ordinary.CLEANUP_RUN_MAX_ROWS_READ, '1000000');
+  assert.equal(ordinary.CLEANUP_RUN_MAX_ROWS_WRITTEN, '100000');
+
+  const intentionalContinuation = syntheticCleanupRunnerEnv({
+    CLEANUP_TRIGGER_CONFIRMATION: 'RESUME READ ONLY AUDIT',
+    CLEANUP_AUDIT_RUN_ID: AUDIT_ID,
+    CLEANUP_CONTINUATION_REQUEST: '123456789',
+    CLEANUP_SESSION_ID: ''
+  }, polluted);
+  assert.equal(intentionalContinuation.CLEANUP_TRIGGER_CONFIRMATION, 'RESUME READ ONLY AUDIT');
+  assert.equal(intentionalContinuation.CLEANUP_AUDIT_RUN_ID, AUDIT_ID);
+  assert.equal(intentionalContinuation.CLEANUP_CONTINUATION_REQUEST, '123456789');
+  assert.equal(intentionalContinuation.CLEANUP_SESSION_ID, '');
+});
 
 test('misfiled dry-run audit ID is recovered without starting an execution session', async () => {
   const result = await invokeRunner({

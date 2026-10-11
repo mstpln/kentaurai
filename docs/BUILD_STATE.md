@@ -1,3 +1,25 @@
+## Read-only audit continuation #22: isolate QA from active workflow inputs
+
+- GitHub run #21 correctly accepted bounded read-only progress and automatically
+  queued run #22 using the same source-bound audit ID. Run #22 failed **before**
+  obtaining Cloudflare credentials or making further audit requests: 11 of 1215
+  tests inherited the live `CLEANUP_TRIGGER_CONFIRMATION` marker from the job.
+- Root cause was test subprocess fixtures spreading `process.env` without
+  overriding the production continuation marker, audit/session IDs or parent
+  correlation fields. Synthetic execute-mode tests consequently tripped the
+  real runner's safe marker-rejection logic.
+- Fix isolates all cleanup runner test subprocesses from inherited control
+  fields and continuation cost/batch settings. Explicit per-test overrides
+  retain coverage for valid/invalid automatic continuations and execute-mode
+  safety cases. The production workflow also clears those four continuation
+  metadata inputs **for its QA step only**; the actual audit runner still gets
+  exact workflow inputs.
+- Added hostile-environment end-to-end QA regression and a workflow contract
+  assertion to prevent repeat failures on automatic continuations.
+- No public/private data boundary, Worker endpoint, budget, database migration,
+  destructive execution lock, or source-bound proof policy has been changed.
+  Do not run production dry-run or cleanup without separate operator approval.
+
 ## Read-only production audit #20: normal budget checkpoint mislabeled as safety stop
 
 - Run #20 completed 54 bounded requests, checked 245,621 logical rows and

@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
+import { syntheticCleanupRunnerEnv } from './helpers/cleanup-runner-env.js';
 
 const AUDIT_RUN_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
@@ -156,8 +157,7 @@ test('execute runner continues beyond 250 batches and checkpoints one source-bou
   const address = server.address();
   const script = fileURLToPath(new URL('../scripts/run-production-storage-cleanup.mjs', import.meta.url));
   const child = spawn(process.execPath, [script], {
-    env: {
-      ...process.env,
+    env: syntheticCleanupRunnerEnv({
       MODE: 'execute',
       DRY_RUN_MAX_BATCHES: '25',
       CLEANUP_SOFT_DEADLINE_MS: String(5 * 60 * 1000),
@@ -166,7 +166,7 @@ test('execute runner continues beyond 250 batches and checkpoints one source-bou
       GITHUB_SHA: sourceSha,
       CLEANUP_SESSION_ID: '',
       GITHUB_OUTPUT: ''
-    },
+    }),
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
@@ -222,8 +222,7 @@ test('runner refuses every new cleanup when provenance integrity preflight fails
   const address = server.address();
   const script = fileURLToPath(new URL('../scripts/run-production-storage-cleanup.mjs', import.meta.url));
   const child = spawn(process.execPath, [script], {
-    env: {
-      ...process.env,
+    env: syntheticCleanupRunnerEnv({
       MODE: 'dry-run',
       DRY_RUN_MAX_BATCHES: '25',
       CLEANUP_SOFT_DEADLINE_MS: String(5 * 60 * 1000),
@@ -231,7 +230,7 @@ test('runner refuses every new cleanup when provenance integrity preflight fails
       ADMIN_TOKEN: 'synthetic-cleanup-token',
       GITHUB_SHA: 'b'.repeat(40),
       GITHUB_OUTPUT: ''
-    },
+    }),
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
@@ -309,8 +308,7 @@ test('execute continuation reuses the session-bound audit without rerunning the 
   const address = server.address();
   const script = fileURLToPath(new URL('../scripts/run-production-storage-cleanup.mjs', import.meta.url));
   const child = spawn(process.execPath, [script], {
-    env: {
-      ...process.env,
+    env: syntheticCleanupRunnerEnv({
       MODE: 'execute',
       DRY_RUN_MAX_BATCHES: '25',
       CLEANUP_SOFT_DEADLINE_MS: String(5 * 60 * 1000),
@@ -319,7 +317,7 @@ test('execute continuation reuses the session-bound audit without rerunning the 
       GITHUB_SHA: sourceSha,
       CLEANUP_SESSION_ID: sessionId,
       GITHUB_OUTPUT: ''
-    },
+    }),
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
@@ -394,8 +392,7 @@ test('execute refuses to plan when the session-bound integrity audit fails', asy
   const address = server.address();
   const script = fileURLToPath(new URL('../scripts/run-production-storage-cleanup.mjs', import.meta.url));
   const child = spawn(process.execPath, [script], {
-    env: {
-      ...process.env,
+    env: syntheticCleanupRunnerEnv({
       MODE: 'execute',
       DRY_RUN_MAX_BATCHES: '25',
       CLEANUP_SOFT_DEADLINE_MS: String(5 * 60 * 1000),
@@ -404,7 +401,7 @@ test('execute refuses to plan when the session-bound integrity audit fails', asy
       GITHUB_SHA: sourceSha,
       CLEANUP_SESSION_ID: '',
       GITHUB_OUTPUT: ''
-    },
+    }),
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
@@ -453,8 +450,7 @@ test('runner stops safely when cumulative D1 read budget is reached', async () =
   const address = server.address();
   const script = fileURLToPath(new URL('../scripts/run-production-storage-cleanup.mjs', import.meta.url));
   const child = spawn(process.execPath, [script], {
-    env: {
-      ...process.env,
+    env: syntheticCleanupRunnerEnv({
       MODE: 'dry-run',
       DRY_RUN_MAX_BATCHES: '25',
       CLEANUP_SOFT_DEADLINE_MS: String(5 * 60 * 1000),
@@ -464,7 +460,7 @@ test('runner stops safely when cumulative D1 read budget is reached', async () =
       ADMIN_TOKEN: 'synthetic-cleanup-token',
       GITHUB_SHA: 'c'.repeat(40),
       GITHUB_OUTPUT: ''
-    },
+    }),
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
@@ -503,8 +499,7 @@ test('runner refuses cleanup planning when the integrity audit alone exceeds the
   const address = server.address();
   const script = fileURLToPath(new URL('../scripts/run-production-storage-cleanup.mjs', import.meta.url));
   const child = spawn(process.execPath, [script], {
-    env: {
-      ...process.env,
+    env: syntheticCleanupRunnerEnv({
       MODE: 'dry-run',
       DRY_RUN_MAX_BATCHES: '25',
       CLEANUP_SOFT_DEADLINE_MS: String(5 * 60 * 1000),
@@ -514,7 +509,7 @@ test('runner refuses cleanup planning when the integrity audit alone exceeds the
       ADMIN_TOKEN: 'synthetic-cleanup-token',
       GITHUB_SHA: 'd'.repeat(40),
       GITHUB_OUTPUT: ''
-    },
+    }),
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
@@ -550,8 +545,7 @@ test('runner includes sanitized D1 metrics when a cleanup request trips the per-
   const address = server.address();
   const script = fileURLToPath(new URL('../scripts/run-production-storage-cleanup.mjs', import.meta.url));
   const child = spawn(process.execPath, [script], {
-    env: {
-      ...process.env,
+    env: syntheticCleanupRunnerEnv({
       MODE: 'dry-run',
       DRY_RUN_MAX_BATCHES: '25',
       CLEANUP_SOFT_DEADLINE_MS: String(5 * 60 * 1000),
@@ -559,7 +553,7 @@ test('runner includes sanitized D1 metrics when a cleanup request trips the per-
       ADMIN_TOKEN: 'synthetic-cleanup-token',
       GITHUB_SHA: 'e'.repeat(40),
       GITHUB_OUTPUT: ''
-    },
+    }),
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
