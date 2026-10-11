@@ -75,13 +75,13 @@ async function ready(f) {
   globalThis.fetch=async (url,options={})=>{
     if(String(url).startsWith('https://api.cloudflare.com/client/v4/accounts/')){
       const data=JSON.parse(options.body);
-      if(data.output_format==='polling'){
+      if(data.output_format==='polling' && !data.current_bookmark){
         startedExport=true;
         return new Response(JSON.stringify({success:true,result:{at_bookmark:bookmark}}),{
           status:200,headers:{'content-type':'application/json'}
         });
       }
-      if(data.current_bookmark===bookmark){
+      if(data.output_format==='polling' && data.current_bookmark===bookmark){
         polledExport=true;
         return new Response(JSON.stringify({success:true,result:{
           signed_url:'https://download.cloudflarestorage.com/private-synthetic-backup'
