@@ -38,7 +38,7 @@ included in the returned object. `repairAuthorized` is always false.
 
 Classification `missing_candidate` is **not** authorization to insert data.
 It means the supplied read-only inputs contain no representation, the caller
-has separately verified historical identity, and no known later timeline
+has separately verified historical identity and complete chronology, and no known later timeline
 precludes a simple recovery. An exhaustive source-specific as-of comparison
 is still required before any safe repair design.
 
