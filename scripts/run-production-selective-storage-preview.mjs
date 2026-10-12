@@ -7,7 +7,7 @@ const base = process.env.WORKER_URL;
 const token = process.env.CLEANUP_TOKEN;
 if (!/^https:\/\/[^/]+$/.test(String(base || '')) || !token) throw new Error('read-only preview not configured');
 const limit = 25;
-const MAX_PAGES_PER_FAMILY = 2; // diagnostic-only: do not extrapolate to full coverage
+const MAX_PAGES_PER_FAMILY = 1; // diagnostic-only: do not extrapolate to full coverage
 const MAX_TOTAL_ROWS_READ = 100000; // bounded diagnostic budget, not full inventory
 const STOP_AFTER_MS = 5 * 60 * 1000;
 const started = Date.now();
