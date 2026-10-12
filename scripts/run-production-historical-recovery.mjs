@@ -72,7 +72,9 @@ async function main(){
         report=await put(base+'start',{});
       }
       report=checkResponse(report);
-      if(report.phase==='paused') report=checkResponse(await put(base+'start',{}));
+      // A paused run can encode an unresolved conflict, not just a stale epoch.
+      // Only a new manual inventory dispatch without run_id may start afresh.
+      if(report.phase==='paused') fail('recovery_paused_manual_restart_required');
     }else{
       report=checkResponse(await call(base+'status'+(RUN_ID?'?run_id='+encodeURIComponent(RUN_ID):'')));
     }
