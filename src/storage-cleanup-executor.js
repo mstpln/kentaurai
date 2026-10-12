@@ -173,6 +173,9 @@ async function detailedSnapshotPlan(env, options) {
   const rowLimit = boundedCleanupLimit(limit, MAX_BATCH);
   const partition = [...definition.entity, ...definition.scope];
   const decoded = await decodeCursor(env, cursor, `snapshot:${family}`);
+  const selective = options.selective === true;
+  if (decoded && Boolean(decoded.selective) !== selective)
+    throw new Error('cleanup cursor mode changed; restart preview');
   const sql = buildSnapshotCleanupPageSql(family, Boolean(decoded));
   let bindings = [];
   if (decoded) {
@@ -182,16 +185,25 @@ async function detailedSnapshotPlan(env, options) {
   const { results = [] } = await env.DB.prepare(sql).bind(...bindings, rowLimit + 1).all();
   const truncated = results.length > rowLimit;
   const scannedRows = results.slice(0, rowLimit);
-  const selective = options.selective === true;
   const verified = selective
-    ? await verifySelectiveSourceFamilies(env, family, scannedRows.map((row) => row.source_record_id),
-      { verifyRawHead: options.verifyRawHead === true })
+    ? await verifySelectiveSourceFamilies(env, family, [
+        ...scannedRows.map((row) => row.source_record_id),
+        ...(decoded?.priorSourceRecordId ? [decoded.priorSourceRecordId] : [])
+      ], { verifyRawHead: options.verifyRawHead === true })
     : null;
   let rowsQuarantined = 0;
   let priorPartition = decoded?.priorPartition ?? null;
   let priorFacts = decoded?.priorFacts ?? null;
   let retainedId = decoded?.retainedId ?? null;
   let priorObservedAt = decoded?.priorObservedAt ?? null;
+  let priorSourceRecordId = decoded?.priorSourceRecordId ?? null;
+  if (selective && (!priorSourceRecordId || !verified.has(priorSourceRecordId))) {
+    priorPartition = null;
+    priorFacts = null;
+    retainedId = null;
+    priorObservedAt = null;
+    priorSourceRecordId = null;
+  }
   let rowsRetained = 0;
   const candidates = [];
   for (const row of scannedRows) {
@@ -204,6 +216,7 @@ async function detailedSnapshotPlan(env, options) {
       priorFacts = null;
       retainedId = null;
       priorObservedAt = null;
+      priorSourceRecordId = null;
       continue;
     }
     const partitionKey = snapshotPartitionKey(row, partition);
@@ -229,17 +242,20 @@ async function detailedSnapshotPlan(env, options) {
       priorFacts = facts;
       retainedId = row.id;
       priorObservedAt = row.observed_at;
+      priorSourceRecordId = row.source_record_id;
     }
   }
   const last = scannedRows.at(-1);
   const nextCursor = truncated && last ? await encodeCursor(env, {
     v: 1,
     kind: `snapshot:${family}`,
+    selective,
     order: [...snapshotOrderTuple(family, last, partition), last.observed_at, last.id],
     priorPartition,
     priorFacts,
     retainedId,
-    priorObservedAt
+    priorObservedAt,
+    priorSourceRecordId
   }) : null;
   const material = { kind: 'snapshot', family, cursor: cursor || null, selective, candidates, nextCursor };
   return {

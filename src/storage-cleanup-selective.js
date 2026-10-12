@@ -22,7 +22,7 @@ const FAMILY = Object.freeze({
 
 export function buildSelectiveSourceProofSql(family, sourceCount) {
   const d = FAMILY[String(family || '')];
-  if (!d || !Number.isInteger(sourceCount) || sourceCount < 1 || sourceCount > 25)
+  if (!d || !Number.isInteger(sourceCount) || sourceCount < 1 || sourceCount > 26)
     throw new Error('unsupported selective source proof scope');
   const bind = Array(sourceCount).fill('?').join(',');
   return [
@@ -43,7 +43,7 @@ export function buildSelectiveSourceProofSql(family, sourceCount) {
     '     INDEXED BY sqlite_autoindex_official_snapshot_observations_1',
     '     LEFT JOIN ' + d.table + ' s ON s.id=o.snapshot_id',
     '     WHERE o.source_record_id=sr.id AND o.snapshot_family=?',
-    '       AND (s.id IS NULL OR NOT (' + d.identity + ')',
+    '       AND (s.id IS NULL OR COALESCE((' + d.identity + '),0)<>1',
     '         OR julianday(o.observed_at) IS NULL',
     '         OR julianday(o.observed_at) IS NOT julianday(sr.fetched_at))) AS invalid_observation_count',
     'FROM source_records sr',
@@ -65,7 +65,7 @@ export async function verifySelectiveSourceFamilies(env, family, sourceIds, opti
   for (const row of results) {
     const expected = Number(row.expected_count);
     const total = Number(row.direct_count) + Number(row.remote_count);
-    if (row.status !== 'complete' || !Number.isSafeInteger(expected)
+    if (row.source_type !== 'official_provider' || row.status !== 'complete' || !Number.isSafeInteger(expected)
       || expected < 1 || total !== expected
       || Number(row.invalid_direct_count) !== 0
       || Number(row.invalid_observation_count) !== 0

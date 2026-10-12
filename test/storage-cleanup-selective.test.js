@@ -98,3 +98,28 @@ test('private selective preview rejects unauthenticated access and leaves facts 
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM horse_profile_snapshots').get().n,1);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM official_snapshot_observations').get().n,0);
 });
+
+test('selective preview rechecks retained source proof across pagination', async () => {
+  const { db, env } = createTestEnv();
+  db.prepare("INSERT INTO horses(id,canonical_name) VALUES ('synthetic-horse','Synthetic')").run();
+  source(db,'first','2026-09-01T10:00:00Z');
+  source(db,'second','2026-09-02T10:00:00Z');
+  snapshot(db,'first-snapshot','first','2026-09-01T10:00:00Z',4);
+  snapshot(db,'second-snapshot','second','2026-09-02T10:00:00Z',4);
+  const first=await planSnapshotCleanupBatch(env,{family:'horse_profile',limit:1,selective:true});
+  assert.ok(first.nextCursor);
+  db.prepare("UPDATE official_snapshot_source_sync SET horse_profile_count=2 WHERE source_record_id='first'").run();
+  const next=await planSnapshotCleanupBatch(env,{family:'horse_profile',limit:1,
+    cursor:first.nextCursor,selective:true});
+  assert.equal(next.rowsRemovable,0);
+});
+test('all four selective family proof queries are index-backed and executable', async () => {
+  const { db, env } = createTestEnv();
+  db.prepare("INSERT INTO horses(id,canonical_name) VALUES ('synthetic-horse','Synthetic')").run();
+  source(db,'only-profile','2026-09-01T10:00:00Z');
+  snapshot(db,'only-snapshot','only-profile','2026-09-01T10:00:00Z',4);
+  for(const family of ['horse_profile','horse_stat','horse_record','person_stat']) {
+    const safe=await verifySelectiveSourceFamilies(env,family,['only-profile']);
+    assert.equal(safe.has('only-profile'),family==='horse_profile',family);
+  }
+});
