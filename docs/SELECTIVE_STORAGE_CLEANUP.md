@@ -42,3 +42,23 @@ An actual production preview also checks R2 HEAD existence, positive object
 length and matching content-hash/source-type metadata. A missing object or
 metadata conflict quarantines that source. R2 transport errors abort the
 preview; they must not be treated as evidence that a file is bad.
+
+## Verified limitations before any deletion
+- A source with missing representation may have **no surviving direct row** in
+  the affected entity timeline. An eligible-looking adjacent A-A pair can
+  therefore conceal a missing A-B-A fact. The read-only preview treats
+  incomplete **visible** sources as barriers, but cannot prove that **invisible
+  missing** intermediate source facts are irrelevant. Its count is only a
+  preliminary upper bound, **never permission to delete**.
+- Before execute mode, cross-check candidate entity/family histories against
+  the original versioned R2 facts (actual bytes+SHA, not just HEAD metadata);
+  either prove there is no intervening unrepresented original fact or
+  quarantine the **entire affected timeline segment**.
+- Preview HEAD metadata existence/provenance is intentionally weaker than the
+  byte-level fact/hash proof required for deletion.
+- Current read-only preview lacks a durable full-coverage checkpoint; completion
+  is only certified if the workflow reports all four families fully scanned.
+  An unfinished sample cannot predict total cleanup size.
+- A verified R2 object can still contain conflicting original data; preserving
+  that ambiguity is mandatory. Any database or R2 transport ambiguity is a
+  system-level stop and must not be recoded as a quarantinable file error.
