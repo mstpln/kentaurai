@@ -182,14 +182,20 @@ async function detailedSnapshotPlan(env, options) {
     if (!Array.isArray(decoded.order) || decoded.order.length !== partition.length + 2) throw new Error('cleanup cursor is invalid');
     bindings = decoded.order;
   }
-  const { results = [] } = await env.DB.prepare(sql).bind(...bindings, rowLimit + 1).all();
+  const { results = [], meta = {} } = await env.DB.prepare(sql).bind(...bindings, rowLimit + 1).all();
+  const pageReads = Number(meta?.rows_read);
+  const diagnostic = selective ? {
+    pageRowsRead: Number.isSafeInteger(pageReads) && pageReads >= 0 ? pageReads : null,
+    sourceProofRowsRead: null,
+    rawHeadRequests: 0
+  } : null;
   const truncated = results.length > rowLimit;
   const scannedRows = results.slice(0, rowLimit);
   const verified = selective
     ? await verifySelectiveSourceFamilies(env, family, [
         ...scannedRows.map((row) => row.source_record_id),
         ...(decoded?.priorSourceRecordId ? [decoded.priorSourceRecordId] : [])
-      ], { verifyRawHead: options.verifyRawHead === true })
+      ], { verifyRawHead: options.verifyRawHead === true, diagnostic })
     : null;
   let rowsQuarantined = 0;
   let priorPartition = decoded?.priorPartition ?? null;
@@ -279,7 +285,8 @@ async function detailedSnapshotPlan(env, options) {
         ...(rowsQuarantined ? ['unverified_source_or_chronology_skipped'] : [])
       ],
       planToken: await tokenFor(material),
-      nextCursor
+      nextCursor,
+      ...(diagnostic ? { diagnostic } : {})
     }
   };
 }
