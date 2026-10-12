@@ -123,3 +123,22 @@ test('all four selective family proof queries are index-backed and executable', 
     assert.equal(safe.has('only-profile'),family==='horse_profile',family);
   }
 });
+
+test('selective preview reports aggregate page and source cost without source identifiers', async () => {
+  const { db, env, objects } = createTestEnv();
+  db.prepare("INSERT INTO horses(id,canonical_name) VALUES ('synthetic-horse','Synthetic')").run();
+  source(db,'source-secret','2026-09-01T10:00:00Z');
+  snapshot(db,'private-snapshot','source-secret','2026-09-01T10:00:00Z',4);
+  const key='raw/official_provider/' + hash + '.json';
+  objects.set(key,{body:'fixture',options:{customMetadata:{contentHash:hash,sourceType:'official_provider'}}});
+  // Local adapter does not expose Cloudflare's physical SQLite rows-read metric;
+  // report null explicitly, never fabricate a number or expose source identity.
+  const result=await planSnapshotCleanupBatch(env,{
+    family:'horse_profile',limit:1,selective:true,verifyRawHead:true
+  });
+  assert.equal(result.rowsScanned,1);
+  assert.equal(result.diagnostic.rawHeadRequests,1);
+  assert.equal(result.diagnostic.pageRowsRead,1);
+  assert.equal(result.diagnostic.sourceProofRowsRead,1);
+  assert.doesNotMatch(JSON.stringify(result.diagnostic),/source-secret|private-snapshot/);
+});
