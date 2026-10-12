@@ -183,7 +183,7 @@ async function detailedSnapshotPlan(env, options) {
     bindings = decoded.order;
   }
   const { results = [], meta = {} } = await env.DB.prepare(sql).bind(...bindings, rowLimit + 1).all();
-  const pageReads = Number(meta?.rows_read);
+  const pageReads = meta?.rows_read == null ? null : Number(meta.rows_read);
   const diagnostic = selective ? {
     pageRowsRead: Number.isSafeInteger(pageReads) && pageReads >= 0 ? pageReads : null,
     sourceProofRowsRead: null,
