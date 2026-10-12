@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=13602dbc2f30350a2d902e11a69aa805d1e55910
-release_nonce=2026-10-12-pr318-bounded-cloudflare-deploy-retry
+source_main=95fb2e634ca782b91a11dcda2e80b74276c3c27b
+release_nonce=2026-10-12-pr319-selective-cost-diagnostic
