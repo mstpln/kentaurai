@@ -38,17 +38,24 @@ for (const family of families) {
     }
     if (!response.ok) throw new Error('selective preview private API HTTP ' + response.status);
     const result = await response.json();
-    if (result.safetyStop === true || !Number.isFinite(Number(result?.cost?.rowsRead)))
-      throw new Error('selective preview D1 operation safety stop or missing cost');
-    rowsRead += Number(result.cost.rowsRead);
+    const requestRowsRead = result?.cost?.rowsRead;
+    if (!Number.isSafeInteger(requestRowsRead) || requestRowsRead < 0)
+      throw new Error('selective preview missing or invalid D1 read metric');
+    rowsRead += requestRowsRead;
     const diag = result.diagnostic;
-    if (!diag || !Number.isSafeInteger(diag.pageRowsRead) || !Number.isSafeInteger(diag.sourceProofRowsRead)
-        || !Number.isSafeInteger(diag.rawHeadRequests))
+    if (!diag || !Number.isSafeInteger(diag.pageRowsRead) || diag.pageRowsRead < 0
+        || !Number.isSafeInteger(diag.sourceProofRowsRead) || diag.sourceProofRowsRead < 0
+        || !Number.isSafeInteger(diag.rawHeadRequests) || diag.rawHeadRequests < 0)
       throw new Error('selective preview cost breakdown unavailable');
     // Print only aggregate measurements; no private source IDs or cursors.
     console.log(JSON.stringify({ event:'selective_preview_page_cost', family,
-      page:pages+1, rowsRead:Number(result.cost.rowsRead), pageRowsRead:diag.pageRowsRead,
-      sourceProofRowsRead:diag.sourceProofRowsRead, rawHeadRequests:diag.rawHeadRequests }));
+      page:pages+1, rowsRead:requestRowsRead, pageRowsRead:diag.pageRowsRead,
+      sourceProofRowsRead:diag.sourceProofRowsRead, rawHeadRequests:diag.rawHeadRequests,
+      safetyStop:result.safetyStop === true }));
+    // A Worker-level read-cost breach still fails closed, but the aggregate
+    // query breakdown is already present in the diagnostic log.
+    if (result.safetyStop === true)
+      throw new Error('selective preview D1 operation safety stop');
     if (!Number.isSafeInteger(Number(result.rowsScanned)) || Number(result.rowsScanned) > limit
         || !Number.isSafeInteger(Number(result.rowsQuarantined))
         || !Number.isSafeInteger(Number(result.rowsRemovable))
