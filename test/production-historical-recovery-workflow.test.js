@@ -117,11 +117,15 @@ test('inventory-only runner replaces an incompatible old run after rejected stat
       globalThis.fetch=async (url,options={})=>{
         const path=new URL(url).pathname;
         if(path.endsWith('/status')) return new Response('{}',{status:409});
-        if(path.endsWith('/start')&&options.method==='POST') return Response.json({
+        if(path.endsWith('/start')&&options.method==='POST') {
+          if(JSON.parse(options.body)?.supersedes_run_id!=="00000000-0000-4000-8000-000000000001")
+            throw new Error('missing stale active-run fence');
+          return Response.json({
           mode:'historical_provenance_recovery',phase:'inventory',
           runId:${JSON.stringify(freshId)},
           sourceIdsReturned:false,rawFactsReturned:false,backupVerified:false
-        });
+          });
+        }
         return new Response('{}',{status:400});
       };
       await import(${JSON.stringify(runnerUrl)});
