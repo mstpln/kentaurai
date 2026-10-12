@@ -118,14 +118,14 @@ export async function startHistoricalRecoveryRun(env) {
     env.DB.prepare(
       "UPDATE historical_recovery_runs SET phase='paused',scan_drift=1,updated_at=CURRENT_TIMESTAMP" +
       " WHERE phase IN ('inventory','ready','applying','verify_pending')" +
-      " AND (source_sha<>? OR expected_epoch<>?)"
-    ).bind(env.KENTAURAI_DEPLOY_SHA,revision),
+      " AND (source_sha<>? OR expected_epoch<>(SELECT revision FROM historical_recovery_epoch WHERE singleton=1))"
+    ).bind(env.KENTAURAI_DEPLOY_SHA),
     env.DB.prepare(
       'INSERT INTO historical_recovery_runs(id,source_sha,expected_epoch,started_epoch)' +
-      " SELECT ?,?,?,? WHERE NOT EXISTS(" +
-      "SELECT 1 FROM historical_recovery_runs" +
+      " SELECT ?,?,?,? WHERE (SELECT revision FROM historical_recovery_epoch WHERE singleton=1)=?" +
+      " AND NOT EXISTS(SELECT 1 FROM historical_recovery_runs" +
       " WHERE phase IN ('inventory','ready','applying','verify_pending'))"
-    ).bind(id,env.KENTAURAI_DEPLOY_SHA,revision,revision)
+    ).bind(id,env.KENTAURAI_DEPLOY_SHA,revision,revision,revision)
   ];
   const result=await env.DB.batch(statements);
   if(Number(result[1]?.meta?.changes)!==1)
