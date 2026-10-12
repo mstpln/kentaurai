@@ -542,11 +542,17 @@ test('production entrypoint accepts the same temporary token on auth-check and r
 });
 
 test('new inventory atomically retires an older deployment without deleting its receipts', async () => {
-  const f=createTestEnv();
+  const f=await fixture();
   f.env.KENTAURAI_DEPLOY_SHA=DEPLOY;
   const old=await startHistoricalRecoveryRun(f.env);
   f.db.prepare("UPDATE historical_recovery_runs SET scanned_sources=7 WHERE id=?")
     .run(old.runId);
+  // Old source/family verification receipts must survive a stale-run rollover.
+  f.db.prepare(
+    'INSERT INTO historical_recovery_receipts' +
+    '(run_id,family,source_record_id,status,missing_count,candidate_count,source_hash,checked_epoch)' +
+    " VALUES (?,'horse_profile',?,'ready',1,1,?,?)"
+  ).run(old.runId,SOURCE_CURRENT,f.originalHash,0);
   f.env.KENTAURAI_DEPLOY_SHA='b'.repeat(40);
   const fresh=await startHistoricalRecoveryRun(f.env);
   assert.equal(fresh.phase,'inventory');
@@ -560,6 +566,15 @@ test('new inventory atomically retires an older deployment without deleting its 
   assert.equal(f.db.prepare(
     "SELECT COUNT(*) AS n FROM historical_recovery_runs WHERE phase='inventory'"
   ).get().n,1);
+  assert.deepEqual({...f.db.prepare(
+    'SELECT status,missing_count,candidate_count,source_hash FROM historical_recovery_receipts' +
+    ' WHERE run_id=? AND family=? AND source_record_id=?'
+  ).get(old.runId,'horse_profile',SOURCE_CURRENT)},{
+    status:'ready',missing_count:1,candidate_count:1,source_hash:f.originalHash
+  });
+  assert.equal(f.db.prepare(
+    'SELECT COUNT(*) AS n FROM historical_recovery_receipts WHERE run_id=?'
+  ).get(fresh.runId).n,0);
 });
 
 test('new inventory retires stale source epoch, but never preempts a valid run', async () => {
