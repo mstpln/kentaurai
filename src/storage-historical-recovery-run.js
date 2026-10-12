@@ -106,8 +106,10 @@ async function markPaused(env,runId) {
 function verifyEpoch(run, currentEpoch) {
   if (Number(run.expected_epoch)!==currentEpoch) throw new Error('recovery_epoch_changed');
 }
-export async function startHistoricalRecoveryRun(env) {
+export async function startHistoricalRecoveryRun(env,{supersedesRunId=null}={}) {
   requireEnv(env);
+  if(supersedesRunId!==null && !validId(supersedesRunId))
+    throw new Error('recovery_stale_continuation_identifier_invalid');
   const revision=await epoch(env);
   const id=crypto.randomUUID();
   // A read-only inventory from an older Worker build or data epoch cannot
@@ -118,13 +120,17 @@ export async function startHistoricalRecoveryRun(env) {
     env.DB.prepare(
       "UPDATE historical_recovery_runs SET phase='paused',scan_drift=1,updated_at=CURRENT_TIMESTAMP" +
       " WHERE phase IN ('inventory','ready','applying','verify_pending')" +
-      " AND (source_sha<>? OR expected_epoch<>(SELECT revision FROM historical_recovery_epoch WHERE singleton=1))"
-    ).bind(env.KENTAURAI_DEPLOY_SHA),
+      " AND (source_sha<>? OR expected_epoch<>(SELECT revision FROM historical_recovery_epoch WHERE singleton=1))" +
+      (supersedesRunId!==null ? ' AND id=?' : '')
+    ).bind(env.KENTAURAI_DEPLOY_SHA,...(supersedesRunId!==null?[supersedesRunId]:[])),
     env.DB.prepare(
       'INSERT INTO historical_recovery_runs(id,source_sha,expected_epoch,started_epoch)' +
       " SELECT ?,?,?,? WHERE (SELECT revision FROM historical_recovery_epoch WHERE singleton=1)=?" +
       " AND NOT EXISTS(SELECT 1 FROM historical_recovery_runs" +
-      " WHERE phase IN ('inventory','ready','applying','verify_pending'))"
+      " WHERE phase IN ('inventory','ready','applying','verify_pending'))" +
+      // Continuations must have actually retired their named stale ACTIVE run.
+      // Never convert a paused/failed old run or unrelated 409 into a new run.
+      (supersedesRunId!==null ? ' AND changes()=1' : '')
     ).bind(id,env.KENTAURAI_DEPLOY_SHA,revision,revision,revision)
   ];
   const result=await env.DB.batch(statements);
