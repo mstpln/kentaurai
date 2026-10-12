@@ -15,6 +15,8 @@ test('selective preview workflow cannot perform destructive production cleanup',
   assert.match(yml,/health/);
   assert.doesNotMatch(yml,/secrets\.ADMIN_TOKEN|mode.*execute|snapshots\/execute|raw\/execute|time-travel restore/i);
   assert.match(runner,/preview-selective/);
+  assert.match(runner,/response\.status !== 401/);
+  assert.match(runner,/attempt < 10/);
   assert.match(runner,/MAX_TOTAL_ROWS_READ = 1000000/);
   assert.match(runner,/MAX_PAGES_PER_FAMILY = 250/);
   assert.doesNotMatch(runner,/console\.log\([^\n]*cursor|console\.log\([^\n]*sourceId/);

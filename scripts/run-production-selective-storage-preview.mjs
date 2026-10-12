@@ -17,17 +17,24 @@ for (const family of families) {
   let cursor = null, pages = 0, scanned = 0, eligibleDuplicates = 0;
   let quarantined = 0, complete = false;
   while (pages < MAX_PAGES_PER_FAMILY && Date.now() - started < STOP_AFTER_MS) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30000);
+    // A freshly installed Worker secret can briefly yield 401 on a different
+    // edge. Retry *only* authorization rejections (which the Worker rejects
+    // before any database read); all transport/cost/HTTP ambiguity fails closed.
     let response;
-    try {
-      response = await fetch(base + '/v1/storage-cleanup/snapshots/preview-selective', {
-        method: 'POST', redirect: 'error', signal: controller.signal,
-        headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
-        body: JSON.stringify({ family, limit, cursor })
-      });
-    } finally {
-      clearTimeout(timer);
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 30000);
+      try {
+        response = await fetch(base + '/v1/storage-cleanup/snapshots/preview-selective', {
+          method: 'POST', redirect: 'error', signal: controller.signal,
+          headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
+          body: JSON.stringify({ family, limit, cursor })
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+      if (response.status !== 401 || attempt === 9) break;
+      await new Promise(resolve => setTimeout(resolve, 2500));
     }
     if (!response.ok) throw new Error('selective preview private API HTTP ' + response.status);
     const result = await response.json();
