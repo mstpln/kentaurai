@@ -9,7 +9,7 @@
     "test:schema": "node --test test/schema.test.js",
     "qa": "npm test && node --check src/index.js && node --check src/worker-settings.js && node --check src/settings-data.js && node --check src/app-page-settings.js && node --check src/settings-drift.js && node --check src/settings-drift-ui.js && node --check src/worker-v079.js",
     "dev": "npx --yes wrangler@4.114.0 dev",
-    "deploy": "npx --yes wrangler@4.114.0 deploy",
+    "deploy": "npx --yes wrangler@4.149.0 deploy",
     "db:migrate:local": "npx --yes wrangler@4.114.0 d1 migrations apply kentaurai --local",
     "db:migrate:remote": "npx --yes wrangler@4.114.0 d1 migrations apply kentaurai --remote"
   }
