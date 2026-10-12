@@ -17,7 +17,7 @@ test('selective preview workflow cannot perform destructive production cleanup',
   assert.match(runner,/preview-selective/);
   assert.match(runner,/response\.status !== 401/);
   assert.match(runner,/attempt < 10/);
-  assert.match(runner,/MAX_TOTAL_ROWS_READ = 1000000/);
-  assert.match(runner,/MAX_PAGES_PER_FAMILY = 250/);
+  assert.match(runner,/MAX_TOTAL_ROWS_READ = 100000/);
+  assert.match(runner,/MAX_PAGES_PER_FAMILY = 2/);
   assert.doesNotMatch(runner,/console\.log\([^\n]*cursor|console\.log\([^\n]*sourceId/);
 });
