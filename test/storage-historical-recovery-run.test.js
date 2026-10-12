@@ -139,7 +139,7 @@ test('durable scan and source-owned restoration complete with independent source
   const {runId}=await ready(f);
   await assert.rejects(
     () => startHistoricalRecoveryRun(f.env),
-    /UNIQUE constraint failed/
+    /recovery_active_run_conflict/
   );
   await assert.rejects(
     () => stepHistoricalRecoveryExecution(f.env,{runId,approved:true,authorization:TOKEN}),
@@ -554,7 +554,7 @@ test('new inventory atomically retires an older deployment without deleting its 
   const original=f.db.prepare(
     'SELECT source_sha,phase,scan_drift,scanned_sources FROM historical_recovery_runs WHERE id=?'
   ).get(old.runId);
-  assert.deepEqual(original,{
+  assert.deepEqual({...original},{
     source_sha:DEPLOY,phase:'paused',scan_drift:1,scanned_sources:7
   });
   assert.equal(f.db.prepare(
