@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createTestEnv } from './helpers/d1.js';
+import worker from '../src/index.js';
 import { verifySelectiveSourceFamilies } from '../src/storage-cleanup-selective.js';
 import { planSnapshotCleanupBatch } from '../src/storage-cleanup-executor.js';
 
@@ -69,4 +70,31 @@ test('selective preview validates R2 metadata and quarantine on missing or incon
   assert.deepEqual([...await verifySelectiveSourceFamilies(env,'horse_profile',['original'],{verifyRawHead:true})],['original']);
   objects.set(key,{body:'fixture',options:{customMetadata:{contentHash:'b'.repeat(64),sourceType:'official_provider'}}});
   assert.equal((await verifySelectiveSourceFamilies(env,'horse_profile',['original'],{verifyRawHead:true})).size,0);
+});
+
+test('private selective preview rejects unauthenticated access and leaves facts unchanged', async () => {
+  const { db, env, objects } = createTestEnv();
+  env.ADMIN_TOKEN = 'synthetic-private-admin';
+  db.prepare("INSERT INTO horses(id,canonical_name) VALUES ('synthetic-horse','Synthetic')").run();
+  source(db,'protected','2026-09-01T10:00:00Z');
+  snapshot(db,'protected-snapshot','protected','2026-09-01T10:00:00Z',4);
+  const key='raw/official_provider/' + hash + '.json';
+  objects.set(key,{body:'verified',options:{customMetadata:{contentHash:hash,sourceType:'official_provider'}}});
+  function req(token) {
+    return new Request('https://kentaurai.invalid/v1/storage-cleanup/snapshots/preview-selective',{
+      method:'POST',headers:{'content-type':'application/json',
+        ...(token?{authorization:'Bearer '+token}:{})},
+      body:JSON.stringify({family:'horse_profile',limit:25})
+    });
+  }
+  assert.equal((await worker.fetch(req(null),env)).status,401);
+  assert.equal((await worker.fetch(req('invalid'),env)).status,401);
+  const response=await worker.fetch(req('synthetic-private-admin'),env);
+  assert.equal(response.status,200);
+  const result=await response.json();
+  assert.equal(result.rowsScanned,1);
+  assert.equal(result.rowsQuarantined,0);
+  assert.equal(result.rowsRemovable,0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM horse_profile_snapshots').get().n,1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM official_snapshot_observations').get().n,0);
 });
