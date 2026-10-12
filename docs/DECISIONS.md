@@ -1,3 +1,15 @@
+## Stale historical inventory rollover (2026-10-12)
+
+The private inventory is pinned to the deployed SHA and official-source
+revision epoch. A new **inventory** may atomically archive an older
+incompatible active run as `paused`, preserving its receipts and counters,
+then start a fresh run only when the old deployment SHA or epoch is stale.
+A still-current active run remains an exclusive lock. The GitHub runner may
+replace an old/paused inventory, but neither backup nor restore can restart
+on a 409. The continuation window may extend to 11 minutes/360 steps;
+the existing source proof, database and R2 cumulative cost ceilings,
+separate approval, and no-cleanup-delete boundary remain unchanged.
+
 ## Temporary recovery credential propagation — 2026-10-11
 
 1. A successful `/v1/storage-cleanup/auth-check` call cannot alone establish
