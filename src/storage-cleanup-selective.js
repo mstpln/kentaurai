@@ -57,8 +57,12 @@ export async function verifySelectiveSourceFamilies(env, family, sourceIds, opti
   const ids = [...new Set(sourceIds.map(String))];
   if (ids.length === 0) return new Set();
   const statement = buildSelectiveSourceProofSql(family, ids.length);
-  const { results = [] } = await env.DB.prepare(statement)
+  const { results = [], meta = {} } = await env.DB.prepare(statement)
     .bind(family, family, ...ids).all();
+  if (options.diagnostic) {
+    const reads = Number(meta?.rows_read);
+    options.diagnostic.sourceProofRowsRead = Number.isSafeInteger(reads) && reads >= 0 ? reads : null;
+  }
   const safe = new Set();
   if (options.verifyRawHead === true && !env.RAW_BUCKET?.head)
     throw new Error('selective source proof requires R2 HEAD access');
@@ -74,6 +78,7 @@ export async function verifySelectiveSourceFamilies(env, family, sourceIds, opti
     if (options.verifyRawHead === true) {
       // Missing or inconsistent originals stay quarantined. Transient R2
       // transport errors must propagate and stop the entire preview.
+      if (options.diagnostic) options.diagnostic.rawHeadRequests += 1;
       const raw = await env.RAW_BUCKET.head(row.raw_object_key);
       if (!raw || !Number.isFinite(Number(raw.size)) || Number(raw.size) < 1
           || raw.customMetadata?.contentHash !== row.content_hash
