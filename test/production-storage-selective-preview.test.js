@@ -46,7 +46,7 @@ test('runner returns a valid partial-safe aggregate report for empty families', 
     rowsScanned:0,rowsQuarantined:0,rowsRemovable:0,nextCursor:null
   })`);
   assert.equal(child.status,0,child.stderr);
-  const events = child.stdout.split('\\n').filter(Boolean).map(JSON.parse);
+  const events = child.stdout.split('\n').filter(Boolean).map(JSON.parse);
   assert.equal(events.filter((row) => row.event === 'selective_preview_page_cost').length,4);
   assert.equal(events.find((row) => row.event === 'selective_snapshot_preview_cost')?.allFamiliesComplete,true);
   assert.doesNotMatch(child.stdout,/synthetic-token|sourceRecordId|raw\/official_provider/);
