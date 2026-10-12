@@ -1,4 +1,5 @@
 import { boundedCleanupLimit, SNAPSHOT_FAMILIES, snapshotFactsEqual } from './storage-cleanup-plans.js';
+import { verifySelectiveSourceFamilies } from './storage-cleanup-selective.js';
 
 const MAX_BATCH = 25;
 const MAX_RAW_COPY_BYTES = 10 * 1024 * 1024;
@@ -164,7 +165,8 @@ function snapshotObservationIdentity(family, row) {
 }
 
 
-async function detailedSnapshotPlan(env, { family, limit, cursor = null }) {
+async function detailedSnapshotPlan(env, options) {
+  const { family, limit, cursor = null } = options;
   if (!env?.DB) throw new Error('DB is not configured');
   const definition = SNAPSHOT_FAMILIES[String(family || '')];
   if (!definition) throw new Error('unsupported snapshot family');
@@ -180,14 +182,29 @@ async function detailedSnapshotPlan(env, { family, limit, cursor = null }) {
   const { results = [] } = await env.DB.prepare(sql).bind(...bindings, rowLimit + 1).all();
   const truncated = results.length > rowLimit;
   const scannedRows = results.slice(0, rowLimit);
-  const rows = scannedRows.filter((row) => Number(row.cleanup_source_complete) === 1);
+  const selective = options.selective === true;
+  const verified = selective
+    ? await verifySelectiveSourceFamilies(env, family, scannedRows.map((row) => row.source_record_id))
+    : null;
+  let rowsQuarantined = 0;
   let priorPartition = decoded?.priorPartition ?? null;
   let priorFacts = decoded?.priorFacts ?? null;
   let retainedId = decoded?.retainedId ?? null;
   let priorObservedAt = decoded?.priorObservedAt ?? null;
   let rowsRetained = 0;
   const candidates = [];
-  for (const row of rows) {
+  for (const row of scannedRows) {
+    // A failed/unknown source is a chronological barrier: never collapse an
+    // apparent A-A run across an unverified observation that may be A-B-A.
+    if (Number(row.cleanup_source_complete) !== 1
+        || (selective && !verified.has(row.source_record_id))) {
+      if (selective) rowsQuarantined += 1;
+      priorPartition = null;
+      priorFacts = null;
+      retainedId = null;
+      priorObservedAt = null;
+      continue;
+    }
     const partitionKey = snapshotPartitionKey(row, partition);
     const facts = snapshotTuple(row, definition.facts);
     const previousTime = Date.parse(String(priorObservedAt || ''));
@@ -223,7 +240,7 @@ async function detailedSnapshotPlan(env, { family, limit, cursor = null }) {
     retainedId,
     priorObservedAt
   }) : null;
-  const material = { kind: 'snapshot', family, cursor: cursor || null, candidates, nextCursor };
+  const material = { kind: 'snapshot', family, cursor: cursor || null, selective, candidates, nextCursor };
   return {
     family,
     definition,
@@ -237,9 +254,13 @@ async function detailedSnapshotPlan(env, { family, limit, cursor = null }) {
       limit: rowLimit,
       rowsScanned: scannedRows.length,
       rowsRetained,
+      rowsQuarantined,
       rowsRemovable: candidates.length,
       truncated,
-      warnings: truncated ? ['limit_reached_results_incomplete'] : [],
+      warnings: [
+        ...(truncated ? ['limit_reached_results_incomplete'] : []),
+        ...(rowsQuarantined ? ['unverified_source_or_chronology_skipped'] : [])
+      ],
       planToken: await tokenFor(material),
       nextCursor
     }

@@ -580,6 +580,19 @@ async function handleFetch(request, env) {
     const observed = await observeD1Operation(env, 'storage_cleanup_session_checkpoint', (observedEnv) => checkpointStorageCleanupSession(observedEnv, body));
     return json({ ...observed.value, cost: observed.metrics, safetyStop: observed.safetyStop });
   }
+  // A bounded READ-ONLY preliminary scope preview. Unlike the global strict
+  // audit, known missing source representations only quarantine their own
+  // candidate rows; they do not authorize any production mutation.
+  if (request.method === 'POST' && path === '/v1/storage-cleanup/snapshots/preview-selective') {
+    const body = await readJson(request);
+    const observed = await observeD1Operation(env, 'storage_cleanup_selective_preview', async (observedEnv) =>
+      planSnapshotCleanupBatch(observedEnv, {
+        family: body.family, limit: Math.min(25, Number(body.limit) || 25),
+        cursor: body.cursor, selective: true
+      })
+    );
+    return json({ ...observed.value, cost: observed.metrics, safetyStop: observed.safetyStop });
+  }
   if (request.method === 'POST' && path === '/v1/storage-cleanup/snapshots/plan') {
     const body = await readJson(request);
     const observed = await observeD1Operation(env, 'storage_cleanup_snapshot_plan', async (observedEnv) => {
