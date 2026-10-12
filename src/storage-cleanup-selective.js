@@ -1,6 +1,6 @@
 // An independently checkable, source/family-local proof for selective planning.
 // Unknown, incomplete or contradictory sources are quarantined, not deleted.
-// No raw facts or source IDs leave the authenticated planning response.
+// Source IDs are processed privately; preview results contain only aggregates and a signed pagination cursor.
 const FAMILY = Object.freeze({
   horse_profile: {
     table: 'horse_profile_snapshots', expected: 'horse_profile_count',

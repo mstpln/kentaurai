@@ -1,0 +1,128 @@
+name: Read-only selective storage preview
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    concurrency:
+      group: kentaurai-production-operation
+      cancel-in-progress: false
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: kentaurai-api
+    steps:
+      - name: Checkout reviewed main
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Refuse unreviewed branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+      - name: Require exact successful production release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/production-release-v060.yml/runs?branch=main&status=success&per_page=1")"
+          deployed="$(printf '%s' "$response" | jq -r '.workflow_runs[0].head_sha // empty')"
+          test -n "$deployed" && test "$deployed" = "$GITHUB_SHA"
+      - name: Set up Node.js 22
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+      - name: Run QA before any Cloudflare interaction
+        env:
+          STORAGE_CLEANUP_TOKEN: ""
+          STORAGE_CLEANUP_EXECUTE_ENABLED: ""
+        run: npm run qa
+      - name: Verify deployment credentials exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          echo "::add-mask::$CLOUDFLARE_API_TOKEN"
+      - name: Remove orphaned read-only preview credential
+        id: token_cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          existing="$(npx --yes wrangler@4.114.0 secret list --name "$WORKER_NAME" --format json)"
+          if printf '%s' "$existing" | jq -e '.[] | select(.name == "STORAGE_CLEANUP_TOKEN")' >/dev/null; then
+            printf 'y\n' | npx --yes wrangler@4.114.0 secret delete STORAGE_CLEANUP_TOKEN --name "$WORKER_NAME"
+          fi
+      - name: Install single-run read-only preview credential
+        id: preview_token
+        shell: bash
+        run: |
+          set -euo pipefail
+          token="$(node -e "console.log(Date.now()+'.'+require('crypto').randomBytes(32).toString('hex'))")"
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$token" | npx --yes wrangler@4.114.0 secret put STORAGE_CLEANUP_TOKEN --name "$WORKER_NAME"
+      - name: Resolve verified Worker URL
+        id: worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl --fail --silent --show-error --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "$api/workers/subdomain" > "$RUNNER_TEMP/preview-subdomain.json"
+          subdomain="$(jq -r '.result.subdomain // empty' "$RUNNER_TEMP/preview-subdomain.json")"
+          test -n "$subdomain"
+          curl --fail --silent --show-error --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "$api/workers/scripts/$WORKER_NAME/subdomain" > "$RUNNER_TEMP/preview-route.json"
+          jq -e '.success == true and .result.enabled == true' "$RUNNER_TEMP/preview-route.json" >/dev/null
+          url="https://$WORKER_NAME.$subdomain.workers.dev"
+          curl --fail --silent --show-error "$url/health" > "$RUNNER_TEMP/preview-health.json"
+          jq -e --arg sha "$GITHUB_SHA" '.ok == true and .deploymentSha == $sha' "$RUNNER_TEMP/preview-health.json" >/dev/null
+          echo "worker_url=$url" >> "$GITHUB_OUTPUT"
+      - name: Wait for private read-only authentication
+        env:
+          WORKER_URL: ${{ steps.worker.outputs.worker_url }}
+          CLEANUP_TOKEN: ${{ steps.preview_token.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 15); do
+            status="$(curl --silent --output "$RUNNER_TEMP/preview-auth.json" --write-out '%{http_code}' \
+              --header "Authorization: Bearer $CLEANUP_TOKEN" "$WORKER_URL/v1/storage-cleanup/auth-check" || true)"
+            if [ "$status" = 200 ] && jq -e '.ok == true and .scope == "storage_cleanup"' "$RUNNER_TEMP/preview-auth.json" >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Read-only preview credential propagation failed"; exit 1
+      - name: Examine bounded eligible and quarantined snapshot candidates
+        env:
+          WORKER_URL: ${{ steps.worker.outputs.worker_url }}
+          CLEANUP_TOKEN: ${{ steps.preview_token.outputs.token }}
+        run: node scripts/run-production-selective-storage-preview.mjs
+      - name: Remove temporary Cloudflare credential
+        if: ${{ always() && steps.token_cleanup.outcome != 'skipped' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          existing="$(npx --yes wrangler@4.114.0 secret list --name "$WORKER_NAME" --format json)"
+          if printf '%s' "$existing" | jq -e '.[] | select(.name == "STORAGE_CLEANUP_TOKEN")' >/dev/null; then
+            printf 'y\n' | npx --yes wrangler@4.114.0 secret delete STORAGE_CLEANUP_TOKEN --name "$WORKER_NAME"
+          fi
+      - name: Verify health after read-only preview
+        if: ${{ always() && steps.worker.outcome == 'success' }}
+        env:
+          WORKER_URL: ${{ steps.worker.outputs.worker_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error "$WORKER_URL/health" > "$RUNNER_TEMP/preview-after-health.json"
+          jq -e --arg sha "$GITHUB_SHA" '.ok == true and .deploymentSha == $sha' "$RUNNER_TEMP/preview-after-health.json" >/dev/null

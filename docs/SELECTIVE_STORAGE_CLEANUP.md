@@ -30,3 +30,10 @@ recovered. The old global audit remains strict.
    procedure and read-only post-audit, while stopping on systemic errors.
 5. Keep R2 deletion disabled until full-object reference ownership and
    checksum checks are separately reviewed.
+
+## One-click preflight
+The manual `production-storage-selective-preview.yml` action is deliberately
+read-only. It scans at most 250 pages of 25 snapshot rows per family, respects
+its 20-minute and 1,000,000-row D1 read caps, suppresses all private IDs and
+cursor content in public logs, and records aggregate candidates, quarantines,
+and coverage. A partial preview is **not** a whole-database savings forecast.
