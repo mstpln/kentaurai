@@ -72,7 +72,7 @@ not emit candidate totals before this stop, so its results cannot support a
 storage savings estimate.
 
 The next manually dispatched workflow is intentionally **diagnostic only**:
-at most two pages of 25 rows per family, 100,000 cumulative reported D1 rows
+at most one page of 25 rows per family, 100,000 cumulative reported D1 rows
 read, and five minutes of scanning. It reports aggregate per-page D1 reads
 and R2 HEAD request counts immediately. The final summary is allowed to be
 partial. Do not equate a successful diagnostic run with completion of the
