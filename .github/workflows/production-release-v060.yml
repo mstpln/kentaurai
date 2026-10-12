@@ -322,7 +322,39 @@ jobs:
           runtime_secrets_file="$RUNNER_TEMP/kentaurai-runtime-secrets.json"
           trap 'rm -f "$runtime_secrets_file"' EXIT
           RUNTIME_SECRETS_FILE="$runtime_secrets_file" node -e "const fs=require('fs');const values={CLOUDFLARE_ACCOUNT_ID:process.env.CLOUDFLARE_ACCOUNT_ID,CLOUDFLARE_USAGE_API_TOKEN:process.env.CLOUDFLARE_USAGE_API_TOKEN,KENTAURAI_DEPLOY_SHA:process.env.GITHUB_SHA};if(Object.values(values).some(v=>!v))process.exit(1);fs.writeFileSync(process.env.RUNTIME_SECRETS_FILE,JSON.stringify(values),{mode:0o600});"
-          npm run deploy -- --secrets-file "$runtime_secrets_file" 2>&1 | tee /tmp/kentaurai-deploy.log
+          # Wrangler can fail after upload on a transient Cloudflare control-plane
+          # GET. Retry only the precisely observed malformed 200 / 504 GET
+          # cases, never auth, write, secret, D1 or unknown failures.
+          deployed=false
+          for attempt in 1 2 3; do
+            log_file="$RUNNER_TEMP/kentaurai-deploy-attempt-$attempt.log"
+            if npm run deploy -- --secrets-file "$runtime_secrets_file" 2>&1 | tee "$log_file"; then
+              cp "$log_file" /tmp/kentaurai-deploy.log
+              deployed=true
+              break
+            fi
+            if ! grep -Fq 'Received a malformed response from the API' "$log_file"; then
+              echo "::error::Unclassified Wrangler deployment failure; stopping without retry."
+              exit 1
+            fi
+            transient=false
+            if grep -Eq 'GET /accounts/[^ ]+/workers/scripts/[^ ]+/deployments -> 200 OK' "$log_file"; then
+              transient=true
+            elif grep -Eq 'GET /accounts/[^ ]+/workers/(services/[^ ]+|scripts/[^ ]+/subdomain) -> 504 Gateway Timeout' "$log_file"; then
+              transient=true
+            fi
+            if [ "$transient" != true ]; then
+              echo "::error::Wrangler error does not match a reviewed transient GET response; stopping."
+              exit 1
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Cloudflare control-plane API failed all three bounded deploy attempts."
+              exit 1
+            fi
+            echo "::warning::Cloudflare control-plane GET failed after Wrangler deploy attempt $attempt; waiting before one bounded retry."
+            sleep 20
+          done
+          test "$deployed" = true || exit 1
           worker_url="$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' /tmp/kentaurai-deploy.log | tail -n 1)"
           test -n "$worker_url" || { echo 'Could not determine workers.dev URL from Wrangler output'; exit 1; }
           echo "worker_url=$worker_url" >> "$GITHUB_OUTPUT"
