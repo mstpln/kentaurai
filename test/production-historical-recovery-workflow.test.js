@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createTestEnv } from './helpers/d1.js';
 
 const workflow=readFileSync(new URL(
@@ -71,8 +74,8 @@ test('restore capability is minted after confirmed backup and deleted in all exi
   assert.match(workflow,/Automatically resume unfinished private work/);
   assert.match(workflow,/if: \$\{\{ success\(\)/);
   assert.match(workflow,/next > 160/);
-  assert.match(runner,/MAX_STEPS=180/);
-  assert.match(runner,/MAX_MS=5\*60\*1000/);
+  assert.match(runner,/MAX_STEPS=360/);
+  assert.match(runner,/MAX_MS=11\*60\*1000/);
   assert.doesNotMatch(runner,/console\.log\(body|process\.stdout\.write\(JSON\.stringify\(report\)/);
 });
 
@@ -101,4 +104,64 @@ test('schema and persistent mutation fence cover all four source and identity fa
   assert.match(sql,/CREATE UNIQUE INDEX idx_historical_recovery_one_active/);
   assert.match(sql,/backup_etag TEXT/);
   assert.doesNotMatch(sql,/DROP TABLE|DELETE FROM horse_profile_snapshots/i);
+});
+
+test('inventory-only runner replaces an incompatible old run after rejected status',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'kentaurai-recovery-synthetic-'));
+  const oldId='00000000-0000-4000-8000-000000000001';
+  const freshId='00000000-0000-4000-8000-000000000002';
+  const output=join(dir,'gh-output');
+  try{
+    const runnerUrl=new URL('../scripts/run-production-historical-recovery.mjs',import.meta.url).href;
+    const code=`
+      globalThis.fetch=async (url,options={})=>{
+        const path=new URL(url).pathname;
+        if(path.endsWith('/status')) return new Response('{}',{status:409});
+        if(path.endsWith('/start')&&options.method==='POST') {
+          if(JSON.parse(options.body)?.supersedes_run_id!=="00000000-0000-4000-8000-000000000001")
+            throw new Error('missing stale active-run fence');
+          return Response.json({
+          mode:'historical_provenance_recovery',phase:'inventory',
+          runId:${JSON.stringify(freshId)},
+          sourceIdsReturned:false,rawFactsReturned:false,backupVerified:false
+          });
+        }
+        return new Response('{}',{status:400});
+      };
+      await import(${JSON.stringify(runnerUrl)});
+    `;
+    const result=spawnSync(process.execPath,['--input-type=module','-e',code],{
+      timeout:10000,encoding:'utf8',env:{
+        ...process.env,WORKER_URL:'https://synthetic.invalid',
+        CLEANUP_TOKEN:'synthetic-only-token',RUNNER_PHASE:'initialize',
+        RECOVERY_MODE:'inventory',RECOVERY_RUN_ID:oldId,GITHUB_OUTPUT:output
+      }
+    });
+    assert.equal(result.status,0,result.stderr);
+    assert.match(readFileSync(output,'utf8'),new RegExp('run_id='+freshId));
+    assert.doesNotMatch(result.stdout,/synthetic-only-token|rawPayload/);
+  }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
+test('backup initializer fails closed instead of replacing a rejected inventory',()=>{
+  const oldId='00000000-0000-4000-8000-000000000001';
+  const runnerUrl=new URL('../scripts/run-production-historical-recovery.mjs',import.meta.url).href;
+  const code=`
+    globalThis.fetch=async (url)=>{
+      if(new URL(url).pathname.endsWith('/start'))
+        throw new Error('unsafe backup fallback');
+      return new Response('{}',{status:409});
+    };
+    await import(${JSON.stringify(runnerUrl)});
+  `;
+  const result=spawnSync(process.execPath,['--input-type=module','-e',code],{
+    timeout:10000,encoding:'utf8',env:{
+      ...process.env,WORKER_URL:'https://synthetic.invalid',
+      CLEANUP_TOKEN:'synthetic-only-token',RUNNER_PHASE:'initialize',
+      RECOVERY_MODE:'backup',RECOVERY_RUN_ID:oldId,GITHUB_OUTPUT:''
+    }
+  });
+  assert.equal(result.status,1);
+  assert.match(result.stderr,/recovery_private_api_http_409/);
+  assert.doesNotMatch(result.stderr,/unsafe backup fallback/);
 });

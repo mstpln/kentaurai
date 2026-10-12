@@ -139,7 +139,7 @@ test('durable scan and source-owned restoration complete with independent source
   const {runId}=await ready(f);
   await assert.rejects(
     () => startHistoricalRecoveryRun(f.env),
-    /UNIQUE constraint failed/
+    /recovery_active_run_conflict/
   );
   await assert.rejects(
     () => stepHistoricalRecoveryExecution(f.env,{runId,approved:true,authorization:TOKEN}),
@@ -539,4 +539,93 @@ test('production entrypoint accepts the same temporary token on auth-check and r
     }),f.env);
     assert.equal(denied.status,401);
   }
+});
+
+test('new inventory atomically retires an older deployment without deleting its receipts', async () => {
+  const f=await fixture();
+  f.env.KENTAURAI_DEPLOY_SHA=DEPLOY;
+  const old=await startHistoricalRecoveryRun(f.env);
+  f.db.prepare("UPDATE historical_recovery_runs SET scanned_sources=7 WHERE id=?")
+    .run(old.runId);
+  // Old source/family verification receipts must survive a stale-run rollover.
+  f.db.prepare(
+    'INSERT INTO historical_recovery_receipts' +
+    '(run_id,family,source_record_id,status,missing_count,candidate_count,source_hash,checked_epoch)' +
+    " VALUES (?,'horse_profile',?,'ready',1,1,?,?)"
+  ).run(old.runId,SOURCE_CURRENT,f.originalHash,0);
+  f.env.KENTAURAI_DEPLOY_SHA='b'.repeat(40);
+  const fresh=await startHistoricalRecoveryRun(f.env,{supersedesRunId:old.runId});
+  assert.equal(fresh.phase,'inventory');
+  assert.notEqual(fresh.runId,old.runId);
+  const original=f.db.prepare(
+    'SELECT source_sha,phase,scan_drift,scanned_sources FROM historical_recovery_runs WHERE id=?'
+  ).get(old.runId);
+  assert.deepEqual({...original},{
+    source_sha:DEPLOY,phase:'paused',scan_drift:1,scanned_sources:7
+  });
+  assert.equal(f.db.prepare(
+    "SELECT COUNT(*) AS n FROM historical_recovery_runs WHERE phase='inventory'"
+  ).get().n,1);
+  assert.deepEqual({...f.db.prepare(
+    'SELECT status,missing_count,candidate_count,source_hash FROM historical_recovery_receipts' +
+    ' WHERE run_id=? AND family=? AND source_record_id=?'
+  ).get(old.runId,'horse_profile',SOURCE_CURRENT)},{
+    status:'ready',missing_count:1,candidate_count:1,source_hash:f.originalHash
+  });
+  assert.equal(f.db.prepare(
+    'SELECT COUNT(*) AS n FROM historical_recovery_receipts WHERE run_id=?'
+  ).get(fresh.runId).n,0);
+});
+
+test('new inventory retires stale source epoch, but never preempts a valid run', async () => {
+  const f=createTestEnv();
+  f.env.KENTAURAI_DEPLOY_SHA=DEPLOY;
+  const prior=await startHistoricalRecoveryRun(f.env);
+  await assert.rejects(
+    ()=>startHistoricalRecoveryRun(f.env),/recovery_active_run_conflict/
+  );
+  assert.equal(f.db.prepare(
+    'SELECT COUNT(*) AS n FROM historical_recovery_runs'
+  ).get().n,1);
+
+  // A legitimate import invalidates the old global source/identity epoch.
+  f.db.prepare(
+    "INSERT INTO source_records(id,source_type,fetched_at,quality_status)" +
+    " VALUES ('new-source','official_provider','2026-10-12T12:00:00Z','captured_unmapped')"
+  ).run();
+  const fresh=await startHistoricalRecoveryRun(f.env);
+  assert.notEqual(fresh.runId,prior.runId);
+  assert.equal(f.db.prepare(
+    'SELECT phase,scan_drift FROM historical_recovery_runs WHERE id=?'
+  ).get(prior.runId).phase,'paused');
+  assert.equal(f.db.prepare(
+    "SELECT COUNT(*) AS n FROM historical_recovery_runs WHERE phase='inventory'"
+  ).get().n,1);
+  const latest=await historicalRecoveryStatus(f.env);
+  assert.equal(latest.runId,fresh.runId);
+});
+
+test('automatic inventory rollover cannot silently replace a paused or unrelated run', async () => {
+  const f=createTestEnv();
+  f.env.KENTAURAI_DEPLOY_SHA=DEPLOY;
+  const old=await startHistoricalRecoveryRun(f.env);
+  f.db.prepare("UPDATE historical_recovery_runs SET phase='paused',scan_drift=1 WHERE id=?")
+    .run(old.runId);
+  f.env.KENTAURAI_DEPLOY_SHA='b'.repeat(40);
+  await assert.rejects(
+    () => startHistoricalRecoveryRun(f.env,{supersedesRunId:old.runId}),
+    /recovery_active_run_conflict/
+  );
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM historical_recovery_runs').get().n,1);
+  assert.equal(f.db.prepare("SELECT phase FROM historical_recovery_runs WHERE id=?")
+    .get(old.runId).phase,'paused');
+
+  // A new explicit inventory dispatch without the old identifier is allowed.
+  const manual=await startHistoricalRecoveryRun(f.env);
+  assert.equal(manual.phase,'inventory');
+  await assert.rejects(
+    () => startHistoricalRecoveryRun(f.env,{supersedesRunId:old.runId}),
+    /recovery_active_run_conflict/
+  );
+  assert.equal((await historicalRecoveryStatus(f.env)).runId,manual.runId);
 });

@@ -454,7 +454,9 @@ async function handleFetch(request, env) {
       }
       if (request.method === 'POST') {
         const body=await readJson(request);
-        if(path.endsWith('/start')) return json(await startHistoricalRecoveryRun(env));
+        if(path.endsWith('/start')) return json(await startHistoricalRecoveryRun(env,{
+          supersedesRunId:body.supersedes_run_id ?? null
+        }));
         if(path.endsWith('/scan-step')) return json(await stepHistoricalRecoveryInventory(env,{
           runId:body.run_id
         }));

@@ -12,8 +12,8 @@ const MODE=process.env.RECOVERY_MODE;
 const RUN_ID=process.env.RECOVERY_RUN_ID||'';
 const REPAIR_TOKEN=process.env.HISTORICAL_REPAIR_TOKEN||'';
 const OUT=process.env.GITHUB_OUTPUT;
-const MAX_STEPS=180;
-const MAX_MS=5*60*1000;
+const MAX_STEPS=360;
+const MAX_MS=11*60*1000;
 
 function fail(message){throw new Error(message);}
 function writeOutput(name,value){
@@ -60,16 +60,24 @@ async function main(){
   if(PHASE==='initialize'){
     if(RUN_ID && !/^[a-f0-9-]{36}$/.test(RUN_ID))fail('recovery_run_identifier_invalid');
     let report;
-    if(RUN_ID) report=await call(base+'status?run_id='+encodeURIComponent(RUN_ID));
-    else if(MODE==='execute'||MODE==='backup') report=await call(base+'status');
-    else {
-      try{ report=await call(base+'status'); }
-      catch(error){
+    if(MODE==='inventory') {
+      // A continuation may point at a run made stale by an exact new deploy
+      // or by legitimate scheduled source updates. A 409 alone cannot grant
+      // replacement authority; the Worker atomically refuses to replace any
+      // still-valid active run. Never auto-restart a backup/restore run.
+      try{
+        report=await call(base+'status'+(RUN_ID?'?run_id='+encodeURIComponent(RUN_ID):''));
+      }catch(error){
         if(error.message!=='recovery_private_api_http_409')throw error;
-        report=await put(base+'start',{});
+        report=await put(base+'start',RUN_ID?{supersedes_run_id:RUN_ID}:{});
       }
+      report=checkResponse(report);
+      // A paused run can encode an unresolved conflict, not just a stale epoch.
+      // Only a new manual inventory dispatch without run_id may start afresh.
+      if(report.phase==='paused') fail('recovery_paused_manual_restart_required');
+    }else{
+      report=checkResponse(await call(base+'status'+(RUN_ID?'?run_id='+encodeURIComponent(RUN_ID):'')));
     }
-    report=checkResponse(report);
     if(MODE==='execute'&&!['ready','applying','verify_pending','complete','complete_with_quarantine'].includes(report.phase))
       fail('recovery_inventory_not_complete');
     if(MODE==='inventory'&&!['inventory','ready','paused'].includes(report.phase))
