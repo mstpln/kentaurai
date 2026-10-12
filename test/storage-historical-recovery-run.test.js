@@ -554,7 +554,7 @@ test('new inventory atomically retires an older deployment without deleting its 
     " VALUES (?,'horse_profile',?,'ready',1,1,?,?)"
   ).run(old.runId,SOURCE_CURRENT,f.originalHash,0);
   f.env.KENTAURAI_DEPLOY_SHA='b'.repeat(40);
-  const fresh=await startHistoricalRecoveryRun(f.env);
+  const fresh=await startHistoricalRecoveryRun(f.env,{supersedesRunId:old.runId});
   assert.equal(fresh.phase,'inventory');
   assert.notEqual(fresh.runId,old.runId);
   const original=f.db.prepare(
@@ -603,4 +603,29 @@ test('new inventory retires stale source epoch, but never preempts a valid run',
   ).get().n,1);
   const latest=await historicalRecoveryStatus(f.env);
   assert.equal(latest.runId,fresh.runId);
+});
+
+test('automatic inventory rollover cannot silently replace a paused or unrelated run', async () => {
+  const f=createTestEnv();
+  f.env.KENTAURAI_DEPLOY_SHA=DEPLOY;
+  const old=await startHistoricalRecoveryRun(f.env);
+  f.db.prepare("UPDATE historical_recovery_runs SET phase='paused',scan_drift=1 WHERE id=?")
+    .run(old.runId);
+  f.env.KENTAURAI_DEPLOY_SHA='b'.repeat(40);
+  await assert.rejects(
+    () => startHistoricalRecoveryRun(f.env,{supersedesRunId:old.runId}),
+    /recovery_active_run_conflict/
+  );
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM historical_recovery_runs').get().n,1);
+  assert.equal(f.db.prepare("SELECT phase FROM historical_recovery_runs WHERE id=?")
+    .get(old.runId).phase,'paused');
+
+  // A new explicit inventory dispatch without the old identifier is allowed.
+  const manual=await startHistoricalRecoveryRun(f.env);
+  assert.equal(manual.phase,'inventory');
+  await assert.rejects(
+    () => startHistoricalRecoveryRun(f.env,{supersedesRunId:old.runId}),
+    /recovery_active_run_conflict/
+  );
+  assert.equal((await historicalRecoveryStatus(f.env)).runId,manual.runId);
 });
