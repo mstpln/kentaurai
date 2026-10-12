@@ -79,7 +79,7 @@ console.log(JSON.stringify({
 if (process.env.GITHUB_STEP_SUMMARY) {
   appendFileSync(process.env.GITHUB_STEP_SUMMARY,
     '## Bounded read-only selective storage cost diagnostic\n\n'
-      + 'At most two pages per family. This is not a coverage or savings forecast. No cleanup was executed.\n\n'
+      + 'At most one page per family. This is not a coverage or savings forecast. No cleanup was executed.\n\n'
       + '| Family | Scanned | Eligible duplicate candidates | Quarantined | Fully scanned |\n'
       + '|---|---:|---:|---:|---|\n'
       + report.map(row => '| '+row.family+' | '+row.scanned+' | '+row.eligibleDuplicates
