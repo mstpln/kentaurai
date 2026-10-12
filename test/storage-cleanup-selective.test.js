@@ -123,3 +123,53 @@ test('all four selective family proof queries are index-backed and executable', 
     assert.equal(safe.has('only-profile'),family==='horse_profile',family);
   }
 });
+
+test('selective preview reports aggregate page and source cost without source identifiers', async () => {
+  const { db, env, objects } = createTestEnv();
+  db.prepare("INSERT INTO horses(id,canonical_name) VALUES ('synthetic-horse','Synthetic')").run();
+  source(db,'source-secret','2026-09-01T10:00:00Z');
+  snapshot(db,'private-snapshot','source-secret','2026-09-01T10:00:00Z',4);
+  const key='raw/official_provider/' + hash + '.json';
+  objects.set(key,{body:'fixture',options:{customMetadata:{contentHash:hash,sourceType:'official_provider'}}});
+  // Local adapter does not expose Cloudflare's physical SQLite rows-read metric;
+  // report null explicitly, never fabricate a number or expose source identity.
+  const result=await planSnapshotCleanupBatch(env,{
+    family:'horse_profile',limit:1,selective:true,verifyRawHead:true
+  });
+  assert.equal(result.rowsScanned,1);
+  assert.equal(result.diagnostic.rawHeadRequests,1);
+  assert.equal(result.diagnostic.pageRowsRead,1);
+  assert.equal(result.diagnostic.sourceProofRowsRead,1);
+  assert.doesNotMatch(JSON.stringify(result.diagnostic),/source-secret|private-snapshot/);
+});
+
+test('selective cost diagnostic handles an empty snapshot family without invented query reads', async () => {
+  const { env } = createTestEnv();
+  const result = await planSnapshotCleanupBatch(env, {
+    family:'person_stat', limit:25, selective:true, verifyRawHead:true
+  });
+  assert.equal(result.rowsScanned,0);
+  assert.equal(result.rowsRemovable,0);
+  assert.deepEqual(result.diagnostic,{
+    pageRowsRead:0, sourceProofRowsRead:0, rawHeadRequests:0
+  });
+});
+
+test('selective cost diagnostic keeps unknown D1 read metrics null, not zero', async () => {
+  const { env } = createTestEnv();
+  const originalPrepare = env.DB.prepare.bind(env.DB);
+  env.DB.prepare = (sql) => {
+    const statement = originalPrepare(sql);
+    const originalAll = statement.all.bind(statement);
+    statement.all = async () => {
+      const value = await originalAll();
+      return { results:value.results };
+    };
+    return statement;
+  };
+  const result = await planSnapshotCleanupBatch(env, {
+    family:'horse_profile', limit:25, selective:true
+  });
+  assert.equal(result.diagnostic.pageRowsRead,null);
+  assert.equal(result.diagnostic.sourceProofRowsRead,0);
+});

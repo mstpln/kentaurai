@@ -1,4 +1,4 @@
-name: Read-only selective storage preview
+name: Read-only selective storage cost diagnostic
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ permissions:
 jobs:
   preview:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 15
     concurrency:
       group: kentaurai-production-operation
       cancel-in-progress: false
@@ -103,7 +103,7 @@ jobs:
             sleep 2
           done
           echo "::error::Read-only preview credential propagation failed"; exit 1
-      - name: Examine bounded eligible and quarantined snapshot candidates
+      - name: Measure bounded selective snapshot read costs
         env:
           WORKER_URL: ${{ steps.worker.outputs.worker_url }}
           CLEANUP_TOKEN: ${{ steps.preview_token.outputs.token }}
