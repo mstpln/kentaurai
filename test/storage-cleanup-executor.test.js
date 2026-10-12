@@ -145,7 +145,7 @@ test('snapshot planning bounds long runs of failed-source rows before complete h
   assert.equal(second.nextCursor, null);
 });
 
-test('failed snapshot rows do not block dedupe across complete sources', async () => {
+test('failed snapshot rows prevent chronological dedupe across unverified source history', async () => {
   const { db, env } = createTestEnv();
   db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('horse-failed-gap','Failed Gap Horse')").run();
   const rows = [
@@ -169,19 +169,10 @@ test('failed snapshot rows do not block dedupe across complete sources', async (
 
   const plan = await planSnapshotCleanupBatch(env, { family: 'horse_profile', limit: 25 });
   assert.equal(plan.rowsScanned, 3);
-  assert.equal(plan.rowsRemovable, 1);
-
-  const result = await executeSnapshotCleanupBatch(env, {
-    family: 'horse_profile',
-    limit: 25,
-    planToken: plan.planToken,
-    confirmation: CLEANUP_CONFIRMATION
-  });
-  assert.equal(result.rowsRemoved, 1);
-  assert.equal(
-    db.prepare("SELECT COUNT(*) AS n FROM horse_profile_snapshots WHERE source_record_id='gap-source-c'").get().n,
-    0
-  );
+  assert.equal(plan.rowsRemovable, 0);
+  assert.equal(db.prepare(
+    "SELECT COUNT(*) AS n FROM horse_profile_snapshots WHERE source_record_id='gap-source-c'"
+  ).get().n, 1);
   assert.equal(
     db.prepare("SELECT COUNT(*) AS n FROM horse_profile_snapshots WHERE source_record_id='gap-source-b'").get().n,
     1
