@@ -71,8 +71,8 @@ test('restore capability is minted after confirmed backup and deleted in all exi
   assert.match(workflow,/Automatically resume unfinished private work/);
   assert.match(workflow,/if: \$\{\{ success\(\)/);
   assert.match(workflow,/next > 160/);
-  assert.match(runner,/MAX_STEPS=180/);
-  assert.match(runner,/MAX_MS=5\*60\*1000/);
+  assert.match(runner,/MAX_STEPS=360/);
+  assert.match(runner,/MAX_MS=11\*60\*1000/);
   assert.doesNotMatch(runner,/console\.log\(body|process\.stdout\.write\(JSON\.stringify\(report\)/);
 });
 
