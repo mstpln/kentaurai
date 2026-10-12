@@ -4,9 +4,9 @@ The private inventory is pinned to the deployed SHA and official-source
 revision epoch. A new **inventory** may atomically archive an older
 incompatible active run as `paused`, preserving its receipts and counters,
 then start a fresh run only when the old deployment SHA or epoch is stale.
-A still-current active run remains an exclusive lock. The GitHub runner may
-replace an old/paused inventory, but neither backup nor restore can restart
-on a 409. The continuation window may extend to 11 minutes/360 steps;
+A still-current active run remains an exclusive lock. The GitHub runner may request replacement for an obsolete inventory whose
+old status returns 409; a paused run requires a fresh manual inventory start.
+Neither backup nor restoration retries a 409. The continuation window may extend to 11 minutes/360 steps;
 the existing source proof, database and R2 cumulative cost ceilings,
 separate approval, and no-cleanup-delete boundary remain unchanged.
 
