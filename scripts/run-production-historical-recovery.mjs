@@ -69,7 +69,7 @@ async function main(){
         report=await call(base+'status'+(RUN_ID?'?run_id='+encodeURIComponent(RUN_ID):''));
       }catch(error){
         if(error.message!=='recovery_private_api_http_409')throw error;
-        report=await put(base+'start',{});
+        report=await put(base+'start',RUN_ID?{supersedes_run_id:RUN_ID}:{});
       }
       report=checkResponse(report);
       // A paused run can encode an unresolved conflict, not just a stale epoch.
