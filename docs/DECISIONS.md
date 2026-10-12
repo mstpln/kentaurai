@@ -6,7 +6,7 @@ incompatible active run as `paused`, preserving its receipts and counters,
 then start a fresh run only when the old deployment SHA or epoch is stale.
 A still-current active run remains an exclusive lock. The GitHub runner may request replacement for an obsolete inventory whose
 old status returns 409; a paused run requires a fresh manual inventory start.
-Neither backup nor restoration retries a 409. The continuation window may extend to 11 minutes/360 steps;
+Neither backup nor restoration retries a 409. An automatic continuation carries its old run ID into the new start request; the Worker must prove that exact run was active and stale, so a paused run or unrelated 409 can never silently create another inventory. The continuation window may extend to 11 minutes/360 steps;
 the existing source proof, database and R2 cumulative cost ceilings,
 separate approval, and no-cleanup-delete boundary remain unchanged.
 
