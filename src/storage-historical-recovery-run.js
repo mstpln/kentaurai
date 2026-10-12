@@ -110,10 +110,26 @@ export async function startHistoricalRecoveryRun(env) {
   requireEnv(env);
   const revision=await epoch(env);
   const id=crypto.randomUUID();
-  await env.DB.prepare(
-    'INSERT INTO historical_recovery_runs(id,source_sha,expected_epoch,started_epoch)' +
-    " VALUES (?,?,?,?)"
-  ).bind(id,env.KENTAURAI_DEPLOY_SHA,revision,revision).run();
+  // A read-only inventory from an older Worker build or data epoch cannot
+  // be resumed safely. Archive its progress as paused, never delete receipts,
+  // and admit exactly one fresh inventory in the same D1 transaction.
+  // A still-valid active run continues to block a competing start.
+  const statements=[
+    env.DB.prepare(
+      "UPDATE historical_recovery_runs SET phase='paused',scan_drift=1,updated_at=CURRENT_TIMESTAMP" +
+      " WHERE phase IN ('inventory','ready','applying','verify_pending')" +
+      " AND (source_sha<>? OR expected_epoch<>?)"
+    ).bind(env.KENTAURAI_DEPLOY_SHA,revision),
+    env.DB.prepare(
+      'INSERT INTO historical_recovery_runs(id,source_sha,expected_epoch,started_epoch)' +
+      " SELECT ?,?,?,? WHERE NOT EXISTS(" +
+      "SELECT 1 FROM historical_recovery_runs" +
+      " WHERE phase IN ('inventory','ready','applying','verify_pending'))"
+    ).bind(id,env.KENTAURAI_DEPLOY_SHA,revision,revision)
+  ];
+  const result=await env.DB.batch(statements);
+  if(Number(result[1]?.meta?.changes)!==1)
+    throw new Error('recovery_active_run_conflict');
   return totals(await loadRun(env,id));
 }
 export async function historicalRecoveryStatus(env,{runId}={}) {
