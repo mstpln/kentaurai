@@ -62,3 +62,24 @@ preview; they must not be treated as evidence that a file is bad.
 - A verified R2 object can still contain conflicting original data; preserving
   that ambiguity is mandatory. Any database or R2 transport ambiguity is a
   system-level stop and must not be recoded as a quarantinable file error.
+
+## October 12 read-budget diagnostic
+
+The first production selective preview (run 38258157427) safely stopped after
+exceeding the 1,000,000 D1 rows-read budget. No facts were changed; ephemeral
+credentials were removed and exact-deployment health passed. The old script did
+not emit candidate totals before this stop, so its results cannot support a
+storage savings estimate.
+
+The next manually dispatched workflow is intentionally **diagnostic only**:
+at most two pages of 25 rows per family, 100,000 cumulative reported D1 rows
+read, and five minutes of scanning. It reports aggregate per-page D1 reads
+and R2 HEAD request counts immediately. The final summary is allowed to be
+partial. Do not equate a successful diagnostic run with completion of the
+four-family inventory, and do not authorize deletion from this diagnostic.
+The D1 row-read budget is checked after each API response (a single response
+can exceed the remaining global budget), with the existing per-operation
+cost safety also in force.
+
+Investigate the measured query hotspot before any larger scan. No execute
+routes, backup, restoration or historical recovery behavior changes.
