@@ -37,3 +37,8 @@ read-only. It scans at most 250 pages of 25 snapshot rows per family, respects
 its 20-minute and 1,000,000-row D1 read caps, suppresses all private IDs and
 cursor content in public logs, and records aggregate candidates, quarantines,
 and coverage. A partial preview is **not** a whole-database savings forecast.
+
+An actual production preview also checks R2 HEAD existence, positive object
+length and matching content-hash/source-type metadata. A missing object or
+metadata conflict quarantines that source. R2 transport errors abort the
+preview; they must not be treated as evidence that a file is bad.

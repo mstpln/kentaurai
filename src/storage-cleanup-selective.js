@@ -26,7 +26,7 @@ export function buildSelectiveSourceProofSql(family, sourceCount) {
     throw new Error('unsupported selective source proof scope');
   const bind = Array(sourceCount).fill('?').join(',');
   return [
-    'SELECT sr.id AS source_id, sr.content_hash, sr.raw_object_key,',
+    'SELECT sr.id AS source_id, sr.source_type, sr.content_hash, sr.raw_object_key,',
     '  sync.status, sync.' + d.expected + ' AS expected_count,',
     '  (SELECT COUNT(*) FROM ' + d.table + ' direct INDEXED BY idx_' + d.table + '_source_record',
     '     WHERE direct.source_record_id=sr.id) AS direct_count,',
@@ -52,7 +52,7 @@ export function buildSelectiveSourceProofSql(family, sourceCount) {
   ].join(' ');
 }
 
-export async function verifySelectiveSourceFamilies(env, family, sourceIds) {
+export async function verifySelectiveSourceFamilies(env, family, sourceIds, options = {}) {
   if (!env?.DB) throw new Error('DB is not configured');
   const ids = [...new Set(sourceIds.map(String))];
   if (ids.length === 0) return new Set();
@@ -60,6 +60,8 @@ export async function verifySelectiveSourceFamilies(env, family, sourceIds) {
   const { results = [] } = await env.DB.prepare(statement)
     .bind(family, family, ...ids).all();
   const safe = new Set();
+  if (options.verifyRawHead === true && !env.RAW_BUCKET?.head)
+    throw new Error('selective source proof requires R2 HEAD access');
   for (const row of results) {
     const expected = Number(row.expected_count);
     const total = Number(row.direct_count) + Number(row.remote_count);
@@ -69,6 +71,14 @@ export async function verifySelectiveSourceFamilies(env, family, sourceIds) {
       || Number(row.invalid_observation_count) !== 0
       || !/^[a-f0-9]{64}$/.test(String(row.content_hash || ''))
       || !String(row.raw_object_key || '').startsWith('raw/')) continue;
+    if (options.verifyRawHead === true) {
+      // Missing or inconsistent originals stay quarantined. Transient R2
+      // transport errors must propagate and stop the entire preview.
+      const raw = await env.RAW_BUCKET.head(row.raw_object_key);
+      if (!raw || !Number.isFinite(Number(raw.size)) || Number(raw.size) < 1
+          || raw.customMetadata?.contentHash !== row.content_hash
+          || raw.customMetadata?.sourceType !== row.source_type) continue;
+    }
     safe.add(row.source_id);
   }
   return safe;

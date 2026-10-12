@@ -588,7 +588,7 @@ async function handleFetch(request, env) {
     const observed = await observeD1Operation(env, 'storage_cleanup_selective_preview', async (observedEnv) =>
       planSnapshotCleanupBatch(observedEnv, {
         family: body.family, limit: Math.min(25, Number(body.limit) || 25),
-        cursor: body.cursor, selective: true
+        cursor: body.cursor, selective: true, verifyRawHead: true
       })
     );
     return json({ ...observed.value, cost: observed.metrics, safetyStop: observed.safetyStop });

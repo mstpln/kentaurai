@@ -145,7 +145,7 @@ test('snapshot planning bounds long runs of failed-source rows before complete h
   assert.equal(second.nextCursor, null);
 });
 
-test('failed snapshot rows do not block dedupe across complete sources', async () => {
+test('failed snapshot rows prevent chronological dedupe across unverified source history', async () => {
   const { db, env } = createTestEnv();
   db.prepare("INSERT INTO horses (id,canonical_name) VALUES ('horse-failed-gap','Failed Gap Horse')").run();
   const rows = [

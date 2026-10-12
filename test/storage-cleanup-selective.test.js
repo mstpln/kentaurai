@@ -57,3 +57,16 @@ test('selective preview does not collapse valid repeats across a quarantined sou
   const next=await planSnapshotCleanupBatch(env,{family:'horse_profile',limit:2,cursor:plan.nextCursor,selective:true});
   assert.equal(next.rowsRemovable,0);
 });
+
+test('selective preview validates R2 metadata and quarantine on missing or inconsistent original', async () => {
+  const { db, env, objects } = createTestEnv();
+  db.prepare("INSERT INTO horses(id,canonical_name) VALUES ('synthetic-horse','Synthetic')").run();
+  source(db,'original','2026-09-01T10:00:00Z');
+  snapshot(db,'original-snapshot','original','2026-09-01T10:00:00Z',4);
+  assert.equal((await verifySelectiveSourceFamilies(env,'horse_profile',['original'],{verifyRawHead:true})).size,0);
+  const key='raw/official_provider/' + hash + '.json';
+  objects.set(key,{body:'verified fixture',options:{customMetadata:{contentHash:hash,sourceType:'official_provider'}}});
+  assert.deepEqual([...await verifySelectiveSourceFamilies(env,'horse_profile',['original'],{verifyRawHead:true})],['original']);
+  objects.set(key,{body:'fixture',options:{customMetadata:{contentHash:'b'.repeat(64),sourceType:'official_provider'}}});
+  assert.equal((await verifySelectiveSourceFamilies(env,'horse_profile',['original'],{verifyRawHead:true})).size,0);
+});

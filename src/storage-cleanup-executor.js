@@ -184,7 +184,8 @@ async function detailedSnapshotPlan(env, options) {
   const scannedRows = results.slice(0, rowLimit);
   const selective = options.selective === true;
   const verified = selective
-    ? await verifySelectiveSourceFamilies(env, family, scannedRows.map((row) => row.source_record_id))
+    ? await verifySelectiveSourceFamilies(env, family, scannedRows.map((row) => row.source_record_id),
+      { verifyRawHead: options.verifyRawHead === true })
     : null;
   let rowsQuarantined = 0;
   let priorPartition = decoded?.priorPartition ?? null;
