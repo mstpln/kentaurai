@@ -55,12 +55,15 @@ export function buildSelectiveSourceProofSql(family, sourceCount) {
 export async function verifySelectiveSourceFamilies(env, family, sourceIds, options = {}) {
   if (!env?.DB) throw new Error('DB is not configured');
   const ids = [...new Set(sourceIds.map(String))];
-  if (ids.length === 0) return new Set();
+  if (ids.length === 0) {
+    if (options.diagnostic) options.diagnostic.sourceProofRowsRead = 0;
+    return new Set();
+  }
   const statement = buildSelectiveSourceProofSql(family, ids.length);
   const { results = [], meta = {} } = await env.DB.prepare(statement)
     .bind(family, family, ...ids).all();
   if (options.diagnostic) {
-    const reads = Number(meta?.rows_read);
+    const reads = meta?.rows_read == null ? null : Number(meta.rows_read);
     options.diagnostic.sourceProofRowsRead = Number.isSafeInteger(reads) && reads >= 0 ? reads : null;
   }
   const safe = new Set();
