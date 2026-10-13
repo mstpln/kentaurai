@@ -629,3 +629,87 @@ test('automatic inventory rollover cannot silently replace a paused or unrelated
   );
   assert.equal((await historicalRecoveryStatus(f.env)).runId,manual.runId);
 });
+
+test('stale inventory status is read-only and rejects an out-of-date source epoch before scanning', async () => {
+  const f=await fixture();
+  f.env.KENTAURAI_DEPLOY_SHA=DEPLOY;
+  const old=await startHistoricalRecoveryRun(f.env);
+  const original=f.db.prepare(
+    'SELECT phase,expected_epoch,scan_drift,scanned_sources FROM historical_recovery_runs WHERE id=?'
+  ).get(old.runId);
+  assert.equal((await historicalRecoveryStatus(f.env)).runId,old.runId);
+
+  // Normal official ingestion invalidates the inventory source/identity epoch.
+  f.db.prepare(
+    "INSERT INTO source_records(id,source_type,fetched_at,quality_status)" +
+    " VALUES ('synthetic-new-source','official_provider','2026-10-13T06:00:00Z','captured_unmapped')"
+  ).run();
+  await assert.rejects(
+    () => historicalRecoveryStatus(f.env), /recovery_active_run_epoch_changed/
+  );
+  await assert.rejects(
+    () => historicalRecoveryStatus(f.env,{runId:old.runId}),
+    /recovery_active_run_epoch_changed/
+  );
+  // A rejected GET must never pause, rewrite, or remove the old run/receipts.
+  assert.deepEqual({...f.db.prepare(
+    'SELECT phase,expected_epoch,scan_drift,scanned_sources FROM historical_recovery_runs WHERE id=?'
+  ).get(old.runId)}, {...original});
+
+  // The private GET status route returns only its existing generic failure.
+  const temporary=String(Date.now())+'.'+'b'.repeat(64);
+  f.env.STORAGE_CLEANUP_TOKEN=temporary;
+  const prefix='https://synthetic.example.invalid/v1/storage-cleanup/restoration/run/';
+  const headers={authorization:'Bearer '+temporary};
+  const privateStatus=await productionWorker.fetch(
+    new Request(prefix+'status',{headers}),f.env
+  );
+  assert.equal(privateStatus.status,409);
+  assert.deepEqual(await privateStatus.json(),{
+    error:'historical_recovery_not_authorized_or_unavailable'
+  });
+  assert.deepEqual({...f.db.prepare(
+    'SELECT phase,expected_epoch,scan_drift,scanned_sources FROM historical_recovery_runs WHERE id=?'
+  ).get(old.runId)}, {...original});
+
+  // A separate, explicitly dispatched inventory start can now atomically
+  // retire that *stale* run and preserve its preexisting source evidence.
+  const started=await productionWorker.fetch(
+    new Request(prefix+'start',{
+      method:'POST',headers:{...headers,'content-type':'application/json'},body:'{}'
+    }),f.env
+  );
+  assert.equal(started.status,200);
+  const fresh=await started.json();
+  assert.equal(fresh.phase,'inventory');
+  assert.notEqual(fresh.runId,old.runId);
+  const previous=f.db.prepare(
+    'SELECT phase,scan_drift,scanned_sources FROM historical_recovery_runs WHERE id=?'
+  ).get(old.runId);
+  assert.deepEqual({...previous},{
+    phase:'paused',scan_drift:1,scanned_sources:Number(original.scanned_sources)
+  });
+  assert.equal((await historicalRecoveryStatus(f.env)).runId,fresh.runId);
+});
+
+test('valid recovery status remains resumable, while epoch-stale ready inventory fails closed', async () => {
+  const f=createTestEnv();
+  f.env.KENTAURAI_DEPLOY_SHA=DEPLOY;
+  const started=await startHistoricalRecoveryRun(f.env);
+  assert.equal((await historicalRecoveryStatus(f.env)).phase,'inventory');
+  f.db.prepare("UPDATE historical_recovery_runs SET phase='ready' WHERE id=?")
+    .run(started.runId);
+  assert.equal((await historicalRecoveryStatus(f.env)).phase,'ready');
+  f.db.prepare(
+    "INSERT INTO source_records(id,source_type,fetched_at,quality_status)" +
+    " VALUES ('synthetic-ready-epoch','official_provider','2026-10-13T06:00:00Z','captured_unmapped')"
+  ).run();
+  await assert.rejects(
+    () => historicalRecoveryStatus(f.env), /recovery_active_run_epoch_changed/
+  );
+  // Even though an inventory can restart, a ready-to-backup state never
+  // silently authorizes old source proof after underlying data changes.
+  assert.equal(f.db.prepare(
+    'SELECT phase FROM historical_recovery_runs WHERE id=?'
+  ).get(started.runId).phase,'ready');
+});

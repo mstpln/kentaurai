@@ -1,3 +1,10 @@
+## October 13 stale historical inventory status preflight (pending PR)
+
+- Manual production inventory run 38359980370 reused a prior active inventory with 3,012 missing source representations, 2,463 candidate facts and 549 quarantined, then received HTTP 409 on its first scan-step. Full QA, exact deployment, auth cleanup and post-failure health passed. The sanitized public response cannot prove the underlying 409 cause.
+- Code issue confirmed: the private `/restoration/run/status` checked the deployed commit but **not the source/identity revision epoch**, despite the inventory scan enforcing that epoch. The runner therefore trusted a possibly stale active inventory at initialization.
+- This change makes the authenticated status GET reject an epoch-stale active inventory/ready/application state **without mutation**. The existing inventory-only 409 fallback then calls the Worker’s separate atomic stale-run replacement; it keeps all previous receipts and never replaces a still-valid active run.
+- Do not retry the 409 loop or bypass the epoch fence. Neither backup/restore nor cleanup deletion is enabled by this build. Require CI, final review, separate approval for merge/deploy and a new explicit inventory dispatch.
+
 ## Historical inventory continuation recovery (2026-10-12, pending PR)
 
 - Production read-only diagnostic #2 (38265064068) completed with 100 sampled snapshot rows, 71 quarantined and zero deletable candidates; full cleanup remains blocked. These sample counts cannot certify recovered provenance or physical storage savings.
