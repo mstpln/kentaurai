@@ -149,7 +149,16 @@ export async function historicalRecoveryStatus(env,{runId}={}) {
     if(!latest)throw new Error('recovery_no_active_run');
     chosen=latest.id;
   }
-  return totals(await loadRun(env,chosen));
+  const run = await loadRun(env,chosen);
+  // A status lookup is the GitHub runner's resume preflight. Reject old
+  // source/identity epochs *before* claiming the active inventory can resume.
+  // Keep GET status read-only: explicit inventory start owns the atomic
+  // pause-and-replace transaction and preserves every historical receipt.
+  if (['inventory','ready','applying','verify_pending'].includes(run.phase) &&
+      Number(run.expected_epoch) !== await epoch(env)) {
+    throw new Error('recovery_active_run_epoch_changed');
+  }
+  return totals(run);
 }
 export async function stepHistoricalRecoveryInventory(env,{runId}={}) {
   requireEnv(env);
