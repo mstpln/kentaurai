@@ -259,7 +259,7 @@ async function recentDailyXlabsJobs(env) {
 async function latestRun(env, sourceType) {
   return env.DB.prepare(`
     SELECT id, source_type, started_at, finished_at, status, error_count, error_json
-    FROM import_runs
+    FROM import_runs INDEXED BY idx_import_runs_settings_family_datetime
     WHERE source_type = ?
     ORDER BY datetime(started_at) DESC, id DESC
     LIMIT 1
@@ -270,7 +270,7 @@ async function latestFamilyRun(env, family) {
   const pattern = family === 'xlabs' ? '%xlab%' : '%official%';
   return env.DB.prepare(`
     SELECT id, source_type, started_at, finished_at, status, error_count, error_json
-    FROM import_runs
+    FROM import_runs INDEXED BY idx_import_runs_settings_family_datetime
     WHERE lower(source_type) LIKE ?
     ORDER BY datetime(started_at) DESC, id DESC
     LIMIT 1
