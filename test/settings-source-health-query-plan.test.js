@@ -7,14 +7,14 @@ import { getSettingsSourceHealth } from '../src/settings-source-health.js';
 const COLUMNS = 'id, source_type, started_at, finished_at, status, error_count, error_json';
 const EXACT_QUERY = `
   SELECT ${COLUMNS}
-  FROM import_runs
+  FROM import_runs INDEXED BY idx_import_runs_settings_family_datetime
   WHERE source_type = ?
   ORDER BY datetime(started_at) DESC, id DESC
   LIMIT 1
 `;
 const FAMILY_QUERY = `
   SELECT ${COLUMNS}
-  FROM import_runs
+  FROM import_runs INDEXED BY idx_import_runs_settings_family_datetime
   WHERE lower(source_type) LIKE ?
   ORDER BY datetime(started_at) DESC, id DESC
   LIMIT 1
