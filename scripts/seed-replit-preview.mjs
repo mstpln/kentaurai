@@ -212,6 +212,21 @@ if (!RESET_ONLY) {
     }
   }
 
+  // Keep enough qualifying starts inside Trend's default 2-week window.
+  // Dates roll forward from the current Stockholm seed date, not a fixed fixture epoch.
+  for (let dayIndex = 0; dayIndex < 13; dayIndex += 1) {
+    const day = dateAtOffset(dayIndex - 13);
+    for (let raceOfDay = 0; raceOfDay < 2; raceOfDay += 1) {
+      races.push({
+        id:`demo_race_recent_${String(dayIndex + 1).padStart(2, '0')}_${raceOfDay + 1}`,
+        date:day, track:tracks[(dayIndex * 2 + raceOfDay) % tracks.length],
+        number:raceOfDay + 1, type:'standalone', round:null, leg:null,
+        upcoming:false, index:races.length,
+        firstPrizeSek:[120000,150000,180000,220000][(dayIndex + raceOfDay) % 4]
+      });
+    }
+  }
+
   const raceEntries = new Map();
   const raceWinners = new Map();
   const raceSources = new Map();
@@ -235,7 +250,7 @@ if (!RESET_ONLY) {
     insert('races', {
       id:race.id, track_id:race.track.id, race_date:race.date, race_number:race.number,
       scheduled_start_at:startAt, distance_m:distance, start_method:startMethod,
-      field_size:fieldSize, first_prize_sek:[30000,50000,80000,120000][race.index % 4],
+      field_size:fieldSize, first_prize_sek:race.firstPrizeSek ?? [30000,50000,80000,120000][race.index % 4],
       race_name:`Demo ${className} · lopp ${race.number}`,
       main_class:className, class_flags_json:JSON.stringify({ synthetic:true, class:className }),
       status:race.upcoming ? 'scheduled' : 'completed', source_quality:'synthetic_preview'
