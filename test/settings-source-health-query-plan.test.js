@@ -48,7 +48,7 @@ test('Settings import-run lookups use indexed datetime ordering without changing
   }
 
   assertIndexedOrder(db, EXACT_QUERY, 'official_live_scheduled_capture',
-    'idx_import_runs_settings_exact_source_datetime');
+    'idx_import_runs_settings_family_datetime');
   assertIndexedOrder(db, FAMILY_QUERY, '%official%',
     'idx_import_runs_settings_family_datetime');
   assertIndexedOrder(db, FAMILY_QUERY, '%xlab%',

@@ -1,9 +1,7 @@
--- Preserve existing datetime(started_at) semantics for historical mixed timestamp formats.
--- Exact source lookups should search the source partition in timestamp order.
-CREATE INDEX IF NOT EXISTS idx_import_runs_settings_exact_source_datetime
-  ON import_runs(source_type, datetime(started_at) DESC, id DESC);
-
--- Family filters such as lower(source_type) LIKE '%official%' cannot seek by
--- source type. Traverse newest-first instead of sorting all import_runs rows.
+-- Preserve datetime(started_at) semantics for historical mixed timestamp formats.
+-- Scan newest-first rather than sorting the entire import_runs table for
+-- Settings fallback source-family queries. Do not add a (source_type, datetime)
+-- index: it displaces the dedicated sourceRecordId index in automatic retry
+-- lookups and causes a serious performance regression.
 CREATE INDEX IF NOT EXISTS idx_import_runs_settings_family_datetime
   ON import_runs(datetime(started_at) DESC, id DESC);
