@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, extname, join, relative } from 'node:path';
@@ -19,11 +20,21 @@ function publicFiles(dir) {
   for (const name of readdirSync(dir)) {
     if (['node_modules', '.git', '.wrangler', 'coverage'].includes(name)) continue;
     const path = join(dir, name);
+    // Replit's generated tooling is not repository content. Tracked files in
+    // these directories are still included below so this cannot hide leaks.
+    const repoPath = relative(root, path).replaceAll('\\', '/');
+    if (['.cache', '.local', '.upm'].includes(repoPath)) continue;
     const stat = statSync(path);
     if (stat.isDirectory()) files.push(...publicFiles(path));
     else if (stat.isFile()) files.push(path);
   }
   return files;
+}
+
+function repositoryFiles() {
+  const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: root })
+    .toString().split('\0').filter(Boolean).map((path) => join(root, path));
+  return [...new Set([...publicFiles(root), ...tracked])];
 }
 
 function sha256(value) {
@@ -54,7 +65,7 @@ test('public repository documents generic editorial-source handling', () => {
 
 test('all public repository files avoid private editorial source tokens', () => {
   const matches = [];
-  for (const file of publicFiles(root)) {
+  for (const file of repositoryFiles()) {
     if (containsForbiddenPrivateSourceToken(readFileSync(file))) {
       matches.push(relative(root, file));
     }
@@ -64,7 +75,7 @@ test('all public repository files avoid private editorial source tokens', () => 
 
 test('public repository contains no unapproved data-like files', () => {
   const unexpected = [];
-  for (const file of publicFiles(root)) {
+  for (const file of repositoryFiles()) {
     const repoPath = relative(root, file).replaceAll('\\', '/');
     if (!dataExtensions.has(extname(file).toLowerCase())) continue;
     if (repoPath === 'package.json' || repoPath === 'package-lock.json') continue;

@@ -3,14 +3,23 @@
   "version": "0.6.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22 <23" },
+  "engines": {
+    "node": ">=22 <23"
+  },
   "scripts": {
     "test": "node --test test/*.test.js",
     "test:schema": "node --test test/schema.test.js",
     "qa": "npm test && node --check src/index.js && node --check src/worker-settings.js && node --check src/settings-data.js && node --check src/app-page-settings.js && node --check src/settings-drift.js && node --check src/settings-drift-ui.js && node --check src/worker-v079.js",
     "dev": "npx --yes wrangler@4.114.0 dev",
+    "dev:replit": "wrangler dev --config wrangler.local.jsonc --local --ip 0.0.0.0 --port 5000",
+    "db:migrate:replit": "wrangler d1 migrations apply kentaurai-local --config wrangler.local.jsonc --local",
+    "db:seed:replit": "node scripts/seed-replit-preview.mjs",
+    "db:reset:replit": "node scripts/seed-replit-preview.mjs --reset-only",
     "deploy": "npx --yes wrangler@4.149.0 deploy",
     "db:migrate:local": "npx --yes wrangler@4.114.0 d1 migrations apply kentaurai --local",
     "db:migrate:remote": "npx --yes wrangler@4.114.0 d1 migrations apply kentaurai --remote"
+  },
+  "dependencies": {
+    "wrangler": "4.149.0"
   }
 }

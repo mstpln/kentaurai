@@ -20,13 +20,18 @@ async function requireSession(request, env) {
   return null;
 }
 
-async function enhanceApp(request, response) {
+async function enhanceApp(request, response, env) {
   if (request.method !== 'GET' || new URL(request.url).pathname !== '/app/') return response;
   const type = response.headers.get('content-type') || '';
   if (!type.includes('text/html')) return response;
   const headers = new Headers(response.headers);
   headers.delete('content-length');
-  return new Response(enhanceSettingsDriftHtml(await response.text()), {
+  let html = enhanceSettingsDriftHtml(await response.text());
+  if (env.PREVIEW_DATA_MODE === 'synthetic') {
+    html = html.replace('</body>', `<div class="synthetic-preview-badge" role="status" aria-label="Synthetic local preview data">SYNTHETIC PREVIEW · local D1</div>
+      <style>.synthetic-preview-badge{position:fixed;right:12px;bottom:calc(70px + env(safe-area-inset-bottom));z-index:9999;padding:6px 9px;border:1px solid #f0c36d;border-radius:999px;background:#fff7e6;color:#744b00;font:600 10px/1.2 system-ui,sans-serif;letter-spacing:.04em;box-shadow:0 2px 8px #0002;pointer-events:none}@media(min-width:760px){.synthetic-preview-badge{bottom:12px}}</style></body>`);
+  }
+  return new Response(html, {
     status:response.status,
     statusText:response.statusText,
     headers
@@ -64,6 +69,13 @@ export default {
     if (path === '/app/api/settings/drift' && request.method === 'GET') {
       const denied = await requireSession(request, env);
       if (denied) return denied;
+      if (env.PREVIEW_DATA_MODE === 'synthetic') {
+        return json({
+          automation: await getAutomationControl(env),
+          cloudflare: { configured:false, reason:'synthetic_preview_external_access_disabled', billingPeriod:null, metrics:[] },
+          preview: { dataMode:'synthetic', localOnly:true }
+        });
+      }
       return json(await getDriftOverview(env));
     }
 
@@ -78,10 +90,13 @@ export default {
       }
     }
 
-    return enhanceApp(request, await worker.fetch(request, env, ctx));
+    return enhanceApp(request, await worker.fetch(request, env, ctx), env);
   },
 
   async scheduled(controller, env, ctx) {
+    if (env.PREVIEW_DATA_MODE === 'synthetic') {
+      return { skipped:true, reason:'synthetic_preview_external_workflows_disabled' };
+    }
     let automation;
     try {
       automation = await getAutomationControl(env);

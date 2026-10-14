@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=a249deba7586604256327c9a2226b6c8905fc97f
-release_nonce=2026-10-13-pr321-stale-recovery-status-preflight
+source_main=893bdfd5f3d4712dab4864903abd5072ff9e9857
+release_nonce=2026-10-14-synthetic-preview-review

@@ -1,0 +1,29 @@
+Continue the KentaurAI synthetic Preview release from branch `dev/synthetic-preview`.
+
+The GitHub token permissions have now been updated to include **Pull requests: Read and write**. Authentication is already configured through `GH_TOKEN`.
+
+**Goal: Complete review, fix any issues, merge and deploy only when all checks pass.**
+
+1. **GitHub:** Verify authentication and the latest remote branch. Create a PR from `dev/synthetic-preview` into `main`.
+
+2. **Review:** Thoroughly review the entire PR for correctness, security, regressions and production compatibility. Pay particular attention to preventing synthetic data, preview settings or local D1/R2 bindings from affecting production.
+
+3. **Dependency fix:** Investigate the 91 Replit-internal registry URLs in `package-lock.json`. Replace them with portable public npm registry references where appropriate. Verify clean installation outside Replit without introducing unnecessary dependency updates.
+
+4. **Testing:** Run targeted tests, full `npm run qa` and schema tests. Fix any blocking issues, then rerun affected checks. Ensure production configuration remains unchanged.
+
+5. **Merge:** Only after all checks pass and no blocking findings remain, merge the PR into `main`.
+
+6. **Deploy:** Use only KentaurAI's existing approved GitHub Actions production-release workflow. Never use Replit Publish or deploy local synthetic data. Verify the deployment and production health after release.
+
+**Safety requirements:**
+- Do not expose credentials or modify production secrets.
+- Do not include the unrelated local `.replit` commit.
+- Do not modify or overwrite production D1/R2 data with synthetic fixtures.
+- Stop before merge or deployment if any production-safety concern remains.
+- Do not bypass failed checks or branch protection.
+- Keep changes minimal and limited to the approved Preview implementation and necessary fixes.
+
+**Report:** PR URL, review findings, test results, merge SHA, deployment status and production verification. Clearly identify any remaining blockers.
+
+Do not claim success unless the remote merge and production deployment are verified.
