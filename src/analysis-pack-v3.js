@@ -336,6 +336,9 @@ function resolveCutoff(round, requestedAsOf) {
 async function loadLatestObservations(env, entityType, entityIds, asOf) {
   const ids = [...new Set(entityIds.filter(Boolean).map(String))];
   const out = new Map();
+  const sourceFilter = env?.PREVIEW_DATA_MODE === 'synthetic'
+    ? "sr.source_type IN ('official_provider','synthetic_preview_observation')"
+    : "sr.source_type='official_provider'";
   for (const group of chunks(ids)) {
     const { results } = await env.DB.prepare(`
       WITH ranked AS (
@@ -343,7 +346,7 @@ async function loadLatestObservations(env, entityType, entityIds, asOf) {
         FROM normalized_observations o
         JOIN source_records sr ON sr.id=o.source_record_id
         WHERE o.entity_type=? AND o.entity_id IN (${placeholders(group)})
-          AND sr.source_type='official_provider'
+          AND ${sourceFilter}
           AND julianday(o.observed_at)<=julianday(?)
           AND julianday(sr.fetched_at)<=julianday(?)
       )

@@ -107,13 +107,16 @@ async function effectiveAsOf(env, roundId, requestedAsOf) {
 async function latestObservations(env, entityType, ids, asOf) {
   if (!ids.length) return new Map();
   const placeholders = ids.map(() => '?').join(',');
+  const sourceFilter = env?.PREVIEW_DATA_MODE === 'synthetic'
+    ? "sr.source_type IN ('official_provider','synthetic_preview_observation')"
+    : "sr.source_type='official_provider'";
   const { results } = await env.DB.prepare(`
     WITH ranked AS (
       SELECT o.*,ROW_NUMBER() OVER (PARTITION BY o.entity_id ORDER BY julianday(o.observed_at) DESC,o.id DESC) AS rn
       FROM normalized_observations o
       JOIN source_records sr ON sr.id=o.source_record_id
       WHERE o.entity_type=? AND o.entity_id IN (${placeholders})
-        AND sr.source_type='official_provider'
+        AND ${sourceFilter}
         AND julianday(o.observed_at)<=julianday(?)
         AND julianday(sr.fetched_at)<=julianday(?)
     ) SELECT * FROM ranked WHERE rn=1

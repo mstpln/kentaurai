@@ -1,0 +1,1 @@
+- [Local D1 seeding](local-d1-seeding.md) — Wrangler's local D1 rejects SQL transaction statements; make fixture resets prefix-scoped and rerunnable.
