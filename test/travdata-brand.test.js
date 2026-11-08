@@ -8,6 +8,7 @@ import { enhancePhase1Html } from '../src/phase1-ui.js';
 import { enhanceTravdataHtml, travdataAssetResponse, travdataManifest } from '../src/travdata-brand.js';
 import worker from '../src/worker-v079.js';
 import { pwaHeadMarkup } from '../src/pwa.js';
+import assets from '../src/assets/travdata.json' with { type: 'json' };
 
 test('Travdata replaces the visible brand and login copy while retaining form behavior', () => {
   const html = enhanceTravdataHtml(renderLoginPage({ error: true }));
@@ -147,4 +148,66 @@ test('production app excludes demo payloads while local synthetic preview retain
   assert.match(prod, /const demoSystems=\[\];/);
   assert.match(preview, /const demoEnabled=true;/);
   assert.match(preview, /demo-v85-2026-/);
+});
+
+function decodePngRgba(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const width = view.getUint32(16), height = view.getUint32(20);
+  const compressed = [];
+  for (let pos = 8; pos + 12 <= bytes.length;) {
+    const size = view.getUint32(pos);
+    const type = String.fromCharCode(...bytes.subarray(pos + 4, pos + 8));
+    if (type === 'IDAT') compressed.push(Buffer.from(bytes.subarray(pos + 8, pos + 8 + size)));
+    pos += size + 12;
+  }
+  const scanlines = inflateSync(Buffer.concat(compressed));
+  const stride = width * 4, pixels = new Uint8Array(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    const filter = scanlines[y * (stride + 1)];
+    for (let i = 0; i < stride; i++) {
+      const at = y * stride + i;
+      const left = i >= 4 ? pixels[at - 4] : 0;
+      const up = y > 0 ? pixels[at - stride] : 0;
+      const diagonal = y > 0 && i >= 4 ? pixels[at - stride - 4] : 0;
+      let predictor = 0;
+      if (filter === 1) predictor = left;
+      else if (filter === 2) predictor = up;
+      else if (filter === 3) predictor = (left + up) >>> 1;
+      else if (filter === 4) {
+        const p = left + up - diagonal;
+        const dLeft = Math.abs(p - left), dUp = Math.abs(p - up), dDiagonal = Math.abs(p - diagonal);
+        predictor = dLeft <= dUp && dLeft <= dDiagonal ? left : dUp <= dDiagonal ? up : diagonal;
+      } else assert.equal(filter, 0, 'Only legal PNG scanline filters are accepted');
+      pixels[at] = (scanlines[y * (stride + 1) + 1 + i] + predictor) & 255;
+    }
+  }
+  return { width, height, pixels };
+}
+
+test('transparent TD icon preserves every original pixel inside the circle', async () => {
+  const original = decodePngRgba(Buffer.from(assets.iconPng, 'base64'));
+  const response = await travdataAssetResponse(new Request('https://example.test/app/icon.png'));
+  assert.equal(response.status, 200);
+  const transformed = decodePngRgba(await response.arrayBuffer());
+  assert.equal(transformed.width, original.width);
+  assert.equal(transformed.height, original.height);
+  const radiusSquared = (original.width * 0.493) ** 2;
+  let preservedPixels = 0, clearedPixels = 0;
+  for (let y = 0; y < original.height; y++) for (let x = 0; x < original.width; x++) {
+    const offset = (y * original.width + x) * 4;
+    const inside = (x + .5 - original.width / 2) ** 2 +
+                   (y + .5 - original.height / 2) ** 2 <= radiusSquared;
+    if (inside) {
+      for (let channel = 0; channel < 4; channel++)
+        assert.equal(transformed.pixels[offset + channel], original.pixels[offset + channel],
+          `TD pixel changed at (${x},${y}), channel ${channel}`);
+      preservedPixels++;
+    } else {
+      assert.equal(transformed.pixels[offset + 3], 0, `Corner not transparent at (${x},${y})`);
+      clearedPixels++;
+    }
+  }
+  assert.ok(preservedPixels > 180000);
+  assert.ok(clearedPixels > 30000);
 });
