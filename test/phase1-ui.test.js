@@ -230,7 +230,7 @@ test('upcoming horse cards present scratch and handicap states without hiding th
 
 test('starter cards render verified scratch, handicap and equipment states rather than inventing missing facts', () => {
   const html = enhancePhase1Html('<html><head></head><body></body></html>', { asOfDate: '2028-01-02' });
-  const code = html.match(/function shoeMark[\\s\\S]*?(?=function metric\\()/)?.[0];
+  const code = html.match(/function shoeMark[\s\S]*?(?=function metric\()/)?.[0];
   assert.ok(code, 'card renderer must be part of the generated browser script');
   const context = {
     expandedHorses: new Set(), formScores: new Map(), profiles: new Map(),
@@ -243,7 +243,7 @@ test('starter cards render verified scratch, handicap and equipment states rathe
   const example = { raceEntryId:'entry-1', horseId:'horse-1', startNumber:3, horseName:'Luna Lane', sex:'sto', age:6, trainerName:'Test Trainer', driverName:'Test Driver', lane:3 };
   const normal = context.card(example, {}, {}, false);
   assert.match(normal, /Luna Lane/);
-  assert.match(normal, /s6 \\(Test Trainer\\)/);
+  assert.match(normal, /s6 \(Test Trainer\)/);
   assert.match(normal, /Form:/);
   assert.match(normal, /Spår: 3/);
   assert.match(normal, /Skor: –/);
@@ -253,13 +253,13 @@ test('starter cards render verified scratch, handicap and equipment states rathe
   const scratch = context.card({ ...example, scratched:true, handicapM:20 }, {}, {}, false);
   assert.match(scratch, /p1-scratched-label">STRUKEN/);
   assert.match(scratch, /p1-horse-scratched/);
-  assert.match(scratch, /\\+20 m tillägg/);
+  assert.match(scratch, /\+20 m tillägg/);
 
   const verified = context.card({ ...example, equipment:{
     barefootFront:true, barefootRear:false, sulkyType:'american',
     change:{ shoesFrontChanged:true, shoesRearChanged:false, sulkyTypeChanged:true }
   } }, {}, {}, false);
-  assert.match(verified, /Vagn: <span class="p1-equipment-changed">Am\\./);
+  assert.match(verified, /Vagn: <span class="p1-equipment-changed">Am\./);
   assert.match(verified, /aria-label="Barfota"/);
   assert.match(verified, /aria-label="Skor på"/);
   assert.match(verified, /p1-equipment-changed/);
