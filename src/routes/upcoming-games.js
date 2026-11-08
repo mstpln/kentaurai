@@ -295,6 +295,69 @@ export async function getUpcomingGameRound(env, roundId) {
   };
 }
 
+
+function normalizeShoe(row, part) {
+  if (!row) return null;
+  const barefoot=row['barefoot_'+part];
+  if (barefoot===1 || barefoot===true) return 'barefoot';
+  if (barefoot===0 || barefoot===false) return 'shod';
+  const shoes=String(row['shoes_'+part]||'').trim().toLowerCase();
+  if (shoes==='shod') return 'shod';
+  if (shoes==='barefoot') return 'barefoot';
+  return null;
+}
+function normalizeCart(row) {
+  if (!row) return null;
+  const exact=String(row.exact_sulky||'').trim().toLowerCase();
+  const type=String(row.sulky_type||'').trim().toLowerCase();
+  if (['a','american','amerikansk'].includes(exact)||/amerikan|american/.test(type)) return 'Am.';
+  if (['s','v','standard','vanlig'].includes(exact)||/vanlig|standard|regular/.test(type)) return 'Va.';
+  return null;
+}
+function equipmentDisplay(current, previous) {
+  return {
+    front:normalizeShoe(current,'front'), rear:normalizeShoe(current,'rear'), cart:normalizeCart(current),
+    frontChanged:normalizeShoe(current,'front')!=null && normalizeShoe(previous,'front')!=null &&
+      normalizeShoe(current,'front')!==normalizeShoe(previous,'front'),
+    rearChanged:normalizeShoe(current,'rear')!=null && normalizeShoe(previous,'rear')!=null &&
+      normalizeShoe(current,'rear')!==normalizeShoe(previous,'rear'),
+    cartChanged:normalizeCart(current)!=null && normalizeCart(previous)!=null &&
+      normalizeCart(current)!==normalizeCart(previous)
+  };
+}
+// Both the immediately preceding start and the latest source-backed equipment snapshot
+// are required for an inferred change; an earlier equipped start must not substitute
+// for the immediately preceding start if that start has unknown equipment.
+async function getUpcomingEquipment(env, raceId, cutoff, roundDate, entries) {
+  const {results:prior}=await env.DB.prepare(`
+    SELECT cur.id current_entry_id,(
+      SELECT old.id FROM race_entries old
+      JOIN races hr ON hr.id=old.race_id
+      WHERE old.horse_id=cur.horse_id AND old.id<>cur.id AND COALESCE(old.scratched,0)=0
+        AND ${priorRaceCondition('hr')}
+      ORDER BY hr.race_date DESC, COALESCE(hr.scheduled_start_at,'') DESC,
+        hr.race_number DESC, old.id DESC LIMIT 1
+    ) previous_entry_id
+    FROM race_entries cur WHERE cur.race_id=?
+  `).bind(cutoff,roundDate,raceId).all();
+  const previous=new Map((prior||[]).map(row=>[row.current_entry_id,row.previous_entry_id]));
+  const ids=[...new Set([...entries.map(row=>row.race_entry_id),...previous.values()].filter(Boolean))];
+  const snapshots=new Map();
+  if (ids.length) {
+    const marks=ids.map(()=>'?').join(',');
+    const {results:equipment}=await env.DB.prepare(`
+      SELECT e.*,sr.fetched_at FROM equipment e
+      JOIN source_records sr ON sr.id=e.source_record_id
+      WHERE e.race_entry_id IN (${marks}) AND e.verification_status IN ('reported','verified')
+      ORDER BY julianday(sr.fetched_at) DESC,e.id DESC
+    `).bind(...ids).all();
+    for(const item of equipment||[]) if(!snapshots.has(item.race_entry_id)) snapshots.set(item.race_entry_id,item);
+  }
+  return new Map(entries.map(row=>[row.race_entry_id,
+    equipmentDisplay(snapshots.get(row.race_entry_id),snapshots.get(previous.get(row.race_entry_id)))
+  ]));
+}
+
 export async function getUpcomingGameLeg(env, roundId, legNumber) {
   if (!env.DB) throw new Error('DB is not configured');
   const round = await getUpcomingGameRound(env, roundId);
@@ -305,8 +368,18 @@ export async function getUpcomingGameLeg(env, roundId, legNumber) {
 
   const { results:entries } = await env.DB.prepare(`
     SELECT re.id race_entry_id,re.horse_id,re.driver_id,re.trainer_id,re.start_number,re.actual_lane,re.start_tier,
-      re.handicap_m,re.scratched,h.canonical_name horse_name,h.sex,
-      d.canonical_name driver_name,tr.canonical_name trainer_name,
+      re.handicap_m,re.scratched,h.canonical_name horse_name,h.sex,h.birth_year,
+       (
+         SELECT json_extract(obs.fields_json,'$.ageYears')
+         FROM normalized_observations obs
+         WHERE obs.entity_type='horse' AND obs.entity_id=h.id
+           AND obs.quality_status='normalized_verified_subset'
+           AND substr(obs.observed_at,1,4)=substr(?,1,4)
+           AND obs.observed_at<=?
+           AND json_type(obs.fields_json,'$.ageYears') IN ('integer','real')
+         ORDER BY obs.observed_at DESC,obs.id DESC LIMIT 1
+       ) observed_age,
+       d.canonical_name driver_name,tr.canonical_name trainer_name,
       (
         SELECT bs.bet_percent
         FROM betting_snapshots bs
@@ -319,7 +392,7 @@ export async function getUpcomingGameLeg(env, roundId, legNumber) {
     LEFT JOIN trainers tr ON tr.id=re.trainer_id
     WHERE re.race_id=?
     ORDER BY re.start_number ASC,re.id ASC
-  `).bind(round.id, leg.legNumber, leg.raceId).all();
+  `).bind(round.roundDate,targetStart,round.id,leg.legNumber,leg.raceId).all();
 
   const { results:history } = await env.DB.prepare(`
     SELECT cur.id current_entry_id,hr.start_method,xd.first_200_time,xd.last_400_time,
@@ -336,6 +409,7 @@ export async function getUpcomingGameLeg(env, roundId, legNumber) {
     ORDER BY cur.id,hr.race_date DESC,hr.race_number DESC,xsr.fetched_at DESC,xd.id DESC
   `).bind(leg.raceId, targetStart, round.roundDate).all();
 
+  const equipmentByEntry=await getUpcomingEquipment(env,leg.raceId,targetStart,round.roundDate,entries||[]);
   const byEntry = new Map();
   for (const row of history || []) {
     if (!byEntry.has(row.current_entry_id)) byEntry.set(row.current_entry_id, []);
@@ -352,6 +426,9 @@ export async function getUpcomingGameLeg(env, roundId, legNumber) {
         horseId:row.horse_id,
         horseName:row.horse_name,
         sex:row.sex || null,
+        birthYear:row.birth_year == null ? null : Number(row.birth_year),
+        ageYears:row.observed_age != null ? Number(row.observed_age) : (row.birth_year == null ? null : Number(round.roundDate.slice(0,4))-Number(row.birth_year)),
+        equipment:equipmentByEntry.get(row.race_entry_id)||equipmentDisplay(null,null),
         driverId:row.driver_id || null,
         driverName:row.driver_name || null,
         trainerId:row.trainer_id || null,

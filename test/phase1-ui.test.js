@@ -207,3 +207,24 @@ test('horse cards show first 200 and last 400 times without min/km suffix',()=>{
   assert.match(html,/metric\('Första 200',pace1\(/);
   assert.match(html,/metric\('Sista 400',pace1\(/);
 });
+
+test('compact horse card includes trainer, gear, form/spår, handicap grouping and struken status',()=>{
+ const html=enhancePhase1Html('<html><head></head><body></body></html>',{asOfDate:'2028-01-02'});
+ assert.match(html,/p1-compact-name-row/);
+ assert.match(html,/p1GenderAge\(e\)/);
+ assert.match(html,/trainerName/);
+ assert.match(html,/Kusk: /);
+ assert.match(html,/Skor:/);
+ assert.match(html,/Vagn:/);
+ assert.match(html,/Form: /);
+ assert.match(html,/Spår: /);
+ assert.match(html,/p1-compact-divider/);
+ assert.match(html,/p1HandicapSeparator\(separator\)/);
+ assert.match(html,/p1HorseOrder\(entries,leg\)/);
+ assert.match(html,/p1-scratch-badge">STRUKEN/);
+ assert.match(html,/p1-compact-metrics/);
+ assert.match(html,/p1-shoe\.barefoot::after/);
+ assert.match(html,/p1-cart\.changed/);
+ assert.match(html,/p1-compact-bio/);
+ assert.doesNotMatch(html,/p1-horse-driver">.* · Spår /);
+});

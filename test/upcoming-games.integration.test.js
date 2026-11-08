@@ -169,3 +169,64 @@ test('upcoming form batch retains the null/zero convention for horses with no re
   assert.equal(result.forms[0].score,null);
   assert.equal(result.forms[0].usedStarts,0);
 });
+
+test('upcoming card API retains verified age, sex, trainer, scratch and handicap facts',async()=>{
+ const {env,db}=createTestEnv();seedUpcoming(db);
+ db.prepare("UPDATE horses SET birth_year=2095 WHERE id='horse_1'").run();
+ db.prepare("UPDATE race_entries SET scratched=1,handicap_m=20 WHERE id='entry_1'").run();
+ const e=(await getUpcomingGameLeg(env,'round_up',1)).entries[0];
+ assert.equal(e.sex,'gelding');assert.equal(e.ageYears,4);
+ assert.equal(e.trainerName,'Synthetic Trainer');
+ assert.equal(e.handicapM,20);assert.equal(e.scratched,true);
+ assert.deepEqual(e.equipment,{front:null,rear:null,cart:null,frontChanged:false,rearChanged:false,cartChanged:false});
+});
+
+test('upcoming equipment displays verified state and only flags comparison against immediately previous start',async()=>{
+ const {env,db}=createTestEnv();seedUpcoming(db);
+ db.prepare("INSERT INTO equipment (id,race_entry_id,shoes_front,shoes_rear,barefoot_front,barefoot_rear,sulky_type,exact_sulky,verification_status,source_record_id) VALUES ('eq_today','entry_1','barefoot','barefoot',1,1,'Amerikansk','A','reported','src_current')").run();
+ const noPrior=(await getUpcomingGameLeg(env,'round_up',1)).entries[0].equipment;
+ assert.deepEqual(noPrior,{front:'barefoot',rear:'barefoot',cart:'Am.',frontChanged:false,rearChanged:false,cartChanged:false});
+ db.prepare("INSERT INTO equipment (id,race_entry_id,shoes_front,shoes_rear,barefoot_front,barefoot_rear,sulky_type,exact_sulky,verification_status,source_record_id) VALUES ('eq_prior','hist_auto_high_entry','shod','shod',0,0,'Vanlig','S','reported','src_hist_auto_high')").run();
+ const changed=(await getUpcomingGameLeg(env,'round_up',1)).entries[0].equipment;
+ assert.deepEqual(changed,{front:'barefoot',rear:'barefoot',cart:'Am.',frontChanged:true,rearChanged:true,cartChanged:true});
+ db.prepare("UPDATE equipment SET verification_status='unknown' WHERE id='eq_prior'").run();
+ const unknown=(await getUpcomingGameLeg(env,'round_up',1)).entries[0].equipment;
+ assert.equal(unknown.frontChanged,false);assert.equal(unknown.rearChanged,false);assert.equal(unknown.cartChanged,false);
+});
+
+test('latest verified equipment snapshot wins without guessing missing dimensions',async()=>{
+ const {env,db}=createTestEnv();seedUpcoming(db);
+ db.prepare("INSERT INTO equipment (id,race_entry_id,shoes_front,barefoot_front,sulky_type,exact_sulky,verification_status,source_record_id) VALUES ('eq_today','entry_1','shod',0,'Vanlig','S','reported','src_current')").run();
+ const e=(await getUpcomingGameLeg(env,'round_up',1)).entries[0].equipment;
+ assert.equal(e.front,'shod');assert.equal(e.rear,null);assert.equal(e.cart,'Va.');
+ assert.equal(e.rearChanged,false);
+});
+
+test('age uses official same-year age observation without inferring birth year',async()=>{
+ const {env,db}=createTestEnv();seedUpcoming(db);
+ db.prepare("INSERT INTO normalized_observations (id,entity_type,entity_id,source_record_id,observed_at,fields_json,quality_status) VALUES (?,?,?,?,?,?,?)")
+  .run('horse_age','horse','horse_1','src_current','2099-09-19T09:05:00Z',JSON.stringify({ageYears:6}),'normalized_verified_subset');
+ const e=(await getUpcomingGameLeg(env,'round_up',1)).entries[0];
+ assert.equal(e.birthYear,null);assert.equal(e.ageYears,6);
+});
+test('age refuses observation from a different calendar year',async()=>{
+ const {env,db}=createTestEnv();seedUpcoming(db);
+ db.prepare("INSERT INTO normalized_observations (id,entity_type,entity_id,source_record_id,observed_at,fields_json,quality_status) VALUES (?,?,?,?,?,?,?)")
+  .run('old_age','horse','horse_1','src_current','2098-09-19T09:05:00Z',JSON.stringify({ageYears:6}),'normalized_verified_subset');
+ const e=(await getUpcomingGameLeg(env,'round_up',1)).entries[0];
+ assert.equal(e.ageYears,null);
+});
+
+test('an older equipped start must not substitute for the immediately preceding unknown start',async()=>{
+ const {env,db}=createTestEnv();seedUpcoming(db);
+ const rows=[
+   ['eq_today','entry_1','barefoot','barefoot',1,1,'Amerikansk','A','src_current'],
+   ['eq_older','hist_auto_weekday_entry','shod','shod',0,0,'Vanlig','S','src_hist_auto_weekday']
+ ];
+ for(const row of rows){
+   db.prepare("INSERT INTO equipment (id,race_entry_id,shoes_front,shoes_rear,barefoot_front,barefoot_rear,sulky_type,exact_sulky,verification_status,source_record_id) VALUES (?,?,?,?,?,?,?,?, 'reported',?)").run(...row);
+ }
+ const eq=(await getUpcomingGameLeg(env,'round_up',1)).entries[0].equipment;
+ assert.equal(eq.front,'barefoot');assert.equal(eq.cart,'Am.');
+ assert.equal(eq.frontChanged,false);assert.equal(eq.rearChanged,false);assert.equal(eq.cartChanged,false);
+});
