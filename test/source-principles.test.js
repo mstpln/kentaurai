@@ -79,6 +79,17 @@ test('public repository contains no unapproved data-like files', () => {
     const repoPath = relative(root, file).replaceAll('\\', '/');
     if (!dataExtensions.has(extname(file).toLowerCase())) continue;
     if (repoPath === 'package.json' || repoPath === 'package-lock.json') continue;
+    if (repoPath === 'src/assets/travdata.json') {
+      // Only the approved, byte-identical public logo may use this JSON asset path.
+      const asset = JSON.parse(readFileSync(file, 'utf8'));
+      assert.deepEqual(Object.keys(asset).sort(), ['iconPng', 'sources']);
+      assert.equal(createHash('sha256').update(Buffer.from(asset.iconPng, 'base64')).digest('hex'),
+        'aebac604fa63a40bee5efa52b701f93adc3ebce0a206242c53a0c9c14051711c');
+      assert.deepEqual(asset.sources, {
+        logo: 'Original uploaded TD round mark, unchanged. TRAVDATA is rendered separately as Helvetica text.'
+      });
+      continue;
+    }
     if (repoPath.startsWith('fixtures/')) continue;
     unexpected.push(repoPath);
   }

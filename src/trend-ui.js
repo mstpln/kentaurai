@@ -79,7 +79,7 @@ async function renderTrendBuildA(){
   state.detail=null;state.gameDetail=null;state.gameSystemId=null;state.page='start';setNav('start');
   const token=++trendRequestToken;
   const f=state.trendDetailFilters;
-  app.innerHTML='<div class="start-heading"><h1>Trend</h1><p>Topplistor baserade på verifierade resultat och valda filter.</p></div>'+trendPageControls()+'<section class="trend-panel"><div class="trend-panel-head"><div><div class="trend-panel-kicker">'+esc(trendLabel(TREND_CATEGORIES,state.trendCategory))+'</div><div class="trend-panel-title-row"><h2>'+(state.trendCategory==='horses'?'Starkast form':trendSortLabel())+'</h2>'+trendSortControl()+'</div></div><div class="trend-panel-period">'+esc(trendLabel(TREND_PERIODS,state.trendRange))+'</div></div><div id="trendResults" class="trend-loading">Läser statistik…</div></section>';
+  app.innerHTML='<div class="start-heading"><h1>Trend</h1><p>Rankning efter segerprocent och form.</p></div>'+trendPageControls()+'<section class="trend-panel"><div class="trend-panel-head"><div><div class="trend-panel-kicker">'+esc(trendLabel(TREND_CATEGORIES,state.trendCategory))+'</div><div class="trend-panel-title-row"><h2>'+(state.trendCategory==='horses'?'Starkast form':trendSortLabel())+'</h2>'+trendSortControl()+'</div></div><div class="trend-panel-period">'+esc(trendLabel(TREND_PERIODS,state.trendRange))+'</div></div><div id="trendResults" class="trend-loading">Läser statistik…</div></section>';
   bindTrendBuildA();
   try{
     const query=new URLSearchParams({category:state.trendCategory,period:state.trendRange,race_scope:state.trendRaceScope,race_type:f.raceType,breed_type:f.breedType,start_method:f.startMethod,min_starts:f.minStarts,sort:state.trendWinSort});

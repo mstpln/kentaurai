@@ -54,10 +54,10 @@ function rankingGrid(data){const r=data.rankings||{};let html='<div class="horse
  return html}
 function bindRows(){document.querySelectorAll('[data-hs-horse]').forEach(row=>row.onclick=()=>openDetail('horses',row.dataset.hsHorse))}
 function mergeHorseRankingPayload(core,extended){return{...core,...extended,partial:extended.partial??core.partial,rankings:{...(core.rankings||{}),...(extended.rankings||{})}}}
-function renderHorseRankingShell(data){app.innerHTML=heading('Hästar','Sök och utforska hästar')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+toolbar()+rankingGrid(data);bindTabs(()=>renderEntityList('horses'));bindFilters(renderHorseRankings);bindRows()}
+function renderHorseRankingShell(data){app.innerHTML=heading('Hästar','Utforska hästar, form och resultat.')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+toolbar()+rankingGrid(data);bindTabs(()=>renderEntityList('horses'));bindFilters(renderHorseRankings);bindRows()}
 async function renderHorseRankings(){
  const token=++rankingToken;cancelRankingLifecycle();cancelEntityListLifecycle();state.detail=null;state.page='horses';setNav('horses');const key=query();const cached=state.horseStatsDataKey===key?state.horseStatsData:null;
- app.innerHTML=heading('Hästar','Sök och utforska hästar')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+toolbar()+(cached?rankingGrid(cached):'<div class="horse-ranking-empty">Läser häststatistik…</div>');bindTabs(()=>renderEntityList('horses'));bindFilters(renderHorseRankings);if(cached){bindRows();return}
+ app.innerHTML=heading('Hästar','Utforska hästar, form och resultat.')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+toolbar()+(cached?rankingGrid(cached):'<div class="horse-ranking-empty">Läser häststatistik…</div>');bindTabs(()=>renderEntityList('horses'));bindFilters(renderHorseRankings);if(cached){bindRows();return}
  const lifecycle=beginRankingLifecycle();
  try{
   const core=await api('/horses/statistics?'+key+'&mode=core',{signal:lifecycle.controller.signal});
