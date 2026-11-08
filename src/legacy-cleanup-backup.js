@@ -73,7 +73,7 @@ function publicStatus(row,verified=false){
   };
 }
 async function latest(env){
-  return env.DB.prepare('SELECT * FROM legacy_cleanup_backups ORDER BY created_at DESC,id DESC LIMIT 1').first();
+  return env.DB.prepare('SELECT * FROM legacy_cleanup_backups ORDER BY rowid DESC LIMIT 1').first();
 }
 async function verifyComplete(env,row){
   if(row.status!=='complete'||!validBookmark(row.bookmark)||!validUuid(row.id)||
