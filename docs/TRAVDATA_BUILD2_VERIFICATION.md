@@ -32,7 +32,11 @@ synthetic query plans are **not** proof of actual production consumption.
    never disabled because optional account telemetry is absent.
    Historical expansion is already manual and retains D1-based
    guarded headroom. These are **soft** protections, not billing caps.
-4. Workflow health is now calculated from the exact latest morning
+4. Read-only daily R2 operations are observed across all R2 buckets for
+   the UTC day. They inform normal/busy-day pressure alongside monthly
+   billed Class A/B quantities, but R2 action types are **never** guessed
+   into a billable class and missing datasets remain unknown.
+5. Workflow health is now calculated from the exact latest morning
    orchestration log. Successful metadata alone is insufficient: a
    missing, failed or skipped essential stage is reported as such.
    The existing Drift section receives only a small text status
@@ -55,8 +59,8 @@ removal can be considered after a complete call-graph/feature audit.
 ## Known limitations that should remain visible
 
 - Full production Cloudflare Query Insights, real daily consumption,
-  current R2 operation counters and exact billed CPU are **not**
-  verified from public GitHub. The new Workers metrics are advisory,
+  optional R2 operation telemetry and exact billed CPU are **not**
+  independently verified from public GitHub. The new Workers metrics are advisory,
   sampled and account-scoped, not precise billable request totals.
 - The existing R2 billing Class A and Class B monthly quantities
   remain displayed only when Cloudflare makes those records available.

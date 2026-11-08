@@ -388,7 +388,21 @@ export async function getUpcomingLegHorseForms(env, roundId, legNumber, options 
     startMethod:'all',
     distanceGroup:'all'
   };
-  // The existing calendar-year calculator already has a verified bulk path.\n  // Use it for all starters in this leg instead of N per-horse form queries.\n  // No historical starts are dropped: scoring logic and cutoff remain unchanged.\n  const horses = [...new Set((results || []).map((entry) => String(entry.horse_id)).filter(Boolean))];\n  const formByHorse = await getCalendarYearHorseFormsBatch(env, horses, formOptions);\n  const forms = (results || []).map((entry) => {\n    const form = formByHorse.get(String(entry.horse_id)) || null;\n    return {\n      raceEntryId:entry.race_entry_id,\n      horseId:entry.horse_id,\n      score:form?.score ?? null,\n      usedStarts:form?.usedStarts ?? 0\n    };\n  });\n  return { roundId:round.id, legNumber:leg.legNumber, forms };
+  // The existing calendar-year calculator already has a verified bulk path.
+  // Use it for all starters in this leg instead of N per-horse form queries.
+  // No historical starts are dropped: scoring logic and cutoff remain unchanged.
+  const horses = [...new Set((results || []).map((entry) => String(entry.horse_id)).filter(Boolean))];
+  const formByHorse = await getCalendarYearHorseFormsBatch(env, horses, formOptions);
+  const forms = (results || []).map((entry) => {
+    const form = formByHorse.get(String(entry.horse_id)) || null;
+    return {
+      raceEntryId:entry.race_entry_id,
+      horseId:entry.horse_id,
+      score:form?.score ?? null,
+      usedStarts:form?.usedStarts ?? 0
+    };
+  });
+  return { roundId:round.id, legNumber:leg.legNumber, forms };
 }
 
 function laneSql(context) {

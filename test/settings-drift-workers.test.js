@@ -22,6 +22,11 @@ function mockAnalyticsFetch() {
     if(String(url).includes('/billable-usage?')) return ok({result:[]});
     if(String(url).endsWith('/graphql')) {
       const payload=JSON.parse(options.body);
+      if(payload.query.includes('TravdataR2Today')) {
+        return ok({data:{viewer:{accounts:[{
+          r2OperationsAdaptiveGroups:[{dimensions:{date:'2026-11-08',bucketName:'synthetic-r2',actionType:'ReadObject'},sum:{requests:350_000}}]
+        }]}}});
+      }
       if(payload.query.includes('TravdataWorkersUsage')) {
         assert.equal(payload.variables.accountTag,'synthetic-account');
         return ok({data:{viewer:{accounts:[{
@@ -57,7 +62,7 @@ test('Drift can read account-wide Workers counts and CPU alongside D1 without ex
   const {fetchImpl,calls}=mockAnalyticsFetch();
   const usage=await getCloudflareUsage(env,{
     now:'2026-11-08T12:00:00.000Z',fetchImpl,
-    includeWorkersUsage:true,includeDailyUsage:true
+    includeWorkersUsage:true,includeR2DailyUsage:true,includeDailyUsage:true
   });
   const requests=usage.metrics.find(x=>x.id==='workers_requests');
   const cpu=usage.metrics.find(x=>x.id==='workers_cpu_ms');
@@ -72,8 +77,10 @@ test('Drift can read account-wide Workers counts and CPU alongside D1 without ex
   assert.equal(usage._dailyWorkersUsage.cpuMs,300_000);
   assert.equal(usage.additional.workersAccountAvailable,true);
   assert.equal(usage.additional.workersCpuAvailable,true);
-  assert.equal(calls.length,5);
-  assert.doesNotMatch(JSON.stringify(usage),/app-a|app-b|synthetic-analytics-token/);
+  assert.equal(usage.additional.r2DailyAvailable,true);
+  assert.equal(usage._dailyR2Operations,350_000);
+  assert.equal(calls.length,6);
+  assert.doesNotMatch(JSON.stringify(usage),/app-a|app-b|synthetic-r2|synthetic-analytics-token/);
   const pressure=evaluateWorkloadPressure(usage,'2026-11-08T12:00:00Z');
   assert.equal(pressure.level,'high');
   assert.equal(pressure.allowExpansion,false);
