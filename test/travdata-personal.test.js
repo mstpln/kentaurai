@@ -81,6 +81,8 @@ test('revision-aware notes and tombstones prevent stale offline resurrection', a
   assert.equal(page.notes.length,0);
   assert.equal(page.systems.length,0);
   assert.equal(page.tombstones.length,2);
+  assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM travdata_horse_notes').first()).n,0);
+  assert.equal((await env.DB.prepare('SELECT COUNT(*) AS n FROM travdata_manual_systems').first()).n,0);
 });
 
 test('canonical ID, current-leg and race-reference validation fails before mutations', async () => {

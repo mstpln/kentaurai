@@ -139,10 +139,8 @@ export async function syncTravdataPersonal(env, payload) {
       'WHERE excluded.deleted_at>travdata_personal_tombstones.deleted_at'
     ).bind(t.kind,t.id,t.deletedAt));
     const table = t.kind === 'note' ? 'travdata_horse_notes' : 'travdata_manual_systems';
-    statements.push(env.DB.prepare(
-      'UPDATE ' + table + ' SET deleted_at=? WHERE id=? ' +
-      'AND (deleted_at IS NULL OR deleted_at<?)'
-    ).bind(t.deletedAt,t.id,t.deletedAt));
+    // Physically delete user content; retain only the opaque tombstone ID.
+    statements.push(env.DB.prepare('DELETE FROM ' + table + ' WHERE id=?').bind(t.id));
   }
   if (statements.length) await env.DB.batch(statements);
   return { ok:true, accepted:{ notes:notes.length, systems:systems.length, tombstones:tombstones.length } };
