@@ -3,7 +3,8 @@ import { travdataThemeCss } from './travdata-theme.js';
 import { pwaManifest, pwaServiceWorker } from './pwa.js';
 import { circularTransparentPng } from './travdata-png.js';
 
-const logoMarkup = '<div class="brand travdata-brand"><img class="travdata-logo-mark" src="/app/brand/td-mark.png?brand=travdata-3" width="30" height="30" alt=""><span class="travdata-wordmark" role="img" aria-label="Travdata"><span class="travdata-word-trav">TRAV</span><span class="travdata-word-data">DATA</span></span></div>';
+const ICON_VERSION = 'travdata-4';
+const logoMarkup = `<div class="brand travdata-brand"><img class="travdata-logo-mark" src="/app/brand/td-mark.png?brand=${ICON_VERSION}" width="30" height="30" alt=""><span class="travdata-wordmark" role="img" aria-label="Travdata"><span class="travdata-word-trav">TRAV</span><span class="travdata-word-data">DATA</span></span></div>`;
 const originalBrand = /<div class="brand"><span class="brand-badge">[\s\S]*?<\/span><div class="brand-name">KENTAUR<span>AI<\/span><\/div><\/div>/g;
 
 /** Display-only transformation. API/storage names and existing icons are untouched. */
@@ -12,8 +13,8 @@ export function enhanceTravdataHtml(html) {
   return html
     .replace(originalBrand, logoMarkup)
     .replaceAll('KentaurAI', 'Travdata')
-    .replace('<link rel="manifest" href="/app/manifest.webmanifest">', '<link rel="manifest" href="/app/manifest.webmanifest?brand=travdata-3">')
-    .replace('<link rel="icon" href="/app/icon.svg" type="image/svg+xml">', '<link rel="icon" href="/app/icon.svg?brand=travdata-3" type="image/svg+xml"><link rel="apple-touch-icon" sizes="512x512" href="/app/apple-touch-icon.png?brand=travdata-3">')
+    .replace('<link rel="manifest" href="/app/manifest.webmanifest">', `<link rel="manifest" href="/app/manifest.webmanifest?brand=${ICON_VERSION}">`)
+    .replace('<link rel="icon" href="/app/icon.svg" type="image/svg+xml">', `<link rel="icon" href="/app/icon.svg?brand=${ICON_VERSION}" type="image/svg+xml"><link rel="apple-touch-icon" sizes="512x512" href="/app/apple-touch-icon.png?brand=${ICON_VERSION}">`)
     .replace(/(<meta name="color-scheme" content=")[^"]*(")/g, '$1light$2')
     .replace(/(<meta name="theme-color" content=")[^"]*(")/g, '$1#010127$2')
     .replace(/(<meta name="apple-mobile-web-app-status-bar-style" content=")[^"]*(")/g, '$1default$2')
@@ -32,7 +33,7 @@ function staticResponse(body, type, cache = 'no-cache') {
 
 let transparentIconPromise;
 function transparentIcon() {
-  // Reuse the identical approved icon pixels; only clear the square corners.
+  // One clean master shared by header, favicon, Apple and manifest icons.
   if (!transparentIconPromise) transparentIconPromise = circularTransparentPng(assets.iconPng);
   return transparentIconPromise;
 }
@@ -44,8 +45,8 @@ export function travdataManifest() {
     short_name: 'Travdata',
     description: 'Travstatistik, hästanteckningar och egna V85/V86-system.',
     icons: [
-      { src: '/app/icon.png?brand=travdata-3', sizes: '512x512', type: 'image/png', purpose: 'any' },
-      { src: '/app/icon-maskable.svg?brand=travdata-3', sizes: 'any', type: 'image/svg+xml', purpose: 'maskable' }
+      { src: `/app/icon.png?brand=${ICON_VERSION}`, sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: `/app/icon-maskable.svg?brand=${ICON_VERSION}`, sizes: 'any', type: 'image/svg+xml', purpose: 'maskable' }
     ],
     background_color: '#F7F7FC',
     theme_color: '#010127'
@@ -66,15 +67,21 @@ export function travdataAssetResponse(request) {
     const maskable = path.includes('maskable');
     const inset = maskable ? 52 : 0;
     const size = 512 - inset * 2;
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Travdata"><defs><clipPath id="td-circle"><circle cx="256" cy="256" r="${size * .493}"/></clipPath></defs>${maskable ? '<rect width="512" height="512" fill="#010127"/>' : '' }<image x="${inset}" y="${inset}" width="${size}" height="${size}" clip-path="url(#td-circle)" href="data:image/png;base64,${assets.iconPng}"/></svg>`;
-    return staticResponse(svg, 'image/svg+xml; charset=utf-8');
+    return transparentIcon().then(bytes => {
+      // Chunk the conversion to avoid argument limits in Workers.
+      let binary = '';
+      for (let at = 0; at < bytes.length; at += 8192)
+        binary += String.fromCharCode(...bytes.subarray(at, at + 8192));
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Travdata">${maskable ? '<rect width="512" height="512" fill="#0001FD"/>' : ''}<image x="${inset}" y="${inset}" width="${size}" height="${size}" href="data:image/png;base64,${btoa(binary)}"/></svg>`;
+      return staticResponse(svg, 'image/svg+xml; charset=utf-8');
+    });
   }
   if (path === '/app/sw.js') {
     // Refresh only the existing PWA static cache. Notes/systems/auth are unchanged.
     const response = staticResponse(pwaServiceWorker()
-      .replace('kentaurai-pwa-v1', 'kentaurai-pwa-v5')
+      .replace('kentaurai-pwa-v1', 'kentaurai-pwa-v6')
       .replace("'/app/icon-maskable.svg'", "'/app/icon-maskable.svg','/app/icon.png','/app/apple-touch-icon.png'")
-      .replace('cache.addAll([...STATIC])', "cache.addAll([...STATIC].map(path=>path+'?brand=travdata-3'))"), 'text/javascript; charset=utf-8');
+      .replace('cache.addAll([...STATIC])', `cache.addAll([...STATIC].map(path=>path+'?brand=${ICON_VERSION}'))`), 'text/javascript; charset=utf-8');
     response.headers.set('service-worker-allowed', '/app/');
     return response;
   }

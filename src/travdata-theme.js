@@ -35,6 +35,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .brand{min-width:0}
 .travdata-brand{--travdata-logo-size:30px;display:flex;align-items:center;gap:8px;white-space:nowrap}
 .topbar .travdata-brand{gap:4px!important}
+.travdata-brand,.travdata-brand img{background:transparent!important;border:0!important;outline:0!important;box-shadow:none!important;padding:0!important}
 .travdata-brand img{display:block;flex:none;object-fit:contain}
 .travdata-logo-mark{width:var(--travdata-logo-size);height:var(--travdata-logo-size)}
 .travdata-wordmark{display:block;flex:none;height:var(--travdata-logo-size);font:italic 700 calc(var(--travdata-logo-size)*.9605)/var(--travdata-logo-size) Arial,Helvetica,sans-serif;letter-spacing:-.04em;white-space:nowrap}
