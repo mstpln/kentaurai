@@ -50,6 +50,12 @@ jobs:
       - name: Run complete QA before Cloudflare access
         run: npm run qa
 
+      - name: Fail before export if D1 is too large for the existing single-upload backup
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/check-legacy-backup-capacity.mjs --require-backup-eligible
+
       - name: Verify private Cloudflare configuration
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
