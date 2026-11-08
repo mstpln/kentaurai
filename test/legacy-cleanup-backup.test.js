@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { createTestEnv } from './helpers/d1.js';
 import worker from '../src/index.js';
+import deployedWorker from '../src/worker-v079.js';
 import {
   legacyBackupCapability, beginLegacyBackup, pollLegacyBackup, getLegacyBackupStatus
 } from '../src/legacy-cleanup-backup.js';
@@ -94,6 +95,21 @@ test('private Worker refuses admin token, stale, absent and preview mode backup 
     headers:{authorization:'Bearer '+f.env.STORAGE_CLEANUP_TOKEN}
   }),f.env);
   assert.equal(blocked.status,409);
+  f.db.close();
+});
+
+test('full production Worker stack enforces the same capability gate',async()=>{
+  const f=fixture();
+  const url='https://safe.invalid/v1/storage-cleanup/legacy-backup/auth-check';
+  const admin=await deployedWorker.fetch(new Request(url,{headers:{
+    authorization:'Bearer '+f.env.ADMIN_TOKEN
+  }}),f.env);
+  assert.equal(admin.status,403);
+  const authorized=await deployedWorker.fetch(new Request(url,{headers:{
+    authorization:'Bearer '+f.env.STORAGE_CLEANUP_TOKEN
+  }}),f.env);
+  assert.equal(authorized.status,200);
+  assert.deepEqual(await authorized.json(),{ok:true,scope:'legacy_backup_only'});
   f.db.close();
 });
 
