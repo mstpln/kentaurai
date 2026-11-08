@@ -20,7 +20,9 @@ function check(report){
   return report;
 }
 let state=check(await call('status'));
-if(state.status==='none')state=check(await call('start','POST'));
+// Every separately approved manual dispatch creates a new snapshot after a
+// previous completion; never reuse yesterday's backup as a fresh recovery point.
+if(state.status!=='exporting')state=check(await call('start','POST'));
 const until=Date.now()+7*60*1000;
 let polls=0;
 while(state.status==='exporting' && Date.now()<until && polls<72){
