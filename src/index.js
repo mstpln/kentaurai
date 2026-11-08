@@ -840,11 +840,8 @@ export async function handleScheduled(controller, env) {
   }));
   await runStage('live_normalize_morning', (observedEnv) => runLiveNormalizationMorning(observedEnv));
   await runStage('official_daily_incremental', (observedEnv) => runDailyOfficialIncremental(observedEnv, controller.scheduledTime));
-  await runStage('post_race_settlement', async (observedEnv) => {
-    const official = await runPostRaceSettlementBatch(observedEnv);
-    const personal = await settleNextTravdataManualSystems(observedEnv);
-    return { ...official, personal };
-  });
+  await runStage('post_race_settlement', (observedEnv) => runPostRaceSettlementBatch(observedEnv));
+  await runStage('manual_system_settlement', (observedEnv) => settleNextTravdataManualSystems(observedEnv));
   await runStage('xlabs_daily_incremental', (observedEnv) => runDailyXlabsIncremental(observedEnv, controller.scheduledTime));
 
   // Supporting promotion is paused on abnormal cost or emergency billing

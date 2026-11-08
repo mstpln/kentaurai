@@ -35,7 +35,13 @@ async function eligibleRounds(env, nowIso) {
       ) AS last_known_start
     FROM game_rounds gr
     WHERE gr.game_type IN ('V85','V86')
-      AND EXISTS (SELECT 1 FROM systems s WHERE s.game_round_id=gr.id)
+      AND (
+        EXISTS (SELECT 1 FROM systems s WHERE s.game_round_id=gr.id)
+        OR EXISTS (
+          SELECT 1 FROM travdata_manual_systems tm
+          WHERE tm.game_round_id=gr.id AND tm.deleted_at IS NULL
+        )
+      )
       AND (SELECT COUNT(*) FROM game_legs gl WHERE gl.game_round_id=gr.id)=8
       AND (
         (

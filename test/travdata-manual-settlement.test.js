@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createTestEnv } from './helpers/d1.js';
 import { syncTravdataPersonal, getTravdataPersonal } from '../src/travdata-personal.js';
 import { manualWinningRowCounts, evaluateManualPayout, settleNextTravdataManualSystems } from '../src/travdata-manual-settlement.js';
+import { ensurePostRaceSettlementJobs } from '../src/post-race-settlement-v1.js';
 
 const legs=Array.from({length:8},()=>[1,2]);
 const winners=Array.from({length:8},()=>1);
@@ -101,4 +102,21 @@ test('missing final results leave a due-state checkpoint rather than faking a wi
   ).first();
   assert.equal(row.settlement_state,'pending');
   assert.equal(row.next_check_at,'2026-11-08T17:15:00.000Z');
+});
+
+test('official finalization job is created for a manual-only saved V85 round',async()=>{
+  const {env}=createTestEnv();
+  await seed(env);
+  const count=await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM systems WHERE game_round_id='V85_2026-11-07'"
+  ).first();
+  assert.equal(count.n,0);
+  await env.DB.prepare("DELETE FROM game_round_final_results WHERE game_round_id='V85_2026-11-07'").run();
+  const scheduled=await ensurePostRaceSettlementJobs(env,'2026-11-08T05:15:00Z');
+  assert.equal(scheduled.eligible,1);
+  assert.equal(scheduled.created,1);
+  const record=await env.DB.prepare(
+    "SELECT game_round_id,status FROM post_race_settlement_jobs WHERE game_round_id='V85_2026-11-07'"
+  ).first();
+  assert.equal(record.status,'pending');
 });

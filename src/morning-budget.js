@@ -11,6 +11,7 @@ export const MORNING_STAGE_BUDGETS = Object.freeze({
   live_normalize_morning: Object.freeze({ rowsRead: 110_000_000, rowsWritten: 45_000, durationMs: 360_000, priority: 'essential' }),
   official_daily_incremental: Object.freeze({ rowsRead: 40_000_000, rowsWritten: 16_000, durationMs: 180_000, priority: 'essential' }),
   post_race_settlement: Object.freeze({ rowsRead: 20_000_000, rowsWritten: 10_000, durationMs: 150_000, priority: 'essential' }),
+  manual_system_settlement: Object.freeze({ rowsRead: 12_000_000, rowsWritten: 6_000, durationMs: 90_000, priority: 'essential' }),
   xlabs_daily_incremental: Object.freeze({ rowsRead: 40_000_000, rowsWritten: 16_000, durationMs: 180_000, priority: 'essential' }),
   recent_start_points_promotion: Object.freeze({ rowsRead: 12_000_000, rowsWritten: 6_000, durationMs: 90_000, priority: 'supporting' }),
   recent_official_snapshot_promotion: Object.freeze({ rowsRead: 12_000_000, rowsWritten: 6_000, durationMs: 90_000, priority: 'supporting' })

@@ -19,7 +19,7 @@ test('optional expansion fails closed when verified account analytics are missin
   const decision=await manualExpansionBudgetDecision({WORKLOAD_GUARD_ENABLED:'1'});
   assert.equal(decision.allowed,false);
   assert.equal(decision.level,'unknown');
-  assert.equal(decision.reason,'verified_usage_headroom_unavailable');
+  assert.equal(decision.reason,'usage_unavailable');
 });
 
 test('preview is isolated and guard remains an explicit production config',async()=>{
