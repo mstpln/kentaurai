@@ -230,6 +230,22 @@ function renderLeg(leg,isDemo){
  host.innerHTML='<div class="p1-leg-head"><div><h2>'+esc1(round.gameType)+'-'+activeLeg+' · '+esc1(leg.distanceM||leg.distance_m||'–')+' m · '+esc1(method1(leg.startMethod))+'</h2><p>'+esc1(leg.trackName||'')+' · '+(isDemo?'Syntetisk startlista':num1(leg.activeEntries??entries.length)+' startande')+'</p></div>'+sourceTag(isDemo?'synthetic':'live')+'</div>'+(formLoadIssue&&!isDemo?'<div class="p1-small" role="status">Formpoäng kunde inte läsas just nu; okända värden visas som –.</div>':'')+(!entries.length?'<div class="p1-card p1-empty"><strong>Ingen startlista</strong>Verifierade häststarter saknas för avdelningen.</div>':'<div class="p1-horses">'+entries.map(entry=>horseCard(entry,round,leg,isDemo)).join('')+'</div>');
  host.querySelectorAll('[data-p1-horse-open]').forEach(b=>b.onclick=()=>toggleHorse(b.dataset.p1HorseOpen,b.dataset.p1Entry,b.dataset.p1Source==='synthetic',leg));
 }
+function shoeMark(barefoot,shoes,changed){
+ const text=String(shoes||'').toLowerCase();
+ const isBarefoot=barefoot===true||(!Number.isNaN(Number(barefoot))&&barefoot===1)||text.includes('barfota')||text.includes('barefoot');
+ const known=barefoot!=null||Boolean(text);
+ if(!known)return '<span class="p1-shoe-unknown" title="Skostatus saknas">–</span>';
+ return '<span class="p1-shoe-symbol'+(changed===true?' p1-equipment-changed':'')+'" aria-label="'+(isBarefoot?'Barfota':'Skor på')+'" title="'+(isBarefoot?'Barfota':'Skor på')+'"><svg aria-hidden="true" viewBox="0 0 15 17" width="10" height="12"><path d="M12 3 C3 0 2 4 2 9 C2 14 6 16 12 14" fill="none" stroke="currentColor" stroke-width="2"/>'+(isBarefoot?'<path d="M13 2 L3 15" stroke="currentColor" stroke-width="1.6"/>':'')+'</svg></span>';
+}
+function equipmentLine(e){
+ const q=e.equipment||null;
+ if(!q)return '<span class="p1-info-unit">Skor: –</span><span class="p1-info-unit">Vagn: –</span>';
+ const flags=q.change||{};
+ const shoes=shoeMark(q.barefootFront,q.shoesFront,flags.shoesFrontChanged===true)+' '+shoeMark(q.barefootRear,q.shoesRear,flags.shoesRearChanged===true);
+ const type=String(q.sulkyType||'').trim().toLowerCase();
+ const sulky=type?(type.includes('american')||type.includes('amerik')?'Am.':type.includes('vanlig')||type.includes('regular')||type.includes('standard')?'Va.':esc1(q.sulkyType)):'–';
+ return '<span class="p1-info-unit p1-equipment">Skor: <span class="p1-shoes">'+shoes+'</span></span><span class="p1-info-unit">Vagn: <span class="'+(flags.sulkyTypeChanged===true?'p1-equipment-changed':'')+'">'+sulky+'</span></span>';
+}
 function horseCard(e,round,leg,isDemo){
  const entryId=e.raceEntryId||e.race_entry_id||e.horseId||e.horse_id;
  const horseId=e.horseId||e.horse_id||e.horse?.id||entryId;
@@ -237,7 +253,22 @@ function horseCard(e,round,leg,isDemo){
  const score=isDemo?e.formScore:formScores.get(String(entryId));
  const sequence=isDemo?e.form:formSequence((profiles.get(String(horseId))?.starts)||[]);
  const noteCount=localData.notes.filter(n=>String(n.horseId)===String(horseId)).length;
- return '<article class="p1-horse"><div class="p1-horse-grid"><div class="p1-horse-num">'+esc1(e.startNumber??e.start_number??'–')+'</div><div class="p1-horse-ident"><div class="p1-horse-name">'+esc1(e.horseName||e.horse_name||'Okänd häst')+'<span class="p1-note-dot" data-p1-note-indicator="'+esc1(horseId)+'" '+(noteCount?'':'hidden')+'>Anteckning</span></div><div class="p1-horse-driver">'+esc1(e.driverName||e.driver_name||e.driver?.name||'Okänd kusk')+' · Spår '+esc1(e.lane??e.actual_lane??'–')+'</div><div class="p1-form" data-p1-form-sequence="'+esc1(horseId)+'">Form '+formHtml(sequence)+'</div></div>'+metric('Formpoäng',score==null?'–':score)+metric('Första 200',pace1(e.first200??e.fastestFirst200?.value))+metric('Sista 400',pace1(e.last400??e.fastestLast400?.value))+metric('Streck',e.betPercent==null&&e.bet_percent==null?'–':pct1(Number(e.betPercent??e.bet_percent)/100))+'<button type="button" class="p1-expand-btn" aria-label="'+(opened?'Dölj':'Visa')+' häststatistik" data-p1-horse-open="'+esc1(entryId)+'" data-p1-entry="'+esc1(horseId)+'" data-p1-source="'+(isDemo?'synthetic':'live')+'">'+(opened?'⌃':'⌄')+'</button></div><div class="p1-expanded-host" data-p1-expanded="'+esc1(entryId)+'" '+(opened?'':'hidden')+'>'+(opened?'<div class="p1-loading-line"></div>':'')+'</div></article>'
+ const scratched=e.scratched===true||e.scratched===1;
+ const handicap=Number(e.handicapM??e.handicap_m);
+ const hasHandicap=Number.isFinite(handicap)&&handicap>0;
+ const sex=String(e.sex||'').toLowerCase();
+ const sexCode=['sto','mare','female','f'].includes(sex)?'s':['hingst','stallion','male','h'].includes(sex)?'h':['valack','gelding','v'].includes(sex)?'v':null;
+ const age=Number(e.age);
+ const description=(sexCode||'')+(Number.isInteger(age)&&age>0&&age<50?age:'');
+ const trainer=e.trainerName||e.trainer_name;
+ const meta=(description?description+' ':'')+(trainer?'('+trainer+')':'');
+ const name=esc1(e.horseName||e.horse_name||'Okänd häst');
+ const label='<div class="p1-horse-main"><span class="p1-horse-num">'+esc1(e.startNumber??e.start_number??'–')+'</span><span class="p1-horse-name" title="'+name+'">'+name+'</span>'+(meta?'<span class="p1-horse-meta" title="'+esc1(meta)+'">'+esc1(meta)+'</span>':'')+(scratched?'<span class="p1-scratched-label">STRUKEN</span>':'')+(noteCount?'<span class="p1-note-dot" data-p1-note-indicator="'+esc1(horseId)+'">Anteckning</span>':'<span class="p1-note-dot" data-p1-note-indicator="'+esc1(horseId)+'" hidden>Anteckning</span>')+'</div>';
+ const lane=esc1(e.lane??e.actual_lane??'–');
+ const line2='<div class="p1-horse-info"><span class="p1-info-unit">Kusk: '+esc1(e.driverName||e.driver_name||e.driver?.name||'Okänd kusk')+'</span>'+equipmentLine(e)+'</div>';
+ const line3='<div class="p1-horse-info"><span class="p1-info-unit p1-form" data-p1-form-sequence="'+esc1(horseId)+'">Form: '+formHtml(sequence)+'</span><span class="p1-info-unit">Spår: '+lane+'</span>'+(hasHandicap?'<span class="p1-handicap-badge">+'+esc1(handicap)+' m tillägg</span>':'')+'</div>';
+ const stats='<div class="p1-horse-stats">'+metric('Formpoäng',score==null?'–':score)+metric('Första 200',pace1(e.first200??e.fastestFirst200?.value))+metric('Sista 400',pace1(e.last400??e.fastestLast400?.value))+metric('Streck',e.betPercent==null&&e.bet_percent==null?'–':pct1(Number(e.betPercent??e.bet_percent)/100))+'</div>';
+ return '<article class="p1-horse'+(scratched?' p1-horse-scratched':'')+'"><div class="p1-horse-grid"><div class="p1-horse-top">'+label+'<button type="button" class="p1-expand-btn" aria-label="'+(opened?'Dölj':'Visa')+' häststatistik" data-p1-horse-open="'+esc1(entryId)+'" data-p1-entry="'+esc1(horseId)+'" data-p1-source="'+(isDemo?'synthetic':'live')+'">'+(opened?'⌃':'⌄')+'</button></div>'+line2+line3+'<div class="p1-horse-separator" aria-hidden="true"></div>'+stats+'</div><div class="p1-expanded-host" data-p1-expanded="'+esc1(entryId)+'" '+(opened?'':'hidden')+'>'+(opened?'<div class="p1-loading-line"></div>':'')+'</div></article>';
 }
 function metric(label,value){return '<div class="p1-horse-metric"><small>'+label+'</small><strong>'+esc1(value)+'</strong></div>'}
 function formHtml(values){if(!Array.isArray(values)||!values.length)return '<span>–</span>';return values.map((value,index)=>{const segs=resultFormSegments(value);const result=segs.map(seg=>'<span class="p1-result '+(seg.kind==='win'?'p1-result-win':seg.kind==='gallop'?'p1-gallop':seg.kind==='disqualified'?'p1-result-dq':'')+'">'+esc1(seg.text)+'</span>').join('');return (index?' <span> - </span>':'')+result}).join('')}
