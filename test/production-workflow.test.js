@@ -178,3 +178,14 @@ test('cleanup atomic fencing migration uses D1-safe trigger guards and LF line e
   const attrs = readFileSync(new URL('../.gitattributes', import.meta.url), 'utf8');
   assert.match(attrs, /migrations\/\*\.sql text eol=lf/);
 });
+
+
+test('reviewed production release marker has a validated immutable source SHA and unique nonce', () => {
+  const marker = readFileSync(new URL('../.github/production-release-v060.trigger',import.meta.url),'utf8');
+  assert.match(marker, /^release=kentaurai-v0\.6\.0$/m);
+  assert.match(marker, /^source_main=[a-f0-9]{40}$/m);
+  assert.match(marker, /^release_nonce=\d{4}-\d{2}-\d{2}-[a-z0-9-]+$/m);
+  assert.match(releaseWorkflow, /branches:\s*\n\s*- main/);
+  assert.match(releaseWorkflow, /- '\.github\/production-release-v060\.trigger'/);
+  assert.match(releaseWorkflow, /git merge-base --is-ancestor/);
+});

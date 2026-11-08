@@ -78,6 +78,15 @@ removal can be considered after a complete call-graph/feature audit.
 - A full billing cycle of observations is necessary before adjusting
   manual job budgets or setting aggressive absolute caps.
 
+## Release activation
+
+- For an owner-approved merge and deploy, update
+  `.github/production-release-v060.trigger` in the PR itself. The release
+  workflow listens to this path, not arbitrary `main` pushes. The marker
+  must contain an ancestral `source_main` commit and a unique nonce.
+- The GitHub production workflow alone applies migrations, deploys the
+  Worker and verifies its live private auth/health endpoints.
+
 ## Verification gates
 
 - Original and batched form results are identical for a synthetic
