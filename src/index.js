@@ -2,7 +2,7 @@ import { requireAdmin, requireStorageCleanupAdmin } from './auth.js';
 import { archiveRawPayload } from './raw.js';
 import { importEditorial } from './import/editorial.js';
 import { legacyBackupCapability, getLegacyBackupStatus, beginLegacyBackup, pollLegacyBackup } from './legacy-cleanup-backup.js';
-import { multipartBackupCapability, privateMultipartBackup } from './legacy-multipart-backup.js';
+import { multipartBackupCapability, multipartDiagnosticCapability, inspectMultipartBackupState, safeMultipartStartError, privateMultipartBackup } from './legacy-multipart-backup.js';
 import { importReferenceRound } from './import/reference-round-safe.js';
 import { normalizeCapturedOfficialGameSequential } from './import/official-live-sequential.js';
 import { captureUpcomingOfficialGames, normalizeNextPendingOfficialGame } from './import/official-live-scheduled.js';
@@ -268,7 +268,9 @@ async function handleFetch(request, env) {
   if (path.startsWith('/v1/')) {
     // Backup credentials are scoped exclusively to backup endpoints:
     // they MUST NOT authorize historical restore, cleanup or admin routes.
-    const denied = path.startsWith('/v1/storage-cleanup/legacy-backup-multipart/')
+    const denied = path.startsWith('/v1/storage-cleanup/legacy-backup-diagnostic/')
+      ? (multipartDiagnosticCapability(request,env) ? null : json({error:'unauthorized'},401))
+      : path.startsWith('/v1/storage-cleanup/legacy-backup-multipart/')
       ? (multipartBackupCapability(request,env) ? null : json({error:'unauthorized'},401))
       : path.startsWith('/v1/storage-cleanup/legacy-backup/')
       ? (legacyBackupCapability(request,env) ? null : json({error:'unauthorized'},401))
@@ -285,6 +287,23 @@ async function handleFetch(request, env) {
         level:decision.level,
         reason:decision.reason
       },429);
+    }
+  }
+  // Dedicated READ-ONLY diagnostic capability. Never authorizes start,
+  // export, polling, R2 mutation or any existing administrative endpoint.
+  if(path.startsWith('/v1/storage-cleanup/legacy-backup-diagnostic/')){
+    if(!multipartDiagnosticCapability(request,env))
+      return json({error:'unauthorized'},401);
+    const action=path.slice('/v1/storage-cleanup/legacy-backup-diagnostic/'.length);
+    try{
+      if(request.method==='GET'&&action==='auth-check')
+        return json({ok:true,scope:'legacy_multipart_diagnostic_only'});
+      if(request.method==='GET'&&action==='inspect')
+        return json(await inspectMultipartBackupState(env));
+      return json({error:'not_found'},404);
+    }catch{
+      console.error('read-only private backup inspection safely stopped');
+      return json({error:'legacy_multipart_diagnostic_unavailable'},409);
     }
   }
   // Isolated backup-only multipart capability. Explicit manual invocation,
@@ -309,9 +328,15 @@ async function handleFetch(request, env) {
       if(request.method==='POST'&&action==='finalize')
         return json(await privateMultipartBackup.finalize(env));
       return json({error:'not_found'},404);
-    }catch{
-      console.error('private multipart backup safely stopped');
-      return json({error:'legacy_multipart_backup_unavailable'},409);
+    }catch(error){
+      // A safe, bounded stage enum helps diagnose the next 409 without
+      // exposing Cloudflare body, source IDs, raw SQL or private R2 keys.
+      const startFailure=action==='start'?safeMultipartStartError(error):null;
+      console.error('private multipart backup safely stopped',startFailure||'unknown_stage');
+      return json({
+        error:'legacy_multipart_backup_unavailable',
+        ...(startFailure?{stage:startFailure.stage,reason:startFailure.reason}:{})
+      },409);
     }
   }
   // Explicitly manual BACKUP ONLY: different short-lived capability from
