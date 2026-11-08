@@ -110,7 +110,9 @@ async function cloudflare(env,path,method,body,fetchImpl){
   const url='https://api.cloudflare.com/client/v4/accounts/'+c.account+
     '/d1/database/'+DATABASE_ID+path;
   let response;
-  try {response=await fetchImpl(url,{method,redirect:'error',
+  // Workers does not implement redirect:'error'. 'manual' makes 3xx an
+  // explicit non-success response, never forwarding the API bearer token.
+  try {response=await fetchImpl(url,{method,redirect:'manual',
     headers:{authorization:'Bearer '+c.token,'content-type':'application/json'},
     ...(body?{body:JSON.stringify(body)}:{})});}
   catch{throw Error('multipart_cloudflare_transport_unavailable');}
@@ -346,7 +348,8 @@ export function createPrivateMultipartBackup({partBytes=MULTIPART_PART_BYTES,
   async function probeSignedUrl(url){
     if(!signedUrl(url))throw Error('multipart_signed_url_refused');
     let res;
-    try{res=await fetchImpl(url,{method:'GET',redirect:'error',
+    // Never follow a signed SQL URL redirect; require exact 206 from source.
+    try{res=await fetchImpl(url,{method:'GET',redirect:'manual',
       headers:{Range:'bytes=0-0','Accept-Encoding':'identity'}});}
     catch{throw Error('multipart_range_transport_failed');}
     if(res.status!==206){
@@ -430,8 +433,9 @@ export function createPrivateMultipartBackup({partBytes=MULTIPART_PART_BYTES,
     const begin=index*partBytes,end=Math.min(state.totalBytes,(index+1)*partBytes)-1;
     const n=end-begin+1;
     let response;
+    // Range downloads also reject 3xx and never send SQL requests elsewhere.
     try{response=await fetchImpl(state.signedUrl,{
-      method:'GET',redirect:'error',
+      method:'GET',redirect:'manual',
       headers:{Range:'bytes='+begin+'-'+end,'Accept-Encoding':'identity'}
     });}catch{throw Error('multipart_source_range_transport_failed');}
     if(response.status!==206){
