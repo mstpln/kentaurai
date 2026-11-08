@@ -116,3 +116,16 @@ test('personal API is session protected and synthetic preview cannot write produ
   const preview=await worker.fetch(new Request(url,{headers:{cookie}}),env,{});
   assert.deepEqual((await preview.json()).notes,[]);
 });
+
+test('saved manual rounds preserve all unique track names rather than a missing primary track',async()=>{
+  const {env}=createTestEnv();
+  await seedRound(env);
+  await env.DB.prepare(
+    "INSERT INTO tracks(id,canonical_name) VALUES ('track-one','Halmstad'),('track-two','Åby')"
+  ).run();
+  await env.DB.prepare("UPDATE races SET track_id='track-one' WHERE id IN ('race-personal-1','race-personal-3')").run();
+  await env.DB.prepare("UPDATE races SET track_id='track-two' WHERE id='race-personal-2'").run();
+  await syncTravdataPersonal(env,{systems:[system]});
+  const page=await getTravdataPersonal(env);
+  assert.equal(page.systems[0].trackNames,'Halmstad · Åby');
+});

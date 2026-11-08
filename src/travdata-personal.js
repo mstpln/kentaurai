@@ -169,9 +169,14 @@ export async function getTravdataPersonal(env, options = {}) {
     env.DB.prepare(
       'SELECT s.id,s.game_round_id,s.game_type,s.system_name,s.selections_json,s.row_count,' +
       's.stake_sek,s.created_at,s.updated_at,s.settlement_state,s.payout_sek,s.net_sek,' +
-      's.winner_numbers_json,s.correct_legs,gr.round_date,t.canonical_name AS track_name ' +
+      's.winner_numbers_json,s.correct_legs,gr.round_date, ' +
+      '(SELECT GROUP_CONCAT(name, \' · \') FROM (' +
+      ' SELECT DISTINCT t2.canonical_name AS name FROM game_legs gl2' +
+      ' JOIN races r2 ON r2.id=gl2.race_id JOIN tracks t2 ON t2.id=r2.track_id' +
+      ' WHERE gl2.game_round_id=s.game_round_id ORDER BY t2.canonical_name COLLATE NOCASE' +
+      ')) AS track_names ' +
       'FROM travdata_manual_systems s JOIN game_rounds gr ON gr.id=s.game_round_id ' +
-      'LEFT JOIN tracks t ON t.id=gr.primary_track_id WHERE s.deleted_at IS NULL ' +
+      'WHERE s.deleted_at IS NULL ' +
       'ORDER BY s.created_at DESC,s.id DESC LIMIT ? OFFSET ?'
     ).bind(limit+1,offset).all(),
     env.DB.prepare(
@@ -187,7 +192,7 @@ export async function getTravdataPersonal(env, options = {}) {
     })),
     systems:sr.slice(0,limit).map(s=>({
       id:s.id,roundId:s.game_round_id,gameType:s.game_type,
-      systemName:s.system_name,roundDate:s.round_date,trackNames:s.track_name || null,
+      systemName:s.system_name,roundDate:s.round_date,trackNames:s.track_names || null,
       legs:JSON.parse(s.selections_json),rowCount:s.row_count,stakeSek:s.stake_sek,
       createdAt:s.created_at,updatedAt:s.updated_at,source:'server',
       settlementState:s.settlement_state,payoutSek:s.payout_sek,
