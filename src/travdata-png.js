@@ -58,12 +58,15 @@ export async function circularTransparentPng(encoded){
       const predictor=filter===0?0:filter===1?left:filter===2?up:filter===3?Math.floor((left+up)/2):paeth(left,up,corner);
       row[i]=(source[start+1+i]+predictor)&255;
     }
+    // PNG filter decoding must use the ORIGINAL previous row, never the masked row.
+    // Otherwise up/Paeth predictors propagate the transparent corner pixels into
+    // the approved TD artwork and progressively corrupt its colours and shape.
+    before.set(row);
     for(let x=0;x<width;x++){
       const dx=x+.5-centerX,dy=y+.5-centerY;
       if(dx*dx+dy*dy>radius*radius){const i=x*4;row[i]=0;row[i+1]=0;row[i+2]=0;row[i+3]=0}
     }
     output[start]=0;output.set(row,start+1);
-    before.set(row);
   }
   const deflated=await codec(output,'deflate');
   return concat([new Uint8Array(PNG_SIGNATURE),pngChunk('IHDR',ihdr),pngChunk('IDAT',deflated),pngChunk('IEND',new Uint8Array())]);
