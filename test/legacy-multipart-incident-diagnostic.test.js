@@ -17,6 +17,10 @@ const CONTROL='backups/legacy-cleanup-multipart/.active-v1.json';
 const stamp=()=>Date.now()+'.'+'e'.repeat(64);
 function fixture(){
   const f=createTestEnv();
+  // The simulated Worker must have multipart R2 capabilities even though
+  // these pre-export failure scenarios never create an actual upload.
+  f.env.RAW_BUCKET.createMultipartUpload=async()=>{throw Error('must_not_upload');};
+  f.env.RAW_BUCKET.resumeMultipartUpload=()=>{throw Error('must_not_resume');};
   f.env.KENTAURAI_DEPLOY_SHA=SHA;
   f.env.LEGACY_MULTIPART_DIAG_ENABLED='true';
   f.env.LEGACY_MULTIPART_DIAG_TOKEN=stamp();
