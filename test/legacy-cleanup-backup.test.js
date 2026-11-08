@@ -63,16 +63,16 @@ function fakeCloudflare({badUrl=null,declaredBytes=null,unfinished=false}={}){
   };
 }
 
-test('legacy backup migration stores receipts separately and refuses overlapping active exports',async()=>{
+test('legacy backup schema stores only finished private export receipts',async()=>{
   const f=fixture();
   const schema=f.db.prepare('PRAGMA table_info(legacy_cleanup_backups)').all().map(x=>x.name);
   for(const field of ['id','source_sha','bookmark','object_key','object_etag','object_size','status'])
     assert.ok(schema.includes(field));
-  f.db.prepare("INSERT INTO legacy_cleanup_backups(id,source_sha,bookmark,status) VALUES (?,?,?,'exporting')")
-    .run('one',DEPLOY,BOOKMARK);
-  assert.throws(()=>f.db.prepare("INSERT INTO legacy_cleanup_backups(id,source_sha,bookmark,status) VALUES (?,?,?,'exporting')")
-    .run('two',DEPLOY,BOOKMARK),/UNIQUE constraint failed/);
-  assert.equal(f.db.prepare('SELECT COUNT(*) AS c FROM legacy_cleanup_backups').get().c,1);
+  assert.throws(()=>f.db.prepare(
+    "INSERT INTO legacy_cleanup_backups(id,source_sha,bookmark,object_key,object_etag,object_size,status)"+
+    " VALUES (? , ? , ? , 'synthetic', 'etagvalue', 2048, 'exporting')"
+  ).run('one',DEPLOY,BOOKMARK),/CHECK constraint failed/);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS c FROM legacy_cleanup_backups').get().c,0);
   f.db.close();
 });
 
@@ -203,7 +203,8 @@ test('wrong signed hosts and truncated export cannot produce a completed receipt
     await beginLegacyBackup(f.env,{fetchImpl:api.fetch});
     await assert.rejects(pollLegacyBackup(f.env,{fetchImpl:api.fetch}),
       /legacy_backup_signed_url_refused|legacy_backup_r2_write_unverified/);
-    assert.equal(f.db.prepare('SELECT status FROM legacy_cleanup_backups').get().status,'exporting');
+    assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM legacy_cleanup_backups').get().n,0);
+    assert.equal((await getLegacyBackupStatus(f.env)).status,'exporting');
     f.db.close();
   }
 });
