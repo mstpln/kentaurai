@@ -95,3 +95,26 @@ test('scheduled work keeps one cron, caps individual chunks and prioritizes resu
   assert.ok(code.indexOf("await runStage('xlabs_daily_incremental'")
     < code.indexOf("await runStage('recent_official_snapshot_promotion'"));
 });
+
+test('Workers daily and monthly thresholds affect only optional expansion', () => {
+  const usage = report(2_000_000, 100, 1_000_000, 100, [
+    {id:'workers_requests',used:300_000},
+    {id:'workers_cpu_ms',used:1_000_000}
+  ]);
+  usage._dailyWorkersUsage = {requests:230_000,cpuMs:800_000};
+  const elevated=evaluateWorkloadPressure(usage,now);
+  assert.equal(elevated.level,'elevated');
+  assert.equal(elevated.allowExpansion,false);
+  assert.equal(elevated.allowSupporting,true);
+  assert.equal(elevated.dailyWorkersCpuTelemetryAvailable,true);
+  assert.equal(morningStageDecision('official_daily_incremental',{stopped:true},elevated).run,true);
+
+  usage._dailyWorkersUsage = {requests:500_000,cpuMs:1_300_000};
+  const high=evaluateWorkloadPressure(usage,now);
+  assert.equal(high.level,'high');
+  assert.equal(morningStageDecision('post_race_settlement',{stopped:true},high).run,true);
+
+  usage._dailyWorkersUsage = null;
+  usage.metrics.find(x=>x.id==='workers_cpu_ms').used=24_000_001;
+  assert.equal(evaluateWorkloadPressure(usage,now).level,'high');
+});

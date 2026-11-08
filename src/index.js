@@ -798,7 +798,7 @@ export async function handleScheduled(controller, env) {
   // Cloudflare analytics are delayed. Missing metrics are never zero usage.
   // They cannot disable the bounded chain of current V85/V86 data.
   const usage = await getCloudflareUsage(env, {
-    now:new Date(controller.scheduledTime || Date.now()), includeDailyUsage:true
+    now:new Date(controller.scheduledTime || Date.now()), includeDailyUsage:true, includeWorkersUsage:true, includeR2DailyUsage:true, includeQueryInsights:false
   }).catch(() => ({ available:false, reason:'usage_unavailable' }));
   const pressure = evaluateWorkloadPressure(usage, controller.scheduledTime || Date.now());
 

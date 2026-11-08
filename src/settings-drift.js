@@ -1,3 +1,7 @@
+import { loadWorkersAccountUsage } from './cloudflare-workers-usage.js';
+import { summarizeMorningWorkflow } from './workflow-health.js';
+import { loadAccountR2DailyOperations } from './cloudflare-r2-daily-usage.js';
+
 const AUTOMATION_KEY = 'automatic_workflows_enabled';
 const KENTAURAI_D1_DATABASE_ID = 'd8189e0e-6127-4ef2-88cc-534cb2217340';
 
@@ -7,7 +11,9 @@ export const CLOUDFLARE_USAGE_LIMITS = Object.freeze({
   d1StorageBytes: 5_000_000_000,
   r2StorageBytes: 10_000_000_000,
   r2ClassAOperations: 1_000_000,
-  r2ClassBOperations: 10_000_000
+  r2ClassBOperations: 10_000_000,
+  workersRequests: 10_000_000,
+  workersCpuMs: 30_000_000
 });
 
 function nowIso(now = new Date()) {
@@ -502,7 +508,7 @@ async function loadD1QueryInsights(fetchImpl, token, accountId, window) {
   }
 }
 
-async function d1Usage(env, fetchImpl, cycle, now) {
+async function d1Usage(env, fetchImpl, cycle, now, options = {}) {
   const accountId = String(env.CLOUDFLARE_ACCOUNT_ID || '').trim();
   const token = String(env.CLOUDFLARE_USAGE_API_TOKEN || '').trim();
   const data = await cloudflareJson(fetchImpl, 'https://api.cloudflare.com/client/v4/graphql', token, {
@@ -533,7 +539,8 @@ async function d1Usage(env, fetchImpl, cycle, now) {
     ? currentR2Storage(account.r2StorageAdaptiveGroups)
     : null;
   const queryInsightsWindow = recentQueryInsightsWindow(now);
-  const queryInsights = await loadD1QueryInsights(fetchImpl, token, accountId, queryInsightsWindow);
+  const queryInsights = options.includeQueryInsights === false ? [] :
+    await loadD1QueryInsights(fetchImpl, token, accountId, queryInsightsWindow);
   return {
     rowsRead: sumMetric(account.d1AnalyticsAdaptiveGroups, 'rowsRead'),
     rowsWritten: sumMetric(account.d1AnalyticsAdaptiveGroups, 'rowsWritten'),
@@ -594,7 +601,7 @@ export async function getCloudflareUsage(env, options = {}) {
   }
   try {
     const cycle = await billingCycle(env, fetchImpl, now);
-    const d1 = await d1Usage(env, fetchImpl, cycle, now);
+    const d1 = await d1Usage(env, fetchImpl, cycle, now, options);
     let billingByMetric = new Map();
     let billingCostAvailable = true;
     try {
@@ -602,6 +609,25 @@ export async function getCloudflareUsage(env, options = {}) {
     } catch {
       billingCostAvailable = false;
     }
+    // Optional, read-only account-wide Workers analytics. Do not let a
+    // missing dataset prevent verified D1/R2 information from displaying.
+    // The adaptive dataset is diagnostic (possibly sampled), not a bill.
+    const workers = options.includeWorkersUsage === true
+      ? await loadWorkersAccountUsage(
+        (query, variables) => cloudflareJson(fetchImpl,
+          'https://api.cloudflare.com/client/v4/graphql', token,
+          { method:'POST', body:JSON.stringify({query,variables}) }),
+        { accountId, periodStart:cycle.start, dayStart:dateKey(now)+'T00:00:00.000Z', end:now.toISOString() }
+      ).catch(() => null)
+      : null;
+    const r2Daily = options.includeR2DailyUsage === true
+      ? await loadAccountR2DailyOperations(
+        (query, variables) => cloudflareJson(fetchImpl,
+          'https://api.cloudflare.com/client/v4/graphql', token,
+          {method:'POST',body:JSON.stringify({query,variables})}),
+        {accountId,date:now.toISOString()}
+      ).catch(() => null)
+      : null;
     const metrics = [
       usageMetric('d1_rows_read', 'D1 · Rows read', d1.rowsRead, CLOUDFLARE_USAGE_LIMITS.d1RowsRead, 'rows',
         '25 miljarder ingår per billingperiod. Därefter debiteras överförbrukning.', billingCostOrFallback('d1_rows_read', d1.rowsRead, billingByMetric.get('d1_rows_read'))),
@@ -628,6 +654,26 @@ export async function getCloudflareUsage(env, options = {}) {
       metrics.push(usageMetric('r2_class_b', 'R2 · Class B', r2ClassB.quantity, CLOUDFLARE_USAGE_LIMITS.r2ClassBOperations, 'requests',
         '10 miljoner Class B-operationer ingår per månad.', r2ClassB));
     }
+    if (workers?.available === true) {
+      const observed = {
+        source:workers.source, approximate:true,
+        scope:'account', observedAt:nowIso(now)
+      };
+      metrics.push({
+        ...usageMetric('workers_requests', 'Workers · Anrop (konto)',
+          workers.period.requests, CLOUDFLARE_USAGE_LIMITS.workersRequests, 'requests',
+          'Kontots Workers-anrop, uppskattning från Cloudflare Analytics. 10 miljoner/mån ingår.'),
+        ...observed
+      });
+      if (workers.period.cpuMs != null) {
+        metrics.push({
+          ...usageMetric('workers_cpu_ms', 'Workers · CPU (konto)',
+            workers.period.cpuMs, CLOUDFLARE_USAGE_LIMITS.workersCpuMs, 'ms',
+            'Kontots Workers-CPU, uppskattning. 30 miljoner CPU-ms/mån ingår.'),
+          ...observed
+        });
+      }
+    }
     return {
       configured: true,
       fetchedAt: nowIso(now),
@@ -637,9 +683,15 @@ export async function getCloudflareUsage(env, options = {}) {
       queryInsightsWindow: d1.queryInsightsWindow,
       additional: {
         billingCostAvailable,
-        r2Available: Boolean(d1.r2StorageBytes != null || r2Storage?.available || r2ClassA?.available || r2ClassB?.available)
+        r2Available: Boolean(d1.r2StorageBytes != null || r2Storage?.available || r2ClassA?.available || r2ClassB?.available),
+        workersAccountAvailable:Boolean(workers?.available),
+        workersCpuAvailable:Boolean(workers?.available && workers.period.cpuMs != null),
+        r2DailyAvailable:Boolean(r2Daily),
+        r2DailyOperations:r2Daily?.operations ?? null
       },
-      ...(options.includeDailyUsage ? { _dailyUsage:d1.dailyUsage } : {})
+      ...(options.includeDailyUsage ? { _dailyUsage:d1.dailyUsage,
+        ...(workers?.available ? { _dailyWorkersUsage:workers.today } : {}),
+        ...(r2Daily ? { _dailyR2Operations:r2Daily.operations } : {}) } : {})
     };
   } catch (error) {
     return {
@@ -656,7 +708,7 @@ export async function getCloudflareUsage(env, options = {}) {
 export async function getDriftOverview(env, options = {}) {
   const [automation, cloudflare, morningStageCosts] = await Promise.all([
     getAutomationControl(env),
-    getCloudflareUsage(env, { ...options, includeDailyUsage:true }),
+    getCloudflareUsage(env, { ...options, includeDailyUsage:true, includeWorkersUsage:true, includeR2DailyUsage:true }),
     recentMorningStageCosts(env)
   ]);
   let recentRunEstimates = {};
@@ -664,11 +716,14 @@ export async function getDriftOverview(env, options = {}) {
     recentRunEstimates = await estimateRecentRunD1Usage(env, cloudflare.billingPeriod, cloudflare._dailyUsage).catch(() => ({}));
   }
   if (cloudflare && Object.prototype.hasOwnProperty.call(cloudflare, '_dailyUsage')) delete cloudflare._dailyUsage;
+  if (cloudflare && Object.prototype.hasOwnProperty.call(cloudflare, '_dailyWorkersUsage')) delete cloudflare._dailyWorkersUsage;
+  if (cloudflare && Object.prototype.hasOwnProperty.call(cloudflare, '_dailyR2Operations')) delete cloudflare._dailyR2Operations;
   return {
     automation,
     cloudflare,
     recentRunEstimates,
     morningStageCosts,
+    morningWorkflow:summarizeMorningWorkflow(morningStageCosts[0], options.now || new Date()),
     usageEstimateNote:'Beräknad fördelning av den dagens verifierade Cloudflare D1-usage mellan registrerade workflows. Detta är en uppskattning, inte exakt per-query-mätning.',
     schedule: {
       cron: '15 5 * * *',
