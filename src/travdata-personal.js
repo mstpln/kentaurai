@@ -116,21 +116,21 @@ export async function syncTravdataPersonal(env, payload) {
     statements.push(env.DB.prepare(
       'INSERT INTO travdata_horse_notes (id,horse_id,race_entry_id,note_text,created_at,updated_at) ' +
       'SELECT ?,?,?,?,?,? WHERE NOT EXISTS (' +
-      'SELECT 1 FROM travdata_personal_tombstones t WHERE t.kind=\'note\' AND t.id=? AND t.deleted_at>=?) ' +
+      'SELECT 1 FROM travdata_personal_tombstones t WHERE t.kind=\'note\' AND t.id=?) ' +
       'ON CONFLICT(id) DO UPDATE SET horse_id=excluded.horse_id, race_entry_id=excluded.race_entry_id, ' +
       'note_text=excluded.note_text, updated_at=excluded.updated_at ' +
       'WHERE excluded.updated_at>travdata_horse_notes.updated_at AND travdata_horse_notes.deleted_at IS NULL'
-    ).bind(n.id,n.horseId,n.raceEntryId,n.text,n.createdAt,n.updatedAt,n.id,n.updatedAt));
+    ).bind(n.id,n.horseId,n.raceEntryId,n.text,n.createdAt,n.updatedAt,n.id));
   }
   for (const s of systems) {
     statements.push(env.DB.prepare(
       'INSERT INTO travdata_manual_systems (id,game_round_id,game_type,system_name,selections_json,' +
       'row_count,stake_sek,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,? ' +
       'WHERE NOT EXISTS (SELECT 1 FROM travdata_personal_tombstones t ' +
-      'WHERE t.kind=\'system\' AND t.id=? AND t.deleted_at>=?) ' +
+      'WHERE t.kind=\'system\' AND t.id=?) ' +
       'ON CONFLICT(id) DO NOTHING'
     ).bind(s.id,s.roundId,s.gameType,s.name,JSON.stringify(s.legs),s.rowCount,
-      s.stakeSek,s.createdAt,s.updatedAt,s.id,s.updatedAt));
+      s.stakeSek,s.createdAt,s.updatedAt,s.id));
   }
   for (const t of tombstones) {
     statements.push(env.DB.prepare(
@@ -141,8 +141,8 @@ export async function syncTravdataPersonal(env, payload) {
     const table = t.kind === 'note' ? 'travdata_horse_notes' : 'travdata_manual_systems';
     statements.push(env.DB.prepare(
       'UPDATE ' + table + ' SET deleted_at=? WHERE id=? ' +
-      'AND (deleted_at IS NULL OR deleted_at<?) AND updated_at<=?'
-    ).bind(t.deletedAt,t.id,t.deletedAt,t.deletedAt));
+      'AND (deleted_at IS NULL OR deleted_at<?)'
+    ).bind(t.deletedAt,t.id,t.deletedAt));
   }
   if (statements.length) await env.DB.batch(statements);
   return { ok:true, accepted:{ notes:notes.length, systems:systems.length, tombstones:tombstones.length } };

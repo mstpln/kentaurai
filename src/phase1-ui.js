@@ -75,7 +75,7 @@ function mergePersonal(local,remote){
  }
  const allowed=(kind,row)=>{
   const deletion=tombstones.get(kind+':'+row.id);
-  return !deletion||String(deletion.deletedAt)<String(row.updatedAt||row.createdAt||'');
+  return !deletion;
  };
  return {...local,
   notes:newestRecords(local.notes,remote.notes).filter(row=>allowed('note',row)),
@@ -109,8 +109,8 @@ function queuePersonalSync(){
   renderStorageNotice();
  });
 }
-async function initializePersonalSync(){
- if(personalSyncBusy||personalSyncReady||demoEnabled||storageReadBlocked)return;
+async function initializePersonalSync(forceRefresh=false){
+ if(personalSyncBusy||(!forceRefresh&&personalSyncReady)||demoEnabled||storageReadBlocked)return;
  personalSyncBusy=true;
  try{
   const remote={notes:[],systems:[],tombstones:[]};
@@ -528,7 +528,7 @@ window.__kentauraiPhase1.renderSystems=renderSystems;
 window.__kentauraiPhase1.renderBuilder=renderBuilder;
 currentRoute='trend';setNav1('trend');renderStart();
 initializePersonalSync();
-document.addEventListener('visibilitychange',()=>{if(!document.hidden){if(!personalSyncReady)initializePersonalSync();else queuePersonalSync()}});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)initializePersonalSync(true)});
 })();
 </script>`;
 }

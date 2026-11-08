@@ -41,6 +41,7 @@ also have indexes, bounded input and separate query-plan tests.
 | Upcoming capture | 12m | 8k | 120k | Essential |
 | Live normalization | 110m | 45k | 360k | Essential |
 | Final results/settlement | 20m | 10k | 150k | Essential |
+| Manual system settlement | 12m | 6k | 90k | Essential |
 | Recent official results | 40m | 16k | 180k | Essential |
 | Recent X-Labs | 40m | 16k | 180k | Essential |
 | Start-point promotion | 12m | 6k | 90k | Supporting |
@@ -61,29 +62,72 @@ available, but does not permit expanding historical processing on unknown
 or stale analytics. These are resource *planning* budgets, **not** hard
 Cloudflare billing caps. Other Cloudflare applications share account limits.
 
-## Next implementation in the same backend program
+## Implemented in this PR (not yet deployed)
 
-1. Verify production D1 Query Insights and stage costs without modifying data.
-   Tune any pathological read queries with EXPLAIN QUERY PLAN and realistic
-   synthetic scale. Do not hide missing data or reduce result coverage.
-2. Create separate, authenticated D1 models for TravData personal horse notes
-   and manually entered systems. Migrate existing browser-local records with
-   idempotency, revision-aware conflict resolution, deletion tombstones, and
-   an offline-safe retry path. Never erase the local originals until the
-   server confirms durable persistence.
-3. Integrate settled winners and official payouts into those manual systems.
-   Support past rounds, multi-system rounds, scratches/reserves, non-unique
-   winners and exact wager payout tiers. Unverified payout stays null; never
-   equate covered winners with a paid dividend.
-4. Verify Trend/statistics read paths, historic coverage and X-Labs readiness.
-   Run optional historical expansion only after explicit approval and safe
-   account-level headroom; provenance recovery remains separate.
-5. Once the new frontend is entirely decoupled, disable obsolete AI routes
-   and old background dependencies without destroying retained historical
-   facts or paid/private provenance.
-6. Add account-level Workers request/CPU and R2 operation telemetry from
-   authoritative Cloudflare sources. Missing metrics must be shown as
-   unavailable, not zero, and cannot be represented as enforced caps.
+- One scheduled morning chain remains. Current official imports, 3-day
+  official results, post-race settlement, manual-system settlement and daily
+  X-Labs have independent measured budgets and cannot be skipped merely
+  because normalization had a high read count.
+- Normalization stops between saved-source chunks, retaining the existing
+  durable cursor. Budget observations are advisory *after each operation*;
+  they do not interrupt SQL mid-statement or guarantee a billing cap.
+- Optional manually dispatched historical/repair steps require verified
+  Cloudflare D1 usage headroom; they return a controlled 429 rather than
+  starting on unknown billing telemetry. The old cleanup/restoration
+  authorization gates remain separate and unchanged.
+- Dedicated private D1 tables: travdata_horse_notes,
+  travdata_manual_systems, travdata_personal_tombstones.
+  APP_PASSWORD-session-authenticated GET/POST sync endpoints are limited
+  and isolated from old external-AI systems. No public provider payloads,
+  private paid material, or article bodies are added.
+- Browser local copies are retained. Initial and resumed-app reads merge
+  D1 and local records; failed sync retries later. Tombstones prevent
+  deleted notes or systems from being resurrected by another device.
+- New manual systems accept arbitrary singleton-spike counts, validate all
+  eight legs and canonical round IDs, and calculate rows and stake on
+  the server. Historical legacy analysis/system validation is unchanged.
+- Official post-race job discovery recognizes manual-only systems.
+  A separate bounded settlement step calculates theoretical standard
+  stake payouts from verified final official tiers and unique winners.
+  Missing payouts, selected scratches/reserves and ambiguous winners
+  stay unresolved for manual review (never invented). There is no
+  assertion that a ticket was actually purchased or paid.
+- The user's INSATS card now sums stakes of all registered systems while
+  RESULTAT is calculated from settled systems only.
+
+## Remaining verification and second-build tasks
+
+1. Verify private production D1 Query Insights and the measured morning
+   stage costs without mutating data. Identify and optimize the largest
+   SQL scans with EXPLAIN QUERY PLAN and synthetic scale testing. No
+   artificial omission of legitimate historic starts is acceptable.
+2. Confirm source coverage and frontend behavior against private real
+   data *after* approved deployment and migration 0070. No real payload
+   enters the public repository or CI.
+3. Observe several morning runs and check whether each bounded step
+   meets its coverage SLA. Calibrate per-stage limits from actual data.
+4. Extend account-wide authoritative telemetry to Workers requests/CPU
+   and R2 Class A/B. D1-only measurements and estimated billing
+   allocations must never be misrepresented as hard account caps.
+5. Review Trend/statistics read paths and historic data coverage.
+   Backfill remains independently, explicitly authorized and cost-gated.
+   Any source-provenance restoration requires its separate approvals.
+6. When no new UI function relies on the legacy external AI backend,
+   deactivate obsolete AI routes without deleting old private analysis,
+   editorial or historical source data.
+
+## Remaining limitations / safety caveats
+
+- Paid Cloudflare usage metrics can lag. An internal budget cannot
+  guarantee zero Cloudflare overage when other apps share the account.
+- The existing per-connection APP_PASSWORD protects personal data
+  through a 30-day cookie; losing that password does not back up local
+  data. No local browser data is deleted during the sync.
+- Manual settlements are theoretical standard-wager calculations. The
+  provider's scratch/reserve and special payout semantics can require
+  human review; do not present them as confirmed financial receipts.
+- An individual SQL statement can consume more than a soft quota
+  before its D1 meta is returned. Query-plan inspection is required.
 
 ## Release gates
 

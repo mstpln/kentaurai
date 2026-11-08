@@ -76,6 +76,7 @@ test('revision-aware notes and tombstones prevent stale offline resurrection', a
     {kind:'system',id:system.id,deletedAt}
   ]});
   await syncTravdataPersonal(env,{notes:[updated],systems:[system]});
+  await syncTravdataPersonal(env,{notes:[{...updated,updatedAt:'2026-11-09T10:00:00.000Z'}]});
   page=await getTravdataPersonal(env);
   assert.equal(page.notes.length,0);
   assert.equal(page.systems.length,0);

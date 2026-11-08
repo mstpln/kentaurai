@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=365715be6b92d23f3d3f087ade327703a7c1b409
-release_nonce=2026-11-08-travdata-clean-blue-icon-edge
+source_main=ee24fa28894a753657a69e5724a1603be8573ad5
+release_nonce=2026-11-08-travdata-workflows-personal-v1
