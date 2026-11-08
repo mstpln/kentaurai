@@ -5,6 +5,7 @@
   "compatibility_date": "2026-09-06",
   "vars": {
     "ANALYSIS_WORKFLOW_MODE": "v3",
+    "WORKLOAD_GUARD_ENABLED": "1",
     "V85_LINE_PRICE_SEK": "0.50",
     "V86_LINE_PRICE_SEK": "0.25",
     "HISTORICAL_RECOVERY_DATABASE_ID": "d8189e0e-6127-4ef2-88cc-534cb2217340"

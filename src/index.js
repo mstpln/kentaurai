@@ -30,6 +30,7 @@ import { ensureRecentDailyXlabsJobs, getXlabsBackfill, runXlabsBackfillBatch, ru
 import { captureCalendar, captureGame, captureRace } from './provider/official.js';
 import { runPostRaceSettlementBatch } from './post-race-settlement-v1.js';
 import { settleNextTravdataManualSystems } from './travdata-manual-settlement.js';
+import { isBudgetedExpansion, manualExpansionBudgetDecision } from './manual-usage-gate.js';
 import { getStatisticsDataBackfillStatus, runNextStatisticsDataBackfill } from './statistics-data-backfill-v1.js';
 import { captureXlabsDate } from './provider/xlabs.js';
 import { captureXlabsRaceJson } from './provider/xlabs-race.js';
@@ -267,6 +268,16 @@ async function handleFetch(request, env) {
       ? requireStorageCleanupAdmin(request, env)
       : requireAdmin(request, env);
     if (denied) return denied;
+  }
+  if (request.method === 'POST' && isBudgetedExpansion(path)) {
+    const decision = await manualExpansionBudgetDecision(env);
+    if (!decision.allowed) {
+      return json({
+        error:'manual_expansion_paused_for_usage_safety',
+        level:decision.level,
+        reason:decision.reason
+      },429);
+    }
   }
   // The source-bound audit may still perform read-only checks and planning.
   // Destructive session and execute routes are disabled for ALL credentials,
