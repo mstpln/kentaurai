@@ -185,6 +185,9 @@ test('backup-only code and workflow include no production delete or upload-to-ru
   assert.match(workflow,/BACKUP_D1_ONLY/);
   assert.match(workflow,/kentaurai-production-operation/);
   assert.match(workflow,/npm run qa/);
+  assert.doesNotMatch(workflow.slice(0,workflow.indexOf('    steps:')),
+    /secrets\.CLOUDFLARE_API_TOKEN/,
+    'Cloudflare production token must not be inherited by the QA job');
   assert.match(workflow,/secret delete/);
   assert.doesNotMatch(workflow,/d1 export\s+|wrangler d1 execute.+DELETE|restoration\/run\/apply-step|HISTORICAL_REPAIR_ENABLED/);
   assert.doesNotMatch(script,/\bDELETE FROM\b|\bDROP TABLE\b|\.delete\(/);
