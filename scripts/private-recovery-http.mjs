@@ -15,7 +15,8 @@ const MULTIPART_START_REASONS = new Set([
   'cloudflare_http_503','cloudflare_http_504','cloudflare_response_unverified',
   'cloudflare_json_invalid','export_response_unverified',
   'source_size_out_of_bounds','private_bindings_unavailable',
-  'internal_operation_failed'
+  'internal_operation_failed','credentials_unavailable','transport_unavailable',
+  'cloudflare_http_other'
 ]);
 
 // Opt-in only for the multipart /start endpoint. Discard all untrusted
