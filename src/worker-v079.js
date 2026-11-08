@@ -31,7 +31,7 @@ async function enhanceApp(request, response, env) {
   headers.delete('content-length');
   let html = await response.text();
   const appPage = path === '/app/' || path === '/app';
-  if (appPage) html = enhancePhase1Html(enhanceSettingsDriftHtml(html));
+  if (appPage) html = enhancePhase1Html(enhanceSettingsDriftHtml(html), { allowDemo: env.PREVIEW_DATA_MODE === 'synthetic' });
   if (appPage && env.PREVIEW_DATA_MODE === 'synthetic') {
     html = html.replace('</body>', `<div class="synthetic-preview-badge" role="status" aria-label="Synthetic local preview data">SYNTHETIC PREVIEW · local D1</div>
       <style>.synthetic-preview-badge{position:fixed;right:12px;bottom:calc(70px + env(safe-area-inset-bottom));z-index:9999;padding:6px 9px;border:1px solid #f0c36d;border-radius:999px;background:#fff7e6;color:#744b00;font:600 10px/1.2 system-ui,sans-serif;letter-spacing:.04em;box-shadow:0 2px 8px #0002;pointer-events:none}@media(min-width:760px){.synthetic-preview-badge{bottom:12px}}</style></body>`);
