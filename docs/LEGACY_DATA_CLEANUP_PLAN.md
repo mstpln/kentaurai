@@ -117,8 +117,12 @@ The backup-only Cloudflare route:
   cannot authorize legacy cleanup, provenance restoration or other routes.
 - Uses Cloudflare D1 export polling; **the SQL body is streamed from Cloudflare
   directly to private Cloudflare R2**, never GitHub, ChatGPT or a user device.
-- Stores a distinct receipt in \`legacy_cleanup_backups\`, binding D1 export
-  bookmark, original run, R2 key/size/ETag and exact deployed commit.
+- Stores in-progress export bookmark and progress **only in private R2**,
+  without querying locked D1. Only after a completed Cloudflare export,
+  it stores a separate immutable receipt in `legacy_cleanup_backups`,
+  binding bookmark, private R2 key/size/ETag and the deployed commit.
+  A temporarily unavailable D1 after export completion can be retried
+  without downloading or duplicating the private SQL file.
 - Verifies Cloudflare-signed HTTPS URL host, content type, expected byte length,
   object metadata and R2 HEAD; mismatches stop without marking verified.
 - Does not delete data, restore databases, enable cleanup, modify official
