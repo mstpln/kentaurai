@@ -141,3 +141,10 @@ Verified in the local preview on 2026-11-08: the full `npm run qa` suite passed
 There were no uncaught browser exceptions, no backend mutation requests, and
 no page-level horizontal overflow at the tested widths. The existing workflow
 remained running after login, navigation, reload, and the storage-failure test.
+
+## Production preview isolation and icon correction (2026-11-08)
+
+- Synthetic rounds, systems, and linked note fixtures are available only when the Worker explicitly receives `PREVIEW_DATA_MODE=synthetic`. Public production pages embed empty fixture arrays and render no synthetic-example buttons, including error and empty states. Existing browser-local notes/systems are not erased.
+- The approved TD artwork remains unchanged. The icon pipeline removes only the rectangular area outside the circular badge by applying an alpha mask to the existing 512px RGBA source. Header, PNG manifest icon, iOS touch icon, and favicon use the corrected transparent presentation; maskable icon keeps a navy safe-area background.
+- Brand icon URLs and the static-only service-worker cache are versioned. Do not clear site data or uninstall the PWA just to refresh a cached icon; browser-local notes and manual systems are still device-local.
+- No database changes, new bindings, imports, backfills, or backend mutations are included in this correction.
