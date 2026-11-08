@@ -21,6 +21,7 @@ function fixture(){
   const f=createTestEnv();
   f.env.KENTAURAI_DEPLOY_SHA=DEPLOY;
   f.env.LEGACY_BACKUP_TOKEN=TOKEN_TIME();
+  f.env.STORAGE_CLEANUP_TOKEN=Date.now()+'.'+'e'.repeat(64);
   f.env.LEGACY_BACKUP_ENABLED='true';
   f.env.HISTORICAL_RECOVERY_ACCOUNT_ID='b'.repeat(32);
   f.env.HISTORICAL_RECOVERY_DATABASE_ID='d8189e0e-6127-4ef2-88cc-534cb2217340';
@@ -113,6 +114,11 @@ test('full production Worker stack enforces the same capability gate',async()=>{
   }}),f.env);
   assert.equal(authorized.status,200);
   assert.deepEqual(await authorized.json(),{ok:true,scope:'legacy_backup_only'});
+  const cleanupAllowed=await deployedWorker.fetch(new Request(
+    'https://safe.invalid/v1/storage-cleanup/auth-check',{headers:{
+      authorization:'Bearer '+f.env.STORAGE_CLEANUP_TOKEN
+    }}),f.env);
+  assert.equal(cleanupAllowed.status,200,'the control cleanup credential must be valid');
   // The dedicated backup token cannot access ANY shared cleanup or restore route.
   for (const p of ['/v1/storage-cleanup/auth-check',
     '/v1/storage-cleanup/restoration/run/status',
