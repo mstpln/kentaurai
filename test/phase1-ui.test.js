@@ -193,3 +193,17 @@ test('manual-review systems show why intervention is required and deletion is cr
   assert.match(html, /else initializePersonalSync\(\);return true/);
   assert.match(html, /inte bekräftelse på inlämnat spel/);
 });
+
+test('horse cards show first 200 and last 400 times without min/km suffix',()=>{
+  const html=enhancePhase1Html('<html><head></head><body></body></html>', {asOfDate:'2028-01-02'});
+  const helper=html.match(/const pace1=[^\n]+/);
+  assert.ok(helper,'browser pace formatter exists');
+  const args=['1.07,6 min/km','1.13,6 min/km','1.07.2 min/km','07,6 min/km','1.15,0',null,'','–'];
+  const context=vm.createContext({});
+  vm.runInContext(helper[0]+';globalThis.formatPace=pace1;',context);
+  assert.deepEqual(args.map(value=>context.formatPace(value)),[
+    '1.07,6','1.13,6','1.07,2','1.07,6','1.15,0','–','–','–'
+  ]);
+  assert.match(html,/metric\('Första 200',pace1\(/);
+  assert.match(html,/metric\('Sista 400',pace1\(/);
+});

@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=a483c918392fc1db7ac6364399e2f3baf252ae1a
-release_nonce=2026-11-08-multipart-worker-fetch-manual-redirects-v1
+source_main=af9146d674a458c9d6ae4ed2a4ce1bad4b34f5a4
+release_nonce=2026-11-08-phase1-horse-pace-without-unit-v1
