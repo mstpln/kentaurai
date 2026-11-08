@@ -20,7 +20,7 @@ export async function manualExpansionBudgetDecision(env, options={}) {
   }
   const now=options.now||Date.now();
   const usage=await getCloudflareUsage(env,{
-    now:new Date(now), includeDailyUsage:true, includeWorkersUsage:true, includeR2DailyUsage:true, ...(options.fetchImpl?{fetchImpl:options.fetchImpl}:{})
+    now:new Date(now), includeDailyUsage:true, includeWorkersUsage:true, includeR2DailyUsage:true, includeQueryInsights:false, ...(options.fetchImpl?{fetchImpl:options.fetchImpl}:{})
   }).catch(()=>({available:false,metrics:[]}));
   const pressure=evaluateWorkloadPressure(usage,now);
   if (!pressure.allowExpansion) {

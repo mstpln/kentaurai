@@ -508,7 +508,7 @@ async function loadD1QueryInsights(fetchImpl, token, accountId, window) {
   }
 }
 
-async function d1Usage(env, fetchImpl, cycle, now) {
+async function d1Usage(env, fetchImpl, cycle, now, options = {}) {
   const accountId = String(env.CLOUDFLARE_ACCOUNT_ID || '').trim();
   const token = String(env.CLOUDFLARE_USAGE_API_TOKEN || '').trim();
   const data = await cloudflareJson(fetchImpl, 'https://api.cloudflare.com/client/v4/graphql', token, {
@@ -539,7 +539,8 @@ async function d1Usage(env, fetchImpl, cycle, now) {
     ? currentR2Storage(account.r2StorageAdaptiveGroups)
     : null;
   const queryInsightsWindow = recentQueryInsightsWindow(now);
-  const queryInsights = await loadD1QueryInsights(fetchImpl, token, accountId, queryInsightsWindow);
+  const queryInsights = options.includeQueryInsights === false ? [] :
+    await loadD1QueryInsights(fetchImpl, token, accountId, queryInsightsWindow);
   return {
     rowsRead: sumMetric(account.d1AnalyticsAdaptiveGroups, 'rowsRead'),
     rowsWritten: sumMetric(account.d1AnalyticsAdaptiveGroups, 'rowsWritten'),
@@ -600,7 +601,7 @@ export async function getCloudflareUsage(env, options = {}) {
   }
   try {
     const cycle = await billingCycle(env, fetchImpl, now);
-    const d1 = await d1Usage(env, fetchImpl, cycle, now);
+    const d1 = await d1Usage(env, fetchImpl, cycle, now, options);
     let billingByMetric = new Map();
     let billingCostAvailable = true;
     try {

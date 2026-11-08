@@ -106,3 +106,25 @@ test('Optional Workers API failure retains D1 coverage and never invents a zero 
   assert.equal(usage.metrics.some(x=>x.id==='workers_requests'),false);
   assert.equal(usage.additional.workersAccountAvailable,false);
 });
+
+test('a cost guard skips expensive Query Insights while the Drift view keeps them available',async()=>{
+  const {env}=createTestEnv();
+  env.CLOUDFLARE_ACCOUNT_ID='synthetic-account';
+  env.CLOUDFLARE_USAGE_API_TOKEN='synthetic-analytics-token';
+  const {fetchImpl,calls}=mockAnalyticsFetch();
+  const guarded=async(url,options)=>{
+    if(String(url).endsWith('/graphql') &&
+       JSON.parse(options.body).query.includes('d1QueriesAdaptiveGroups')) {
+      throw new Error('Query Insights must not be queried by a budget guard');
+    }
+    return fetchImpl(url,options);
+  };
+  const usage=await getCloudflareUsage(env,{
+    now:'2026-11-08T12:00:00.000Z',fetchImpl:guarded,
+    includeDailyUsage:true,includeQueryInsights:false
+  });
+  assert.notEqual(usage.available,false);
+  assert.deepEqual(usage.queryInsights,[]);
+  assert.equal(calls.length,3);
+  assert.equal(usage.metrics.find(x=>x.id==='d1_rows_read').used,8_000_000);
+});

@@ -42,6 +42,11 @@ synthetic query plans are **not** proof of actual production consumption.
    The existing Drift section receives only a small text status
    using its original styling, not a redesign.
 
+6. The daily budget guard and optional backfill gate skip Cloudflare's
+   seven-day D1 Query Insights scan. Detailed Query Insights remains
+   available when the user opens Drift, reducing account analytics
+   queries during unattended work.
+
 ## Current-data vs legacy workflows
 
 The only active cron remains 05:15 UTC once daily. No independent old
