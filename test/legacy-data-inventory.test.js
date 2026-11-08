@@ -76,3 +76,41 @@ test('manual inventory workflow has no deploy, destructive operations or secret 
   assert.doesNotMatch(workflow, /\b(?:wrangler deploy|wrangler d1 execute|db:migrate|secret put|secret delete|mode:\s*execute)\b/i);
   assert.doesNotMatch(script, /RAW_BUCKET|\.delete\(|\bDROP TABLE\b|\bDELETE FROM\b/);
 });
+
+test('all FKs pointing into any deletion candidate are owned by candidate tables only', () => {
+  // A candidate with a dependent table outside the candidate set must not be
+  // deleted; this check follows the complete current migration chain.
+  const { db } = createTestEnv();
+  const candidates = new Set(DELETE_CANDIDATE_GROUPS.flatMap((group) => LEGACY_INVENTORY_GROUPS[group]));
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all().map(row => row.name);
+  const blockers = [];
+  for (const child of tables) {
+    const safeIdentifier = '"' + child.replaceAll('"', '""') + '"';
+    const foreignKeys = db.prepare('PRAGMA foreign_key_list(' + safeIdentifier + ')').all();
+    for (const foreignKey of foreignKeys) {
+      if (candidates.has(foreignKey.table) && !candidates.has(child)) {
+        blockers.push({ referencedTable: foreignKey.table, dependentTable: child });
+      }
+    }
+  }
+  db.close();
+  assert.deepEqual(blockers, [],
+    'Candidate tables have non-candidate dependents. Do not build a deletion executor.');
+});
+
+test('schema audit does not confuse referenced official facts with deletion targets', () => {
+  const { db } = createTestEnv();
+  const candidates = new Set(DELETE_CANDIDATE_GROUPS.flatMap((group) => LEGACY_INVENTORY_GROUPS[group]));
+  const referencedParents = new Set();
+  for (const child of candidates) {
+    const safeIdentifier = '"' + child.replaceAll('"', '""') + '"';
+    for (const foreignKey of db.prepare('PRAGMA foreign_key_list(' + safeIdentifier + ')').all()) {
+      referencedParents.add(foreignKey.table);
+    }
+  }
+  db.close();
+  assert.ok(referencedParents.has('source_records'));
+  assert.ok(referencedParents.has('race_entries'));
+  assert.equal(candidates.has('source_records'), false);
+  assert.equal(candidates.has('race_entries'), false);
+});
