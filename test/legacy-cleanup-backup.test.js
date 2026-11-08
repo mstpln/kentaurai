@@ -184,6 +184,74 @@ test('after a later deployment, completed old receipts do not count as fresh bac
   f.db.close();
 });
 
+test('D1 is never queried during an in-progress Cloudflare export',async()=>{
+  const f=fixture(),api=fakeCloudflare();
+  const originalD1=f.env.DB;
+  let databaseUnavailable=false,queriedWhileLocked=0,polls=0;
+  f.env.DB={prepare:(sql)=>{
+    if(databaseUnavailable){queriedWhileLocked++;throw new Error('D1 unavailable during export');}
+    return originalD1.prepare(sql);
+  }};
+  const guardedFetch=async (url,options={})=>{
+    if(String(url).endsWith('/export')){
+      const input=JSON.parse(options.body);
+      if(!input.current_bookmark){
+        const response=await api.fetch(url,options);
+        databaseUnavailable=true;
+        return response;
+      }
+      if(polls++===0) return Response.json({success:true,result:{
+        type:'export',at_bookmark:BOOKMARK,status:'active'
+      }});
+      databaseUnavailable=false;
+    }
+    return api.fetch(url,options);
+  };
+  await beginLegacyBackup(f.env,{fetchImpl:guardedFetch});
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM legacy_cleanup_backups').get().n,0);
+  assert.equal((await getLegacyBackupStatus(f.env)).status,'exporting');
+  assert.equal((await pollLegacyBackup(f.env,{fetchImpl:guardedFetch})).status,'exporting');
+  assert.equal(queriedWhileLocked,0,'backup queried D1 during an active export');
+  assert.equal(databaseUnavailable,true);
+  const completed=await pollLegacyBackup(f.env,{fetchImpl:guardedFetch});
+  assert.equal(completed.backupVerified,true);
+  assert.equal(queriedWhileLocked,0);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM legacy_cleanup_backups').get().n,1);
+  f.db.close();
+});
+
+test('an unavailable D1 after SQL reached private R2 resumes receipt without re-downloading',async()=>{
+  const f=fixture(),api=fakeCloudflare();
+  await beginLegacyBackup(f.env,{fetchImpl:api.fetch});
+  const originalD1=f.env.DB;
+  let blocked=true;
+  f.env.DB={prepare:(sql)=>{
+    if(blocked)throw new Error('synthetic D1 temporarily unavailable');
+    return originalD1.prepare(sql);
+  }};
+  await assert.rejects(pollLegacyBackup(f.env,{fetchImpl:api.fetch}),
+    /synthetic D1 temporarily unavailable/);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM legacy_cleanup_backups').get().n,0);
+  assert.equal((await getLegacyBackupStatus(f.env)).status,'exporting');
+  blocked=false;
+  const completed=await pollLegacyBackup(f.env,{fetchImpl:api.fetch});
+  assert.equal(completed.status,'complete');
+  assert.equal(completed.backupVerified,true);
+  assert.equal(api.counts().downloads,1,'must not download SQL twice after R2 receipt stored');
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM legacy_cleanup_backups').get().n,1);
+  f.db.close();
+});
+
+test('oversized signed SQL is rejected before any permanent R2 backup object',async()=>{
+  const f=fixture(),api=fakeCloudflare({declaredBytes:5*1024*1024*1024+1});
+  await beginLegacyBackup(f.env,{fetchImpl:api.fetch});
+  await assert.rejects(pollLegacyBackup(f.env,{fetchImpl:api.fetch}),
+    /legacy_backup_size_unsupported/);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM legacy_cleanup_backups').get().n,0);
+  assert.equal((await getLegacyBackupStatus(f.env)).status,'exporting');
+  f.db.close();
+});
+
 test('missing or changed private R2 object invalidates even a completed receipt',async()=>{
   const f=fixture(),api=fakeCloudflare();
   await beginLegacyBackup(f.env,{fetchImpl:api.fetch});
