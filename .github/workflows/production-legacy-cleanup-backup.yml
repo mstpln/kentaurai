@@ -72,7 +72,7 @@ jobs:
           token="$(node -e "console.log(Date.now()+'.'+require('crypto').randomBytes(32).toString('hex'))")"
           echo "::add-mask::$token"
           echo "token=$token" >> "$GITHUB_OUTPUT"
-          printf '%s\n' "$token" | npx --yes wrangler@4.114.0 secret put STORAGE_CLEANUP_TOKEN --name "$WORKER_NAME"
+          printf '%s\n' "$token" | npx --yes wrangler@4.114.0 secret put LEGACY_BACKUP_TOKEN --name "$WORKER_NAME"
           printf '%s\n' "$CLOUDFLARE_API_TOKEN" | npx --yes wrangler@4.114.0 secret put HISTORICAL_BACKUP_API_TOKEN --name "$WORKER_NAME"
           printf '%s\n' "$CLOUDFLARE_ACCOUNT_ID" | npx --yes wrangler@4.114.0 secret put HISTORICAL_RECOVERY_ACCOUNT_ID --name "$WORKER_NAME"
           printf 'true\n' | npx --yes wrangler@4.114.0 secret put LEGACY_BACKUP_ENABLED --name "$WORKER_NAME"
@@ -138,7 +138,7 @@ jobs:
           set -euo pipefail
           names="$(npx --yes wrangler@4.114.0 secret list --name "$WORKER_NAME" --format json)"
           for name in LEGACY_BACKUP_ENABLED HISTORICAL_BACKUP_API_TOKEN \
-            HISTORICAL_RECOVERY_ACCOUNT_ID STORAGE_CLEANUP_TOKEN; do
+            HISTORICAL_RECOVERY_ACCOUNT_ID LEGACY_BACKUP_TOKEN; do
             if printf '%s' "$names" | jq -e --arg name "$name" \
               '.[] | select(.name == $name)' > /dev/null; then
               printf 'y\n' | npx --yes wrangler@4.114.0 secret delete "$name" --name "$WORKER_NAME"
