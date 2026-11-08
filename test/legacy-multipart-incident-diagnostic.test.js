@@ -280,3 +280,23 @@ test('manual D1-metadata diagnostic workflow is read-only and separate from back
   assert.doesNotMatch(yaml,/run-production-legacy-multipart-backup\.mjs|\/legacy-backup-multipart\/(?:start|poll|step|finalize|refresh)/);
   assert.doesNotMatch(yaml,/wrangler d1 execute|wrangler deploy|\/d1\/database\/.*\/export|\/d1\/database\/.*\/query/);
 });
+
+test('metadata workflow safely retries only a bounded 401 for GET after secret rollout',()=>{
+  const yaml=readFileSync(new URL(
+    '../.github/workflows/production-legacy-multipart-metadata-diagnostic.yml',
+    import.meta.url),'utf8');
+  const start=yaml.indexOf('      - name: Inspect Worker-side D1 metadata only');
+  const end=yaml.indexOf('      - name: Remove all temporary diagnostic',start);
+  assert.ok(start>=0&&end>start);
+  const section=yaml.slice(start,end);
+  assert.match(section,/for auth_try in \$\(seq 1 12\); do/);
+  assert.match(section,/--write-out '%\{http_code\}'/);
+  assert.match(section,/--output "\$RUNNER_TEMP\/private-d1-metadata.json"/);
+  assert.match(section,/if \[ "\$code" = 200 \]; then break; fi/);
+  assert.match(section,/if \[ "\$code" != 401 \]; then/);
+  assert.match(section,/if \[ "\$auth_try" -eq 12 \]; then/);
+  assert.match(section,/sleep 3/);
+  assert.doesNotMatch(section,/curl --fail|--data-binary|--data-raw|--request POST|--request DELETE/);
+  assert.doesNotMatch(section,/cat "\$RUNNER_TEMP\/private-d1-metadata.json"/);
+  assert.doesNotMatch(section,/legacy-backup-multipart\/(?:start|poll|step|refresh|finalize)/);
+});
