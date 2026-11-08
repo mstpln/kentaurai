@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       approval:
-        description: "Type BACKUP_D1_ONLY to create or verify a private Cloudflare backup"
+        description: "Type BACKUP_D1_ONLY. Large D1 exports can pause queries; 5 GiB single-upload limit."
         required: true
         type: string
 
