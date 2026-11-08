@@ -156,3 +156,40 @@ test('Phase 1 does not expose private APIs without the existing session', async 
     assert.equal(response.status, 401, path);
   }
 });
+
+test('personal data sync uses a same-origin authenticated JSON POST and refreshes on resumed PWA', async () => {
+  const originalFetch=globalThis.fetch,requests=[];
+  globalThis.fetch=async(path,options)=>{
+    requests.push({path,options});
+    return {ok:true,status:200,json:async()=>({ok:true})};
+  };
+  try{
+    const context=vm.createContext({fetch:globalThis.fetch});
+    vm.runInContext(phase1ApiBrowserSource + ';globalThis.adapter=phase1Api;',context);
+    await context.adapter.personalSync({notes:[]});
+    assert.equal(requests.length,1);
+    const request=requests[0];
+    assert.equal(request.path,'/app/api/travdata/personal');
+    assert.equal(request.options.method,'POST');
+    assert.equal(request.options.credentials,'same-origin');
+    assert.equal(request.options.headers['content-type'],'application/json');
+    assert.equal(JSON.parse(request.options.body).notes.length,0);
+  }finally{globalThis.fetch=originalFetch;}
+  const html=enhancePhase1Html('<html><head></head><body></body></html>');
+  assert.match(html,/initializePersonalSync\(\)/);
+  assert.match(html,/visibilitychange.*initializePersonalSync\(true\)/);
+  assert.match(html,/tombstones/);
+  assert.match(html,/Kunde inte spara lokalt/);
+});
+
+test('manual-review systems show why intervention is required and deletion is cross-device', () => {
+  const html = enhancePhase1Html('<html><head></head><body></body></html>', { asOfDate:'2028-01-02' });
+  assert.match(html, /stateLabel=settled\?'Avgjort':needsReview\?'Kontroll krävs':'Väntar'/);
+  assert.match(html, /needsReview\?manualReviewText\(s\.reviewReason\)/);
+  assert.match(html, /Strykning eller reserv måste kontrolleras/);
+  assert.match(html, /Raderingen synkroniseras även till dina andra enheter/);
+  assert.doesNotMatch(html, /Endast lokal data påverkas/);
+  assert.match(html, /newestRecords\(local\.systems,remote\.systems,true\)/);
+  assert.match(html, /else initializePersonalSync\(\);return true/);
+  assert.match(html, /inte bekräftelse på inlämnat spel/);
+});

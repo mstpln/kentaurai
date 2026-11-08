@@ -48,8 +48,8 @@ export function completedPhase1Starts(items = [], asOfDate) {
 export const phase1ApiBrowserSource = `
 const completedPhase1Starts=(${completedPhase1Starts.toString()});
 const phase1Api={
-  async get(path){
-    const response=await fetch('/app/api'+path,{headers:{accept:'application/json'},credentials:'same-origin'});
+  async get(path,options={}){
+    const response=await fetch('/app/api'+path,{...options,headers:{accept:'application/json',...(options.headers||{})},credentials:'same-origin'});
     if(response.status===401){location.href='/app/login';throw new Error('Inloggningen har gått ut.')}
     if(!response.ok){const body=await response.text().catch(()=> '');throw new Error(body||'Kunde inte läsa data ('+response.status+').')}
     return response.json()
@@ -65,5 +65,8 @@ const phase1Api={
   searchTracks(query){return this.get('/tracks?q='+encodeURIComponent(query)+'&limit=10&offset=0')},
   search(query){return this.get('/search?q='+encodeURIComponent(query))},
   settingsStatus(){return this.get('/settings/status')},
+  personalPage(offset=0){return this.get('/travdata/personal?limit=100&offset='+Number(offset))},
+  personalSync(payload){return this.get('/travdata/personal',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)})},
+
   historicalRounds(type=''){return this.get('/games?limit=50&offset=0'+(type?'&type='+encodeURIComponent(type):''))}
 };`;

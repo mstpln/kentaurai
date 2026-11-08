@@ -46,14 +46,15 @@ export function summarizeSystems(systems = []) {
     knownNumber(system.payoutSek) &&
     knownNumber(system.stakeSek)
   );
-  const stake = settled.reduce((total, system) => total + Number(system.stakeSek || 0), 0);
+  const stake = systems.reduce((total, system) => total + (knownNumber(system.stakeSek) ? Number(system.stakeSek) : 0), 0);
+  const settledStake = settled.reduce((total, system) => total + Number(system.stakeSek), 0);
   const payout = settled.reduce((total, system) => total + Number(system.payoutSek || 0), 0);
   return {
     registeredCount: systems.length,
     settledCount: settled.length,
     stakeSek: stake,
     payoutSek: payout,
-    netSek: resultNet(payout, stake),
+    netSek: settled.length ? resultNet(payout, settledStake) : null,
     pendingCount: systems.length - settled.length
   };
 }

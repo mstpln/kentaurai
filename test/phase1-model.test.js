@@ -48,7 +48,7 @@ test('selection changes immediately alter deterministic arithmetic', () => {
   assert.equal(calculateSystem(selections).rows, 1);
 });
 
-test('financial totals exclude pending and incomplete settlements; zero payout is a real loss', () => {
+test('total stake includes all registered systems but payout and net use only settled systems', () => {
   const data = [
     system({ settlementState: 'settled', stakeSek: 100, payoutSek: 0 }),
     system({ settlementState: 'settled', stakeSek: 200, payoutSek: 200 }),
@@ -59,7 +59,7 @@ test('financial totals exclude pending and incomplete settlements; zero payout i
   const summary = summarizeSystems(data);
   assert.equal(summary.registeredCount, 5);
   assert.equal(summary.settledCount, 3);
-  assert.equal(summary.stakeSek, 600);
+  assert.equal(summary.stakeSek, 18600);
   assert.equal(summary.payoutSek, 800);
   assert.equal(summary.netSek, 200);
   assert.equal(resultNet(0, 100), -100);

@@ -115,11 +115,13 @@ test('recent automatic promotion selectors seek through the bounded source index
   }
 });
 
-test('morning scheduler centralizes promotion jobs and stops all later processors after abnormal cumulative cost', () => {
+test('morning scheduler preserves essential processing after abnormal cost, deferring only supporting stages', () => {
   const source = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
   assert.match(source, /recent_start_points_promotion/);
   assert.match(source, /recent_official_snapshot_promotion/);
-  assert.match(source, /async function critical\(name, action\)[\s\S]*?if \(safety\.stopped\)/);
+  assert.match(source, /morningStageDecision\(name, safety, pressure\)/);
+  assert.match(source, /await runStage\('post_race_settlement'/);
+  assert.match(source, /await runStage\('xlabs_daily_incremental'/);
   assert.match(source, /daysAhead: 6/);
 });
 

@@ -29,6 +29,8 @@ import { ensureDailyOfficialHistoryJobs, getHistoricalBackfill, runHistoricalBac
 import { ensureRecentDailyXlabsJobs, getXlabsBackfill, runXlabsBackfillBatch, runXlabsBackfillStep, startXlabsBackfill } from './import/xlabs-backfill.js';
 import { captureCalendar, captureGame, captureRace } from './provider/official.js';
 import { runPostRaceSettlementBatch } from './post-race-settlement-v1.js';
+import { settleNextTravdataManualSystems } from './travdata-manual-settlement.js';
+import { isBudgetedExpansion, manualExpansionBudgetDecision } from './manual-usage-gate.js';
 import { getStatisticsDataBackfillStatus, runNextStatisticsDataBackfill } from './statistics-data-backfill-v1.js';
 import { captureXlabsDate } from './provider/xlabs.js';
 import { captureXlabsRaceJson } from './provider/xlabs-race.js';
@@ -67,7 +69,8 @@ import {
   settleStorageCleanupAuditPage,
   startOrResumeStorageCleanupAudit,
 } from './storage-cleanup-audit.js';
-import { getAutomationControl } from './settings-drift.js';
+import { getAutomationControl, getCloudflareUsage } from './settings-drift.js';
+import { MORNING_STAGE_BUDGETS, MORNING_RUN_BUDGET, NORMALIZATION_CHUNK_BUDGET, evaluateWorkloadPressure, morningStageDecision } from './morning-budget.js';
 
 const LIVE_MORNING_CRON = '15 5 * * *';
 const DAILY_LIVE_NORMALIZE_RUNS = 16;
@@ -265,6 +268,16 @@ async function handleFetch(request, env) {
       ? requireStorageCleanupAdmin(request, env)
       : requireAdmin(request, env);
     if (denied) return denied;
+  }
+  if (request.method === 'POST' && isBudgetedExpansion(path)) {
+    const decision = await manualExpansionBudgetDecision(env);
+    if (!decision.allowed) {
+      return json({
+        error:'manual_expansion_paused_for_usage_safety',
+        level:decision.level,
+        reason:decision.reason
+      },429);
+    }
   }
   // The source-bound audit may still perform read-only checks and planning.
   // Destructive session and execute routes are disabled for ALL credentials,
@@ -633,7 +646,7 @@ async function handleFetch(request, env) {
 
 async function runScheduledPart(name, env, fn) {
   try {
-    const observed = await observeD1Operation(env, `morning_cron:${name}`, fn);
+    const observed = await observeD1Operation(env, `morning_cron:${name}`, fn, MORNING_STAGE_BUDGETS[name]);
     return { name, ok: true, result: observed.value, cost: observed.metrics, safetyStop: observed.safetyStop };
   } catch (error) {
     console.error(error);
@@ -650,15 +663,40 @@ async function runLiveNormalizationMorning(env) {
   let completedSources = 0;
   let sourceGaps = 0;
   let finalStatus = 'idle';
+  let pausedByBudget = false;
+  const spent = { rowsRead:0, rowsWritten:0, durationMs:0 };
+  const stageBudget = MORNING_STAGE_BUDGETS.live_normalize_morning;
+
+  // A bounded source chunk is the smallest safe restart boundary. Never stop
+  // in the middle of a source's database writes or its durable cursor update.
   for (let index = 0; index < DAILY_LIVE_NORMALIZE_RUNS; index += 1) {
-    const result = await normalizeNextPendingOfficialGame(env, { maxSteps: 12 });
+    const observed = await observeD1Operation(
+      env, 'morning_cron:live_normalize_chunk',
+      (chunkEnv) => normalizeNextPendingOfficialGame(chunkEnv, { maxSteps:12 }),
+      NORMALIZATION_CHUNK_BUDGET
+    );
+    const result = observed.value;
     runCount += 1;
+    spent.rowsRead += observed.metrics.rowsRead;
+    spent.rowsWritten += observed.metrics.rowsWritten;
+    spent.durationMs += observed.metrics.durationMs;
     finalStatus = result?.status || 'unknown';
     if (result?.status === 'completed_source') completedSources += 1;
     if (result?.status === 'source_gap') sourceGaps += 1;
     if (!result || result.status === 'idle') break;
+    if (observed.safetyStop
+        || spent.rowsRead >= stageBudget.rowsRead
+        || spent.rowsWritten >= stageBudget.rowsWritten
+        || spent.durationMs >= stageBudget.durationMs) {
+      pausedByBudget = true;
+      break;
+    }
   }
-  return { runCount, maxRuns: DAILY_LIVE_NORMALIZE_RUNS, completedSources, sourceGaps, finalStatus };
+  return {
+    runCount, maxRuns: DAILY_LIVE_NORMALIZE_RUNS,
+    completedSources, sourceGaps, finalStatus,
+    pausedByBudget, budgetMetrics:spent
+  };
 }
 
 async function runDailyOfficialIncremental(env, scheduledTime) {
@@ -748,15 +786,21 @@ async function runDailyXlabsIncremental(env, scheduledTime) {
 
 export async function handleScheduled(controller, env) {
   if (controller.cron !== LIVE_MORNING_CRON) {
-    return { skipped: true, reason: 'unsupported_cron', cron: controller.cron };
+    return { skipped:true, reason:'unsupported_cron', cron:controller.cron };
   }
-
   const scheduledAt = new Date(controller.scheduledTime || Date.now()).toISOString();
   const startedAt = new Date().toISOString();
   const id = `cron_${crypto.randomUUID()}`;
   const parts = [];
-  const safety = createRunSafetyState();
+  const safety = createRunSafetyState(MORNING_RUN_BUDGET);
   let automationStopReason = null;
+
+  // Cloudflare analytics are delayed. Missing metrics are never zero usage.
+  // They cannot disable the bounded chain of current V85/V86 data.
+  const usage = await getCloudflareUsage(env, {
+    now:new Date(controller.scheduledTime || Date.now()), includeDailyUsage:true
+  }).catch(() => ({ available:false, reason:'usage_unavailable' }));
+  const pressure = evaluateWorkloadPressure(usage, controller.scheduledTime || Date.now());
 
   async function automationAllowed(name) {
     if (automationStopReason) {
@@ -775,10 +819,11 @@ export async function handleScheduled(controller, env) {
     return false;
   }
 
-  async function critical(name, action) {
+  async function runStage(name, action) {
     if (!(await automationAllowed(name))) return;
-    if (safety.stopped) {
-      parts.push(skippedScheduledPart(name, safety.reason));
+    const decision = morningStageDecision(name, safety, pressure);
+    if (!decision.run) {
+      parts.push(skippedScheduledPart(name, decision.reason));
       return;
     }
     const part = await runScheduledPart(name, env, (observedEnv) => action(observedEnv));
@@ -786,33 +831,27 @@ export async function handleScheduled(controller, env) {
     applyRunSafetyResult(safety, name, part);
   }
 
-  async function nonCritical(name, action) {
-    if (!(await automationAllowed(name))) return;
-    if (safety.stopped) {
-      parts.push(skippedScheduledPart(name, safety.reason));
-      return;
-    }
-    const part = await runScheduledPart(name, env, (observedEnv) => action(observedEnv));
-    parts.push(part);
-    applyRunSafetyResult(safety, name, part);
-  }
+  const recentPromotionCutoff = new Date(Number(controller.scheduledTime || Date.now()) - 3 * 86_400_000).toISOString();
 
-  const recentPromotionCutoff = new Date(Number(controller.scheduledTime || Date.now()) - (3 * 86_400_000)).toISOString();
-
-  await critical('live_capture_morning', (observedEnv) => captureUpcomingOfficialGames(observedEnv, controller.scheduledTime, {
-    includeToday: true,
-    daysAhead: 6
+  // Essential current V85/V86 steps have separate budgets; previous cost
+  // can no longer starve results, settlement or X-Labs.
+  await runStage('live_capture_morning', (observedEnv) => captureUpcomingOfficialGames(observedEnv, controller.scheduledTime, {
+    includeToday:true, daysAhead: 6
   }));
-  await critical('live_normalize_morning', (observedEnv) => runLiveNormalizationMorning(observedEnv));
-  await nonCritical('official_daily_incremental', (observedEnv) => runDailyOfficialIncremental(observedEnv, controller.scheduledTime));
-  await nonCritical('recent_start_points_promotion', (observedEnv) => syncOnePendingHorseStartPointSource(observedEnv, {
+  await runStage('live_normalize_morning', (observedEnv) => runLiveNormalizationMorning(observedEnv));
+  await runStage('official_daily_incremental', (observedEnv) => runDailyOfficialIncremental(observedEnv, controller.scheduledTime));
+  await runStage('post_race_settlement', (observedEnv) => runPostRaceSettlementBatch(observedEnv));
+  await runStage('manual_system_settlement', (observedEnv) => settleNextTravdataManualSystems(observedEnv));
+  await runStage('xlabs_daily_incremental', (observedEnv) => runDailyXlabsIncremental(observedEnv, controller.scheduledTime));
+
+  // Supporting promotion is paused on abnormal cost or emergency billing
+  // pressure, never after arbitrary small legacy thresholds.
+  await runStage('recent_start_points_promotion', (observedEnv) => syncOnePendingHorseStartPointSource(observedEnv, {
     minFetchedAt: recentPromotionCutoff
   }));
-  await nonCritical('recent_official_snapshot_promotion', (observedEnv) => syncOnePendingOfficialSnapshotSource(observedEnv, {
+  await runStage('recent_official_snapshot_promotion', (observedEnv) => syncOnePendingOfficialSnapshotSource(observedEnv, {
     minFetchedAt: recentPromotionCutoff
   }));
-  await critical('post_race_settlement', (observedEnv) => runPostRaceSettlementBatch(observedEnv));
-  await nonCritical('xlabs_daily_incremental', (observedEnv) => runDailyXlabsIncremental(observedEnv, controller.scheduledTime));
 
   const failures = parts.filter((part) => !part.ok);
   await env.DB.prepare(`
@@ -820,15 +859,18 @@ export async function handleScheduled(controller, env) {
       (id, source_type, started_at, finished_at, status, error_count, error_json, metadata_json)
     VALUES (?, 'scheduled_orchestrator', ?, ?, ?, ?, ?, ?)
   `).bind(
-    id,
-    startedAt,
-    new Date().toISOString(),
+    id, startedAt, new Date().toISOString(),
     failures.length ? 'failed' : 'success',
     failures.length,
     failures.length ? JSON.stringify(failures.map(({ name, error }) => ({ name, error }))) : null,
-    JSON.stringify({ cron: controller.cron, scheduledAt, safety, parts })
+    JSON.stringify({
+      cron:controller.cron, scheduledAt, safety,
+      usagePressure:{ level:pressure.level, reason:pressure.reason || null,
+        telemetryAvailable:pressure.telemetryAvailable },
+      parts
+    })
   ).run();
-  return { skipped: false, parts, safety };
+  return { skipped:false, parts, safety, usagePressure:pressure.level };
 }
 
 export default {
