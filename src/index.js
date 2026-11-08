@@ -2,6 +2,7 @@ import { requireAdmin, requireStorageCleanupAdmin } from './auth.js';
 import { archiveRawPayload } from './raw.js';
 import { importEditorial } from './import/editorial.js';
 import { legacyBackupCapability, getLegacyBackupStatus, beginLegacyBackup, pollLegacyBackup } from './legacy-cleanup-backup.js';
+import { multipartBackupCapability, privateMultipartBackup } from './legacy-multipart-backup.js';
 import { importReferenceRound } from './import/reference-round-safe.js';
 import { normalizeCapturedOfficialGameSequential } from './import/official-live-sequential.js';
 import { captureUpcomingOfficialGames, normalizeNextPendingOfficialGame } from './import/official-live-scheduled.js';
@@ -267,7 +268,9 @@ async function handleFetch(request, env) {
   if (path.startsWith('/v1/')) {
     // Backup credentials are scoped exclusively to backup endpoints:
     // they MUST NOT authorize historical restore, cleanup or admin routes.
-    const denied = path.startsWith('/v1/storage-cleanup/legacy-backup/')
+    const denied = path.startsWith('/v1/storage-cleanup/legacy-backup-multipart/')
+      ? (multipartBackupCapability(request,env) ? null : json({error:'unauthorized'},401))
+      : path.startsWith('/v1/storage-cleanup/legacy-backup/')
       ? (legacyBackupCapability(request,env) ? null : json({error:'unauthorized'},401))
       : path.startsWith('/v1/storage-cleanup/')
         ? requireStorageCleanupAdmin(request, env)
@@ -282,6 +285,33 @@ async function handleFetch(request, env) {
         level:decision.level,
         reason:decision.reason
       },429);
+    }
+  }
+  // Isolated backup-only multipart capability. Explicit manual invocation,
+  // all state and source SQL remain within private Cloudflare Worker/R2.
+  if(path.startsWith('/v1/storage-cleanup/legacy-backup-multipart/')){
+    if(!multipartBackupCapability(request,env))
+      return json({error:'unauthorized'},401);
+    const action=path.slice('/v1/storage-cleanup/legacy-backup-multipart/'.length);
+    try {
+      if(request.method==='GET'&&action==='auth-check')
+        return json({ok:true,scope:'legacy_multipart_backup_only'});
+      if(request.method==='GET'&&action==='status')
+        return json(await privateMultipartBackup.status(env));
+      if(request.method==='POST'&&action==='start')
+        return json(await privateMultipartBackup.start(env));
+      if(request.method==='POST'&&action==='poll')
+        return json(await privateMultipartBackup.poll(env));
+      if(request.method==='POST'&&action==='refresh')
+        return json(await privateMultipartBackup.refresh(env));
+      if(request.method==='POST'&&action==='step')
+        return json(await privateMultipartBackup.step(env));
+      if(request.method==='POST'&&action==='finalize')
+        return json(await privateMultipartBackup.finalize(env));
+      return json({error:'not_found'},404);
+    }catch{
+      console.error('private multipart backup safely stopped');
+      return json({error:'legacy_multipart_backup_unavailable'},409);
     }
   }
   // Explicitly manual BACKUP ONLY: different short-lived capability from
