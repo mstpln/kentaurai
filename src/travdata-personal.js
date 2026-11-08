@@ -167,7 +167,7 @@ export async function getTravdataPersonal(env, options = {}) {
     env.DB.prepare(
       'SELECT s.id,s.game_round_id,s.game_type,s.system_name,s.selections_json,s.row_count,' +
       's.stake_sek,s.created_at,s.updated_at,s.settlement_state,s.payout_sek,s.net_sek,' +
-      's.winner_numbers_json,s.correct_legs,gr.round_date, ' +
+      's.winner_numbers_json,s.correct_legs,s.review_reason,gr.round_date, ' +
       '(SELECT GROUP_CONCAT(name, \' · \') FROM (' +
       ' SELECT DISTINCT t2.canonical_name AS name FROM game_legs gl2' +
       ' JOIN races r2 ON r2.id=gl2.race_id JOIN tracks t2 ON t2.id=r2.track_id' +
@@ -195,7 +195,7 @@ export async function getTravdataPersonal(env, options = {}) {
       createdAt:s.created_at,updatedAt:s.updated_at,source:'server',
       settlementState:s.settlement_state,payoutSek:s.payout_sek,
       netSek:s.net_sek,winnerNumbers:s.winner_numbers_json ? JSON.parse(s.winner_numbers_json) : null,
-      correctLegs:s.correct_legs
+      correctLegs:s.correct_legs,reviewReason:s.review_reason
     })),
     tombstones:tr.slice(0,limit).map(t=>({kind:t.kind,id:t.id,deletedAt:t.deleted_at})),
     hasMore:Math.max(nr.length,sr.length,tr.length)>limit,

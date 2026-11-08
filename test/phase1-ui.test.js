@@ -181,3 +181,15 @@ test('personal data sync uses a same-origin authenticated JSON POST and refreshe
   assert.match(html,/tombstones/);
   assert.match(html,/Kunde inte spara lokalt/);
 });
+
+test('manual-review systems show why intervention is required and deletion is cross-device', () => {
+  const html = enhancePhase1Html('<html><head></head><body></body></html>', { asOfDate:'2028-01-02' });
+  assert.match(html, /stateLabel=settled\?'Avgjort':needsReview\?'Kontroll krävs':'Väntar'/);
+  assert.match(html, /needsReview\?manualReviewText\(s\.reviewReason\)/);
+  assert.match(html, /Strykning eller reserv måste kontrolleras/);
+  assert.match(html, /Raderingen synkroniseras även till dina andra enheter/);
+  assert.doesNotMatch(html, /Endast lokal data påverkas/);
+  assert.match(html, /newestRecords\(local\.systems,remote\.systems,true\)/);
+  assert.match(html, /else initializePersonalSync\(\);return true/);
+  assert.match(html, /inte bekräftelse på inlämnat spel/);
+});

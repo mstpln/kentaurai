@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createTestEnv } from './helpers/d1.js';
+import { readFileSync } from 'node:fs';
 import { getTravdataPersonal, syncTravdataPersonal } from '../src/travdata-personal.js';
 import worker from '../src/worker-v079.js';
 import { createAppSessionCookie } from '../src/app-auth.js';
@@ -130,4 +131,28 @@ test('saved manual rounds preserve all unique track names rather than a missing 
   await syncTravdataPersonal(env,{systems:[system]});
   const page=await getTravdataPersonal(env);
   assert.equal(page.systems[0].trackNames,'Halmstad · Åby');
+});
+
+test('manual settlement review reason is returned without inventing a payout',async()=>{
+  const {env}=createTestEnv();
+  await seedRound(env);
+  await syncTravdataPersonal(env,{systems:[system]});
+  await env.DB.prepare(
+    "UPDATE travdata_manual_systems SET settlement_state='manual_review',review_reason='selected_scratch_requires_verified_reserve' WHERE id=?"
+  ).bind(system.id).run();
+  const page=await getTravdataPersonal(env);
+  assert.equal(page.systems[0].settlementState,'manual_review');
+  assert.equal(page.systems[0].reviewReason,'selected_scratch_requires_verified_reserve');
+  assert.equal(page.systems[0].payoutSek,null);
+});
+
+test('production release verifies new personal tables and private authentication before announcing success',()=>{
+  const workflow=readFileSync(new URL('../.github/workflows/production-release-v060.yml',import.meta.url),'utf8');
+  assert.match(workflow,/Verify TravData personal schema before deploying/);
+  assert.match(workflow,/0070_travdata_personal_v1\.sql/);
+  assert.match(workflow,/SELECT id,horse_id,race_entry_id,note_text,updated_at FROM travdata_horse_notes LIMIT 0/);
+  assert.match(workflow,/SELECT id,game_round_id,settlement_state,next_check_at,review_reason,payout_sek FROM travdata_manual_systems LIMIT 0/);
+  assert.match(workflow,/SELECT kind,id,deleted_at FROM travdata_personal_tombstones LIMIT 0/);
+  assert.match(workflow,/unauthenticated TravData POST to return 401/);
+  assert.match(workflow,/\/app\/api\/travdata\/personal/);
 });
