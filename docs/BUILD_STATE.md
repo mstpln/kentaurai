@@ -1,3 +1,21 @@
+## 2026-11-08 private large-backup build (PR pending; no production execution)
+
+- Current verified main is 1d10401721a1b3df84bcd474976b253cd523be3e.
+- Live read-only inventory (Actions 42515861630) measured D1 5.32 GiB,
+  legacy cleanup candidates 3,728, first-stage 3,681, protected saved systems 9
+  with 208 selections, and no direct orphans in five targeted tests.
+- The existing D1-to-R2 single-upload backup is blocked correctly because the
+  database exceeds 4 GiB conservative preflight and 5 GiB per PUT.
+- This build adds isolated, manually approved private multipart backup using
+  fixed 16 MiB signed-source range reads, R2 chunk ETags and SHA-256 checks,
+  private resumable progress, explicit source and deployed-SHA fencing, and
+  final private D1 backup receipt after export completes.
+- No Cloudflare production export/backup has been attempted; signed D1 export
+  URL byte-range support is not yet proven against private production.
+- Independent private restore verification, full application dependency audit,
+  zero-write deletion rehearsal, and separate approval are required before
+  deleting legacy data. No automatic export or destructive path added.
+
 ## October 13 stale historical inventory status preflight (pending PR)
 
 - Manual production inventory run 38359980370 reused a prior active inventory with 3,012 missing source representations, 2,463 candidate facts and 549 quarantined, then received HTTP 409 on its first scan-step. Full QA, exact deployment, auth cleanup and post-failure health passed. The sanitized public response cannot prove the underlying 409 cause.
