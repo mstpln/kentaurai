@@ -167,6 +167,23 @@ test('full D1 export is streamed to private R2; receipts are verified and not re
   isolated.close();f.db.close();
 });
 
+test('after a later deployment, completed old receipts do not count as fresh backup',async()=>{
+  const f=fixture(),api=fakeCloudflare();
+  await beginLegacyBackup(f.env,{fetchImpl:api.fetch});
+  await pollLegacyBackup(f.env,{fetchImpl:api.fetch});
+  f.env.KENTAURAI_DEPLOY_SHA='b'.repeat(40);
+  const status=await getLegacyBackupStatus(f.env);
+  assert.equal(status.status,'none');
+  assert.equal(status.backupVerified,false);
+  const fresh=await beginLegacyBackup(f.env,{fetchImpl:api.fetch});
+  assert.equal(fresh.status,'exporting');
+  const finished=await pollLegacyBackup(f.env,{fetchImpl:api.fetch});
+  assert.equal(finished.sourceSha,'b'.repeat(40));
+  assert.equal(finished.backupVerified,true);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM legacy_cleanup_backups').get().n,2);
+  f.db.close();
+});
+
 test('missing or changed private R2 object invalidates even a completed receipt',async()=>{
   const f=fixture(),api=fakeCloudflare();
   await beginLegacyBackup(f.env,{fetchImpl:api.fetch});
