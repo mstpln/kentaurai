@@ -20,7 +20,7 @@ const SIGNED_URL='https://download.cloudflarestorage.com/synthetic-test-export';
 function fixture(){
   const f=createTestEnv();
   f.env.KENTAURAI_DEPLOY_SHA=DEPLOY;
-  f.env.STORAGE_CLEANUP_TOKEN=TOKEN_TIME();
+  f.env.LEGACY_BACKUP_TOKEN=TOKEN_TIME();
   f.env.LEGACY_BACKUP_ENABLED='true';
   f.env.HISTORICAL_RECOVERY_ACCOUNT_ID='b'.repeat(32);
   f.env.HISTORICAL_RECOVERY_DATABASE_ID='d8189e0e-6127-4ef2-88cc-534cb2217340';
@@ -80,20 +80,22 @@ test('private Worker refuses admin token, stale, absent and preview mode backup 
   const url='https://safe.invalid/v1/storage-cleanup/legacy-backup/auth-check';
   const response=(token)=>worker.fetch(new Request(url,{headers:{authorization:'Bearer '+token}}),f.env);
   assert.equal((await response('wrong')).status,401);
-  assert.equal((await response(f.env.ADMIN_TOKEN)).status,403);
-  f.env.LEGACY_BACKUP_ENABLED='false';
-  assert.equal((await response(f.env.STORAGE_CLEANUP_TOKEN)).status,403);
-  f.env.LEGACY_BACKUP_ENABLED='true';
-  f.env.STORAGE_CLEANUP_TOKEN=String(Date.now()-3600_001)+'.'+'c'.repeat(64);
+  assert.equal((await response(f.env.ADMIN_TOKEN)).status,401);
+  // A previously authorized cleanup token must never authorize a backup.
   assert.equal((await response(f.env.STORAGE_CLEANUP_TOKEN)).status,401);
-  f.env.STORAGE_CLEANUP_TOKEN=TOKEN_TIME();
-  assert.equal((await response(f.env.STORAGE_CLEANUP_TOKEN)).status,200);
+  f.env.LEGACY_BACKUP_ENABLED='false';
+  assert.equal((await response(f.env.LEGACY_BACKUP_TOKEN)).status,401);
+  f.env.LEGACY_BACKUP_ENABLED='true';
+  f.env.LEGACY_BACKUP_TOKEN=String(Date.now()-3600_001)+'.'+'c'.repeat(64);
+  assert.equal((await response(f.env.LEGACY_BACKUP_TOKEN)).status,401);
+  f.env.LEGACY_BACKUP_TOKEN=TOKEN_TIME();
+  assert.equal((await response(f.env.LEGACY_BACKUP_TOKEN)).status,200);
   assert.equal(legacyBackupCapability(new Request(url,{
-    headers:{authorization:'Bearer '+f.env.STORAGE_CLEANUP_TOKEN}
+    headers:{authorization:'Bearer '+f.env.LEGACY_BACKUP_TOKEN}
   }),f.env),true);
   f.env.PREVIEW_DATA_MODE='synthetic';
   const blocked=await worker.fetch(new Request('https://safe.invalid/v1/storage-cleanup/legacy-backup/status',{
-    headers:{authorization:'Bearer '+f.env.STORAGE_CLEANUP_TOKEN}
+    headers:{authorization:'Bearer '+f.env.LEGACY_BACKUP_TOKEN}
   }),f.env);
   assert.equal(blocked.status,409);
   f.db.close();
@@ -105,12 +107,26 @@ test('full production Worker stack enforces the same capability gate',async()=>{
   const admin=await deployedWorker.fetch(new Request(url,{headers:{
     authorization:'Bearer '+f.env.ADMIN_TOKEN
   }}),f.env);
-  assert.equal(admin.status,403);
+  assert.equal(admin.status,401);
   const authorized=await deployedWorker.fetch(new Request(url,{headers:{
-    authorization:'Bearer '+f.env.STORAGE_CLEANUP_TOKEN
+    authorization:'Bearer '+f.env.LEGACY_BACKUP_TOKEN
   }}),f.env);
   assert.equal(authorized.status,200);
   assert.deepEqual(await authorized.json(),{ok:true,scope:'legacy_backup_only'});
+  // The dedicated backup token cannot access ANY shared cleanup or restore route.
+  for (const p of ['/v1/storage-cleanup/auth-check',
+    '/v1/storage-cleanup/restoration/run/status',
+    '/v1/storage-cleanup/restoration/run/start',
+    '/v1/storage-cleanup/session/start',
+    '/v1/rounds/synthetic-round']) {
+    const response=await deployedWorker.fetch(new Request('https://safe.invalid'+p,{
+      method:p.endsWith('/start')?'POST':'GET',
+      headers:{authorization:'Bearer '+f.env.LEGACY_BACKUP_TOKEN,
+        'content-type':'application/json'},
+      ...(p.endsWith('/start')?{body:'{}'}:{})
+    }),f.env);
+    assert.equal(response.status,401,'backup token escaped scope at '+p);
+  }
   f.db.close();
 });
 
@@ -189,6 +205,8 @@ test('backup-only code and workflow include no production delete or upload-to-ru
     /secrets\.CLOUDFLARE_API_TOKEN/,
     'Cloudflare production token must not be inherited by the QA job');
   assert.match(workflow,/secret delete/);
+  assert.match(workflow,/secret put LEGACY_BACKUP_TOKEN/);
+  assert.doesNotMatch(workflow,/secret put STORAGE_CLEANUP_TOKEN/);
   assert.doesNotMatch(workflow,/d1 export\s+|wrangler d1 execute.+DELETE|restoration\/run\/apply-step|HISTORICAL_REPAIR_ENABLED/);
   assert.doesNotMatch(script,/\bDELETE FROM\b|\bDROP TABLE\b|\.delete\(/);
   assert.match(script,/redirect:'error'/);
