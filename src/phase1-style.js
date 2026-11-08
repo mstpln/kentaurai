@@ -47,4 +47,62 @@ export const phase1Css = `
  .p1-stat-label{font-size:10px}.p1-stat-pair strong{font-size:13px}
  .p1-history-item{font-size:11px}
 }
+
+/* Compact upcoming horse cards: one shared left edge, narrow information rows,
+   a subtle information/stat divider and source-backed start-status treatments. */
+.p1-horse-compact{position:relative;padding:10px 11px 9px}
+.p1-compact-body{min-width:0;padding-right:28px}
+.p1-compact-name-row{display:flex;align-items:baseline;gap:6px;min-width:0;white-space:nowrap;line-height:1.35}
+.p1-compact-number{font-size:14px;font-weight:700;color:var(--accent-soft);flex:0 0 auto}
+.p1-compact-horse-name{font-size:14px;font-weight:650;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}
+.p1-compact-bio{font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;max-width:48%}
+.p1-compact-info,.p1-compact-form{display:flex;align-items:center;gap:8px;min-width:0;white-space:nowrap;color:var(--muted);font-size:10px;line-height:15px}
+.p1-compact-info{margin-top:3px}.p1-compact-form{margin-top:3px}
+.p1-driver-name{min-width:0;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;white-space:nowrap}
+.p1-info-group{display:inline-flex;align-items:center;gap:3px;flex:0 0 auto;white-space:nowrap}
+.p1-shoes{display:inline-flex;align-items:center;gap:2px}
+.p1-shoe{position:relative;display:inline-block;width:9px;height:12px;line-height:12px;font-family:Arial,sans-serif;font-size:13px;font-weight:600;color:#aaa49b;text-align:center}
+.p1-shoe.barefoot::after{content:"";position:absolute;height:1.5px;background:currentColor;width:14px;left:-2px;top:6px;transform:rotate(-54deg);transform-origin:center}
+.p1-shoe.changed,.p1-cart.changed{color:#d9505c}
+.p1-cart{font-weight:500}
+.p1-compact-form .p1-result{font-size:inherit}.p1-form-hyphen{color:var(--muted)}
+.p1-compact-divider{height:1px;background:var(--line-soft);margin:11px 0 10px}
+.p1-compact-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;min-width:0}
+.p1-compact-metrics .p1-horse-metric{text-align:left;min-width:0}
+.p1-compact-metrics .p1-horse-metric small{font-size:9px;letter-spacing:0;line-height:1.2;white-space:normal}
+.p1-compact-metrics .p1-horse-metric strong{font-size:12px;line-height:1.4;margin-top:3px;white-space:nowrap}
+.p1-compact-expand{position:absolute;top:8px;right:8px;width:29px;height:29px;min-height:29px}
+.p1-handicap-separator{display:flex;align-items:center;gap:10px;margin:7px 1px 2px;color:var(--accent-soft);font-size:11px;font-weight:650}
+.p1-handicap-separator::before,.p1-handicap-separator::after{content:"";height:1px;flex:1;background:var(--line)}
+.p1-scratched{border-color:#754844;background:#1a1211}
+.p1-scratched .p1-compact-body{opacity:.6}
+.p1-scratched .p1-compact-horse-name{text-decoration:line-through;text-decoration-thickness:1px}
+.p1-scratch-badge{font-size:9px;font-weight:750;color:#f1b0aa;border:1px solid #9b5550;background:#482320;border-radius:5px;padding:2px 5px;white-space:nowrap;flex:0 0 auto;line-height:1.2}
+.p1-scratched .p1-scratch-badge{opacity:1}
+.p1-scratched .p1-compact-name-row{gap:5px}
+@media(max-width:767px){
+ .p1-horse-compact{padding:9px 9px 8px}
+ .p1-compact-body{padding-right:30px}
+ .p1-compact-number,.p1-compact-horse-name{font-size:13px}
+ .p1-compact-bio{font-size:9px;max-width:44%}
+ .p1-compact-info,.p1-compact-form{font-size:10px;gap:7px;line-height:14px}
+ .p1-compact-metrics{gap:5px}
+ .p1-compact-metrics .p1-horse-metric small{font-size:9px}
+ .p1-compact-metrics .p1-horse-metric strong{font-size:12px}
+ .p1-compact-expand{top:7px;right:7px;width:29px;min-height:29px;height:29px}
+}
+@media(max-width:380px){
+ .p1-horse-compact{padding:8px 7px}
+ .p1-compact-body{padding-right:27px}
+ .p1-compact-name-row{gap:4px}
+ .p1-compact-number,.p1-compact-horse-name{font-size:12px}
+ .p1-compact-bio{font-size:9px;max-width:40%}
+ .p1-compact-info,.p1-compact-form{font-size:9px;gap:5px}
+ .p1-shoes{gap:1px}
+ .p1-compact-metrics{gap:4px}
+ .p1-compact-metrics .p1-horse-metric small{font-size:8px}
+ .p1-compact-metrics .p1-horse-metric strong{font-size:11px}
+ .p1-scratch-badge{font-size:8px;padding:2px 3px}
+}
+
 </style>`;
