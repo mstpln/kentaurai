@@ -95,3 +95,61 @@ test('missing token, HTTP URL and malformed JSON fail without unsafe fallback',a
   }),/recovery_private_api_invalid_json/);
   assert.equal(calls,1);
 });
+
+test('multipart start 409 prints only trusted stage and reason, never the response body',async()=>{
+  const url='https://synthetic.example.test/v1/storage-cleanup/legacy-backup-multipart/start';
+  let calls=0;
+  await assert.rejects(fetchPrivateRecoveryJson({
+    url,token:TOKEN,method:'POST',body:{},allowSafeMultipartStartError:true,
+    fetchImpl:async()=>{
+      calls++;
+      return response(409,{error:'legacy_multipart_backup_unavailable',
+        stage:'request_d1_export',reason:'cloudflare_http_403',
+        private:'SECRET_PRIVATE_RESPONSE_MUST_NOT_ESCAPE'});
+    },
+    sleep:async()=>{throw Error('must_not_retry');}
+  }),error=>{
+    assert.equal(error.message,
+      'recovery_private_api_http_409_stage_request_d1_export_reason_cloudflare_http_403');
+    assert.doesNotMatch(error.message,/SECRET_PRIVATE|synthetic-temporary|Bearer/);
+    return true;
+  });
+  assert.equal(calls,1,'HTTP 409 must never be retried');
+});
+
+test('untrusted multipart error fields never escape allowlists',async()=>{
+  const url='https://synthetic.example.test/v1/storage-cleanup/legacy-backup-multipart/start';
+  for(const bad of [
+    {error:'legacy_multipart_backup_unavailable',stage:'request_d1_export\nSECRET',
+      reason:'cloudflare_http_403'},
+    {error:'legacy_multipart_backup_unavailable',stage:'request_d1_export',
+      reason:'cloudflare_http_403_SECRET'},
+    {error:'unexpected',stage:'request_d1_export',reason:'cloudflare_http_403'}
+  ]){
+    await assert.rejects(fetchPrivateRecoveryJson({
+      url,token:TOKEN,method:'POST',body:{},allowSafeMultipartStartError:true,
+      fetchImpl:async()=>response(409,{...bad,sql:'PRIVATE_SQL_NOT_FOR_LOGS'})
+    }),error=>{
+      assert.equal(error.message,'recovery_private_api_http_409');
+      assert.doesNotMatch(error.message,/SECRET|PRIVATE_SQL|Bearer/);
+      return true;
+    });
+  }
+});
+
+test('multipart diagnostics cannot be opted into on other private routes or methods',async()=>{
+  for(const [url,method] of [
+    [ENDPOINT,'POST'],
+    ['https://synthetic.example.test/v1/storage-cleanup/legacy-backup-multipart/start','GET']
+  ]){
+    await assert.rejects(fetchPrivateRecoveryJson({
+      url,token:TOKEN,method,allowSafeMultipartStartError:true,
+      fetchImpl:async()=>response(409,{
+        error:'legacy_multipart_backup_unavailable',stage:'request_d1_export',
+        reason:'cloudflare_http_403'})
+    }),error=>{
+      assert.equal(error.message,'recovery_private_api_http_409');
+      return true;
+    });
+  }
+});

@@ -11,7 +11,8 @@ if(!origin?.startsWith('https://')||!token||!/^[a-f0-9]{40}$/.test(sha)||
   throw Error('multipart_runner_configuration_invalid');
 const endpoint=origin+'/v1/storage-cleanup/legacy-backup-multipart/';
 const call=(name,method='GET')=>fetchPrivateRecoveryJson({
-  url:endpoint+name,token,method,body:method==='POST'?{}:null
+  url:endpoint+name,token,method,body:method==='POST'?{}:null,
+  allowSafeMultipartStartError:name==='start'&&method==='POST'
 });
 function checked(v){
   if(!v||v.mode!=='private_multipart_backup_only'||

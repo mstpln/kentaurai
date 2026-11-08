@@ -254,3 +254,21 @@ Future start errors now return an allowlisted stage and safe HTTP status
 category. Cloudflare D1 export requires D1 Write API permission because
 export can lock D1; missing scope is a hypothesis, not a confirmed cause.
 Independent private restore verification remains mandatory before cleanup.
+
+## 2026-11-08 read-only inspection and safe GitHub error visibility
+
+- The owner-triggered, GET-only diagnostic run 42520399131 succeeded on the exact deployed release.
+  It found no private multipart progress marker, no bookmark and zero uploaded parts.
+  This shows no persisted reservation and no completed backup; it does not independently
+  prove why the original start failed, or certify that a full D1 backup exists.
+- The backup implementation persists a private R2 `starting` marker *before* the D1 export POST.
+  Missing progress is consistent with a failure during binding/state/metadata checks
+  or marker reservation rather than a recorded in-progress export. Do not attribute
+  the original HTTP 409 to missing D1 Write permission without stage evidence.
+- PR-only safety fix: on a future explicitly authorized first start, the GitHub runner
+  may display two pre-allowlisted Worker enums (failure stage and reason) for the multipart
+  start HTTP 409. Raw response bodies and unknown fields are always discarded. No 409
+  retry, full backup start, R2 state reset, restoration or deletion is authorized by this change.
+- The source D1 SQL export can interrupt production queries. A new export attempt requires
+  separate explicit owner approval after release review; a successful upload still needs
+  an independent private restore verification before any legacy cleanup.
