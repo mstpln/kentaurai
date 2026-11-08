@@ -216,3 +216,17 @@ test('age refuses observation from a different calendar year',async()=>{
  const e=(await getUpcomingGameLeg(env,'round_up',1)).entries[0];
  assert.equal(e.ageYears,null);
 });
+
+test('an older equipped start must not substitute for the immediately preceding unknown start',async()=>{
+ const {env,db}=createTestEnv();seedUpcoming(db);
+ const rows=[
+   ['eq_today','entry_1','barefoot','barefoot',1,1,'Amerikansk','A','src_current'],
+   ['eq_older','hist_auto_weekday_entry','shod','shod',0,0,'Vanlig','S','src_hist_auto_weekday']
+ ];
+ for(const row of rows){
+   db.prepare("INSERT INTO equipment (id,race_entry_id,shoes_front,shoes_rear,barefoot_front,barefoot_rear,sulky_type,exact_sulky,verification_status,source_record_id) VALUES (?,?,?,?,?,?,?,?, 'reported',?)").run(...row);
+ }
+ const eq=(await getUpcomingGameLeg(env,'round_up',1)).entries[0].equipment;
+ assert.equal(eq.front,'barefoot');assert.equal(eq.cart,'Am.');
+ assert.equal(eq.frontChanged,false);assert.equal(eq.rearChanged,false);assert.equal(eq.cartChanged,false);
+});

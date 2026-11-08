@@ -66,7 +66,7 @@ export const phase1Css = `
 .p1-shoe.changed,.p1-cart.changed{color:#d9505c}
 .p1-cart{font-weight:500}
 .p1-compact-form .p1-result{font-size:inherit}.p1-form-hyphen{color:var(--muted)}
-.p1-compact-divider{height:1px;background:var(--line-soft);margin:11px 0 10px}
+.p1-compact-divider{height:1px;background:var(--line-soft);margin:7px 0}
 .p1-compact-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;min-width:0}
 .p1-compact-metrics .p1-horse-metric{text-align:left;min-width:0}
 .p1-compact-metrics .p1-horse-metric small{font-size:9px;letter-spacing:0;line-height:1.2;white-space:normal}

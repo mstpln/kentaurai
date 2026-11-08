@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=af9146d674a458c9d6ae4ed2a4ce1bad4b34f5a4
-release_nonce=2026-11-08-phase1-horse-pace-without-unit-v1
+source_main=4f7cf825e7658379abc8c53b8be03841205a0419
+release_nonce=2026-11-09-compact-horse-cards-and-handicap-v1
