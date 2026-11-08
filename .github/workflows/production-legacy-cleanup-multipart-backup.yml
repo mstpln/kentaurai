@@ -1,0 +1,167 @@
+name: Private large D1 multipart backup (manual ONLY)
+run-name: Manually approved private D1 to R2 multipart backup
+
+on:
+  workflow_dispatch:
+    inputs:
+      approval:
+        description: "Type BACKUP_MULTIPART_ONLY. A full D1 export can temporarily stop database queries."
+        required: true
+        type: string
+      mode:
+        description: "Start a new backup if none exists, or resume existing parts"
+        type: choice
+        required: true
+        default: resume_only
+        options:
+          - resume_only
+          - start_or_resume
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  private_backup:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 17
+    concurrency:
+      group: kentaurai-production-operation
+      cancel-in-progress: false
+    env:
+      WORKER_NAME: kentaurai-api
+    steps:
+      - name: Checkout exact reviewed main
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Require typed approval and exact deployed production release
+        env:
+          APPROVAL: ${{ inputs.approval }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$APPROVAL" = BACKUP_MULTIPART_ONLY
+          releases="$(curl --fail --silent --show-error \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/actions/workflows/production-release-v060.yml/runs?branch=main&status=success&per_page=1")"
+          test "$(printf '%s' "$releases" | jq -r '.workflow_runs[0].head_sha // empty')" = "$GITHUB_SHA"
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+
+      - name: Full QA before private Cloudflare access
+        run: npm run qa
+
+      - name: Check private D1 metadata and multipart-only operating limits
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/check-legacy-multipart-capacity.mjs
+
+      - name: Install independent, short-lived multipart-only credentials
+        id: backup_credential
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          token="$(node -e "console.log(Date.now()+'.'+require('crypto').randomBytes(32).toString('hex'))")"
+          echo "::add-mask::$token"
+          echo "::add-mask::$CLOUDFLARE_API_TOKEN"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$token" | npx --yes wrangler@4.114.0 secret put LEGACY_MULTIPART_BACKUP_TOKEN --name "$WORKER_NAME"
+          printf '%s\n' "$CLOUDFLARE_API_TOKEN" | npx --yes wrangler@4.114.0 secret put HISTORICAL_BACKUP_API_TOKEN --name "$WORKER_NAME"
+          printf '%s\n' "$CLOUDFLARE_ACCOUNT_ID" | npx --yes wrangler@4.114.0 secret put HISTORICAL_RECOVERY_ACCOUNT_ID --name "$WORKER_NAME"
+          printf 'true\n' | npx --yes wrangler@4.114.0 secret put LEGACY_MULTIPART_BACKUP_ENABLED --name "$WORKER_NAME"
+
+      - name: Verify exact production Worker and private backup route
+        id: worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLEANUP_TOKEN: ${{ steps.backup_credential.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          subdomain="$(curl --fail --silent --show-error -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "$api/workers/subdomain" | jq -r '.result.subdomain // empty')"
+          test -n "$subdomain"
+          enabled="$(curl --fail --silent --show-error -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "$api/workers/scripts/$WORKER_NAME/subdomain" | jq -r '.result.enabled // false')"
+          test "$enabled" = true
+          url="https://$WORKER_NAME.$subdomain.workers.dev"
+          curl --fail --silent --show-error "$url/health" > "$RUNNER_TEMP/multipart-health.json"
+          jq -e --arg sha "$GITHUB_SHA" '.ok==true and .deploymentSha==$sha' \
+            "$RUNNER_TEMP/multipart-health.json" > /dev/null
+          confirmed=0
+          for attempt in $(seq 1 25); do
+            code="$(curl --silent --output "$RUNNER_TEMP/multipart-auth.json" --write-out '%{http_code}' \
+              --header "Authorization: Bearer $CLEANUP_TOKEN" \
+              "$url/v1/storage-cleanup/legacy-backup-multipart/auth-check" || true)"
+            if [ "$code" = 200 ] && jq -e \
+              '.ok==true and .scope=="legacy_multipart_backup_only"' \
+              "$RUNNER_TEMP/multipart-auth.json" >/dev/null 2>&1; then
+              confirmed=$((confirmed+1))
+              if [ "$confirmed" -ge 2 ]; then
+                echo "worker_url=$url" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+            else
+              confirmed=0
+            fi
+            sleep 2
+          done
+          echo "::error::Dedicated multipart backup authorization not verified. No export started."
+          exit 1
+
+      - name: Execute only the explicitly approved private backup or resume
+        env:
+          WORKER_URL: ${{ steps.worker.outputs.worker_url }}
+          CLEANUP_TOKEN: ${{ steps.backup_credential.outputs.token }}
+          MULTIPART_BACKUP_MODE: ${{ inputs.mode }}
+        run: node scripts/run-production-legacy-multipart-backup.mjs
+
+      - name: Remove every ephemeral multipart backup credential
+        if: ${{ always() && steps.backup_credential.outcome != 'skipped' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          names="$(npx --yes wrangler@4.114.0 secret list --name "$WORKER_NAME" --format json)"
+          for name in LEGACY_MULTIPART_BACKUP_ENABLED LEGACY_MULTIPART_BACKUP_TOKEN \
+            HISTORICAL_BACKUP_API_TOKEN HISTORICAL_RECOVERY_ACCOUNT_ID; do
+            if printf '%s' "$names" | jq -e --arg name "$name" \
+              '.[] | select(.name==$name)' > /dev/null; then
+              printf 'y\n' | npx --yes wrangler@4.114.0 secret delete "$name" --name "$WORKER_NAME"
+            fi
+          done
+
+      - name: Verify production health after secret cleanup
+        if: ${{ always() && steps.worker.outcome == 'success' }}
+        env:
+          WORKER_URL: ${{ steps.worker.outputs.worker_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error "$WORKER_URL/health" > "$RUNNER_TEMP/multipart-health-after.json"
+          jq -e --arg sha "$GITHUB_SHA" '.ok==true and .deploymentSha==$sha' \
+            "$RUNNER_TEMP/multipart-health-after.json" > /dev/null
+
+      - name: Record private-only no-deletion guarantee
+        if: ${{ always() }}
+        run: |
+          echo "Private R2 multipart backup only. No DELETE route, SQL dump download, restoration or cleanup." >> "$GITHUB_STEP_SUMMARY"
+          echo "GitHub receives only aggregate progress and authorization status; raw racing data never leaves Cloudflare." >> "$GITHUB_STEP_SUMMARY"
+          echo "An R2 receipt does not authorize data deletion; independent recovery proof is still mandatory." >> "$GITHUB_STEP_SUMMARY"
