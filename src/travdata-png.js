@@ -1,4 +1,4 @@
-// Apply a circular alpha mask to the approved PNG without changing the TD artwork.
+// Clean the source PNG's dark blue fringe without changing the interior TD artwork.
 // Works in Workers and Node 22 through standards-based Compression Streams.
 const PNG_SIGNATURE = [137,80,78,71,13,10,26,10];
 const textEncoder = new TextEncoder();
@@ -25,8 +25,9 @@ const paeth=(a,b,c)=>{
   return da<=db&&da<=dc?a:db<=dc?b:c;
 };
 /**
- * Preserve source pixels inside the approved circular artwork and make outside pixels
- * fully transparent. Only 8-bit, non-interlaced RGBA PNGs are accepted (fail closed).
+ * Preserve the interior exactly; reconstruct only the outer blue annulus with straight
+ * alpha and the approved #0001FD. Outside pixels are transparent black (no matte).
+ * Only 8-bit, non-interlaced RGBA PNGs are accepted (fail closed).
  */
 export async function circularTransparentPng(encoded){
   const binary=atob(encoded),data=Uint8Array.from(binary,c=>c.charCodeAt(0));
@@ -64,7 +65,12 @@ export async function circularTransparentPng(encoded){
     before.set(row);
     for(let x=0;x<width;x++){
       const dx=x+.5-centerX,dy=y+.5-centerY;
-      if(dx*dx+dy*dy>radius*radius){const i=x*4;row[i]=0;row[i+1]=0;row[i+2]=0;row[i+3]=0}
+      const distance=Math.hypot(dx,dy),i=x*4;
+      if(distance>=radius-10){
+        // A 1px coverage transition antialiases the circle without darkening RGB.
+        const alpha=Math.round(255*Math.max(0,Math.min(1,radius+.5-distance)));
+        row[i]=0;row[i+1]=alpha?1:0;row[i+2]=alpha?253:0;row[i+3]=alpha;
+      }
     }
     output[start]=0;output.set(row,start+1);
   }

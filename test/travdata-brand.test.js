@@ -42,8 +42,8 @@ test('Travdata keeps existing navigation SVGs, Phase 1 controls, storage keys an
 test('the unchanged original TD symbol is a valid GET-only image', async () => {
   for (const [path, width, height] of [
     ['/app/brand/td-mark.png', 512, 512],
-    ['/app/icon.png?brand=travdata-3', 512, 512],
-    ['/app/apple-touch-icon.png?brand=travdata-3', 512, 512]
+    ['/app/icon.png?brand=travdata-4', 512, 512],
+    ['/app/apple-touch-icon.png?brand=travdata-4', 512, 512]
   ]) {
     const response = await travdataAssetResponse(new Request('https://example.test' + path));
     assert.equal(response.status, 200);
@@ -98,15 +98,15 @@ test('all page-heading families share responsive sizes, weight, line height and 
 
 test('mobile installation uses the unchanged TD PNG and versioned manifest and Apple icon URLs', async () => {
   const html = enhanceTravdataHtml(renderLoginPage().replace('</head>', pwaHeadMarkup() + '</head>'));
-  assert.match(html, /rel="apple-touch-icon" sizes="512x512" href="\/app\/apple-touch-icon\.png\?brand=travdata-3"/);
-  assert.match(html, /rel="manifest" href="\/app\/manifest\.webmanifest\?brand=travdata-3"/);
+  assert.match(html, /rel="apple-touch-icon" sizes="512x512" href="\/app\/apple-touch-icon\.png\?brand=travdata-4"/);
+  assert.match(html, /rel="manifest" href="\/app\/manifest\.webmanifest\?brand=travdata-4"/);
   const icon = travdataManifest().icons.find(icon => icon.type === 'image/png');
   assert.equal(icon.sizes, '512x512');
   assert.equal(icon.purpose, 'any');
-  assert.equal(icon.src, '/app/icon.png?brand=travdata-3');
+  assert.equal(icon.src, '/app/icon.png?brand=travdata-4');
   const sw = await travdataAssetResponse(new Request('https://example.test/app/sw.js')).text();
-  assert.match(sw, /kentaurai-pwa-v5/);
-  assert.match(sw, /map\(path=>path\+'\?brand=travdata-3'\)/);
+  assert.match(sw, /kentaurai-pwa-v6/);
+  assert.match(sw, /map\(path=>path\+'\?brand=travdata-4'\)/);
   assert.match(sw, /'\/app\/apple-touch-icon\.png'/);
   assert.doesNotMatch(sw, /kentaurai-pwa-v2/);
   assert.equal(travdataAssetResponse(new Request('https://example.test/app/apple-touch-icon.png', { method: 'POST' })), null);
@@ -121,13 +121,13 @@ test('PWA identity and icons change without changing installed app scope or cach
   assert.equal(manifest.scope, '/app/');
   assert.equal(manifest.start_url, '/app/');
   assert.equal(manifest.theme_color, '#010127');
-  const icon = await travdataAssetResponse(new Request('https://example.test/app/icon.svg')).text();
+  const icon = await (await travdataAssetResponse(new Request('https://example.test/app/icon.svg'))).text();
   assert.match(icon, /aria-label="Travdata"/);
   assert.match(icon, /data:image\/png;base64,/);
-  assert.match(icon, /clip-path="url\(#td-circle\)"/);
+  assert.doesNotMatch(icon, /stroke=|filter=|clip-path=/);
   assert.doesNotMatch(icon, /fill="#F7F7FC"/);
   const sw = await travdataAssetResponse(new Request('https://example.test/app/sw.js')).text();
-  assert.match(sw, /kentaurai-pwa-v5/);
+  assert.match(sw, /kentaurai-pwa-v6/);
   assert.doesNotMatch(sw, /\/app\/api/);
 });
 
@@ -185,29 +185,55 @@ function decodePngRgba(buffer) {
   return { width, height, pixels };
 }
 
-test('transparent TD icon preserves every original pixel inside the circle', async () => {
+test('clean master preserves the TD interior and removes every dark edge pixel', async () => {
   const original = decodePngRgba(Buffer.from(assets.iconPng, 'base64'));
   const response = await travdataAssetResponse(new Request('https://example.test/app/icon.png'));
   assert.equal(response.status, 200);
   const transformed = decodePngRgba(await response.arrayBuffer());
   assert.equal(transformed.width, original.width);
   assert.equal(transformed.height, original.height);
-  const radiusSquared = (original.width * 0.493) ** 2;
-  let preservedPixels = 0, clearedPixels = 0;
+  const radius = original.width * 0.493;
+  let preservedPixels = 0, clearedPixels = 0, antialiasedPixels = 0;
   for (let y = 0; y < original.height; y++) for (let x = 0; x < original.width; x++) {
     const offset = (y * original.width + x) * 4;
-    const inside = (x + .5 - original.width / 2) ** 2 +
-                   (y + .5 - original.height / 2) ** 2 <= radiusSquared;
+    const distance = Math.hypot(x + .5 - original.width / 2, y + .5 - original.height / 2);
+    const inside = distance < radius - 10;
     if (inside) {
       for (let channel = 0; channel < 4; channel++)
         assert.equal(transformed.pixels[offset + channel], original.pixels[offset + channel],
           `TD pixel changed at (${x},${y}), channel ${channel}`);
       preservedPixels++;
     } else {
-      assert.equal(transformed.pixels[offset + 3], 0, `Corner not transparent at (${x},${y})`);
+      // This annulus contains only the blue field in the original, never T or D.
+      assert.ok(original.pixels[offset + 3] < 128 ||
+        (original.pixels[offset] < 30 && original.pixels[offset + 1] < 30),
+        `Would overwrite approved artwork at (${x},${y})`);
+      const alpha = Math.round(255 * Math.max(0, Math.min(1, radius + .5 - distance)));
+      assert.deepEqual([...transformed.pixels.slice(offset, offset + 4)],
+        alpha ? [0, 1, 253, alpha] : [0, 0, 0, 0]);
+      if (alpha > 0 && alpha < 255) antialiasedPixels++;
       clearedPixels++;
     }
   }
   assert.ok(preservedPixels > 180000);
   assert.ok(clearedPixels > 30000);
+  assert.ok(antialiasedPixels > 1000);
+});
+
+test('all PNG and SVG icon surfaces use the identical cleaned master', async () => {
+  const master = Buffer.from(await (await travdataAssetResponse(new Request('https://example.test/app/icon.png'))).arrayBuffer());
+  for (const path of ['/app/brand/td-mark.png', '/app/apple-touch-icon.png']) {
+    const response = await travdataAssetResponse(new Request('https://example.test' + path));
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), master);
+  }
+  for (const path of ['/app/icon.svg', '/app/icon-maskable.svg']) {
+    const response = await travdataAssetResponse(new Request('https://example.test' + path));
+    const svg = await response.text();
+    assert.deepEqual(Buffer.from(svg.match(/base64,([^"]+)/)[1], 'base64'), master);
+    if (path.includes('maskable')) assert.match(svg, /<rect[^>]+fill="#0001FD"/);
+    else assert.doesNotMatch(svg, /<rect/);
+  }
+  const html = enhanceTravdataHtml(renderAppPage());
+  assert.match(html, /td-mark\.png\?brand=travdata-4/);
+  assert.match(html, /\.travdata-brand,\.travdata-brand img\{background:transparent!important;border:0!important;outline:0!important;box-shadow:none!important;padding:0!important\}/);
 });
