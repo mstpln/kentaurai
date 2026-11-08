@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { createTestEnv } from './helpers/d1.js';
 import worker from '../src/index.js';
 import deployedWorker from '../src/worker-v079.js';
@@ -189,4 +190,30 @@ test('backup-only code and workflow include no production delete or upload-to-ru
   assert.doesNotMatch(script,/\bDELETE FROM\b|\bDROP TABLE\b|\.delete\(/);
   assert.match(script,/redirect:'error'/);
   assert.match(script,/MAX_SINGLE_R2_OBJECT_BYTES/);
+});
+
+test('manual backup runner takes a fresh snapshot after an older verified one',()=>{
+  const script=new URL('../scripts/run-production-legacy-cleanup-backup.mjs',import.meta.url).href;
+  const js=[
+    'let starts=0;',
+    'globalThis.fetch=async(url)=>{',
+    "  const key=String(url).split('/').at(-1);",
+    "  const common={mode:'private_legacy_backup_only',sourceSha:'"+DEPLOY+"',",
+    '    rawPayloadReturned:false,dataDeletionEnabled:false};',
+    "  if(key==='status')return Response.json({...common,status:'complete',backupVerified:true,sizeBytes:3200});",
+    "  if(key==='start'){starts++;return Response.json({...common,status:'exporting',backupVerified:false,sizeBytes:null});}",
+    "  if(key==='poll')return Response.json({...common,status:'complete',backupVerified:true,sizeBytes:3300});",
+    "  throw new Error('unexpected route');",
+    '};',
+    'await import('+JSON.stringify(script)+');',
+    "console.log('fresh_start_count='+starts);"
+  ].join('\n');
+  const result=spawnSync(process.execPath,['--input-type=module','-e',js],{
+    encoding:'utf8',timeout:10000,
+    env:{...process.env,WORKER_URL:'https://synthetic.invalid',
+      CLEANUP_TOKEN:'synthetic-runner-token',GITHUB_SHA:DEPLOY,GITHUB_STEP_SUMMARY:''}
+  });
+  assert.equal(result.status,0,result.stderr);
+  assert.match(result.stdout,/fresh_start_count=1/);
+  assert.match(result.stdout,/"sqlBytes":3300/);
 });
