@@ -261,3 +261,55 @@ test('production part size is >= R2 minimum 5 MiB and <= Worker safe buffer',()=
   assert.ok(MULTIPART_PART_BYTES>=5*1024*1024);
   assert.ok(MULTIPART_PART_BYTES<=32*1024*1024);
 });
+
+
+test('ambiguous first multipart part is safely re-uploaded at the SAME part index',async()=>{
+  const f=fixture();
+  await ready(f);
+  const raw=f.bucket.resumeMultipartUpload.bind(f.bucket);
+  let first=true;
+  f.bucket.resumeMultipartUpload=(key,id)=>{
+    const upload=raw(key,id);
+    return {...upload,uploadPart:async(number,data)=>{
+      const completed=await upload.uploadPart(number,data);
+      if(first){first=false;throw Error('synthetic ambiguous part result');}
+      return completed;
+    }};
+  };
+  await assert.rejects(f.service.step(f.env),/synthetic ambiguous part result/);
+  assert.equal((await f.service.status(f.env)).partsUploaded,0);
+  await uploadAll(f);
+  const output=await f.service.finalize(f.env);
+  assert.equal(output.backupVerified,true);
+  assert.equal(f.events.filter(x=>x==='part:1').length,2,
+    'retry replaces part 1 instead of silently skipping bytes');
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM legacy_cleanup_backups').get().n,1);
+  f.db.close();
+});
+test('ambiguous D1 receipt commit resumes without re-uploading private SQL',async()=>{
+  const f=fixture();
+  await ready(f);await uploadAll(f);
+  const db=f.env.DB;
+  let first=true;
+  f.env.DB={prepare(sql){
+    const statement=db.prepare(sql);
+    if(!sql.startsWith('INSERT INTO legacy_cleanup_backups'))return statement;
+    return {bind(...args){
+      const bound=statement.bind(...args);
+      return {run(){
+        const result=bound.run();
+        if(first){first=false;throw Error('synthetic D1 receipt response lost');}
+        return result;
+      }};
+    }};
+  }};
+  await assert.rejects(f.service.finalize(f.env),/synthetic D1 receipt response lost/);
+  const uploaded=f.events.filter(x=>x==='complete').length;
+  assert.equal(uploaded,1);
+  const resumed=await f.service.finalize(f.env);
+  assert.equal(resumed.backupVerified,true);
+  assert.equal(f.events.filter(x=>x==='complete').length,uploaded,
+    'D1 receipt retry must not reassemble or re-upload the SQL');
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM legacy_cleanup_backups').get().n,1);
+  f.db.close();
+});
