@@ -25,10 +25,10 @@ ${Object.entries({
   summarizeSystems, selectionResult, resultFormSegments
 }).map(([name, implementation]) => `const ${name}=(${implementation.toString()});`).join('\n')}`;
 
-function phase1ClientScript(asOfDate) {
+function phase1ClientScript(asOfDate, allowDemo = false) {
   // Workers can freeze the module-initialization clock. Generate relative dates
   // while handling the page request, never at module evaluation time.
-  const rounds = createPhase1DemoRounds(asOfDate);
+  const rounds = allowDemo ? createPhase1DemoRounds(asOfDate) : [];
   return `
 <script id="kentaurai-phase1-script">
 (function(){
@@ -37,10 +37,11 @@ window.__kentauraiPhase1={version:1};
 ${phase1ApiBrowserSource}
 ${phase1ModelBrowserSource}
 const appEl=document.getElementById('app');
+const demoEnabled=${JSON.stringify(allowDemo)};
 const demoRounds=${JSON.stringify(rounds)};
-const demoHistoricalRound=${JSON.stringify(createPhase1DemoHistoricalRound(asOfDate))};
-const demoSystems=${JSON.stringify(createPhase1DemoSystems(rounds, asOfDate))};
-const demoNotes=${JSON.stringify(PHASE1_DEMO_HORSE_NOTES)};
+const demoHistoricalRound=${JSON.stringify(allowDemo ? createPhase1DemoHistoricalRound(asOfDate) : null)};
+const demoSystems=${JSON.stringify(allowDemo ? createPhase1DemoSystems(rounds, asOfDate) : [])};
+const demoNotes=${JSON.stringify(allowDemo ? PHASE1_DEMO_HORSE_NOTES : [])};
 const storageKey='kentaurai.phase1.local.v1';
 const demoFlagKey='kentaurai.phase1.demo-visible.v1';
 const esc1=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -56,7 +57,7 @@ let storeResult=storedRead();
 let localData=storeResult.value;
 let storageError=storeResult.ok?'':storeResult.error;
 const storageReadBlocked=!storeResult.ok;
-let demoVisible=(()=>{try{return localStorage.getItem(demoFlagKey)==='1'}catch{return false}})();
+let demoVisible=demoEnabled&&(()=>{try{return localStorage.getItem(demoFlagKey)==='1'}catch{return false}})();
 let currentRoute='trend',spelView='upcoming',roundFilter='all',activeRound=null,activeLeg=1,roundToken=0,upcomingRequestToken=0,formLoadIssue='';
 let upcomingItems=[],historyRounds=[],builderType='V85',builderRoundId='',builderRound=null,builderLegs=Array.from({length:8},()=>[]);
 let builderName='',builderDemo=false,expandedSystems=new Set(),expandedHorses=new Set();
@@ -64,7 +65,7 @@ let profiles=new Map(),facts=new Map(),formScores=new Map(),activeNoteDraft=null
 let builderRoundsCache={};
 function persist(next){if(storageReadBlocked){renderStorageNotice();return false}const result=(()=>{try{localStorage.setItem(storageKey,JSON.stringify(next));return{ok:true}}catch(error){return{ok:false,error:error?.message||'Kunde inte spara lokalt.'}}})();if(!result.ok){storageError=result.error;renderStorageNotice();return false}localData=next;storageError='';renderStorageNotice();return true}
 function renderStorageNotice(){const host=document.getElementById('p1-storage-status');if(host)host.replaceChildren();let alert=document.getElementById('p1-global-storage-status');if(storageError){if(!alert){alert=document.createElement('div');alert.id='p1-global-storage-status';alert.className='p1-notice p1-error';alert.setAttribute('role','alert');appEl.before(alert)}alert.textContent='Lokal lagring kunde inte användas: '+storageError+(storageReadBlocked?' Befintliga data lämnas orörda; lokal sparning är blockerad.':'')}else alert?.remove()}
-function saveDemoVisibility(value){demoVisible=Boolean(value);try{localStorage.setItem(demoFlagKey,demoVisible?'1':'0')}catch{}}
+function saveDemoVisibility(value){if(!demoEnabled)return;demoVisible=Boolean(value);try{localStorage.setItem(demoFlagKey,demoVisible?'1':'0')}catch{}}
 function setNav1(page){const navPage=page==='upcoming'||page==='systems'||page==='builder'?'spel':page==='start'?'trend':page;document.querySelectorAll('.nav-item[data-p1-nav]').forEach(button=>{const active=button.dataset.p1Nav===navPage;button.classList.toggle('active',active);if(active)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current')})}
 function spelSwitcher(selected){return '<div class="p1-spel-switcher" role="group" aria-label="Spelvy">'+[['upcoming','Kommande'],['builder','Registrera system'],['systems','Mina system']].map(([view,label])=>'<button type="button" class="p1-filter '+(selected===view?'active':'')+'" data-p1-spel-view="'+view+'" aria-pressed="'+(selected===view)+'">'+label+'</button>').join('')+'</div>'}
 function pageHead(title,subtitle,action=''){return '<div class="p1-page-head"><div><div class="p1-kicker">KentaurAI</div><h1>'+esc1(title)+'</h1><p>'+esc1(subtitle)+'</p></div>'+action+'</div>'}
@@ -89,22 +90,23 @@ async function renderUpcoming(){
  renderStorageNotice();
  appEl.querySelectorAll('[data-p1-filter]').forEach(b=>b.onclick=()=>{roundFilter=b.dataset.p1Filter;renderUpcoming()});
  try{const data=await phase1Api.upcomingRounds(roundFilter==='all'?'':roundFilter);if(requestToken!==upcomingRequestToken||currentRoute!=='upcoming')return;upcomingItems=(data.items||[]).map(item=>({...item,gameType:item.gameType||item.game_type,roundDate:item.roundDate||item.round_date,trackNames:item.trackNames||item.track_names,source:'live'}));renderUpcomingList()}
- catch(error){if(requestToken!==upcomingRequestToken||currentRoute!=='upcoming')return;const host=document.getElementById('p1-upcoming-host');if(!host)return;host.innerHTML=errorBox('Kunde inte läsa verifierade kommande omgångar: '+error.message,'retry-upcoming')+'<div class="p1-section">'+button(demoVisible?'Dölj syntetiska exempel':'Visa syntetiska exempel','toggle-upcoming-demo')+'</div>'+(demoVisible?demoRoundCards():'');bindRoundCards(host)}
+ catch(error){if(requestToken!==upcomingRequestToken||currentRoute!=='upcoming')return;const host=document.getElementById('p1-upcoming-host');if(!host)return;host.innerHTML=errorBox('Kunde inte läsa verifierade kommande omgångar: '+error.message,'retry-upcoming')+(demoEnabled?'<div class="p1-section">'+button(demoVisible?'Dölj syntetiska exempel':'Visa syntetiska exempel','toggle-upcoming-demo')+'</div>':'')+(demoEnabled&&demoVisible?demoRoundCards():'');bindRoundCards(host)}
 }
 function renderUpcomingList(){
  const host=document.getElementById('p1-upcoming-host');if(!host)return;
  const items=upcomingItems.filter(item=>roundFilter==='all'||item.gameType===roundFilter);
-  if(!items.length){host.innerHTML='<div class="p1-card p1-empty"><strong>Inga kommande omgångar</strong>Det finns inga verifierade '+(roundFilter==='all'?'V85/V86':roundFilter)+'-omgångar i den lokala databasen.</div><div class="p1-section">'+button(demoVisible?'Dölj syntetiska exempel':'Visa syntetiska exempel','toggle-upcoming-demo')+'</div>'+(demoVisible?demoRoundCards():'' );bindRoundCards(host);return}
+  if(!items.length){host.innerHTML='<div class="p1-card p1-empty"><strong>Inga kommande omgångar</strong>Det finns inga verifierade '+(roundFilter==='all'?'V85/V86':roundFilter)+'-omgångar i den lokala databasen.</div><div class="p1-section">'+button(demoVisible?'Dölj syntetiska exempel':'Visa syntetiska exempel','toggle-upcoming-demo')+'</div>'+(demoEnabled&&demoVisible?demoRoundCards():'');bindRoundCards(host);return}
   const grouped=new Map();items.forEach(item=>{const key=item.roundDate||'unknown';if(!grouped.has(key))grouped.set(key,[]);grouped.get(key).push(item)});
-  host.innerHTML=[...grouped.entries()].map(([date,group])=>'<section class="p1-section"><div class="p1-small" style="margin:0 0 6px 2px">'+esc1(date1(date))+'</div><div class="p1-round-list">'+group.map(roundCard).join('')+'</div></section>').join('')+'<div class="p1-section">'+button(demoVisible?'Dölj syntetiska exempel':'Visa syntetiska exempel','toggle-upcoming-demo')+'</div>'+(demoVisible?demoRoundCards():'');
+  host.innerHTML=[...grouped.entries()].map(([date,group])=>'<section class="p1-section"><div class="p1-small" style="margin:0 0 6px 2px">'+esc1(date1(date))+'</div><div class="p1-round-list">'+group.map(roundCard).join('')+'</div></section>').join('')+(demoEnabled?'<div class="p1-section">'+button(demoVisible?'Dölj syntetiska exempel':'Visa syntetiska exempel','toggle-upcoming-demo')+'</div>':'')+(demoEnabled&&demoVisible?demoRoundCards():'');
   bindRoundCards(host);
 }
 function bindRoundCards(host){host.querySelectorAll('[data-p1-round]').forEach(card=>card.onclick=()=>openRound(card.dataset.p1Round,card.dataset.p1Source==='synthetic'))}
 function renderUpcomingDemoList(){const host=document.getElementById('p1-upcoming-host');if(host){host.innerHTML=demoRoundCards();bindRoundCards(host)}}
 function roundCard(round){const xlabs=round.xlabsCoverage;const freshness=round.latestFetchedAt?'Senast hämtat '+date1(round.latestFetchedAt):'Källstatus saknas';return '<button type="button" class="p1-card p1-round" data-p1-round="'+esc1(round.id)+'" data-p1-source="live"><div class="p1-round-top"><span class="p1-game '+(round.gameType==='V86'?'v86':'')+'">'+esc1(round.gameType||'V85')+'</span><span class="p1-round-name">'+esc1(round.trackNames||'Omgång')+'</span><span class="p1-round-facts"><span>'+esc1(time1(round.scheduledStartAt))+'</span></span></div><div class="p1-round-meta">'+esc1(date1(round.roundDate))+' · Start '+esc1(time1(round.scheduledStartAt))+' · Spelstopp '+esc1(time1(round.betStopAt))+' · '+num1(round.legCount||8)+' avdelningar'+(xlabs?' · X-Labs '+num1(xlabs.covered)+'/'+num1(xlabs.activeEntries):'')+' · '+esc1(freshness)+'</div></button>'}
-function demoRoundCards(){const rows=demoRounds.filter(x=>roundFilter==='all'||x.gameType===roundFilter).sort((a,b)=>a.roundDate.localeCompare(b.roundDate));return '<div class="p1-synthetic-banner">Syntetiska exempel · separerade från verifierade omgångar</div><div class="p1-round-list">'+rows.map(round=>'<button type="button" class="p1-card p1-round" data-p1-round="'+esc1(round.id)+'" data-p1-source="synthetic"><div class="p1-round-top"><span class="p1-game '+(round.gameType==='V86'?'v86':'')+'">'+round.gameType+'</span><span class="p1-round-name">'+esc1(round.trackNames)+'</span><span class="p1-round-facts">Exempel</span></div><div class="p1-round-meta">'+esc1(date1(round.roundDate))+' · Start '+esc1(time1(round.scheduledStartAt))+' · 8 avdelningar</div></button>').join('')+'</div>'}
+function demoRoundCards(){if(!demoEnabled)return '';const rows=demoRounds.filter(x=>roundFilter==='all'||x.gameType===roundFilter).sort((a,b)=>a.roundDate.localeCompare(b.roundDate));return '<div class="p1-synthetic-banner">Syntetiska exempel · separerade från verifierade omgångar</div><div class="p1-round-list">'+rows.map(round=>'<button type="button" class="p1-card p1-round" data-p1-round="'+esc1(round.id)+'" data-p1-source="synthetic"><div class="p1-round-top"><span class="p1-game '+(round.gameType==='V86'?'v86':'')+'">'+round.gameType+'</span><span class="p1-round-name">'+esc1(round.trackNames)+'</span><span class="p1-round-facts">Exempel</span></div><div class="p1-round-meta">'+esc1(date1(round.roundDate))+' · Start '+esc1(time1(round.scheduledStartAt))+' · 8 avdelningar</div></button>').join('')+'</div>'}
 async function openRound(id,isDemo=false){
  activeRound=null;activeLeg=1;expandedHorses.clear();const token=++roundToken;
+ if(isDemo&&!demoEnabled)return;
  const found=isDemo?demoRounds.find(x=>x.id===id):null;
  try{activeRound=found||await phase1Api.upcomingRound(id);if(token!==roundToken||!activeRound)return;activeRound.gameType=activeRound.gameType||activeRound.game_type;activeRound.roundDate=activeRound.roundDate||activeRound.round_date;activeRound.source=isDemo?'synthetic':'live';activeRound.legs=(activeRound.legs||[]).map((leg,index)=>({...leg,number:leg.number||leg.legNumber||index+1,startMethod:leg.startMethod||leg.start_method,trackName:leg.trackName||leg.track_name}));renderRound()}
  catch(error){const host=document.getElementById('p1-upcoming-host');if(host)host.innerHTML=errorBox('Omgången kunde inte öppnas: '+error.message,'retry-upcoming')}
@@ -278,9 +280,9 @@ let builderLoadError='';
 async function renderBuilder(alreadyLoaded=false){
  currentRoute='systems';spelView='builder';setNav1('spel');if(!alreadyLoaded){appEl.innerHTML=pageHead('Registrera system','Manuella val · lokal sparning · ingen AI')+spelSwitcher('builder')+'<div class="p1-loading-line"></div>';await loadBuilderRounds();if(currentRoute!=='systems'||spelView!=='builder')return}
  const rows=[...upcomingItems.filter(x=>x.gameType===builderType),...historyRounds];
- if(builderDemo){rows.push(...demoRounds.filter(x=>x.gameType===builderType).map(x=>({...x,source:'synthetic'})));if(builderType==='V85')rows.push({...demoHistoricalRound,source:'synthetic'})}
+ if(demoEnabled&&builderDemo){rows.push(...demoRounds.filter(x=>x.gameType===builderType).map(x=>({...x,source:'synthetic'})));if(builderType==='V85')rows.push({...demoHistoricalRound,source:'synthetic'})}
  if(!builderRoundId||!rows.some(x=>String(x.id)===String(builderRoundId))){builderRound=rows[0]||null;builderRoundId=builderRound?.id||''}
- appEl.innerHTML=pageHead('Registrera system','Manuella val · lokal sparning · ingen AI')+spelSwitcher('builder')+'<div id="p1-storage-status"></div><div class="p1-card p1-card-pad p1-section"><div class="p1-section-title"><h2>Omgång</h2><span>Kommande eller historisk</span></div><div class="p1-builder-selects"><label><span class="p1-label">Spelform</span><select class="p1-select" data-p1-builder-type><option '+(builderType==='V85'?'selected':'')+'>V85</option><option '+(builderType==='V86'?'selected':'')+'>V86</option></select></label><label><span class="p1-label">Välj omgång</span><select class="p1-select" data-p1-builder-round>'+(rows.length?rows.map(x=>'<option value="'+esc1(x.id)+'" '+(String(x.id)===String(builderRoundId)?'selected':'')+'>'+esc1(x.gameType+' · '+date1(x.roundDate)+' · '+(x.trackNames||'Bana saknas')+(x.source==='synthetic'?' · Syntetiskt exempel':x.historical?' · Historisk':' · Kommande'))+'</option>').join(''):'<option value="">Ingen omgång tillgänglig</option>')+'</select></label><div class="p1-row wrap">'+button(builderDemo?'Dölj demo-omgångar':'Visa syntetiska omgångar','toggle-builder-demo')+(builderLoadError?'<span class="p1-small">Kunde inte läsa omgångar: '+esc1(builderLoadError)+'</span>'+button('Försök igen','retry-builder'):'')+'</div></div><div class="p1-synthetic-banner">'+(builderRound?.source==='synthetic'?'Syntetisk exempelomgång vald.':'Omgångslistan hämtas från befintliga läs-API:er.')+'</div></div>'+(builderRound?builderLegMarkup():'<div class="p1-card p1-empty"><strong>Ingen omgång att välja</strong>Välj syntetiska exempel för att prova byggaren, eller läs in en omgång från databasen.</div>')+'<div class="p1-section"><div class="p1-section-title"><h2>Systemöversikt</h2><span>Alla åtta avdelningar krävs för att spara</span></div>'+builderSummary()+'<div class="p1-save-row"><input class="p1-input" data-p1-builder-name maxlength="60" placeholder="Systemnamn (valfritt)" value="'+esc1(builderName)+'">'+button('Rensa val','clear-builder')+button('Spara system','save-system','primary')+'</div><div id="p1-builder-message" class="p1-small" role="status"></div></div>';
+ appEl.innerHTML=pageHead('Registrera system','Manuella val · lokal sparning · ingen AI')+spelSwitcher('builder')+'<div id="p1-storage-status"></div><div class="p1-card p1-card-pad p1-section"><div class="p1-section-title"><h2>Omgång</h2><span>Kommande eller historisk</span></div><div class="p1-builder-selects"><label><span class="p1-label">Spelform</span><select class="p1-select" data-p1-builder-type><option '+(builderType==='V85'?'selected':'')+'>V85</option><option '+(builderType==='V86'?'selected':'')+'>V86</option></select></label><label><span class="p1-label">Välj omgång</span><select class="p1-select" data-p1-builder-round>'+(rows.length?rows.map(x=>'<option value="'+esc1(x.id)+'" '+(String(x.id)===String(builderRoundId)?'selected':'')+'>'+esc1(x.gameType+' · '+date1(x.roundDate)+' · '+(x.trackNames||'Bana saknas')+(x.source==='synthetic'?' · Syntetiskt exempel':x.historical?' · Historisk':' · Kommande'))+'</option>').join(''):'<option value="">Ingen omgång tillgänglig</option>')+'</select></label><div class="p1-row wrap">'+(demoEnabled?button(builderDemo?'Dölj demo-omgångar':'Visa syntetiska omgångar','toggle-builder-demo'):'')+(builderLoadError?'<span class="p1-small">Kunde inte läsa omgångar: '+esc1(builderLoadError)+'</span>'+button('Försök igen','retry-builder'):'')+'</div></div><div class="p1-synthetic-banner">'+(builderRound?.source==='synthetic'?'Syntetisk exempelomgång vald.':'Omgångslistan hämtas från befintliga läs-API:er.')+'</div></div>'+(builderRound?builderLegMarkup():'<div class="p1-card p1-empty"><strong>Ingen omgång att välja</strong>Läs in en omgång från databasen.</div>')+'<div class="p1-section"><div class="p1-section-title"><h2>Systemöversikt</h2><span>Alla åtta avdelningar krävs för att spara</span></div>'+builderSummary()+'<div class="p1-save-row"><input class="p1-input" data-p1-builder-name maxlength="60" placeholder="Systemnamn (valfritt)" value="'+esc1(builderName)+'">'+button('Rensa val','clear-builder')+button('Spara system','save-system','primary')+'</div><div id="p1-builder-message" class="p1-small" role="status"></div></div>';
  renderStorageNotice();
  appEl.querySelector('[data-p1-builder-type]').onchange=event=>{builderType=event.target.value;builderRoundId='';builderLegs=Array.from({length:8},()=>[]);renderBuilder()};
   appEl.querySelector('[data-p1-builder-round]').onchange=event=>{builderRoundId=event.target.value;builderRound=rows.find(x=>String(x.id)===String(builderRoundId))||null;builderLegs=Array.from({length:8},()=>[]);renderBuilder(true)};
@@ -300,7 +302,7 @@ function addLocalSystem(){
 }
 function renderSystems(){
  currentRoute='systems';spelView='systems';setNav1('spel');
-  const all=[...localData.systems,...(demoVisible?demoSystems:[])];const visible=all.filter(s=>groupFilter==='all'||(groupFilter==='settled'?isSettledResult(s):!isSettledResult(s)));
+  const all=[...localData.systems,...(demoEnabled&&demoVisible?demoSystems:[])];const visible=all.filter(s=>groupFilter==='all'||(groupFilter==='settled'?isSettledResult(s):!isSettledResult(s)));
  const summary=summarizeSystems(all);
  appEl.innerHTML=pageHead('Mina system','Dina registrerade V85- och V86-system')+spelSwitcher('systems')+'<div id="p1-storage-status"></div><div class="p1-finance">'+financeCard('INSATS',summary.stakeSek)+financeCard('UTDELNING',summary.payoutSek)+financeCard('RESULTAT',summary.netSek,true)+'</div><div class="p1-section"><div class="p1-section-title"><h2>Registrerade omgångar</h2><span>'+(demoVisible?'<span class="p1-chip demo">Syntetiska exempel visas</span>':'')+'</span></div><div class="p1-filterbar">'+[['all','Alla'],['settled','Avgjorda'],['pending','Kommande']].map(([id,label])=>'<button class="p1-filter '+(groupFilter===id?'active':'')+'" data-p1-group-filter="'+id+'">'+label+'</button>').join('')+'<button class="p1-filter" data-p1-action="toggle-demo-systems">'+(demoVisible?'Dölj exempeldata':'Visa syntetiska exempel')+'</button></div><div id="p1-round-groups">'+renderRoundGroups(visible)+'</div></div><div class="p1-section"><div class="p1-section-title"><h2>Min resultatstatistik</h2><span>Underlag: '+summary.settledCount+' avgjorda system</span></div>'+performanceMarkup(all,summary)+'</div>';
  renderStorageNotice();
@@ -311,7 +313,7 @@ function renderSystems(){
 }
 function financeCard(label,value,net=false){const tone=net?(value>0?'p1-positive':value<0?'p1-negative':'p1-neutral'):'p1-neutral';return'<div class="p1-card p1-finance-card"><small>'+label+'</small><strong class="'+tone+'">'+(value==null?'–':money1(value))+'</strong></div>'}
 function renderRoundGroups(systems){
- if(!systems.length)return'<div class="p1-card p1-empty"><strong>Inga registrerade system</strong>Spara ett manuellt system eller visa de tydligt märkta syntetiska exemplen.</div>';
+ if(!systems.length)return'<div class="p1-card p1-empty"><strong>Inga registrerade system</strong>Spara ett manuellt system för att visa det här.</div>';
  const groups=new Map();systems.forEach(system=>{const key=String(system.roundId);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(system)});
   return'<div class="p1-rounds">'+[...groups.entries()].map(([id,items])=>{const first=items[0],settled=items.filter(isSettledResult),stake=items.reduce((s,x)=>s+Number(x.stakeSek||0),0),payout=settled.reduce((s,x)=>s+Number(x.payoutSek),0),net=settled.length?payout-settled.reduce((s,x)=>s+Number(x.stakeSek),0):null;return'<section class="p1-card p1-saved-round"><button type="button" class="p1-saved-round-head" data-p1-round-toggle="'+esc1(id)+'"><span><span class="p1-saved-round-title"><span class="p1-game '+(first.gameType==='V86'?'v86':'')+'">'+esc1(first.gameType)+'</span>'+esc1(first.trackNames||'Bana saknas')+' '+sourceTag(first.source==='synthetic'?'synthetic':'')+'</span><span class="p1-saved-round-meta">'+esc1(date1(first.roundDate))+' · '+items.length+' system · Insatser '+money1(stake)+'</span></span><span class="p1-saved-round-result '+(net==null?'p1-neutral':net>0?'p1-positive':net<0?'p1-negative':'p1-neutral')+'">'+(settled.length?money1(net)+' netto':'Inväntar resultat')+'</span></button><div class="p1-systems" data-p1-round-systems="'+esc1(id)+'" hidden>'+items.map(systemCard).join('')+'</div></section>'}).join('')+'</div>'
 }
@@ -339,14 +341,14 @@ function handleAction(action,element){
   if(action==='back-upcoming'){activeRound=null;roundToken++;renderUpcoming()}
  else if(action==='retry-upcoming')renderUpcoming()
  else if(action==='retry-leg')renderRound()
- else if(action==='toggle-upcoming-demo'){saveDemoVisibility(!demoVisible);renderUpcoming()}
+ else if(action==='toggle-upcoming-demo'&&demoEnabled){saveDemoVisibility(!demoVisible);renderUpcoming()}
   else if(action==='open-builder'){currentRoute='systems';state.settingsOpen=false;state.detail=null;state.gameDetail=null;state.gameSystemId=null;state.page='games';renderBuilder()}
- else if(action==='toggle-builder-demo'){builderDemo=!builderDemo;builderRoundId='';renderBuilder(true)}
+ else if(action==='toggle-builder-demo'&&demoEnabled){builderDemo=!builderDemo;builderRoundId='';renderBuilder(true)}
  else if(action==='retry-builder'){delete builderRoundsCache[builderType];renderBuilder()}
  else if(action==='retry-settings')renderSettings()
  else if(action==='clear-builder'){builderLegs=Array.from({length:8},()=>[]);renderBuilder(true)}
  else if(action==='save-system')addLocalSystem()
- else if(action==='toggle-demo-systems'){saveDemoVisibility(!demoVisible);renderSystems()}
+ else if(action==='toggle-demo-systems'&&demoEnabled){saveDemoVisibility(!demoVisible);renderSystems()}
  else if(action==='new-note'){const host=element.closest('.p1-notes');activeNoteDraft={horseId:host.dataset.horseId,noteId:null,text:'',raceEntryId:'',context:null};renderNotesHost(host)}
  else if(action==='cancel-note'){activeNoteDraft=null;const host=element.closest('.p1-notes');renderNotesHost(host)}
  else if(action==='save-note')saveNote(element)
@@ -433,7 +435,7 @@ currentRoute='trend';setNav1('trend');renderStart();
 </script>`;
 }
 
-export function enhancePhase1Html(html, { asOfDate } = {}) {
+export function enhancePhase1Html(html, { asOfDate, allowDemo = false } = {}) {
   if (typeof html !== 'string' || html.includes('kentaurai-phase1-script')) return html;
   let enhanced = html.replace('</head>', `${phase1Css}</head>`);
   const compatibility = '<script id="kentaurai-phase1-esbuild-compat">function __name(target){return target}</script>';
@@ -441,5 +443,5 @@ export function enhancePhase1Html(html, { asOfDate } = {}) {
   if (firstScript >= 0) enhanced = enhanced.slice(0, firstScript) + compatibility + enhanced.slice(firstScript);
   else enhanced = enhanced.replace('</body>', compatibility + '</body>');
   const date = asOfDate || new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Stockholm' }).format(new Date());
-  return enhanced.replace('</body>', `${phase1ClientScript(date)}</body>`);
+  return enhanced.replace('</body>', `${phase1ClientScript(date, allowDemo)}</body>`);
 }
