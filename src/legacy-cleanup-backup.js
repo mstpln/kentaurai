@@ -93,8 +93,15 @@ export async function getLegacyBackupStatus(env){
   const row=await latest(env);
   if(!row) return {mode:'private_legacy_backup_only',status:'none',
     backupVerified:false,rawPayloadReturned:false,dataDeletionEnabled:false};
-  if(row.source_sha!==env.KENTAURAI_DEPLOY_SHA)
-    throw new Error('legacy_backup_different_deployment');
+  if(row.source_sha!==env.KENTAURAI_DEPLOY_SHA) {
+    // An already completed backup from a prior release remains privately
+    // recorded, but is not a fresh backup for this deployment. A stale
+    // *active* export must never be taken over by new code.
+    if(row.status==='complete')return {mode:'private_legacy_backup_only',
+      status:'none',backupVerified:false,rawPayloadReturned:false,
+      dataDeletionEnabled:false};
+    throw new Error('legacy_backup_previous_deployment_active');
+  }
   if(row.status==='complete')await verifyComplete(env,row);
   return publicStatus(row,row.status==='complete');
 }
