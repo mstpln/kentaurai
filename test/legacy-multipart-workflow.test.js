@@ -76,3 +76,31 @@ test('runner rejects starting a fresh export in resume-only mode',()=>{
   assert.match(r.stderr,/multipart_runner_no_active_backup_to_resume/);
   assert.doesNotMatch(r.stderr,/signed_url|r2_object_key|source_record_id/);
 });
+
+test('multipart runner displays sanitized first-start diagnostics without retrying',()=>{
+  const moduleUrl=new URL('../scripts/run-production-legacy-multipart-backup.mjs',import.meta.url).href;
+  const code=[
+    'let calls=0;',
+    'globalThis.fetch=async(url)=>{',
+    'calls++;',
+    'if(calls===1)return Response.json({mode:"private_multipart_backup_only",',
+    'status:"none",rawPayloadReturned:false,dataDeletionEnabled:false,sourceSha:null});',
+    'if(String(url).endsWith("/start"))return Response.json({',
+    'error:"legacy_multipart_backup_unavailable",stage:"check_d1_size",',
+    'reason:"cloudflare_http_403",payload:"SECRET_PRIVATE_ERROR"},',
+    '{status:409});',
+    'throw Error("unexpected_request");',
+    '};',
+    'await import('+JSON.stringify(moduleUrl)+');'
+  ].join('\n');
+  const result=spawnSync(process.execPath,['--input-type=module','-e',code],{
+    timeout:10000,encoding:'utf8',
+    env:{...process.env,WORKER_URL:'https://synthetic.invalid',
+      CLEANUP_TOKEN:'synthetic-only',GITHUB_SHA:'a'.repeat(40),
+      MULTIPART_BACKUP_MODE:'start_or_resume',GITHUB_STEP_SUMMARY:''}
+  });
+  assert.notEqual(result.status,0);
+  assert.match(result.stderr,
+    /recovery_private_api_http_409_stage_check_d1_size_reason_cloudflare_http_403/);
+  assert.doesNotMatch(result.stderr,/SECRET_PRIVATE_ERROR|signed_url|source_record_id/);
+});
