@@ -42,8 +42,8 @@ test('Travdata keeps existing navigation SVGs, Phase 1 controls, storage keys an
 test('the unchanged original TD symbol is a valid GET-only image', async () => {
   for (const [path, width, height] of [
     ['/app/brand/td-mark.png', 512, 512],
-    ['/app/icon.png?brand=travdata-2', 512, 512],
-    ['/app/apple-touch-icon.png?brand=travdata-2', 512, 512]
+    ['/app/icon.png?brand=travdata-3', 512, 512],
+    ['/app/apple-touch-icon.png?brand=travdata-3', 512, 512]
   ]) {
     const response = await travdataAssetResponse(new Request('https://example.test' + path));
     assert.equal(response.status, 200);
@@ -98,15 +98,15 @@ test('all page-heading families share responsive sizes, weight, line height and 
 
 test('mobile installation uses the unchanged TD PNG and versioned manifest and Apple icon URLs', async () => {
   const html = enhanceTravdataHtml(renderLoginPage().replace('</head>', pwaHeadMarkup() + '</head>'));
-  assert.match(html, /rel="apple-touch-icon" sizes="512x512" href="\/app\/apple-touch-icon\.png\?brand=travdata-2"/);
-  assert.match(html, /rel="manifest" href="\/app\/manifest\.webmanifest\?brand=travdata-2"/);
+  assert.match(html, /rel="apple-touch-icon" sizes="512x512" href="\/app\/apple-touch-icon\.png\?brand=travdata-3"/);
+  assert.match(html, /rel="manifest" href="\/app\/manifest\.webmanifest\?brand=travdata-3"/);
   const icon = travdataManifest().icons.find(icon => icon.type === 'image/png');
   assert.equal(icon.sizes, '512x512');
   assert.equal(icon.purpose, 'any');
-  assert.equal(icon.src, '/app/icon.png?brand=travdata-2');
+  assert.equal(icon.src, '/app/icon.png?brand=travdata-3');
   const sw = await travdataAssetResponse(new Request('https://example.test/app/sw.js')).text();
-  assert.match(sw, /kentaurai-pwa-v4/);
-  assert.match(sw, /map\(path=>path\+'\?brand=travdata-2'\)/);
+  assert.match(sw, /kentaurai-pwa-v5/);
+  assert.match(sw, /map\(path=>path\+'\?brand=travdata-3'\)/);
   assert.match(sw, /'\/app\/apple-touch-icon\.png'/);
   assert.doesNotMatch(sw, /kentaurai-pwa-v2/);
   assert.equal(travdataAssetResponse(new Request('https://example.test/app/apple-touch-icon.png', { method: 'POST' })), null);
@@ -127,7 +127,7 @@ test('PWA identity and icons change without changing installed app scope or cach
   assert.match(icon, /clip-path="url\(#td-circle\)"/);
   assert.doesNotMatch(icon, /fill="#F7F7FC"/);
   const sw = await travdataAssetResponse(new Request('https://example.test/app/sw.js')).text();
-  assert.match(sw, /kentaurai-pwa-v4/);
+  assert.match(sw, /kentaurai-pwa-v5/);
   assert.doesNotMatch(sw, /\/app\/api/);
 });
 
