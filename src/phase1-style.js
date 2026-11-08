@@ -47,4 +47,49 @@ export const phase1Css = `
  .p1-stat-label{font-size:10px}.p1-stat-pair strong{font-size:13px}
  .p1-history-item{font-size:11px}
 }
+
+/* Upcoming starter cards: keep factual identifiers together above a separated KPI row. */
+.p1-horse-grid{display:block;padding:10px 12px}
+.p1-horse-top{display:flex;align-items:flex-start;gap:7px;min-width:0}
+.p1-horse-main{display:flex;align-items:baseline;gap:6px;min-width:0;flex:1;flex-wrap:wrap}
+.p1-horse-main .p1-horse-num{font-size:14px;line-height:18px;flex:none}
+.p1-horse-main .p1-horse-name{font-size:14px;line-height:18px;overflow-wrap:normal;min-width:0}
+.p1-horse-meta{font-size:10px;line-height:normal;color:var(--muted);white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis;align-self:baseline}
+.p1-horse-top .p1-expand-btn{flex:none;width:27px;height:27px;min-height:27px;align-self:flex-start}
+.p1-horse-info{display:flex;align-items:center;flex-wrap:wrap;gap:3px 8px;margin-top:3px;font-size:10px;line-height:15px;color:#bdb6ac}
+.p1-info-unit{white-space:nowrap}
+.p1-horse-info .p1-form{font-size:inherit;margin:0;line-height:inherit;overflow-wrap:normal}
+.p1-shoes{display:inline-flex;align-items:center;gap:2px;vertical-align:middle}
+.p1-shoe-symbol{display:inline-flex;vertical-align:middle;color:#bdb6ac}
+.p1-shoe-symbol svg{display:block}
+.p1-equipment-changed{color:#e15c64;font-weight:600}
+.p1-handicap-badge{display:inline-block;background:#302414;border:1px solid #a37b3a;color:#f3c77a;border-radius:4px;padding:0 5px;font-size:10px;line-height:17px;font-weight:700;white-space:nowrap}
+.p1-scratched-label{display:inline-flex;align-items:center;border:1px solid #d95f66;background:#4c2126;color:#ffe4e4;padding:1px 7px;border-radius:4px;font-size:10px;line-height:16px;letter-spacing:.03em;font-weight:800;white-space:nowrap;align-self:baseline}
+.p1-horse-scratched{background:#191211;border-color:#a64a51;border-left:3px solid #dc666e}
+.p1-horse-scratched .p1-horse-name{text-decoration:line-through;color:#b5a3a2}
+.p1-horse-scratched .p1-horse-info,.p1-horse-scratched .p1-horse-stats{opacity:.52}
+.p1-horse-separator{height:1px;background:#37342f;margin:10px 0}
+.p1-horse-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.p1-horse-stats .p1-horse-metric{grid-row:auto;text-align:left;min-width:0}
+.p1-horse-stats .p1-horse-metric small{font-size:8px;letter-spacing:.02em;white-space:nowrap}
+.p1-horse-stats .p1-horse-metric strong{font-size:12px;margin-top:3px}
+@media(max-width:767px){
+ .p1-horse-grid{display:block;padding:10px 11px}
+ .p1-horse-top{display:flex}
+ .p1-horse-main{padding:0;grid-column:auto;grid-row:auto}
+ .p1-horse-main .p1-horse-name{font-size:13px}
+ .p1-horse-main .p1-horse-num{font-size:13px}
+ .p1-horse-meta{font-size:10px}
+ .p1-horse-info{font-size:10px}
+ .p1-horse-top .p1-expand-btn{width:27px;height:27px;min-height:27px}
+ .p1-horse-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px}
+ .p1-horse-stats .p1-horse-metric small{font-size:8px;white-space:normal}
+ .p1-horse-stats .p1-horse-metric strong{font-size:11px}
+}
+@media(max-width:360px){
+ .p1-horse-grid{padding:9px 8px}
+ .p1-horse-info{font-size:9px;gap:3px 6px}
+ .p1-horse-stats .p1-horse-metric small{font-size:7px}
+ .p1-horse-stats .p1-horse-metric strong{font-size:10px}
+}
 </style>`;
