@@ -13,7 +13,7 @@ const BOOKMARK='synthetic_backup_bookmark_20261108_xyz_001';
 const TOKEN_TIME=()=>Date.now()+'.'+'f'.repeat(64);
 const BODY='BEGIN TRANSACTION;\nCREATE TABLE synthetic_only(x INTEGER);\n'+
   'INSERT INTO synthetic_only VALUES(1);\n'+('-- synthetic test export, no real racing payload\n').repeat(90)+'COMMIT;\n';
-const URL='https://download.cloudflarestorage.com/synthetic-test-export';
+const SIGNED_URL='https://download.cloudflarestorage.com/synthetic-test-export';
 
 function fixture(){
   const f=createTestEnv();
@@ -44,10 +44,10 @@ function fakeCloudflare({badUrl=null,declaredBytes=null,unfinished=false}={}){
         assert.equal(request.current_bookmark,BOOKMARK);
         return Response.json({success:true,result:{
           type:'export',at_bookmark:BOOKMARK,status:unfinished?'active':'complete',
-          ...(!unfinished?{result:{signed_url:badUrl||URL,filename:'synthetic-only.sql'}}:{})
+          ...(!unfinished?{result:{signed_url:badUrl||SIGNED_URL,filename:'synthetic-only.sql'}}:{})
         }});
       }
-      if(url===URL){
+      if(url===SIGNED_URL){
         downloads++;
         return new Response(BODY,{headers:{
           'content-length':String(declaredBytes??new TextEncoder().encode(BODY).byteLength),
