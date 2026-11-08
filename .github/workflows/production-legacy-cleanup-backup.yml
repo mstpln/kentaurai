@@ -23,8 +23,6 @@ jobs:
       cancel-in-progress: false
     env:
       WORKER_NAME: kentaurai-api
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - name: Checkout exact reviewed main
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -53,6 +51,9 @@ jobs:
         run: npm run qa
 
       - name: Verify private Cloudflare configuration
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         shell: bash
         run: |
           set -euo pipefail
@@ -61,6 +62,9 @@ jobs:
           echo "::add-mask::$CLOUDFLARE_API_TOKEN"
 
       - name: Install ephemeral backup-only credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         id: backup_credential
         shell: bash
         run: |
@@ -74,6 +78,9 @@ jobs:
           printf 'true\n' | npx --yes wrangler@4.114.0 secret put LEGACY_BACKUP_ENABLED --name "$WORKER_NAME"
 
       - name: Resolve exact production Worker route
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         id: worker
         shell: bash
         run: |
@@ -122,6 +129,9 @@ jobs:
         run: node scripts/run-production-legacy-cleanup-backup.mjs
 
       - name: Remove every ephemeral backup credential
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         if: ${{ always() && steps.backup_credential.outcome != 'skipped' }}
         shell: bash
         run: |
