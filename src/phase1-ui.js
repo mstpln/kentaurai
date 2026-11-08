@@ -95,7 +95,7 @@ async function renderUpcoming(){
 function renderUpcomingList(){
  const host=document.getElementById('p1-upcoming-host');if(!host)return;
  const items=upcomingItems.filter(item=>roundFilter==='all'||item.gameType===roundFilter);
-  if(!items.length){host.innerHTML='<div class="p1-card p1-empty"><strong>Inga kommande omgångar</strong>Det finns inga verifierade '+(roundFilter==='all'?'V85/V86':roundFilter)+'-omgångar i den lokala databasen.</div><div class="p1-section">'+button(demoVisible?'Dölj syntetiska exempel':'Visa syntetiska exempel','toggle-upcoming-demo')+'</div>'+(demoEnabled&&demoVisible?demoRoundCards():'');bindRoundCards(host);return}
+  if(!items.length){host.innerHTML='<div class="p1-card p1-empty"><strong>Inga kommande omgångar</strong>Det finns inga verifierade '+(roundFilter==='all'?'V85/V86':roundFilter)+'-omgångar i den lokala databasen.</div>'+(demoEnabled?'<div class="p1-section">'+button(demoVisible?'Dölj syntetiska exempel':'Visa syntetiska exempel','toggle-upcoming-demo')+'</div>':'')+(demoEnabled&&demoVisible?demoRoundCards():'');bindRoundCards(host);return}
   const grouped=new Map();items.forEach(item=>{const key=item.roundDate||'unknown';if(!grouped.has(key))grouped.set(key,[]);grouped.get(key).push(item)});
   host.innerHTML=[...grouped.entries()].map(([date,group])=>'<section class="p1-section"><div class="p1-small" style="margin:0 0 6px 2px">'+esc1(date1(date))+'</div><div class="p1-round-list">'+group.map(roundCard).join('')+'</div></section>').join('')+(demoEnabled?'<div class="p1-section">'+button(demoVisible?'Dölj syntetiska exempel':'Visa syntetiska exempel','toggle-upcoming-demo')+'</div>':'')+(demoEnabled&&demoVisible?demoRoundCards():'');
   bindRoundCards(host);
