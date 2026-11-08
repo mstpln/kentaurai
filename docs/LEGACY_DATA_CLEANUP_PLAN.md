@@ -111,8 +111,10 @@ JSON consumer references, and contains no write action. If an orphan exists,
 pause and investigate rather than deleting blindly.
 
 The backup-only Cloudflare route:
-- Requires a fresh, temporary storage-cleanup credential **and** a separate
-  \`LEGACY_BACKUP_ENABLED\` secret. Even \`ADMIN_TOKEN\` alone cannot start it.
+- Requires a **dedicated** temporary `LEGACY_BACKUP_TOKEN` credential **and**
+  a separate `LEGACY_BACKUP_ENABLED` switch. Neither `ADMIN_TOKEN` nor
+  `STORAGE_CLEANUP_TOKEN` can authorize backup endpoints; the backup token
+  cannot authorize legacy cleanup, provenance restoration or other routes.
 - Uses Cloudflare D1 export polling; **the SQL body is streamed from Cloudflare
   directly to private Cloudflare R2**, never GitHub, ChatGPT or a user device.
 - Stores a distinct receipt in \`legacy_cleanup_backups\`, binding D1 export
@@ -136,3 +138,9 @@ zero-write delete rehearsal have passed.
 Only after this PR is reviewed and explicitly approved for merge/deploy can
 the operator run the extended read-only inventory and separately click the
 backup-only workflow. **No auto-backup or auto-delete on merge.**
+
+
+**Operational caution:** Cloudflare's D1 export API can make the source
+D1 unavailable for queries while a large export is in progress. Run the
+manual backup outside the morning pipeline or other active processing.
+The 5 GiB R2 single-PUT limit remains in force and fails closed.
