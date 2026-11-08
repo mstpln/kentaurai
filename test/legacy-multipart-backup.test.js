@@ -15,7 +15,8 @@ const PAYLOAD=new TextEncoder().encode("BEGIN TRANSACTION;\n"+
   ("INSERT INTO synthetic_backups VALUES (1,'not-real-racing-data');\n").repeat(24)+"COMMIT;\n");
 
 function fixture({wrongRange=false,badEtag=false,truncated=false,metadataSize=5_711_183_872,
-  changedSource=false,sourceUrl=SIGNED,onePollActive=false}={}){
+  changedSource=false,sourceUrl=SIGNED,onePollActive=false,
+  controlWriteSpacingMs=0,sleep,now}={}){
   const f=createTestEnv();
   const backupObjects=new Map(),uploads=new Map(),events=[];
   let completeCalls=0;
@@ -109,7 +110,8 @@ function fixture({wrongRange=false,badEtag=false,truncated=false,metadataSize=5_
     throw Error('unexpected fetch');
   };
   return {...f,bucket,backupObjects,events,api,
-    service:createPrivateMultipartBackup({partBytes:256,fetchImpl:api})};
+    service:createPrivateMultipartBackup({partBytes:256,fetchImpl:api,
+      controlWriteSpacingMs,sleep,now})};
 }
 async function ready(f){
   assert.equal((await f.service.start(f.env)).status,'exporting');
@@ -311,5 +313,23 @@ test('ambiguous D1 receipt commit resumes without re-uploading private SQL',asyn
   assert.equal(f.events.filter(x=>x==='complete').length,uploaded,
     'D1 receipt retry must not reassemble or re-upload the SQL');
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM legacy_cleanup_backups').get().n,1);
+  f.db.close();
+});
+
+
+test('private R2 control writes are paced across Worker requests',async()=>{
+  let clock=1_800_000_000_000;
+  const delays=[];
+  const f=fixture({controlWriteSpacingMs:1150,now:()=>clock,
+    sleep:async(ms)=>{delays.push(ms);clock+=ms;}});
+  await f.service.start(f.env);
+  await f.service.poll(f.env);
+  await f.service.step(f.env);
+  const control=await f.env.RAW_BUCKET.get('backups/legacy-cleanup-multipart/.active-v1.json');
+  const state=JSON.parse(await control.text());
+  assert.equal(state.lastSavedAtMs,clock);
+  assert.ok(delays.length>=3,'start, poll and step must space control rewrites');
+  assert.ok(delays.every(ms=>ms>=1100&&ms<=1150),'each same-key write must be delayed');
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM legacy_cleanup_backups').get().n,0);
   f.db.close();
 });
