@@ -25,7 +25,7 @@ jobs:
       - name: Require main and a successful deployed ancestor
         shell: bash
         env:
-          GH_TOKEN: \${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = "refs/heads/main"
@@ -48,8 +48,8 @@ jobs:
 
       - name: Count obsolete legacy data without returning private records
         env:
-          CLOUDFLARE_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: \${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           D1_DATABASE_ID: d8189e0e-6127-4ef2-88cc-534cb2217340
         run: |
           set -euo pipefail
@@ -58,7 +58,7 @@ jobs:
           node scripts/inventory-legacy-data.mjs
 
       - name: Record non-deletion boundary
-        if: \${{ always() }}
+        if: ${{ always() }}
         run: |
           echo "Read-only aggregate D1 inventory. No data deletion, R2 traversal, deployment, migration, or Cloudflare secret changes." >> "$GITHUB_STEP_SUMMARY"
           echo "A separate verified private backup, FK/dependency review, and audited deletion plan are mandatory before any future delete." >> "$GITHUB_STEP_SUMMARY"
