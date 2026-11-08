@@ -207,3 +207,22 @@ test('horse cards show first 200 and last 400 times without min/km suffix',()=>{
   assert.match(html,/metric\('Första 200',pace1\(/);
   assert.match(html,/metric\('Sista 400',pace1\(/);
 });
+
+
+test('upcoming horse cards present scratch and handicap states without hiding the underlying start data', () => {
+  const html = enhancePhase1Html('<html><head></head><body></body></html>', { asOfDate: '2028-01-02' });
+  assert.match(html, /p1-scratched-label/);
+  assert.match(html, /STRUKEN/);
+  assert.match(html, /p1-handicap-badge/);
+  assert.match(html, /m tillägg/);
+  assert.match(html, /Spår: /);
+  assert.match(html, /Form: /);
+  assert.match(html, /Kusk: /);
+  assert.match(html, /Skor: /);
+  assert.match(html, /Vagn: /);
+  assert.match(html, /p1-horse-separator/);
+  assert.match(html, /align-items:baseline/);
+  assert.match(html, /p1-horse-stats/);
+  assert.match(html, /p1-equipment-changed/);
+  assert.match(html, /p1-horse-scratched/);
+});
