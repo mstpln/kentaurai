@@ -193,6 +193,7 @@ export function createTestEnv() {
           if (!stored) return null;
           const bytes = typeof stored.body === 'string' ? new TextEncoder().encode(stored.body) : stored.body;
           return {
+            size: bytes.byteLength,
             async text() { return typeof stored.body === 'string' ? stored.body : new TextDecoder().decode(bytes); },
             async arrayBuffer() { return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength); }
           };
