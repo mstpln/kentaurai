@@ -1,6 +1,8 @@
 import worker from './worker-v078.js';
 import { appAuthConfigured, hasValidAppSession } from './app-auth.js';
 import { enhanceSettingsDriftHtml } from './settings-drift-ui.js';
+import { enhancePhase1Html } from './phase1-ui.js';
+import { enhanceTravdataHtml, travdataAssetResponse } from './travdata-brand.js';
 import { getAutomationControl, getDriftOverview, setAutomationControl } from './settings-drift.js';
 
 function json(data, status = 200) {
@@ -21,17 +23,20 @@ async function requireSession(request, env) {
 }
 
 async function enhanceApp(request, response, env) {
-  if (request.method !== 'GET' || new URL(request.url).pathname !== '/app/') return response;
+  const path = new URL(request.url).pathname;
+  if (request.method !== 'GET' || !path.startsWith('/app')) return response;
   const type = response.headers.get('content-type') || '';
   if (!type.includes('text/html')) return response;
   const headers = new Headers(response.headers);
   headers.delete('content-length');
-  let html = enhanceSettingsDriftHtml(await response.text());
-  if (env.PREVIEW_DATA_MODE === 'synthetic') {
+  let html = await response.text();
+  const appPage = path === '/app/' || path === '/app';
+  if (appPage) html = enhancePhase1Html(enhanceSettingsDriftHtml(html));
+  if (appPage && env.PREVIEW_DATA_MODE === 'synthetic') {
     html = html.replace('</body>', `<div class="synthetic-preview-badge" role="status" aria-label="Synthetic local preview data">SYNTHETIC PREVIEW · local D1</div>
       <style>.synthetic-preview-badge{position:fixed;right:12px;bottom:calc(70px + env(safe-area-inset-bottom));z-index:9999;padding:6px 9px;border:1px solid #f0c36d;border-radius:999px;background:#fff7e6;color:#744b00;font:600 10px/1.2 system-ui,sans-serif;letter-spacing:.04em;box-shadow:0 2px 8px #0002;pointer-events:none}@media(min-width:760px){.synthetic-preview-badge{bottom:12px}}</style></body>`);
   }
-  return new Response(html, {
+  return new Response(enhanceTravdataHtml(html), {
     status:response.status,
     statusText:response.statusText,
     headers
@@ -52,6 +57,8 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
+    const brandAsset = travdataAssetResponse(request);
+    if (brandAsset) return brandAsset;
 
     // Deployment identity is injected by the reviewed production release.
     // A missing or different SHA fails the separate cleanup preflight closed.

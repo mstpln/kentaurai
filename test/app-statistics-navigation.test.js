@@ -5,7 +5,27 @@ import vm from 'node:vm';
 import { renderAppPage } from '../src/app-page-aligned.js';
 import { createAppSessionCookie } from '../src/app-auth.js';
 import worker from '../src/worker-v078.js';
+import { enhanceHorseStatisticsHtml } from '../src/horse-statistics-ui.js';
+import { enhanceDriverStatisticsHtml } from '../src/driver-statistics-ui.js';
+import { enhanceTrainerStatisticsHtml } from '../src/trainer-statistics-ui.js';
+
+test('statistics pages use the approved descriptive subtitles in list and ranking views', () => {
+  const html = enhanceTrainerStatisticsHtml(enhanceDriverStatisticsHtml(enhanceHorseStatisticsHtml(renderAppPage())));
+  for (const entity of ['hästar', 'kuskar', 'tränare']) {
+    assert.ok(html.includes('Utforska '+entity+', form och resultat.'));
+  }
+  assert.ok(html.includes("'Utforska '+labels[page].toLowerCase()+', form och resultat.'"));
+  assert.ok(html.includes('Utforska banor och banstatistik.'));
+  assert.doesNotMatch(html, /Sök och utforska|Banprofil, bananalys, spårstatistik och hemmatränare/);
+});
 import { createTestEnv } from './helpers/d1.js';
+
+test('track browsing adds the shared tab row with only Lista selected', () => {
+  const html = renderAppPage();
+  const tracks = html.match(/async function renderTracks\(\)\{[\s\S]*?function trackCountry/)[0];
+  assert.ok(tracks.includes("heading('Banor','Utforska banor och banstatistik.')+tabs([['list','Lista']],'list')+rows"));
+  assert.doesNotMatch(tracks, /\['stats','Statistik'\]/);
+});
 
 function primaryNavigationRuntime(html) {
   const match = html.match(/function alignPrimaryNavigation\(\)\{[\s\S]*?inner\.innerHTML=([\s\S]*?);\n\s*inner\.querySelector\('\[data-page="start"\]'\)/);

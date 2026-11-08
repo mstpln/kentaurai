@@ -160,17 +160,17 @@ async function renderStart(){cancelRankingLifecycle();cancelEntityListLifecycle(
 function entityRows(items){return '<div class="card entity-list">'+items.map(item=>'<button class="entity-row" data-id="'+esc(item.id)+'"><span class="entity-name">'+esc(item.name)+'</span><span class="chevron">›</span></button>').join('')+'</div>'}
 async function renderEntityList(page){
  cancelEntityListLifecycle();state.detail=null;state.gameDetail=null;state.gameSystemId=null;state.page=page;setNav(page);const offset=state.listOffsets[page]||0;
- app.innerHTML=heading(labels[page],'Sök och utforska '+labels[page].toLowerCase())+tabs([['list','Lista'],['stats','Statistik']],state.tab)+(state.tab==='list'?'<div class="notice">Läser '+esc(labels[page].toLowerCase())+'…</div>':empty('Statistik byggs på resultatdata','Här kommer vinstprocent, starter, placeringar och utveckling över valda perioder när historiken finns.'));
+ app.innerHTML=heading(labels[page],'Utforska '+labels[page].toLowerCase()+', form och resultat.')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+(state.tab==='list'?'<div class="notice">Läser '+esc(labels[page].toLowerCase())+'…</div>':empty('Statistik byggs på resultatdata','Här kommer vinstprocent, starter, placeringar och utveckling över valda perioder när historiken finns.'));
  bindTabs(()=>renderEntityList(page));
  const lifecycle=beginEntityListLifecycle();
  try{
   const data=await api('/entities/'+page+'?limit='+PAGE_SIZE+'&offset='+offset,{signal:lifecycle.controller.signal});
   if(!isCurrentEntityListLifecycle(lifecycle)||state.page!==page||state.detail)return;
   if(data.total>0&&!data.items.length&&offset>0){state.listOffsets[page]=Math.max(0,Math.floor((data.total-1)/data.limit)*data.limit);completeEntityListLifecycle(lifecycle);return renderEntityList(page)}
-  app.innerHTML=heading(labels[page],'Sök och utforska '+labels[page].toLowerCase())+tabs([['list','Lista'],['stats','Statistik']],state.tab);
+  app.innerHTML=heading(labels[page],'Utforska '+labels[page].toLowerCase()+', form och resultat.')+tabs([['list','Lista'],['stats','Statistik']],state.tab);
   if(state.tab==='list')app.innerHTML+=data.items.length?entityRows(data.items)+pager(data):empty('Inga poster att visa','Databasen har inga poster på den här sidan.');else app.innerHTML+=empty('Statistik byggs på resultatdata','Här kommer vinstprocent, starter, placeringar och utveckling över valda perioder när historiken finns.');
   bindTabs(()=>renderEntityList(page));document.querySelectorAll('.entity-row[data-id]').forEach(row=>row.onclick=()=>openDetail(page,row.dataset.id));const prev=document.getElementById('prevPage');const next=document.getElementById('nextPage');if(prev)prev.onclick=()=>{state.listOffsets[page]=Math.max(0,data.offset-data.limit);renderEntityList(page)};if(next)next.onclick=()=>{state.listOffsets[page]=data.offset+data.limit;renderEntityList(page)}
- }catch(error){if(isRankingAbort(error))return;if(isCurrentEntityListLifecycle(lifecycle))app.innerHTML=heading(labels[page],'Sök och utforska '+labels[page].toLowerCase())+tabs([['list','Lista'],['stats','Statistik']],state.tab)+'<div class="notice">Kunde inte läsa listan: '+esc(error.message)+'</div>'}
+ }catch(error){if(isRankingAbort(error))return;if(isCurrentEntityListLifecycle(lifecycle))app.innerHTML=heading(labels[page],'Utforska '+labels[page].toLowerCase()+', form och resultat.')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+'<div class="notice">Kunde inte läsa listan: '+esc(error.message)+'</div>'}
  finally{completeEntityListLifecycle(lifecycle)}
 }
 function comparisonCard(title,data){return '<div class="card"><div class="card-pad"><div class="card-title">'+esc(title)+'</div><div class="comparison-row"><div><div class="comparison-value">'+num(data.rounds)+'</div><div class="comparison-label">Omgångar</div></div><div><div class="comparison-value">'+(data.averageCorrect==null?'—':dec(data.averageCorrect,2))+'</div><div class="comparison-label">Snitt rätt</div></div><div><div class="comparison-value">'+pct(data.spikeHitRate)+'</div><div class="comparison-label">Spikträff</div></div></div></div></div>'}

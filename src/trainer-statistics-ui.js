@@ -61,10 +61,10 @@ function tRankingGrid(data){const r=data.rankings||{},limit=data.definitions?.lo
  return html}
 function tBindRows(){document.querySelectorAll('[data-ts-trainer]').forEach(row=>row.onclick=()=>openDetail('trainers',row.dataset.tsTrainer))}
 function tMergeRankingPayload(core,extended){return{...core,...extended,partial:extended.partial??core.partial,definitions:{...(core.definitions||{}),...(extended.definitions||{})},rankings:{...(core.rankings||{}),...(extended.rankings||{})}}}
-function renderTrainerRankingShell(data){app.innerHTML=heading('Tränare','Sök och utforska tränare')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+tToolbar()+tRankingGrid(data);bindTabs(()=>renderEntityList('trainers'));tBindFilters(renderTrainerRankings);tBindRows()}
+function renderTrainerRankingShell(data){app.innerHTML=heading('Tränare','Utforska tränare, form och resultat.')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+tToolbar()+tRankingGrid(data);bindTabs(()=>renderEntityList('trainers'));tBindFilters(renderTrainerRankings);tBindRows()}
 async function renderTrainerRankings(){
  const token=++trainerRankingToken;cancelRankingLifecycle();cancelEntityListLifecycle();state.detail=null;state.page='trainers';setNav('trainers');const key=tQuery();const cached=state.trainerStatsDataKey===key?state.trainerStatsData:null;
- app.innerHTML=heading('Tränare','Sök och utforska tränare')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+tToolbar()+(cached?tRankingGrid(cached):'<div class="trainer-ranking-empty">Läser tränarstatistik…</div>');bindTabs(()=>renderEntityList('trainers'));tBindFilters(renderTrainerRankings);if(cached){tBindRows();return}
+ app.innerHTML=heading('Tränare','Utforska tränare, form och resultat.')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+tToolbar()+(cached?tRankingGrid(cached):'<div class="trainer-ranking-empty">Läser tränarstatistik…</div>');bindTabs(()=>renderEntityList('trainers'));tBindFilters(renderTrainerRankings);if(cached){tBindRows();return}
  const lifecycle=beginRankingLifecycle();
  try{
   const core=await api('/trainers/statistics?'+key+'&mode=core',{signal:lifecycle.controller.signal});

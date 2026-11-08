@@ -59,10 +59,10 @@ function dRankingGrid(data){const r=data.rankings||{},limit=data.definitions?.lo
  return html}
 function dBindRows(){document.querySelectorAll('[data-ds-driver]').forEach(row=>row.onclick=()=>openDetail('drivers',row.dataset.dsDriver))}
 function dMergeRankingPayload(core,extended){return{...core,...extended,partial:extended.partial??core.partial,definitions:{...(core.definitions||{}),...(extended.definitions||{})},rankings:{...(core.rankings||{}),...(extended.rankings||{})}}}
-function renderDriverRankingShell(data){app.innerHTML=heading('Kuskar','Sök och utforska kuskar')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+dToolbar()+dRankingGrid(data);bindTabs(()=>renderEntityList('drivers'));dBindFilters(renderDriverRankings);dBindRows()}
+function renderDriverRankingShell(data){app.innerHTML=heading('Kuskar','Utforska kuskar, form och resultat.')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+dToolbar()+dRankingGrid(data);bindTabs(()=>renderEntityList('drivers'));dBindFilters(renderDriverRankings);dBindRows()}
 async function renderDriverRankings(){
  const token=++driverRankingToken;cancelRankingLifecycle();cancelEntityListLifecycle();state.detail=null;state.page='drivers';setNav('drivers');const key=dQuery();const cached=state.driverStatsDataKey===key?state.driverStatsData:null;
- app.innerHTML=heading('Kuskar','Sök och utforska kuskar')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+dToolbar()+(cached?dRankingGrid(cached):'<div class="driver-ranking-empty">Läser kuskstatistik…</div>');bindTabs(()=>renderEntityList('drivers'));dBindFilters(renderDriverRankings);if(cached){dBindRows();return}
+ app.innerHTML=heading('Kuskar','Utforska kuskar, form och resultat.')+tabs([['list','Lista'],['stats','Statistik']],state.tab)+dToolbar()+(cached?dRankingGrid(cached):'<div class="driver-ranking-empty">Läser kuskstatistik…</div>');bindTabs(()=>renderEntityList('drivers'));dBindFilters(renderDriverRankings);if(cached){dBindRows();return}
  const lifecycle=beginRankingLifecycle();
  try{
   const core=await api('/drivers/statistics?'+key+'&mode=core',{signal:lifecycle.controller.signal});
