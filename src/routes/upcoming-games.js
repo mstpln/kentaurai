@@ -305,7 +305,7 @@ export async function getUpcomingGameLeg(env, roundId, legNumber) {
 
   const { results:entries } = await env.DB.prepare(`
     SELECT re.id race_entry_id,re.horse_id,re.driver_id,re.trainer_id,re.start_number,re.actual_lane,re.start_tier,
-      re.handicap_m,re.scratched,h.canonical_name horse_name,h.sex,
+      re.handicap_m,re.scratched,h.canonical_name horse_name,h.sex,h.birth_year,
       d.canonical_name driver_name,tr.canonical_name trainer_name,
       (
         SELECT bs.bet_percent
@@ -320,6 +320,35 @@ export async function getUpcomingGameLeg(env, roundId, legNumber) {
     WHERE re.race_id=?
     ORDER BY re.start_number ASC,re.id ASC
   `).bind(round.id, leg.legNumber, leg.raceId).all();
+
+  // One batched equipment read for the leg, never one query per horse. Only verified
+  // equipment observations can appear on the card; absent data stays unknown.
+  const { results:equipmentRows } = await env.DB.prepare(`
+    SELECT eq.race_entry_id,eq.shoes_front,eq.shoes_rear,eq.barefoot_front,eq.barefoot_rear,
+      eq.sulky_type,eq.change_from_previous_json,eq.verification_status
+    FROM equipment eq
+    JOIN race_entries current_entry ON current_entry.id=eq.race_entry_id
+    LEFT JOIN source_records eq_source ON eq_source.id=eq.source_record_id
+    WHERE current_entry.race_id=? AND LOWER(COALESCE(eq.verification_status,'unknown'))<>'unknown'
+    ORDER BY eq.race_entry_id,datetime(eq_source.fetched_at) DESC,eq.id DESC
+  `).bind(leg.raceId).all();
+  const equipmentByEntry = new Map();
+  for (const item of equipmentRows || []) {
+    if (equipmentByEntry.has(item.race_entry_id)) continue;
+    const known = [item.shoes_front,item.shoes_rear,item.barefoot_front,item.barefoot_rear,item.sulky_type]
+      .some((value) => value != null && value !== '');
+    if (!known) continue;
+    let change = null;
+    try { const parsed = JSON.parse(item.change_from_previous_json || 'null');
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) change = parsed;
+    } catch { /* Invalid optional change metadata must not hide verified equipment state. */ }
+    equipmentByEntry.set(item.race_entry_id, {
+      shoesFront:item.shoes_front || null, shoesRear:item.shoes_rear || null,
+      barefootFront:item.barefoot_front == null ? null : Number(item.barefoot_front) === 1,
+      barefootRear:item.barefoot_rear == null ? null : Number(item.barefoot_rear) === 1,
+      sulkyType:item.sulky_type || null, change
+    });
+  }
 
   const { results:history } = await env.DB.prepare(`
     SELECT cur.id current_entry_id,hr.start_method,xd.first_200_time,xd.last_400_time,
@@ -352,6 +381,8 @@ export async function getUpcomingGameLeg(env, roundId, legNumber) {
         horseId:row.horse_id,
         horseName:row.horse_name,
         sex:row.sex || null,
+        age:row.birth_year == null ? null : Number(round.roundDate.slice(0, 4)) - Number(row.birth_year),
+        equipment:equipmentByEntry.get(row.race_entry_id) || null,
         driverId:row.driver_id || null,
         driverName:row.driver_name || null,
         trainerId:row.trainer_id || null,

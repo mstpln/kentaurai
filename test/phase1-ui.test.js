@@ -207,3 +207,61 @@ test('horse cards show first 200 and last 400 times without min/km suffix',()=>{
   assert.match(html,/metric\('Första 200',pace1\(/);
   assert.match(html,/metric\('Sista 400',pace1\(/);
 });
+
+
+test('upcoming horse cards present scratch and handicap states without hiding the underlying start data', () => {
+  const html = enhancePhase1Html('<html><head></head><body></body></html>', { asOfDate: '2028-01-02' });
+  assert.match(html, /p1-scratched-label/);
+  assert.match(html, /STRUKEN/);
+  assert.match(html, /p1-handicap-badge/);
+  assert.match(html, /m tillägg/);
+  assert.match(html, /Spår: /);
+  assert.match(html, /Form: /);
+  assert.match(html, /Kusk: /);
+  assert.match(html, /Skor: /);
+  assert.match(html, /Vagn: /);
+  assert.match(html, /p1-horse-separator/);
+  assert.match(html, /align-items:baseline/);
+  assert.match(html, /p1-horse-stats/);
+  assert.match(html, /p1-equipment-changed/);
+  assert.match(html, /p1-horse-scratched/);
+});
+
+
+test('starter cards render verified scratch, handicap and equipment states rather than inventing missing facts', () => {
+  const html = enhancePhase1Html('<html><head></head><body></body></html>', { asOfDate: '2028-01-02' });
+  const code = html.match(/function shoeMark[\s\S]*?(?=function metric\()/)?.[0];
+  assert.ok(code, 'card renderer must be part of the generated browser script');
+  const context = {
+    expandedHorses: new Set(), formScores: new Map(), profiles: new Map(),
+    localData: { notes: [] }, esc1: (value) => String(value),
+    formSequence: () => [], formHtml: () => '<span>–</span>',
+    metric: (label, value) => '<div>' + label + ':' + value + '</div>',
+    pace1: (value) => value ?? '–', pct1: (value) => String(value)
+  };
+  vm.runInNewContext(code + ';globalThis.card=horseCard;globalThis.gear=equipmentLine;', context);
+  const example = { raceEntryId:'entry-1', horseId:'horse-1', startNumber:3, horseName:'Luna Lane', sex:'sto', age:6, trainerName:'Test Trainer', driverName:'Test Driver', lane:3 };
+  const normal = context.card(example, {}, {}, false);
+  assert.match(normal, /Luna Lane/);
+  assert.match(normal, /s6 \(Test Trainer\)/);
+  assert.match(normal, /Form:/);
+  assert.match(normal, /Spår: 3/);
+  assert.match(normal, /Skor: –/);
+  assert.match(normal, /Vagn: –/);
+  assert.doesNotMatch(normal, /STRUKEN|p1-handicap-badge|p1-equipment-changed/);
+
+  const scratch = context.card({ ...example, scratched:true, handicapM:20 }, {}, {}, false);
+  assert.match(scratch, /p1-scratched-label">STRUKEN/);
+  assert.match(scratch, /p1-horse-scratched/);
+  assert.match(scratch, /\+20 m tillägg/);
+
+  const verified = context.card({ ...example, equipment:{
+    barefootFront:true, barefootRear:false, sulkyType:'american',
+    change:{ shoesFrontChanged:true, shoesRearChanged:false, sulkyTypeChanged:true }
+  } }, {}, {}, false);
+  assert.match(verified, /Vagn: <span class="p1-equipment-changed">Am\./);
+  assert.match(verified, /aria-label="Barfota"/);
+  assert.match(verified, /aria-label="Skor på"/);
+  assert.match(verified, /p1-equipment-changed/);
+  assert.match(html, /sequenceHost.innerHTML='Form: '/);
+});
