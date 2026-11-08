@@ -126,10 +126,29 @@ jobs:
           echo "| Probe | Verified | Safe reason |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
           for attempt in 1 2 3; do
-            curl --fail --silent --show-error --max-time 25 \
-              -H "Authorization: Bearer $DIAG_TOKEN" \
-              "$WORKER_URL/v1/storage-cleanup/legacy-backup-diagnostic/metadata" \
-              > "$RUNNER_TEMP/private-d1-metadata.json"
+            # A 401 means the Worker rejected authorization before dispatch.
+            # Secret changes can propagate across isolates at different times;
+            # only this read-only GET may be retried, with the same token.
+            for auth_try in $(seq 1 12); do
+              if ! code="$(curl --silent --max-time 25 \
+                --output "$RUNNER_TEMP/private-d1-metadata.json" \
+                --write-out '%{http_code}' \
+                -H "Authorization: Bearer $DIAG_TOKEN" \
+                "$WORKER_URL/v1/storage-cleanup/legacy-backup-diagnostic/metadata")"; then
+                echo "::error::Read-only metadata transport failed; no retry or export."
+                exit 1
+              fi
+              if [ "$code" = 200 ]; then break; fi
+              if [ "$code" != 401 ]; then
+                echo "::error::Read-only metadata request returned a non-retriable status."
+                exit 1
+              fi
+              if [ "$auth_try" -eq 12 ]; then
+                echo "::error::Read-only metadata authorization remained unavailable."
+                exit 1
+              fi
+              sleep 3
+            done
             jq -e '
               .mode=="private_multipart_metadata_only" and
               (.status|IN("verified","failed")) and

@@ -1,3 +1,11 @@
+## 2026-11-08 first Worker-side D1 metadata diagnostic: transient HTTP 401 gate
+
+- Manual GET-only diagnostic GitHub Actions run 42522939506 on deployed main 574e95fd0fb0a50f91ea4323e362974f400b2517 passed full QA, temporary diagnostic credential installation and two read-only authorization probes. Its first metadata GET returned HTTP 401, before any metadata result was collected. The temporary secrets were subsequently deleted and production health passed.
+- HTTP 401 is from the authenticated Worker diagnostic endpoint, not an upstream D1 metadata result. A possible explanation is asynchronous propagation of several sequential Worker secret updates; this is not proven.
+- The isolated metadata workflow now retries **only** an authorization-rejected GET with the same token, at most 12 attempts with 3 seconds between attempts. Any 200 still requires complete closed-schema validation, while other HTTP statuses and transport errors fail without retry or response-body logging.
+- No new backup or D1 export request is permitted by this change; the backup capability is never enabled. No R2 write, D1 SQL query, restoration or deletion occurs.
+- Do not start the large multipart backup again until the read-only metadata diagnostic successfully identifies or rules out the original size-check cause, and separate approval is obtained.
+
 ## 2026-11-08 second manual multipart start: metadata-stage failure (diagnosis pending)
 
 - Manual GitHub Actions run 42521417114 on deployed main 0a9b360e0be546166b0bd1876cb513d793ddb381 failed at the Worker-only `check_d1_size` stage with sanitized `internal_operation_failed` before any R2 reservation or D1 export request.
