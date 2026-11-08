@@ -38,6 +38,43 @@ export function multipartBackupCapability(request,env,now=Date.now()){
     token!==env?.ADMIN_TOKEN&&token!==env?.STORAGE_CLEANUP_TOKEN&&
     token!==env?.LEGACY_BACKUP_TOKEN;
 }
+// Diagnosis is a DIFFERENT capability. It can read only the sanitized
+// private R2 progress state; it cannot start, poll, upload or finalize.
+export function multipartDiagnosticCapability(request,env,now=Date.now()){
+  const token=String(env?.LEGACY_MULTIPART_DIAG_TOKEN||'');
+  const [issued,nonce,extra]=token.split('.');
+  const created=Number(issued);
+  return env?.LEGACY_MULTIPART_DIAG_ENABLED==='true'&&
+    request.method==='GET'&&
+    token.length>=48&&!extra&&nonce?.length>=32&&Number.isSafeInteger(created)&&
+    created<=now&&now-created<=TOKEN_LIFETIME_MS&&
+    request.headers.get('authorization')==='Bearer '+token&&
+    token!==env?.ADMIN_TOKEN&&token!==env?.STORAGE_CLEANUP_TOKEN&&
+    token!==env?.LEGACY_BACKUP_TOKEN&&
+    token!==env?.LEGACY_MULTIPART_BACKUP_TOKEN;
+}
+
+export function safeMultipartStartError(error){
+  if(!(error instanceof MultipartStartFailure))return null;
+  return {stage:error.stage,reason:error.reason};
+}
+class MultipartStartFailure extends Error {
+  constructor(stage,source){
+    super('multipart_start_failed');
+    this.stage=stage;
+    const message=String(source?.message||'');
+    const status=/^multipart_cloudflare_http_(400|401|403|404|409|423|429|500|502|503|504)$/.exec(message);
+    // Do not leak upstream error bodies, signed URLs, tokens or private IDs.
+    this.reason=status?'cloudflare_http_'+status[1]
+      :message==='multipart_cloudflare_response_unverified'?'cloudflare_response_unverified'
+      :message==='multipart_cloudflare_json_invalid'?'cloudflare_json_invalid'
+      :message==='multipart_export_response_unverified'?'export_response_unverified'
+      :message==='multipart_source_size_out_of_bounds'?'source_size_out_of_bounds'
+      :message==='multipart_private_bindings_unavailable'?'private_bindings_unavailable'
+      :'internal_operation_failed';
+  }
+}
+
 function credentials(env){
   const account=String(env.HISTORICAL_RECOVERY_ACCOUNT_ID||'');
   if(!/^[a-f0-9]{32}$/.test(account)||
@@ -69,7 +106,11 @@ async function cloudflare(env,path,method,body,fetchImpl){
     headers:{authorization:'Bearer '+c.token,'content-type':'application/json'},
     ...(body?{body:JSON.stringify(body)}:{})});}
   catch{throw Error('multipart_cloudflare_transport_unavailable');}
-  if(!response?.ok)throw Error('multipart_cloudflare_http_failure');
+  if(!response?.ok){
+    const code=Number(response?.status);
+    const allowed=[400,401,403,404,409,423,429,500,502,503,504];
+    throw Error('multipart_cloudflare_http_'+(allowed.includes(code)?code:'other'));
+  }
   let data;
   try{data=await response.json();}catch{throw Error('multipart_cloudflare_json_invalid');}
   if(data?.success!==true||data.errors?.length)throw Error('multipart_cloudflare_response_unverified');
@@ -132,6 +173,33 @@ async function readControl(env,partBytes){
   try{v=JSON.parse(await item.text());}catch{throw Error('multipart_control_json_invalid');}
   return validate(v,partBytes);
 }
+export async function inspectMultipartBackupState(env,{
+  partBytes=MULTIPART_PART_BYTES
+}={}){
+  // Read-only: no D1 query, D1 export, R2 put, secret-dependent Cloudflare
+  // API call or generated SQL. Must remain usable after a later deployment.
+  if(!env?.RAW_BUCKET?.get||env.PREVIEW_DATA_MODE==='synthetic'||
+     !sha(env?.KENTAURAI_DEPLOY_SHA))
+    throw Error('multipart_private_diagnostic_unavailable');
+  const state=await readControl(env,partBytes);
+  const same=state?state.sourceSha===env.KENTAURAI_DEPLOY_SHA:null;
+  return {
+    mode:'private_multipart_status_only',
+    status:state?.status||'none',
+    controlExists:!!state,
+    deploymentMatches:same,
+    bookmarkSaved:!!(state&&state.status!=='starting'),
+    exportStartUncertain:state?.status==='starting',
+    partsUploaded:Array.isArray(state?.parts)?state.parts.length:0,
+    completeReceiptClaimed:state?.status==='complete',
+    dataDeleted:false,
+    backupExportStartedByThisCheck:false,
+    d1Queried:false,
+    r2Modified:false,
+    rawPayloadReturned:false
+  };
+}
+
 async function saveControl(env,state,partBytes,{
   gapMs=1150,sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms)),
   now=()=>Date.now()
@@ -225,20 +293,30 @@ export function createPrivateMultipartBackup({partBytes=MULTIPART_PART_BYTES,
     return publicStatus(state,partBytes);
   }
   async function start(env){
-    safeEnv(env);
-    const previous=await load(env);
-    if(previous&&previous.status!=='complete'){
-      versionFence(previous,env);
-      return publicStatus(previous,partBytes);
+    // Diagnose only the safe stage. Never retry an uncertain reservation.
+    let stage='read_private_state';
+    try{
+      safeEnv(env);
+      const previous=await load(env);
+      if(previous&&previous.status!=='complete'){
+        versionFence(previous,env);
+        return publicStatus(previous,partBytes);
+      }
+      stage='check_d1_size';
+      await verifySizeBeforeExport(env,fetchImpl);
+      const reserved={id:crypto.randomUUID(),sourceSha:env.KENTAURAI_DEPLOY_SHA,
+        status:'starting'};
+      stage='reserve_private_r2';
+      await save(env,reserved);
+      stage='request_d1_export';
+      const response=await exportPolling(env,{output_format:'polling'},fetchImpl);
+      const active={...reserved,status:'exporting',bookmark:response.at_bookmark};
+      stage='store_private_bookmark';
+      await save(env,active);
+      return publicStatus(active,partBytes);
+    }catch(error){
+      throw new MultipartStartFailure(stage,error);
     }
-    await verifySizeBeforeExport(env,fetchImpl);
-    const reserved={id:crypto.randomUUID(),sourceSha:env.KENTAURAI_DEPLOY_SHA,
-      status:'starting'};
-    await save(env,reserved);
-    const response=await exportPolling(env,{output_format:'polling'},fetchImpl);
-    const active={...reserved,status:'exporting',bookmark:response.at_bookmark};
-    await save(env,active);
-    return publicStatus(active,partBytes);
   }
   async function probeSignedUrl(url){
     if(!signedUrl(url))throw Error('multipart_signed_url_refused');

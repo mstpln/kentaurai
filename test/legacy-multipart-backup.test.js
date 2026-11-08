@@ -4,7 +4,8 @@ import { createHash } from 'node:crypto';
 import { createTestEnv } from './helpers/d1.js';
 import worker from '../src/worker-v079.js';
 import {
-  createPrivateMultipartBackup,multipartBackupCapability,MULTIPART_PART_BYTES
+  createPrivateMultipartBackup,multipartBackupCapability,MULTIPART_PART_BYTES,
+  safeMultipartStartError
 } from '../src/legacy-multipart-backup.js';
 
 const SHA='a'.repeat(40),OTHER_SHA='b'.repeat(40);
@@ -194,7 +195,12 @@ test('fresh verified D1 metadata precedes a new long-running export; never query
 });
 test('initial D1 metadata above the safe cap refuses export without D1 writes',async()=>{
   const f=fixture({metadataSize:33*1024**3});
-  await assert.rejects(f.service.start(f.env),/multipart_source_size_out_of_bounds/);
+  await assert.rejects(f.service.start(f.env),error=>{
+    assert.deepEqual(safeMultipartStartError(error),{
+      stage:'check_d1_size',reason:'source_size_out_of_bounds'
+    });
+    return true;
+  });
   assert.equal(f.events.filter(x=>x.startsWith('export')).length,0);
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM legacy_cleanup_backups').get().n,0);
   f.db.close();

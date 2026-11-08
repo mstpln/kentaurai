@@ -1,3 +1,20 @@
+## 2026-11-08 large backup first-start 409: diagnostic fix pending
+
+- Manual GitHub Actions 42518434915 failed at the first multipart /start POST.
+- Exact deployed source c8e5469eb771a2a4ad693af080c4a4a1283c4b67.
+- Full QA, D1 5.32 GiB metadata preflight, ephemeral authorization and
+  cleanup, and production health passed.
+- A generic Worker HTTP 409 concealed the actual failure stage. No
+  completed backup is verified. It is unknown whether a private R2 starting
+  state persisted or a D1 export POST began before the failure.
+- Do not rerun a full export, reset progress or infer that no export began.
+- This change provides isolated read-only private R2 status inspection,
+  including across releases, and sanitized stage codes for future 409s.
+- The diagnostic never queries D1, calls D1 export, modifies R2 or deletes
+  racing data. Only a separately approved manual workflow can run it.
+- Cloudflare says D1 export requires D1 Write scope. Its absence is a
+  hypothesis, not a proven cause of this failed run.
+
 ## 2026-11-08 private large-backup build (PR pending; no production execution)
 
 - Current verified main is 1d10401721a1b3df84bcd474976b253cd523be3e.
