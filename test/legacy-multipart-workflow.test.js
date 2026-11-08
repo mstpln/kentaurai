@@ -35,12 +35,14 @@ test('new backup workflow requires explicit typed approval and never deploys or 
   const workflow=read('../.github/workflows/production-legacy-cleanup-multipart-backup.yml');
   const module=read('../src/legacy-multipart-backup.js');
   const runner=read('../scripts/run-production-legacy-multipart-backup.mjs');
+  const release=read('../.github/workflows/production-release-v060.yml');
   assert.match(workflow,/workflow_dispatch:/);
   assert.match(workflow,/BACKUP_MULTIPART_ONLY/);
   assert.match(workflow,/refs\/heads\/main/);
   assert.match(workflow,/kentaurai-production-operation/);
   assert.match(workflow,/npm run qa/);
   assert.match(workflow,/legacy_multipart_backup_only/);
+  assert.match(release,/\/v1\/storage-cleanup\/legacy-backup-multipart\/status/);
   assert.match(workflow,/secret put LEGACY_MULTIPART_BACKUP_TOKEN/);
   assert.match(workflow,/secret delete/);
   assert.ok(workflow.indexOf('check-legacy-multipart-capacity.mjs')<
