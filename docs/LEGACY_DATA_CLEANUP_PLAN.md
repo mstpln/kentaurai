@@ -148,3 +148,30 @@ backup-only workflow. **No auto-backup or auto-delete on merge.**
 D1 unavailable for queries while a large export is in progress. Run the
 manual backup outside the morning pipeline or other active processing.
 The 5 GiB R2 single-PUT limit remains in force and fails closed.
+
+## Size-first export safety gate (next scoped PR, 2026-11-08)
+
+Before *any* manual backup begins, obtain the size of the production D1
+database from the authenticated **read-only Cloudflare D1 database metadata**
+endpoint (GET only; no SELECT, export or database lock). The existing
+read-only legacy inventory also reports this size.
+
+The current single-PUT backup is **refused before temporary backup secrets
+are installed** when D1's database file size is **4 GiB or larger**. This
+is an intentionally conservative operational gate below R2's hard 5 GiB
+single-upload limit. Because a SQL dump may be larger than its backing D1
+database file, passing this metadata gate is *not* proof that the final
+SQL export fits in R2. The existing SQL content-length and R2 receipt guards
+remain active and fail closed.
+
+If metadata is missing, unverified or oversized, do **not** run a full
+D1 export, retry with different credentials, bypass the gate, or attempt
+a partial delete. First design and independently review a private,
+resumable **multipart** export with verified recovery, or use a separately
+validated equivalent backup method. A snapshot or Time Travel bookmark
+alone is not an independently verified off-database archive.
+
+The size gate does not change application facts, registered systems,
+personal notes, X-Labs data or source provenance. No automatic backup or
+deletion is introduced. The safe inventory and manual backup still require
+separate operator actions; no live data was altered while adding this gate.
