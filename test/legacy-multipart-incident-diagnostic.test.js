@@ -5,7 +5,7 @@ import { createTestEnv } from './helpers/d1.js';
 import worker from '../src/worker-v079.js';
 import {
   createPrivateMultipartBackup, multipartDiagnosticCapability,
-  inspectMultipartBackupState, safeMultipartStartError
+  inspectMultipartBackupState, inspectMultipartD1Metadata, safeMultipartStartError
 } from '../src/legacy-multipart-backup.js';
 
 const SHA='a'.repeat(40);
@@ -134,7 +134,7 @@ test('network failures and metadata failures report sanitized start phases',asyn
     await assert.rejects(svc.start(f.env),error=>{
       const safe=safeMultipartStartError(error);
       assert.equal(safe.stage,failure==='metadata'?'check_d1_size':'request_d1_export');
-      assert.equal(safe.reason,failure==='metadata'?'cloudflare_http_503':'internal_operation_failed');
+      assert.equal(safe.reason,failure==='metadata'?'cloudflare_http_503':'transport_unavailable');
       assert.doesNotMatch(JSON.stringify(safe),/PRIVATE_/);
       return true;
     });
@@ -193,4 +193,90 @@ test('diagnostic workflow never calls D1 export, R2 upload, backup or restoratio
     source.indexOf('async function saveControl',source.indexOf('export async function inspectMultipartBackupState')));
   assert.doesNotMatch(inspected,/\b(?:INSERT|UPDATE|DELETE|SELECT)\b|\.put\(|\.delete\(|cloudflare\(|exportPolling\(/);
   assert.match(inspected,/readControl\(env,partBytes\)/);
+});
+
+test('metadata-only probe verifies exact D1 metadata GET without any D1/R2 operation',async()=>{
+  const f=fixture(),before=f.d1Metrics.statements;
+  const keysBefore=Array.from(f.objects.keys());
+  let calls=0;
+  const status=await inspectMultipartD1Metadata(f.env,{fetchImpl:async(url,opts)=>{
+    calls++;
+    assert.equal(url,'https://api.cloudflare.com/client/v4/accounts/'+ACCOUNT+
+      '/d1/database/'+D1_UUID+'?fields=uuid,file_size');
+    assert.equal(opts.method,'GET');
+    assert.equal(opts.body,undefined);
+    return Response.json({success:true,result:{uuid:D1_UUID,file_size:5_711_183_872}});
+  }});
+  assert.deepEqual(status,{mode:'private_multipart_metadata_only',status:'verified',
+    reason:'none',d1Queried:false,exportStarted:false,r2Modified:false,
+    dataDeleted:false,rawPayloadReturned:false});
+  assert.equal(calls,1);
+  assert.equal(f.d1Metrics.statements,before);
+  assert.deepEqual(Array.from(f.objects.keys()),keysBefore);
+  f.db.close();
+});
+
+test('metadata-only probe safely distinguishes absent credentials, transport and HTTP errors',async()=>{
+  const f=fixture();
+  f.env.HISTORICAL_BACKUP_API_TOKEN='';
+  let networkCalls=0;
+  const absent=await inspectMultipartD1Metadata(f.env,{fetchImpl:async()=>{
+    networkCalls++;throw Error('never_call_network');
+  }});
+  assert.equal(absent.status,'failed');
+  assert.equal(absent.reason,'credentials_unavailable');
+  assert.equal(networkCalls,0);
+  f.env.HISTORICAL_BACKUP_API_TOKEN='synthetic_test_token_not_a_real_cloudflare_secret';
+  for(const [network,expected] of [
+    [async()=>{throw Error('PRIVATE_D1_DETAILS_NOT_FOR_LOGS');},'transport_unavailable'],
+    [async()=>new Response('PRIVATE_FORBIDDEN',{status:403}),'cloudflare_http_403'],
+    [async()=>new Response('PRIVATE_UNEXPECTED',{status:530}),'cloudflare_http_other'],
+    [async()=>Response.json({success:false,errors:[{message:'PRIVATE_PAYLOAD'}]}),
+      'cloudflare_response_unverified']
+  ]){
+    const data=await inspectMultipartD1Metadata(f.env,{fetchImpl:network});
+    assert.equal(data.status,'failed');
+    assert.equal(data.reason,expected);
+    assert.doesNotMatch(JSON.stringify(data),/PRIVATE_|Bearer|cloudflare\.com/);
+  }
+  assert.equal(f.objects.size,0);
+  f.db.close();
+});
+
+test('metadata endpoint is strictly GET and isolated from backup mutation credentials',async()=>{
+  const f=fixture();
+  f.env.HISTORICAL_BACKUP_API_TOKEN='';
+  const allowed=await worker.fetch(f.request('metadata'),f.env);
+  assert.equal(allowed.status,200);
+  const data=await allowed.json();
+  assert.equal(data.mode,'private_multipart_metadata_only');
+  assert.equal(data.reason,'credentials_unavailable');
+  assert.equal(data.d1Queried,false);
+  assert.equal(data.exportStarted,false);
+  assert.equal(data.r2Modified,false);
+  for(const token of ['wrong',f.env.LEGACY_MULTIPART_BACKUP_TOKEN,f.env.STORAGE_CLEANUP_TOKEN]){
+    assert.equal((await worker.fetch(f.request('metadata',token),f.env)).status,401);
+  }
+  for(const method of ['POST','PUT','DELETE']){
+    assert.equal((await worker.fetch(f.request('metadata',f.env.LEGACY_MULTIPART_DIAG_TOKEN,method),f.env)).status,401);
+  }
+  f.db.close();
+});
+
+test('manual D1-metadata diagnostic workflow is read-only and separate from backup execution',()=>{
+  const yaml=readFileSync(new URL(
+    '../.github/workflows/production-legacy-multipart-metadata-diagnostic.yml',
+    import.meta.url),'utf8');
+  assert.match(yaml,/workflow_dispatch:/);
+  assert.match(yaml,/INSPECT_D1_METADATA_ONLY/);
+  assert.match(yaml,/kentaurai-production-operation/);
+  assert.match(yaml,/npm run qa/);
+  assert.match(yaml,/legacy-backup-diagnostic\/metadata/);
+  assert.match(yaml,/secret put LEGACY_MULTIPART_DIAG_TOKEN/);
+  assert.match(yaml,/secret delete/);
+  assert.match(yaml,/secret put HISTORICAL_BACKUP_API_TOKEN/);
+  assert.match(yaml,/secret put HISTORICAL_RECOVERY_ACCOUNT_ID/);
+  assert.doesNotMatch(yaml,/secret put LEGACY_MULTIPART_BACKUP_(?:TOKEN|ENABLED)/);
+  assert.doesNotMatch(yaml,/run-production-legacy-multipart-backup\.mjs|\/legacy-backup-multipart\/(?:start|poll|step|finalize|refresh)/);
+  assert.doesNotMatch(yaml,/wrangler d1 execute|wrangler deploy|\/d1\/database\/.*\/export|\/d1\/database\/.*\/query/);
 });

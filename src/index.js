@@ -2,7 +2,7 @@ import { requireAdmin, requireStorageCleanupAdmin } from './auth.js';
 import { archiveRawPayload } from './raw.js';
 import { importEditorial } from './import/editorial.js';
 import { legacyBackupCapability, getLegacyBackupStatus, beginLegacyBackup, pollLegacyBackup } from './legacy-cleanup-backup.js';
-import { multipartBackupCapability, multipartDiagnosticCapability, inspectMultipartBackupState, safeMultipartStartError, privateMultipartBackup } from './legacy-multipart-backup.js';
+import { multipartBackupCapability, multipartDiagnosticCapability, inspectMultipartBackupState, inspectMultipartD1Metadata, safeMultipartStartError, privateMultipartBackup } from './legacy-multipart-backup.js';
 import { importReferenceRound } from './import/reference-round-safe.js';
 import { normalizeCapturedOfficialGameSequential } from './import/official-live-sequential.js';
 import { captureUpcomingOfficialGames, normalizeNextPendingOfficialGame } from './import/official-live-scheduled.js';
@@ -300,6 +300,8 @@ async function handleFetch(request, env) {
         return json({ok:true,scope:'legacy_multipart_diagnostic_only'});
       if(request.method==='GET'&&action==='inspect')
         return json(await inspectMultipartBackupState(env));
+      if(request.method==='GET'&&action==='metadata')
+        return json(await inspectMultipartD1Metadata(env));
       return json({error:'not_found'},404);
     }catch{
       console.error('read-only private backup inspection safely stopped');

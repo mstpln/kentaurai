@@ -58,20 +58,28 @@ export function safeMultipartStartError(error){
   if(!(error instanceof MultipartStartFailure))return null;
   return {stage:error.stage,reason:error.reason};
 }
+// Closed dictionary only; never print the underlying Cloudflare error body,
+// token, account identifier, R2 key, SQL, signed URL or network exception.
+function safeMultipartFailureReason(error){
+  const message=String(error?.message||'');
+  const upstream=/^multipart_cloudflare_http_(400|401|403|404|409|423|429|500|502|503|504|other)$/.exec(message);
+  if(upstream)return 'cloudflare_http_'+upstream[1];
+  const codes={
+    multipart_cloudflare_response_unverified:'cloudflare_response_unverified',
+    multipart_cloudflare_json_invalid:'cloudflare_json_invalid',
+    multipart_cloudflare_transport_unavailable:'transport_unavailable',
+    multipart_export_credentials_unavailable:'credentials_unavailable',
+    multipart_export_response_unverified:'export_response_unverified',
+    multipart_source_size_out_of_bounds:'source_size_out_of_bounds',
+    multipart_private_bindings_unavailable:'private_bindings_unavailable'
+  };
+  return codes[message]||'internal_operation_failed';
+}
 class MultipartStartFailure extends Error {
   constructor(stage,source){
     super('multipart_start_failed');
     this.stage=stage;
-    const message=String(source?.message||'');
-    const status=/^multipart_cloudflare_http_(400|401|403|404|409|423|429|500|502|503|504)$/.exec(message);
-    // Do not leak upstream error bodies, signed URLs, tokens or private IDs.
-    this.reason=status?'cloudflare_http_'+status[1]
-      :message==='multipart_cloudflare_response_unverified'?'cloudflare_response_unverified'
-      :message==='multipart_cloudflare_json_invalid'?'cloudflare_json_invalid'
-      :message==='multipart_export_response_unverified'?'export_response_unverified'
-      :message==='multipart_source_size_out_of_bounds'?'source_size_out_of_bounds'
-      :message==='multipart_private_bindings_unavailable'?'private_bindings_unavailable'
-      :'internal_operation_failed';
+    this.reason=safeMultipartFailureReason(source);
   }
 }
 
@@ -121,6 +129,23 @@ async function verifySizeBeforeExport(env,fetchImpl){
   if(info?.uuid!==DATABASE_ID||!integer(info.file_size)||
      info.file_size<1024||info.file_size>MAX_D1_DB_BYTES)
     throw Error('multipart_source_size_out_of_bounds');
+}
+// Independent diagnostic: a single Cloudflare D1 database-metadata GET.
+// No SQL, D1 bindings, R2 reads/writes, export POST or download is allowed.
+export async function inspectMultipartD1Metadata(env,{fetchImpl=fetch}={}){
+  const base={
+    mode:'private_multipart_metadata_only',
+    d1Queried:false,exportStarted:false,r2Modified:false,
+    dataDeleted:false,rawPayloadReturned:false
+  };
+  if(env?.PREVIEW_DATA_MODE==='synthetic'||!sha(env?.KENTAURAI_DEPLOY_SHA))
+    return {...base,status:'failed',reason:'private_bindings_unavailable'};
+  try{
+    await verifySizeBeforeExport(env,fetchImpl);
+    return {...base,status:'verified',reason:'none'};
+  }catch(error){
+    return {...base,status:'failed',reason:safeMultipartFailureReason(error)};
+  }
 }
 async function exportPolling(env,body,fetchImpl){
   const r=await cloudflare(env,'/export','POST',body,fetchImpl);

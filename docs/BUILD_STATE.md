@@ -1,3 +1,12 @@
+## 2026-11-08 second manual multipart start: metadata-stage failure (diagnosis pending)
+
+- Manual GitHub Actions run 42521417114 on deployed main 0a9b360e0be546166b0bd1876cb513d793ddb381 failed at the Worker-only `check_d1_size` stage with sanitized `internal_operation_failed` before any R2 reservation or D1 export request.
+- GitHub Actions independently measured valid D1 metadata, multipart route authorization succeeded, temporary capability secrets were removed, and production health passed.
+- Stage evidence narrows the failure to Worker-side metadata verification, but it does not yet distinguish missing/mis-propagated credentials, Cloudflare network transport, unexpected upstream HTTP code or internal validation. Do not assume D1 Write permission is the cause.
+- New isolated GET-only metadata diagnostic uses a short-lived **diagnostic** token and temporary Cloudflare metadata credentials. It calls only the exact D1 GET metadata endpoint from the Worker, reports a closed reason enum, and does not query D1 SQL, export, upload, restore or delete.
+- A separate manual-only `INSPECT_D1_METADATA_ONLY` workflow verifies exact deployed SHA, runs full QA, installs only temporary diagnostic/metadata secrets and removes them even if inspection fails. The original backup route remains disabled throughout this workflow.
+- Do not attempt another `start_or_resume` until the independent metadata diagnostic identifies the actual failure and the fix has been reviewed and deployed. A successful GET still does not prove D1 SQL export permission, full SQL byte-range support or restore validity.
+
 ## 2026-11-08 large backup first-start 409: diagnostic fix pending
 
 - Manual GitHub Actions 42518434915 failed at the first multipart /start POST.
