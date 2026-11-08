@@ -18,6 +18,7 @@ function fixture({wrongRange=false,badEtag=false,truncated=false,metadataSize=5_
   changedSource=false,sourceUrl=SIGNED,onePollActive=false}={}){
   const f=createTestEnv();
   const backupObjects=new Map(),uploads=new Map(),events=[];
+  let completeCalls=0;
   f.env.KENTAURAI_DEPLOY_SHA=SHA;
   f.env.LEGACY_MULTIPART_BACKUP_ENABLED='true';
   f.env.LEGACY_MULTIPART_BACKUP_TOKEN=Date.now()+'.'+'a'.repeat(64);
@@ -86,7 +87,7 @@ function fixture({wrongRange=false,badEtag=false,truncated=false,metadataSize=5_
       }
       return Response.json({success:true,result:{
         type:'export',at_bookmark:BOOKMARK,status:'complete',
-        result:{signed_url:changedSource?SIGNED_REFRESHED:sourceUrl}
+        result:{signed_url:changedSource&&completeCalls++>0?SIGNED_REFRESHED:sourceUrl}
       }});
     }
     if(String(url).startsWith('https://')){
@@ -211,9 +212,10 @@ test('changed ETag or a truncated part cannot be recorded as completed',async()=
   for(const options of [{badEtag:true},{truncated:true}]){
     const f=fixture(options);
     await ready(f);
+    await f.service.step(f.env); // first range is correct; subsequent ranges fail
     await assert.rejects(f.service.step(f.env),
       /multipart_range_or_source_mismatch|multipart_source_part_truncated/);
-    assert.equal((await f.service.status(f.env)).partsUploaded,0);
+    assert.equal((await f.service.status(f.env)).partsUploaded,1);
     assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM legacy_cleanup_backups').get().n,0);
     f.db.close();
   }
