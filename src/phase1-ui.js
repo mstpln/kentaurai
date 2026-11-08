@@ -221,7 +221,7 @@ async function loadLiveLeg(round,leg){
 }
 async function loadLiveHorseProfiles(entries,token){
  const ids=[...new Set(entries.map(entry=>String(entry.horseId||'')).filter(Boolean))];let next=0;
- async function worker(){while(next<ids.length){const id=ids[next++];try{const profile=profiles.get(id)||await phase1Api.horseProfile(id);if(token!==roundToken)return;profiles.set(id,profile);const sequenceHost=appEl.querySelector('[data-p1-form-sequence="'+CSS.escape(id)+'"]');if(sequenceHost)sequenceHost.innerHTML='Form '+formHtml(formSequence(profile.starts||[]));const noteDot=appEl.querySelector('[data-p1-note-indicator="'+CSS.escape(id)+'"]');if(noteDot&&localData.notes.some(note=>String(note.horseId)===id))noteDot.hidden=false}catch{}}}
+ async function worker(){while(next<ids.length){const id=ids[next++];try{const profile=profiles.get(id)||await phase1Api.horseProfile(id);if(token!==roundToken)return;profiles.set(id,profile);const sequenceHost=appEl.querySelector('[data-p1-form-sequence="'+CSS.escape(id)+'"]');if(sequenceHost)sequenceHost.innerHTML='Form: '+formHtml(formSequence(profile.starts||[]));const noteDot=appEl.querySelector('[data-p1-note-indicator="'+CSS.escape(id)+'"]');if(noteDot&&localData.notes.some(note=>String(note.horseId)===id))noteDot.hidden=false}catch{}}}
  await Promise.all(Array.from({length:Math.min(3,ids.length)},worker));
 }
 function renderLeg(leg,isDemo){
@@ -261,7 +261,7 @@ function horseCard(e,round,leg,isDemo){
  const age=Number(e.age);
  const description=(sexCode||'')+(Number.isInteger(age)&&age>0&&age<50?age:'');
  const trainer=e.trainerName||e.trainer_name;
- const meta=(description?description+' ':'')+(trainer?'('+trainer+')':'');
+ const meta=[description,trainer?'('+trainer+')':null].filter(Boolean).join(' ');
  const name=esc1(e.horseName||e.horse_name||'Okänd häst');
  const label='<div class="p1-horse-main"><span class="p1-horse-num">'+esc1(e.startNumber??e.start_number??'–')+'</span><span class="p1-horse-name" title="'+name+'">'+name+'</span>'+(meta?'<span class="p1-horse-meta" title="'+esc1(meta)+'">'+esc1(meta)+'</span>':'')+(scratched?'<span class="p1-scratched-label">STRUKEN</span>':'')+(noteCount?'<span class="p1-note-dot" data-p1-note-indicator="'+esc1(horseId)+'">Anteckning</span>':'<span class="p1-note-dot" data-p1-note-indicator="'+esc1(horseId)+'" hidden>Anteckning</span>')+'</div>';
  const lane=esc1(e.lane??e.actual_lane??'–');
