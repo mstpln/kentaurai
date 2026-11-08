@@ -64,6 +64,7 @@ function fixture({wrongRange=false,badEtag=false,truncated=false,metadataSize=5_
     };
   };
   const api=async (url,options={})=>{
+    assert.equal(options.redirect,'manual','Cloudflare Workers rejects redirect:error');
     if(String(url).includes('/d1/database/')&&!String(url).endsWith('/export')){
       events.push('size');
       assert.equal(options.method,'GET');
@@ -338,4 +339,64 @@ test('private R2 control writes are paced across Worker requests',async()=>{
   assert.ok(delays.every(ms=>ms>=1100&&ms<=1150),'each same-key write must be delayed');
   assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM legacy_cleanup_backups').get().n,0);
   f.db.close();
+});
+
+test('D1 metadata redirect fails closed without forwarding the token or beginning export',async()=>{
+  const f=fixture();
+  let calls=0;
+  const svc=createPrivateMultipartBackup({
+    partBytes:256,controlWriteSpacingMs:0,
+    fetchImpl:async(url,options)=>{
+      calls++;
+      assert.equal(options.method,'GET');
+      assert.equal(options.redirect,'manual');
+      assert.match(String(url),/api\.cloudflare\.com/);
+      return new Response(null,{status:302,
+        headers:{location:'https://synthetic-untrusted.invalid/redirect'}});
+    }
+  });
+  await assert.rejects(svc.start(f.env),error=>{
+    assert.deepEqual(safeMultipartStartError(error),{
+      stage:'check_d1_size',reason:'cloudflare_http_other'
+    });
+    return true;
+  });
+  assert.equal(calls,1,'a redirect must not trigger a follow-up request');
+  assert.equal(f.objects.size,0,'no R2 progress reservation');
+  assert.equal(f.events.filter(x=>x.startsWith('export')).length,0);
+  f.db.close();
+});
+
+test('signed SQL range probe and later part requests reject 302 without following',async()=>{
+  for(const at of ['probe','part']){
+    const f=fixture();
+    let signedCalls=0,redirects=0;
+    const svc=createPrivateMultipartBackup({
+      partBytes:256,controlWriteSpacingMs:0,
+      fetchImpl:async(url,options)=>{
+        assert.equal(options.redirect,'manual');
+        if(String(url).startsWith('https://signed.cloudflarestorage.com/')){
+          signedCalls++;
+          if(at==='probe'||signedCalls===2){
+            redirects++;
+            return new Response(null,{status:302,
+              headers:{location:'https://synthetic-untrusted.invalid/redirect'}});
+          }
+        }
+        return f.api(url,options);
+      }
+    });
+    assert.equal((await svc.start(f.env)).status,'exporting');
+    if(at==='probe'){
+      await assert.rejects(svc.poll(f.env),/multipart_source_byte_ranges_unsupported/);
+      assert.equal(f.events.includes('create'),false);
+    }else{
+      assert.equal((await svc.poll(f.env)).status,'uploading');
+      await assert.rejects(svc.step(f.env),/multipart_source_range_denied_or_expired/);
+      assert.equal(f.events.some(x=>x.startsWith('part:')),false);
+    }
+    assert.equal(redirects,1);
+    assert.equal(signedCalls,at==='probe'?1:2,'never follow to a different host');
+    f.db.close();
+  }
 });

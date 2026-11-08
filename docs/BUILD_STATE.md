@@ -1,3 +1,11 @@
+## 2026-11-08 isolated metadata diagnostic identified unsupported Worker redirect mode
+
+- Manual GET-only diagnostic [run 42524525375](https://github.com/mstpln/kentaurai/actions/runs/42524525375) on deployed main a483c918392fc1db7ac6364399e2f3baf252ae1a completed successfully as a workflow. Its three independent Worker-side metadata probes all returned the sanitized `transport_unavailable` category. No verified metadata response was obtained.
+- GitHub's exact release/QA checks, temporary credentials, private diagnostic authorization, cleanup and health checks all passed. This run did not start a backup or D1 export, write R2, restore or delete any racing data.
+- Code review identified a deterministic Cloudflare Workers runtime incompatibility: `src/legacy-multipart-backup.js` used `redirect:'error'` in three Worker-side `fetch` calls, including the metadata check. Cloudflare Workers does not implement this redirect mode; constructing the fetch request throws a TypeError **before sending the HTTP request** (Cloudflare official Request runtime docs). The surrounding catch mapped it to `multipart_cloudflare_transport_unavailable`.
+- Corrected all three calls to Workers-supported `redirect:'manual'`, keeping automatic redirects prohibited. The Cloudflare D1 API call continues to reject any non-2xx status; signed URL ranges require **exact 206** and reject redirects. Synthetic tests now assert manual mode for metadata, D1 export, range probes and parts, and prove that malicious redirects do not trigger another request or expose a token/signed URL.
+- This verified runtime bug explains an otherwise generic error but does NOT prove that Cloudflare D1 metadata, D1 export, signed URL ranges or future restore will succeed after the fix. Run the isolated metadata diagnostic again after a separately reviewed and owner-approved release; do not start another full export yet.
+
 ## 2026-11-08 first Worker-side D1 metadata diagnostic: transient HTTP 401 gate
 
 - Manual GET-only diagnostic GitHub Actions run 42522939506 on deployed main 574e95fd0fb0a50f91ea4323e362974f400b2517 passed full QA, temporary diagnostic credential installation and two read-only authorization probes. Its first metadata GET returned HTTP 401, before any metadata result was collected. The temporary secrets were subsequently deleted and production health passed.

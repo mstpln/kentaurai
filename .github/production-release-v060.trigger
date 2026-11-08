@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=574e95fd0fb0a50f91ea4323e362974f400b2517
-release_nonce=2026-11-08-readonly-worker-metadata-401-get-retry-v1
+source_main=a483c918392fc1db7ac6364399e2f3baf252ae1a
+release_nonce=2026-11-08-multipart-worker-fetch-manual-redirects-v1

@@ -204,6 +204,7 @@ test('metadata-only probe verifies exact D1 metadata GET without any D1/R2 opera
     assert.equal(url,'https://api.cloudflare.com/client/v4/accounts/'+ACCOUNT+
       '/d1/database/'+D1_UUID+'?fields=uuid,file_size');
     assert.equal(opts.method,'GET');
+    assert.equal(opts.redirect,'manual');
     assert.equal(opts.body,undefined);
     return Response.json({success:true,result:{uuid:D1_UUID,file_size:5_711_183_872}});
   }});
