@@ -75,7 +75,7 @@ export const phase1Css = `
 .p1-handicap-separator{display:flex;align-items:center;gap:10px;margin:7px 1px 2px;color:var(--accent-soft);font-size:11px;font-weight:650}
 .p1-handicap-separator::before,.p1-handicap-separator::after{content:"";height:1px;flex:1;background:var(--line)}
 .p1-scratched{border-color:#754844;background:#1a1211}
-.p1-scratched .p1-compact-body{opacity:.6}
+.p1-scratched .p1-compact-name-row>*:not(.p1-scratch-badge),.p1-scratched .p1-compact-info,.p1-scratched .p1-compact-form,.p1-scratched .p1-compact-metrics{opacity:.55}
 .p1-scratched .p1-compact-horse-name{text-decoration:line-through;text-decoration-thickness:1px}
 .p1-scratch-badge{font-size:9px;font-weight:750;color:#f1b0aa;border:1px solid #9b5550;background:#482320;border-radius:5px;padding:2px 5px;white-space:nowrap;flex:0 0 auto;line-height:1.2}
 .p1-scratched .p1-scratch-badge{opacity:1}
