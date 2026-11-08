@@ -4,6 +4,7 @@ import { enhanceSettingsDriftHtml } from './settings-drift-ui.js';
 import { enhancePhase1Html } from './phase1-ui.js';
 import { enhanceTravdataHtml, travdataAssetResponse } from './travdata-brand.js';
 import { getAutomationControl, getDriftOverview, setAutomationControl } from './settings-drift.js';
+import { getTravdataPersonal, syncTravdataPersonal } from './travdata-personal.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -71,6 +72,38 @@ export default {
         ...payload,
         deploymentSha: /^[a-f0-9]{40}$/.test(sha) ? sha : null
       }, response.status);
+    }
+
+    if (path === '/app/api/travdata/personal' && ['GET','POST'].includes(request.method)) {
+      const denied = await requireSession(request, env);
+      if (denied) return denied;
+      if (env.PREVIEW_DATA_MODE === 'synthetic') {
+        return request.method === 'GET'
+          ? json({ notes:[], systems:[], tombstones:[], hasMore:false, nextOffset:0 })
+          : json({ error:'synthetic_preview_write_disabled' }, 403);
+      }
+      try {
+        if (request.method === 'GET') {
+          return json(await getTravdataPersonal(env, {
+            limit:url.searchParams.get('limit'), offset:url.searchParams.get('offset')
+          }));
+        }
+        const contentType = String(request.headers.get('content-type') || '').toLowerCase();
+        if (!contentType.startsWith('application/json')) return json({ error:'invalid_content_type' }, 415);
+        const claimedLength = Number(request.headers.get('content-length'));
+        if (Number.isFinite(claimedLength) && claimedLength > 256_000) {
+          return json({ error:'personal_payload_too_large' }, 413);
+        }
+        const raw = await request.text();
+        if (new TextEncoder().encode(raw).byteLength > 256_000) {
+          return json({ error:'personal_payload_too_large' }, 413);
+        }
+        return json(await syncTravdataPersonal(env, JSON.parse(raw)));
+      } catch (error) {
+        const known = typeof error?.code === 'string' && /^[a-z_]+$/.test(error.code);
+        if (!known) console.error('TravData personal data operation failed');
+        return json({ error:known ? error.code : 'personal_operation_unavailable' }, known ? 400 : 503);
+      }
     }
 
     if (path === '/app/api/settings/drift' && request.method === 'GET') {

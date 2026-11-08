@@ -29,6 +29,7 @@ import { ensureDailyOfficialHistoryJobs, getHistoricalBackfill, runHistoricalBac
 import { ensureRecentDailyXlabsJobs, getXlabsBackfill, runXlabsBackfillBatch, runXlabsBackfillStep, startXlabsBackfill } from './import/xlabs-backfill.js';
 import { captureCalendar, captureGame, captureRace } from './provider/official.js';
 import { runPostRaceSettlementBatch } from './post-race-settlement-v1.js';
+import { settleNextTravdataManualSystems } from './travdata-manual-settlement.js';
 import { getStatisticsDataBackfillStatus, runNextStatisticsDataBackfill } from './statistics-data-backfill-v1.js';
 import { captureXlabsDate } from './provider/xlabs.js';
 import { captureXlabsRaceJson } from './provider/xlabs-race.js';
@@ -824,20 +825,24 @@ export async function handleScheduled(controller, env) {
   // Essential current V85/V86 steps have separate budgets; previous cost
   // can no longer starve results, settlement or X-Labs.
   await runStage('live_capture_morning', (observedEnv) => captureUpcomingOfficialGames(observedEnv, controller.scheduledTime, {
-    includeToday:true, daysAhead:6
+    includeToday:true, daysAhead: 6
   }));
   await runStage('live_normalize_morning', (observedEnv) => runLiveNormalizationMorning(observedEnv));
-  await runStage('post_race_settlement', (observedEnv) => runPostRaceSettlementBatch(observedEnv));
   await runStage('official_daily_incremental', (observedEnv) => runDailyOfficialIncremental(observedEnv, controller.scheduledTime));
+  await runStage('post_race_settlement', async (observedEnv) => {
+    const official = await runPostRaceSettlementBatch(observedEnv);
+    const personal = await settleNextTravdataManualSystems(observedEnv);
+    return { ...official, personal };
+  });
   await runStage('xlabs_daily_incremental', (observedEnv) => runDailyXlabsIncremental(observedEnv, controller.scheduledTime));
 
   // Supporting promotion is paused on abnormal cost or emergency billing
   // pressure, never after arbitrary small legacy thresholds.
   await runStage('recent_start_points_promotion', (observedEnv) => syncOnePendingHorseStartPointSource(observedEnv, {
-    minFetchedAt:recentPromotionCutoff
+    minFetchedAt: recentPromotionCutoff
   }));
   await runStage('recent_official_snapshot_promotion', (observedEnv) => syncOnePendingOfficialSnapshotSource(observedEnv, {
-    minFetchedAt:recentPromotionCutoff
+    minFetchedAt: recentPromotionCutoff
   }));
 
   const failures = parts.filter((part) => !part.ok);

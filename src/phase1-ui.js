@@ -57,14 +57,108 @@ let storeResult=storedRead();
 let localData=storeResult.value;
 let storageError=storeResult.ok?'':storeResult.error;
 const storageReadBlocked=!storeResult.ok;
+let personalSyncReady=false,personalSyncBusy=false,personalSyncError='';
+let personalSyncQueue=Promise.resolve();
+function newestRecords(localRows,remoteRows){
+ const values=new Map((localRows||[]).map(row=>[String(row.id),row]));
+ for(const remote of remoteRows||[]){
+  const key=String(remote.id),local=values.get(key);
+  if(!local||String(remote.updatedAt||remote.createdAt||'')>=String(local.updatedAt||local.createdAt||''))values.set(key,remote);
+ }
+ return [...values.values()];
+}
+function mergePersonal(local,remote){
+ const tombstones=new Map();
+ for(const row of [...(local.tombstones||[]),...(remote.tombstones||[])]){
+  const key=row.kind+':'+row.id,existing=tombstones.get(key);
+  if(!existing||String(row.deletedAt)>String(existing.deletedAt))tombstones.set(key,row);
+ }
+ const allowed=(kind,row)=>{
+  const deletion=tombstones.get(kind+':'+row.id);
+  return !deletion||String(deletion.deletedAt)<String(row.updatedAt||row.createdAt||'');
+ };
+ return {...local,
+  notes:newestRecords(local.notes,remote.notes).filter(row=>allowed('note',row)),
+  systems:newestRecords(local.systems,remote.systems).filter(row=>allowed('system',row)),
+  tombstones:[...tombstones.values()]
+ };
+}
+async function pushPersonal(){
+ if(!personalSyncReady||demoEnabled||storageReadBlocked)return;
+ const copy={notes:[...localData.notes],systems:[...localData.systems],tombstones:[...(localData.tombstones||[])]};
+ let failed=0;
+ for(const kind of ['notes','systems','tombstones']){
+  const rows=copy[kind].filter(x=>x.source!=='synthetic');
+  for(let offset=0;offset<rows.length;offset+=20){
+   const batch=rows.slice(offset,offset+20);
+   try{await phase1Api.personalSync({[kind]:batch})}
+   catch(error){
+    for(const item of batch){
+     try{await phase1Api.personalSync({[kind]:[item]})}catch{failed++}
+    }
+   }
+  }
+ }
+ personalSyncError=failed?'Vissa äldre uppgifter kan ännu inte synkroniseras. De finns kvar på enheten.':'';
+ renderStorageNotice();
+}
+function queuePersonalSync(){
+ if(!personalSyncReady||demoEnabled||storageReadBlocked)return;
+ personalSyncQueue=personalSyncQueue.catch(()=>{}).then(pushPersonal).catch(()=>{
+  personalSyncError='Servern kunde inte nås. Ändringarna finns kvar på enheten.';
+  renderStorageNotice();
+ });
+}
+async function initializePersonalSync(){
+ if(personalSyncBusy||personalSyncReady||demoEnabled||storageReadBlocked)return;
+ personalSyncBusy=true;
+ try{
+  const remote={notes:[],systems:[],tombstones:[]};
+  let offset=0;
+  for(let page=0;page<100;page++){
+   const data=await phase1Api.personalPage(offset);
+   for(const key of ['notes','systems','tombstones'])remote[key].push(...(data[key]||[]));
+   if(!data.hasMore){offset=-1;break}
+   if(Number(data.nextOffset)!==offset+100)throw new Error('Ogiltig sidindelning');
+   offset=data.nextOffset;
+  }
+  if(offset!==-1)throw new Error('För många sparade poster att synkronisera på en gång.');
+  const merged=mergePersonal(localData,remote);
+  // An old or corrupt local copy must never be replaced by the server.
+  localStorage.setItem(storageKey,JSON.stringify(merged));
+  localData=merged;
+  personalSyncReady=true;personalSyncError='';
+  if(currentRoute==='systems'&&spelView==='systems')renderSystems();
+  else if(!activeNoteDraft)document.querySelectorAll('.p1-notes').forEach(renderNotesHost);
+  queuePersonalSync();
+ }catch(error){
+  personalSyncError='Synkronisering är inte tillgänglig just nu. Uppgifterna finns kvar lokalt.';
+  renderStorageNotice();
+ }finally{personalSyncBusy=false}
+}
 let demoVisible=demoEnabled&&(()=>{try{return localStorage.getItem(demoFlagKey)==='1'}catch{return false}})();
 let currentRoute='trend',spelView='upcoming',roundFilter='all',activeRound=null,activeLeg=1,roundToken=0,upcomingRequestToken=0,formLoadIssue='';
 let upcomingItems=[],historyRounds=[],builderType='V85',builderRoundId='',builderRound=null,builderLegs=Array.from({length:8},()=>[]);
 let builderName='',builderDemo=false,expandedSystems=new Set(),expandedHorses=new Set();
 let profiles=new Map(),facts=new Map(),formScores=new Map(),activeNoteDraft=null,deleteTarget=null,groupFilter='all';
 let builderRoundsCache={};
-function persist(next){if(storageReadBlocked){renderStorageNotice();return false}const result=(()=>{try{localStorage.setItem(storageKey,JSON.stringify(next));return{ok:true}}catch(error){return{ok:false,error:error?.message||'Kunde inte spara lokalt.'}}})();if(!result.ok){storageError=result.error;renderStorageNotice();return false}localData=next;storageError='';renderStorageNotice();return true}
-function renderStorageNotice(){const host=document.getElementById('p1-storage-status');if(host)host.replaceChildren();let alert=document.getElementById('p1-global-storage-status');if(storageError){if(!alert){alert=document.createElement('div');alert.id='p1-global-storage-status';alert.className='p1-notice p1-error';alert.setAttribute('role','alert');appEl.before(alert)}alert.textContent='Lokal lagring kunde inte användas: '+storageError+(storageReadBlocked?' Befintliga data lämnas orörda; lokal sparning är blockerad.':'')}else alert?.remove()}
+function persist(next){
+ if(storageReadBlocked){renderStorageNotice();return false}
+ try{localStorage.setItem(storageKey,JSON.stringify(next))}
+ catch(error){storageError=error?.message||'Kunde inte spara lokalt.';renderStorageNotice();return false}
+ localData=next;storageError='';renderStorageNotice();queuePersonalSync();return true
+}
+
+function renderStorageNotice(){
+ const host=document.getElementById('p1-storage-status');if(host)host.replaceChildren();
+ let alert=document.getElementById('p1-global-storage-status');
+ const problem=storageError||personalSyncError;
+ if(problem){
+  if(!alert){alert=document.createElement('div');alert.id='p1-global-storage-status';alert.className='p1-notice p1-error';alert.setAttribute('role','alert');appEl.before(alert)}
+  alert.textContent=storageError?'Lokal lagring kunde inte användas: '+storageError+(storageReadBlocked?' Befintliga data lämnas orörda.':''):personalSyncError;
+ }else alert?.remove()
+}
+
 function saveDemoVisibility(value){if(!demoEnabled)return;demoVisible=Boolean(value);try{localStorage.setItem(demoFlagKey,demoVisible?'1':'0')}catch{}}
 function setNav1(page){const navPage=page==='upcoming'||page==='systems'||page==='builder'?'spel':page==='start'?'trend':page;document.querySelectorAll('.nav-item[data-p1-nav]').forEach(button=>{const active=button.dataset.p1Nav===navPage;button.classList.toggle('active',active);if(active)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current')})}
 function spelSwitcher(selected){return '<div class="p1-spel-switcher" role="group" aria-label="Spelvy">'+[['upcoming','Kommande'],['builder','Registrera system'],['systems','Mina system']].map(([view,label])=>'<button type="button" class="p1-filter '+(selected===view?'active':'')+'" data-p1-spel-view="'+view+'" aria-pressed="'+(selected===view)+'">'+label+'</button>').join('')+'</div>'}
@@ -256,13 +350,13 @@ const priorPhase1SetNav=typeof setNav==='function'?setNav:null;
 if(priorPhase1SetNav)setNav=function(page){priorPhase1SetNav(page);if(page==='start')currentRoute='trend';if(currentRoute==='trend')setNav1('trend');else if(currentRoute==='statistics')setNav1('statistics');else if(currentRoute==='upcoming'||currentRoute==='systems')setNav1('spel');else if(currentRoute==='settings')setNav1('');};
 function renderSettings(){
  currentRoute='settings';setNav1('');
- appEl.innerHTML=pageHead('Inställningar','Datatäckning · driftstatus · lokal lagring')+'<div class="p1-loading-line"></div>';
+ appEl.innerHTML=pageHead('Inställningar','Datatäckning · driftstatus · personlig lagring')+'<div class="p1-loading-line"></div>';
  phase1Api.settingsStatus().then(data=>{
   if(currentRoute!=='settings')return;
   const counts=data.counts||{},sources=data.sources||[],runs=(data.recentRuns||[]).slice(0,5);
-  appEl.innerHTML=pageHead('Inställningar','Datatäckning · driftstatus · lokal lagring')+'<div id="p1-storage-status"></div><section class="p1-section"><div class="p1-section-title"><h2>Datamängd</h2><span>Senast hämtat från systemstatus</span></div><div class="p1-summary-grid">'+[['Tränare',counts.trainers],['Hästar',counts.horses],['Kuskar',counts.drivers],['V85/V86-omgångar',counts.games]].map(([label,value])=>'<div class="p1-card p1-card-pad"><span class="p1-stat-label">'+esc1(label)+'</span><strong class="p1-stat-value">'+esc1(value==null?'–':num1(value))+'</strong></div>').join('')+'</div></section><section class="p1-section"><div class="p1-section-title"><h2>Datakällor</h2><span>Senaste aktivitet</span></div><div class="p1-settings-list">'+(sources.length?sources.map(source=>'<div class="p1-settings-row"><span><strong>'+esc1(source.name||'Datakälla')+'</strong><small>'+esc1(source.description||source.message||'')+'</small></span><span class="p1-settings-state '+(['error_retrying','action_required'].includes(source.status)?'error':'')+'">'+esc1(statusText1(source.status))+'</span><time>'+esc1(date1(source.lastRunAt))+'</time></div>').join(''):'<div class="p1-card p1-empty">Ingen källstatus tillgänglig.</div>')+'</div></section><section class="p1-section"><div class="p1-section-title"><h2>Senaste aktivitet</h2><span>Upp till fem körningar</span></div><div class="p1-card p1-card-pad">'+(runs.length?runs.map(run=>'<div class="p1-run-row"><strong>'+esc1(run.name||'Datakörning')+'</strong><span class="p1-settings-state '+(['error','warning'].includes(run.status)?'error':'')+'">'+esc1(statusText1(run.status))+'</span><time>'+esc1(date1(run.finishedAt||run.startedAt))+'</time><small>'+num1(run.errors||0)+' fel</small></div>').join(''):'<div class="p1-empty">Inga registrerade körningar ännu.</div>')+'</div></section><section class="p1-section"><div class="p1-card p1-card-pad"><div class="p1-section-title"><h2>Lokal lagring</h2><span>Endast den här enheten</span></div><p class="p1-small">Hästanteckningar och egna system sparas i webbläsaren. Inga formulär skickar ändringar till servern.</p><div class="p1-small">'+esc1(data.appVersion?'Appversion '+data.appVersion:'')+'</div></div></section>';
+  appEl.innerHTML=pageHead('Inställningar','Datatäckning · driftstatus · personlig lagring')+'<div id="p1-storage-status"></div><section class="p1-section"><div class="p1-section-title"><h2>Datamängd</h2><span>Senast hämtat från systemstatus</span></div><div class="p1-summary-grid">'+[['Tränare',counts.trainers],['Hästar',counts.horses],['Kuskar',counts.drivers],['V85/V86-omgångar',counts.games]].map(([label,value])=>'<div class="p1-card p1-card-pad"><span class="p1-stat-label">'+esc1(label)+'</span><strong class="p1-stat-value">'+esc1(value==null?'–':num1(value))+'</strong></div>').join('')+'</div></section><section class="p1-section"><div class="p1-section-title"><h2>Datakällor</h2><span>Senaste aktivitet</span></div><div class="p1-settings-list">'+(sources.length?sources.map(source=>'<div class="p1-settings-row"><span><strong>'+esc1(source.name||'Datakälla')+'</strong><small>'+esc1(source.description||source.message||'')+'</small></span><span class="p1-settings-state '+(['error_retrying','action_required'].includes(source.status)?'error':'')+'">'+esc1(statusText1(source.status))+'</span><time>'+esc1(date1(source.lastRunAt))+'</time></div>').join(''):'<div class="p1-card p1-empty">Ingen källstatus tillgänglig.</div>')+'</div></section><section class="p1-section"><div class="p1-section-title"><h2>Senaste aktivitet</h2><span>Upp till fem körningar</span></div><div class="p1-card p1-card-pad">'+(runs.length?runs.map(run=>'<div class="p1-run-row"><strong>'+esc1(run.name||'Datakörning')+'</strong><span class="p1-settings-state '+(['error','warning'].includes(run.status)?'error':'')+'">'+esc1(statusText1(run.status))+'</span><time>'+esc1(date1(run.finishedAt||run.startedAt))+'</time><small>'+num1(run.errors||0)+' fel</small></div>').join(''):'<div class="p1-empty">Inga registrerade körningar ännu.</div>')+'</div></section><section class="p1-section"><div class="p1-card p1-card-pad"><div class="p1-section-title"><h2>Personlig lagring</h2><span>Synkronisering mellan enheter</span></div><p class="p1-small">Hästanteckningar och egna system sparas lokalt och synkroniseras till privat databas när anslutning finns. Lokala kopior behålls som säkerhet.</p><div class="p1-small">'+esc1(data.appVersion?'Appversion '+data.appVersion:'')+'</div></div></section>';
   renderStorageNotice();
- }).catch(error=>{if(currentRoute!=='settings')return;appEl.innerHTML=pageHead('Inställningar','Datatäckning · driftstatus · lokal lagring')+errorBox('Kunde inte läsa driftstatus: '+error.message,'retry-settings')+'<div id="p1-storage-status"></div>';renderStorageNotice()});
+ }).catch(error=>{if(currentRoute!=='settings')return;appEl.innerHTML=pageHead('Inställningar','Datatäckning · driftstatus · personlig lagring')+errorBox('Kunde inte läsa driftstatus: '+error.message,'retry-settings')+'<div id="p1-storage-status"></div>';renderStorageNotice()});
 }
 async function loadBuilderRounds(){
  const current=builderType;
@@ -374,7 +468,9 @@ function saveNote(button){
 }
 function executeDelete(){
  if(!deleteTarget)return;const {kind,id}=deleteTarget;
- const next=kind==='note'?{...localData,notes:localData.notes.filter(x=>x.id!==id)}:{...localData,systems:localData.systems.filter(x=>x.id!==id)};
+ const tombstone={kind,id,deletedAt:new Date().toISOString()};
+ const tombstones=[...(localData.tombstones||[]).filter(x=>x.kind!==kind||x.id!==id),tombstone];
+ const next=kind==='note'?{...localData,tombstones,notes:localData.notes.filter(x=>x.id!==id)}:{...localData,tombstones,systems:localData.systems.filter(x=>x.id!==id)};
  if(!persist(next)){closeConfirm();const host=document.querySelector('.p1-notes')||appEl;host.insertAdjacentHTML('afterbegin','<div class="p1-notice p1-error" role="alert">Ändringen kunde inte sparas lokalt: '+esc1(storageError)+'</div>');return}
  closeConfirm();if(kind==='system')renderSystems();else{activeNoteDraft=null;document.querySelectorAll('.p1-notes').forEach(host=>{if(host.querySelector('[data-note-id="'+CSS.escape(id)+'"]'))renderNotesHost(host)})}
 }
@@ -431,6 +527,8 @@ window.__kentauraiPhase1.renderUpcoming=renderUpcoming;
 window.__kentauraiPhase1.renderSystems=renderSystems;
 window.__kentauraiPhase1.renderBuilder=renderBuilder;
 currentRoute='trend';setNav1('trend');renderStart();
+initializePersonalSync();
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){if(!personalSyncReady)initializePersonalSync();else queuePersonalSync()}});
 })();
 </script>`;
 }
