@@ -8,6 +8,7 @@ import { enhancePhase1Html } from '../src/phase1-ui.js';
 import { enhanceTravdataHtml, travdataAssetResponse, travdataManifest } from '../src/travdata-brand.js';
 import worker from '../src/worker-v079.js';
 import { pwaHeadMarkup } from '../src/pwa.js';
+import assets from '../src/assets/travdata.json' with { type: 'json' };
 
 test('Travdata replaces the visible brand and login copy while retaining form behavior', () => {
   const html = enhanceTravdataHtml(renderLoginPage({ error: true }));
@@ -41,8 +42,8 @@ test('Travdata keeps existing navigation SVGs, Phase 1 controls, storage keys an
 test('the unchanged original TD symbol is a valid GET-only image', async () => {
   for (const [path, width, height] of [
     ['/app/brand/td-mark.png', 512, 512],
-    ['/app/icon.png?brand=travdata-2', 512, 512],
-    ['/app/apple-touch-icon.png?brand=travdata-2', 512, 512]
+    ['/app/icon.png?brand=travdata-3', 512, 512],
+    ['/app/apple-touch-icon.png?brand=travdata-3', 512, 512]
   ]) {
     const response = await travdataAssetResponse(new Request('https://example.test' + path));
     assert.equal(response.status, 200);
@@ -97,15 +98,15 @@ test('all page-heading families share responsive sizes, weight, line height and 
 
 test('mobile installation uses the unchanged TD PNG and versioned manifest and Apple icon URLs', async () => {
   const html = enhanceTravdataHtml(renderLoginPage().replace('</head>', pwaHeadMarkup() + '</head>'));
-  assert.match(html, /rel="apple-touch-icon" sizes="512x512" href="\/app\/apple-touch-icon\.png\?brand=travdata-2"/);
-  assert.match(html, /rel="manifest" href="\/app\/manifest\.webmanifest\?brand=travdata-2"/);
+  assert.match(html, /rel="apple-touch-icon" sizes="512x512" href="\/app\/apple-touch-icon\.png\?brand=travdata-3"/);
+  assert.match(html, /rel="manifest" href="\/app\/manifest\.webmanifest\?brand=travdata-3"/);
   const icon = travdataManifest().icons.find(icon => icon.type === 'image/png');
   assert.equal(icon.sizes, '512x512');
   assert.equal(icon.purpose, 'any');
-  assert.equal(icon.src, '/app/icon.png?brand=travdata-2');
+  assert.equal(icon.src, '/app/icon.png?brand=travdata-3');
   const sw = await travdataAssetResponse(new Request('https://example.test/app/sw.js')).text();
-  assert.match(sw, /kentaurai-pwa-v4/);
-  assert.match(sw, /map\(path=>path\+'\?brand=travdata-2'\)/);
+  assert.match(sw, /kentaurai-pwa-v5/);
+  assert.match(sw, /map\(path=>path\+'\?brand=travdata-3'\)/);
   assert.match(sw, /'\/app\/apple-touch-icon\.png'/);
   assert.doesNotMatch(sw, /kentaurai-pwa-v2/);
   assert.equal(travdataAssetResponse(new Request('https://example.test/app/apple-touch-icon.png', { method: 'POST' })), null);
@@ -126,7 +127,7 @@ test('PWA identity and icons change without changing installed app scope or cach
   assert.match(icon, /clip-path="url\(#td-circle\)"/);
   assert.doesNotMatch(icon, /fill="#F7F7FC"/);
   const sw = await travdataAssetResponse(new Request('https://example.test/app/sw.js')).text();
-  assert.match(sw, /kentaurai-pwa-v4/);
+  assert.match(sw, /kentaurai-pwa-v5/);
   assert.doesNotMatch(sw, /\/app\/api/);
 });
 
@@ -147,4 +148,66 @@ test('production app excludes demo payloads while local synthetic preview retain
   assert.match(prod, /const demoSystems=\[\];/);
   assert.match(preview, /const demoEnabled=true;/);
   assert.match(preview, /demo-v85-2026-/);
+});
+
+function decodePngRgba(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const width = view.getUint32(16), height = view.getUint32(20);
+  const compressed = [];
+  for (let pos = 8; pos + 12 <= bytes.length;) {
+    const size = view.getUint32(pos);
+    const type = String.fromCharCode(...bytes.subarray(pos + 4, pos + 8));
+    if (type === 'IDAT') compressed.push(Buffer.from(bytes.subarray(pos + 8, pos + 8 + size)));
+    pos += size + 12;
+  }
+  const scanlines = inflateSync(Buffer.concat(compressed));
+  const stride = width * 4, pixels = new Uint8Array(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    const filter = scanlines[y * (stride + 1)];
+    for (let i = 0; i < stride; i++) {
+      const at = y * stride + i;
+      const left = i >= 4 ? pixels[at - 4] : 0;
+      const up = y > 0 ? pixels[at - stride] : 0;
+      const diagonal = y > 0 && i >= 4 ? pixels[at - stride - 4] : 0;
+      let predictor = 0;
+      if (filter === 1) predictor = left;
+      else if (filter === 2) predictor = up;
+      else if (filter === 3) predictor = (left + up) >>> 1;
+      else if (filter === 4) {
+        const p = left + up - diagonal;
+        const dLeft = Math.abs(p - left), dUp = Math.abs(p - up), dDiagonal = Math.abs(p - diagonal);
+        predictor = dLeft <= dUp && dLeft <= dDiagonal ? left : dUp <= dDiagonal ? up : diagonal;
+      } else assert.equal(filter, 0, 'Only legal PNG scanline filters are accepted');
+      pixels[at] = (scanlines[y * (stride + 1) + 1 + i] + predictor) & 255;
+    }
+  }
+  return { width, height, pixels };
+}
+
+test('transparent TD icon preserves every original pixel inside the circle', async () => {
+  const original = decodePngRgba(Buffer.from(assets.iconPng, 'base64'));
+  const response = await travdataAssetResponse(new Request('https://example.test/app/icon.png'));
+  assert.equal(response.status, 200);
+  const transformed = decodePngRgba(await response.arrayBuffer());
+  assert.equal(transformed.width, original.width);
+  assert.equal(transformed.height, original.height);
+  const radiusSquared = (original.width * 0.493) ** 2;
+  let preservedPixels = 0, clearedPixels = 0;
+  for (let y = 0; y < original.height; y++) for (let x = 0; x < original.width; x++) {
+    const offset = (y * original.width + x) * 4;
+    const inside = (x + .5 - original.width / 2) ** 2 +
+                   (y + .5 - original.height / 2) ** 2 <= radiusSquared;
+    if (inside) {
+      for (let channel = 0; channel < 4; channel++)
+        assert.equal(transformed.pixels[offset + channel], original.pixels[offset + channel],
+          `TD pixel changed at (${x},${y}), channel ${channel}`);
+      preservedPixels++;
+    } else {
+      assert.equal(transformed.pixels[offset + 3], 0, `Corner not transparent at (${x},${y})`);
+      clearedPixels++;
+    }
+  }
+  assert.ok(preservedPixels > 180000);
+  assert.ok(clearedPixels > 30000);
 });
