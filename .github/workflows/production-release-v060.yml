@@ -487,6 +487,7 @@ jobs:
             '/v1/post-race/settlement/private-probe' \
             '/v1/statistics/backfill/status' \
             '/v1/statistics/backfill/step' \
+            '/v1/storage-cleanup/legacy-backup/status' \
             '/v1/storage-cleanup/audit' \
             '/v1/storage-cleanup/reconciliation/page?family=horse_profile' \
             '/v1/storage-cleanup/restoration/preview?family=horse_profile' \
