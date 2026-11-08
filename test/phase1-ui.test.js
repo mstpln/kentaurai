@@ -20,7 +20,7 @@ test('Phase 1 is an idempotent HTML enhancement with explicit browser aliases', 
     assert.doesNotThrow(() => new vm.Script(script));
   }
   assert.equal(html, enhancePhase1Html(base, { asOfDate: '2028-01-02' }));
-  assert.notEqual(html, enhancePhase1Html(base, { asOfDate: '2028-01-09' }));
+  assert.notEqual(enhancePhase1Html(base, { asOfDate: '2028-01-02', allowDemo: true }), enhancePhase1Html(base, { asOfDate: '2028-01-09', allowDemo: true }));
 });
 
 test('bottom navigation preserves Trend, Statistik and Spel with settings outside it', () => {
