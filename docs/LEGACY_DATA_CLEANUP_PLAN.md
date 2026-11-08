@@ -64,3 +64,87 @@ No deletion is performed, scheduled, or authorized by the new inventory
 workflow. Do **not** reuse the historic generic snapshot cleanup executor for
 this obsolete AI/editorial data cleanup: it targets different tables and a
 prior production execution lost source representations.
+
+## Read-only production inventory evidence — 2026-11-08
+
+The operator manually ran inventory on deployed main f688bcf7ead9e3ff257ee73e91b188416a5547fd,
+GitHub Actions run 42512133295 (success). SQL read 4,140 rows, wrote zero.
+
+| Area | D1 rows |
+|---|---:|
+| Editorial items | 268 |
+| Editorial structured signals | 1,137 |
+| Manually imported external horse-stat snapshots | 1,674 |
+| Old AI race analyses | 48 |
+| Old AI horse predictions | 546 |
+| Old external analysis exports | 8 |
+| External registered analysis runs | 3 |
+| External post-race reviews | 24 |
+| External post-race learning links | 8 |
+| Learning hypotheses | 4 |
+| Learning observations | 8 |
+| **All candidate categories** | **3,728** |
+
+Other legacy workflow and replay candidate tables were empty. Protected
+\`systems\` contained **9** rows and \`system_selections\` **208**.
+\`travdata_manual_systems\` and \`travdata_horse_notes\` were both **0 in D1 at
+inventory time**; client-local personal data is NOT thereby proven absent.
+\`post_race_reviews\` contained 72 and reference-round tables had 1 export and
+116 observations. All these ambiguous/protected rows remain untouched.
+
+**Critical new finding:** \`src/routes/games.js\` resolves a historical round's
+primary saved system through \`analysis_external_runs.main_system_id\` before
+falling back to the \`systems\` table. Deleting linked external analysis rows
+without separately verifying fallback/UI behavior can change displayed saved
+system history even if the selections are still present. Consequently the 3
+external runs, 24 external reviews, 8 links and all model/learning references
+are excluded from the **first** potential delete set.
+
+## Next build: dependency preflight and backup-only tool
+
+A second, separate read-only dependency report evaluates only six narrower
+potential first-stage tables: 3,681 rows at the prior snapshot (actual counts
+must be re-read before deletion). It reports official source and personal
+system counts, legacy link overlap, reference-round overlap, and orphan
+indicators. The report is **not** a row-deletion proof, cannot see dynamic
+JSON consumer references, and contains no write action. If an orphan exists,
+pause and investigate rather than deleting blindly.
+
+The backup-only Cloudflare route:
+- Requires a **dedicated** temporary `LEGACY_BACKUP_TOKEN` credential **and**
+  a separate `LEGACY_BACKUP_ENABLED` switch. Neither `ADMIN_TOKEN` nor
+  `STORAGE_CLEANUP_TOKEN` can authorize backup endpoints; the backup token
+  cannot authorize legacy cleanup, provenance restoration or other routes.
+- Uses Cloudflare D1 export polling; **the SQL body is streamed from Cloudflare
+  directly to private Cloudflare R2**, never GitHub, ChatGPT or a user device.
+- Stores in-progress export bookmark and progress **only in private R2**,
+  without querying locked D1. Only after a completed Cloudflare export,
+  it stores a separate immutable receipt in `legacy_cleanup_backups`,
+  binding bookmark, private R2 key/size/ETag and the deployed commit.
+  A temporarily unavailable D1 after export completion can be retried
+  without downloading or duplicating the private SQL file.
+- Verifies Cloudflare-signed HTTPS URL host, content type, expected byte length,
+  object metadata and R2 HEAD; mismatches stop without marking verified.
+- Does not delete data, restore databases, enable cleanup, modify official
+  racing facts, or schedule a task.
+- Has an explicit manual GitHub Actions typed \`BACKUP_D1_ONLY\` approval,
+  serial production-operation lock, full QA and exact deployment validation.
+  Short-lived secrets are removed even if backup fails.
+
+**Limit:** A single R2 PUT currently refuses a SQL export larger than 5 GiB.
+This is fail-closed, not proof that the full production database fits. Large
+exports require a separately reviewed Cloudflare-side multipart flow. A
+size/ETag-verified R2 copy is NOT yet independently proven restorable in a
+separate database. No destructive cleanup is authorized until that independent
+recovery gate, fresh dependency counts, code reader/writer audit and exact
+zero-write delete rehearsal have passed.
+
+Only after this PR is reviewed and explicitly approved for merge/deploy can
+the operator run the extended read-only inventory and separately click the
+backup-only workflow. **No auto-backup or auto-delete on merge.**
+
+
+**Operational caution:** Cloudflare's D1 export API can make the source
+D1 unavailable for queries while a large export is in progress. Run the
+manual backup outside the morning pipeline or other active processing.
+The 5 GiB R2 single-PUT limit remains in force and fails closed.

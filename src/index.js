@@ -1,6 +1,7 @@
 import { requireAdmin, requireStorageCleanupAdmin } from './auth.js';
 import { archiveRawPayload } from './raw.js';
 import { importEditorial } from './import/editorial.js';
+import { legacyBackupCapability, getLegacyBackupStatus, beginLegacyBackup, pollLegacyBackup } from './legacy-cleanup-backup.js';
 import { importReferenceRound } from './import/reference-round-safe.js';
 import { normalizeCapturedOfficialGameSequential } from './import/official-live-sequential.js';
 import { captureUpcomingOfficialGames, normalizeNextPendingOfficialGame } from './import/official-live-scheduled.js';
@@ -264,9 +265,13 @@ async function handleFetch(request, env) {
   if (path === '/') return redirectResponse('/app');
   if (path.startsWith('/app')) return handleApp(request, env, url);
   if (path.startsWith('/v1/')) {
-    const denied = path.startsWith('/v1/storage-cleanup/')
-      ? requireStorageCleanupAdmin(request, env)
-      : requireAdmin(request, env);
+    // Backup credentials are scoped exclusively to backup endpoints:
+    // they MUST NOT authorize historical restore, cleanup or admin routes.
+    const denied = path.startsWith('/v1/storage-cleanup/legacy-backup/')
+      ? (legacyBackupCapability(request,env) ? null : json({error:'unauthorized'},401))
+      : path.startsWith('/v1/storage-cleanup/')
+        ? requireStorageCleanupAdmin(request, env)
+        : requireAdmin(request, env);
     if (denied) return denied;
   }
   if (request.method === 'POST' && isBudgetedExpansion(path)) {
@@ -277,6 +282,26 @@ async function handleFetch(request, env) {
         level:decision.level,
         reason:decision.reason
       },429);
+    }
+  }
+  // Explicitly manual BACKUP ONLY: different short-lived capability from
+  // permanent ADMIN_TOKEN. SQL bytes stream Cloudflare -> private R2 only.
+  if (path.startsWith('/v1/storage-cleanup/legacy-backup/')) {
+    if (!legacyBackupCapability(request,env))
+      return json({error:'legacy_backup_capability_required'},403);
+    try {
+      if(request.method==='GET' && path.endsWith('/auth-check'))
+        return json({ok:true,scope:'legacy_backup_only'});
+      if(request.method==='GET' && path.endsWith('/status'))
+        return json(await getLegacyBackupStatus(env));
+      if(request.method==='POST' && path.endsWith('/start'))
+        return json(await beginLegacyBackup(env));
+      if(request.method==='POST' && path.endsWith('/poll'))
+        return json(await pollLegacyBackup(env));
+      return json({error:'not_found'},404);
+    } catch {
+      console.error('private legacy backup stopped safely');
+      return json({error:'legacy_backup_unavailable'},409);
     }
   }
   // The source-bound audit may still perform read-only checks and planning.

@@ -157,7 +157,8 @@ export function createTestEnv() {
     '../../migrations/0067_cleanup_audit_atomic_fencing.sql',
     '../../migrations/0068_historical_source_provenance_recovery.sql',
     '../../migrations/0069_settings_source_health_lookup_indexes.sql',
-    '../../migrations/0070_travdata_personal_v1.sql'
+    '../../migrations/0070_travdata_personal_v1.sql',
+    '../../migrations/0071_legacy_cleanup_private_backup.sql'
   ]) {
     db.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
   }
@@ -192,6 +193,7 @@ export function createTestEnv() {
           if (!stored) return null;
           const bytes = typeof stored.body === 'string' ? new TextEncoder().encode(stored.body) : stored.body;
           return {
+            size: bytes.byteLength,
             async text() { return typeof stored.body === 'string' ? stored.body : new TextDecoder().decode(bytes); },
             async arrayBuffer() { return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength); }
           };

@@ -117,6 +117,16 @@ jobs:
             --command "SELECT id,horse_id,race_entry_id,note_text,updated_at FROM travdata_horse_notes LIMIT 0; SELECT id,game_round_id,settlement_state,next_check_at,review_reason,payout_sek FROM travdata_manual_systems LIMIT 0; SELECT kind,id,deleted_at FROM travdata_personal_tombstones LIMIT 0; SELECT name FROM d1_migrations WHERE name='0070_travdata_personal_v1.sql';" \
             > "$schema_file"
           grep -Fq '0070_travdata_personal_v1.sql' "$schema_file"
+      - name: Verify private legacy backup receipt schema (no data reads)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4.114.0 d1 execute kentaurai --remote --command "SELECT id,source_sha,bookmark,object_key,object_etag,object_size,status,completed_at FROM legacy_cleanup_backups LIMIT 0; SELECT name FROM d1_migrations WHERE name='0071_legacy_cleanup_private_backup.sql';" > "$RUNNER_TEMP/legacy-backup-schema-check.txt"
+          grep -Fq '0071_legacy_cleanup_private_backup.sql' "$RUNNER_TEMP/legacy-backup-schema-check.txt"
+
       - name: Verify required production schema without exposing production data
         shell: bash
         env:
@@ -477,6 +487,7 @@ jobs:
             '/v1/post-race/settlement/private-probe' \
             '/v1/statistics/backfill/status' \
             '/v1/statistics/backfill/step' \
+            '/v1/storage-cleanup/legacy-backup/status' \
             '/v1/storage-cleanup/audit' \
             '/v1/storage-cleanup/reconciliation/page?family=horse_profile' \
             '/v1/storage-cleanup/restoration/preview?family=horse_profile' \
