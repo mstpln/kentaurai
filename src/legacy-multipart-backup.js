@@ -91,6 +91,10 @@ async function exportPolling(env,body,fetchImpl){
   return r;
 }
 function validate(state,partBytes){
+  // The R2 manifest is repeatedly written to one key. Its persisted write
+  // timestamp permits a cross-request per-key pacing guard.
+  if(state?.lastSavedAtMs!=null&&!integer(state.lastSavedAtMs))
+    throw Error('multipart_control_timestamp_invalid');
   if(!state||!uuid(state.id)||!sha(state.sourceSha)||
      !['starting','exporting','initializing','uploading','stored','complete'].includes(state.status))
     throw Error('multipart_control_invalid');
@@ -128,9 +132,26 @@ async function readControl(env,partBytes){
   try{v=JSON.parse(await item.text());}catch{throw Error('multipart_control_json_invalid');}
   return validate(v,partBytes);
 }
-async function saveControl(env,state,partBytes){
+async function saveControl(env,state,partBytes,{
+  gapMs=1150,sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms)),
+  now=()=>Date.now()
+}={}){
   validate(state,partBytes);
-  const bytes=JSON.stringify(state);
+  // Cloudflare R2 limits writes to the same object key to 1 per second.
+  // Persist the last write time IN R2: per-isolate timers do not protect
+  // successive Worker requests. The dedicated workflow is also serialized.
+  const existing=await readControl(env,partBytes);
+  if(existing?.lastSavedAtMs!=null){
+    const wait=existing.lastSavedAtMs+gapMs-now();
+    if(wait>0){
+      if(wait>Math.max(5000,gapMs*2))
+        throw Error('multipart_control_timestamp_clock_skew');
+      await sleep(wait);
+    }
+  }
+  const recorded={...state,lastSavedAtMs:now()};
+  validate(recorded,partBytes);
+  const bytes=JSON.stringify(recorded);
   if(new TextEncoder().encode(bytes).length>CONTROL_MAX_BYTES)
     throw Error('multipart_control_too_large');
   await env.RAW_BUCKET.put(CONTROL_KEY,bytes,{
@@ -178,13 +199,19 @@ async function verifyD1(env,state){
     throw Error('multipart_d1_receipt_unverified');
 }
 export function createPrivateMultipartBackup({partBytes=MULTIPART_PART_BYTES,
-  fetchImpl=fetch}={}){
+  fetchImpl=fetch,controlWriteSpacingMs=1150,
+  sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms)),
+  now=()=>Date.now()}={}){
   // Smaller part sizes are only for synthetic tests. Public HTTP never
   // supplies this configuration; production always uses 16 MiB parts.
   if(!integer(partBytes)||partBytes<8||partBytes>MULTIPART_PART_BYTES)
     throw Error('multipart_part_size_invalid');
+  if(!integer(controlWriteSpacingMs)||controlWriteSpacingMs>5000)
+    throw Error('multipart_control_spacing_invalid');
   const load=env=>readControl(env,partBytes);
-  const save=(env,state)=>saveControl(env,state,partBytes);
+  const save=(env,state)=>saveControl(env,state,partBytes,{
+    gapMs:controlWriteSpacingMs,sleep,now
+  });
   async function status(env){
     safeEnv(env);const state=await load(env);
     if(!state)return publicStatus(null,partBytes);
