@@ -369,7 +369,17 @@ export async function getUpcomingGameLeg(env, roundId, legNumber) {
   const { results:entries } = await env.DB.prepare(`
     SELECT re.id race_entry_id,re.horse_id,re.driver_id,re.trainer_id,re.start_number,re.actual_lane,re.start_tier,
       re.handicap_m,re.scratched,h.canonical_name horse_name,h.sex,h.birth_year,
-      d.canonical_name driver_name,tr.canonical_name trainer_name,
+       (
+         SELECT json_extract(obs.fields_json,'$.ageYears')
+         FROM normalized_observations obs
+         WHERE obs.entity_type='horse' AND obs.entity_id=h.id
+           AND obs.quality_status='normalized_verified_subset'
+           AND substr(obs.observed_at,1,4)=substr(?,1,4)
+           AND obs.observed_at<=?
+           AND json_type(obs.fields_json,'$.ageYears') IN ('integer','real')
+         ORDER BY obs.observed_at DESC,obs.id DESC LIMIT 1
+       ) observed_age,
+       d.canonical_name driver_name,tr.canonical_name trainer_name,
       (
         SELECT bs.bet_percent
         FROM betting_snapshots bs
@@ -382,7 +392,7 @@ export async function getUpcomingGameLeg(env, roundId, legNumber) {
     LEFT JOIN trainers tr ON tr.id=re.trainer_id
     WHERE re.race_id=?
     ORDER BY re.start_number ASC,re.id ASC
-  `).bind(round.id, leg.legNumber, leg.raceId).all();
+  `).bind(round.roundDate,targetStart,round.id,leg.legNumber,leg.raceId).all();
 
   const { results:history } = await env.DB.prepare(`
     SELECT cur.id current_entry_id,hr.start_method,xd.first_200_time,xd.last_400_time,
@@ -417,7 +427,7 @@ export async function getUpcomingGameLeg(env, roundId, legNumber) {
         horseName:row.horse_name,
         sex:row.sex || null,
         birthYear:row.birth_year == null ? null : Number(row.birth_year),
-        ageYears:row.birth_year == null ? null : Number(round.roundDate.slice(0,4))-Number(row.birth_year),
+        ageYears:row.observed_age != null ? Number(row.observed_age) : (row.birth_year == null ? null : Number(round.roundDate.slice(0,4))-Number(row.birth_year)),
         equipment:equipmentByEntry.get(row.race_entry_id)||equipmentDisplay(null,null),
         driverId:row.driver_id || null,
         driverName:row.driver_name || null,

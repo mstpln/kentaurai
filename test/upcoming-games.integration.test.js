@@ -201,3 +201,18 @@ test('latest verified equipment snapshot wins without guessing missing dimension
  assert.equal(e.front,'shod');assert.equal(e.rear,null);assert.equal(e.cart,'Va.');
  assert.equal(e.rearChanged,false);
 });
+
+test('age uses official same-year age observation without inferring birth year',async()=>{
+ const {env,db}=createTestEnv();seedUpcoming(db);
+ db.prepare("INSERT INTO normalized_observations (id,entity_type,entity_id,source_record_id,observed_at,fields_json,quality_status) VALUES (?,?,?,?,?,?,?)")
+  .run('horse_age','horse','horse_1','src_current','2099-09-19T09:05:00Z',JSON.stringify({ageYears:6}),'normalized_verified_subset');
+ const e=(await getUpcomingGameLeg(env,'round_up',1)).entries[0];
+ assert.equal(e.birthYear,null);assert.equal(e.ageYears,6);
+});
+test('age refuses observation from a different calendar year',async()=>{
+ const {env,db}=createTestEnv();seedUpcoming(db);
+ db.prepare("INSERT INTO normalized_observations (id,entity_type,entity_id,source_record_id,observed_at,fields_json,quality_status) VALUES (?,?,?,?,?,?,?)")
+  .run('old_age','horse','horse_1','src_current','2098-09-19T09:05:00Z',JSON.stringify({ageYears:6}),'normalized_verified_subset');
+ const e=(await getUpcomingGameLeg(env,'round_up',1)).entries[0];
+ assert.equal(e.ageYears,null);
+});
