@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { createHash } from 'node:crypto';
+import { inflateSync } from 'node:zlib';
 import { renderAppPage, renderLoginPage } from '../src/app-page.js';
 import { enhancePhase1Html } from '../src/phase1-ui.js';
 import { enhanceTravdataHtml, travdataAssetResponse, travdataManifest } from '../src/travdata-brand.js';
@@ -40,17 +41,30 @@ test('Travdata keeps existing navigation SVGs, Phase 1 controls, storage keys an
 test('the unchanged original TD symbol is a valid GET-only image', async () => {
   for (const [path, width, height] of [
     ['/app/brand/td-mark.png', 512, 512],
-    ['/app/icon.png?brand=travdata-1', 512, 512],
-    ['/app/apple-touch-icon.png?brand=travdata-1', 512, 512]
+    ['/app/icon.png?brand=travdata-2', 512, 512],
+    ['/app/apple-touch-icon.png?brand=travdata-2', 512, 512]
   ]) {
-    const response = travdataAssetResponse(new Request('https://example.test' + path));
+    const response = await travdataAssetResponse(new Request('https://example.test' + path));
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('content-type'), 'image/png');
     const bytes = new Uint8Array(await response.arrayBuffer());
     assert.deepEqual([...bytes.slice(0, 4)], [137, 80, 78, 71]);
     assert.equal(new DataView(bytes.buffer).getUint32(16), width);
     assert.equal(new DataView(bytes.buffer).getUint32(20), height);
-    assert.equal(createHash('sha256').update(bytes).digest('hex'), 'aebac604fa63a40bee5efa52b701f93adc3ebce0a206242c53a0c9c14051711c');
+    // New pixels differ from the source only by zeroed transparent corner pixels.
+    assert.notEqual(createHash('sha256').update(bytes).digest('hex'), 'aebac604fa63a40bee5efa52b701f93adc3ebce0a206242c53a0c9c14051711c');
+    const idat = [];
+    for (let offset = 8; offset + 12 < bytes.length;) {
+      const size = new DataView(bytes.buffer, bytes.byteOffset).getUint32(offset);
+      const label = String.fromCharCode(...bytes.subarray(offset + 4, offset + 8));
+      if (label === 'IDAT') idat.push(bytes.subarray(offset + 8, offset + 8 + size));
+      offset += 12 + size;
+    }
+    const rgba = inflateSync(Buffer.concat(idat.map(chunk => Buffer.from(chunk))));
+    const alpha = (col, row) => rgba[row * (width * 4 + 1) + 1 + col * 4 + 3];
+    assert.equal(alpha(0, 0), 0);
+    assert.equal(alpha(width - 1, height - 1), 0);
+    assert.ok(alpha(256, 256) > 0, 'Approved emblem is still visible');
     assert.equal(travdataAssetResponse(new Request('https://example.test' + path, { method: 'POST' })), null);
   }
   assert.equal(travdataAssetResponse(new Request('https://example.test/app/api/brand')), null);
@@ -83,15 +97,15 @@ test('all page-heading families share responsive sizes, weight, line height and 
 
 test('mobile installation uses the unchanged TD PNG and versioned manifest and Apple icon URLs', async () => {
   const html = enhanceTravdataHtml(renderLoginPage().replace('</head>', pwaHeadMarkup() + '</head>'));
-  assert.match(html, /rel="apple-touch-icon" sizes="512x512" href="\/app\/apple-touch-icon\.png\?brand=travdata-1"/);
-  assert.match(html, /rel="manifest" href="\/app\/manifest\.webmanifest\?brand=travdata-1"/);
+  assert.match(html, /rel="apple-touch-icon" sizes="512x512" href="\/app\/apple-touch-icon\.png\?brand=travdata-2"/);
+  assert.match(html, /rel="manifest" href="\/app\/manifest\.webmanifest\?brand=travdata-2"/);
   const icon = travdataManifest().icons.find(icon => icon.type === 'image/png');
   assert.equal(icon.sizes, '512x512');
   assert.equal(icon.purpose, 'any');
-  assert.equal(icon.src, '/app/icon.png?brand=travdata-1');
+  assert.equal(icon.src, '/app/icon.png?brand=travdata-2');
   const sw = await travdataAssetResponse(new Request('https://example.test/app/sw.js')).text();
-  assert.match(sw, /kentaurai-pwa-v3/);
-  assert.match(sw, /map\(path=>path\+'\?brand=travdata-1'\)/);
+  assert.match(sw, /kentaurai-pwa-v4/);
+  assert.match(sw, /map\(path=>path\+'\?brand=travdata-2'\)/);
   assert.match(sw, /'\/app\/apple-touch-icon\.png'/);
   assert.doesNotMatch(sw, /kentaurai-pwa-v2/);
   assert.equal(travdataAssetResponse(new Request('https://example.test/app/apple-touch-icon.png', { method: 'POST' })), null);
@@ -109,8 +123,10 @@ test('PWA identity and icons change without changing installed app scope or cach
   const icon = await travdataAssetResponse(new Request('https://example.test/app/icon.svg')).text();
   assert.match(icon, /aria-label="Travdata"/);
   assert.match(icon, /data:image\/png;base64,/);
+  assert.match(icon, /clip-path="url\(#td-circle\)"/);
+  assert.doesNotMatch(icon, /fill="#F7F7FC"/);
   const sw = await travdataAssetResponse(new Request('https://example.test/app/sw.js')).text();
-  assert.match(sw, /kentaurai-pwa-v3/);
+  assert.match(sw, /kentaurai-pwa-v4/);
   assert.doesNotMatch(sw, /\/app\/api/);
 });
 
@@ -121,4 +137,14 @@ test('the final Worker brands public login but keeps private APIs session-protec
   assert.match(await login.text(), /<title>Travdata<\/title>/);
   const api = await worker.fetch(new Request('https://example.test/app/api/games/upcoming'), env, {});
   assert.equal(api.status, 401);
+});
+
+test('production app excludes demo payloads while local synthetic preview retains them', () => {
+  const prod = enhancePhase1Html(renderAppPage(), { asOfDate: '2026-11-08' });
+  const preview = enhancePhase1Html(renderAppPage(), { asOfDate: '2026-11-08', allowDemo: true });
+  assert.match(prod, /const demoEnabled=false;/);
+  assert.match(prod, /const demoRounds=\[\];/);
+  assert.match(prod, /const demoSystems=\[\];/);
+  assert.match(preview, /const demoEnabled=true;/);
+  assert.match(preview, /demo-v85-2026-/);
 });
