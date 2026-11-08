@@ -28,8 +28,12 @@ export const MORNING_RUN_BUDGET = Object.freeze({
 export const WORKLOAD_CAPACITY = Object.freeze({
   dailyD1Reads: 600_000_000,
   dailyD1Writes: 1_200_000,
+  dailyWorkersRequests: 200_000,
+  dailyWorkersCpuMs: 600_000,
   busyDayD1Reads: 1_000_000_000,
   busyDayD1Writes: 2_000_000,
+  busyDayWorkersRequests: 400_000,
+  busyDayWorkersCpuMs: 1_200_000,
   monthlyD1Reads: 20_000_000_000,
   monthlyD1Writes: 40_000_000,
   monthlyEmergencyD1Reads: 24_000_000_000,
@@ -62,6 +66,9 @@ export function evaluateWorkloadPressure(usage, utcDate = new Date()) {
   const today = Array.isArray(usage?._dailyUsage) ? usage._dailyUsage.find((row) => row.date === day) : null;
   const dailyReads = typeof today?.rowsRead === 'number' ? today.rowsRead : null;
   const dailyWrites = typeof today?.rowsWritten === 'number' ? today.rowsWritten : null;
+  const todayWorkers = usage?._dailyWorkersUsage || null;
+  const dailyWorkersRequests = typeof todayWorkers?.requests === 'number' ? todayWorkers.requests : null;
+  const dailyWorkersCpuMs = typeof todayWorkers?.cpuMs === 'number' ? todayWorkers.cpuMs : null;
   const extraMetrics = [
     ['r2_class_a', WORKLOAD_CAPACITY.monthlyR2ClassA],
     ['r2_class_b', WORKLOAD_CAPACITY.monthlyR2ClassB],
@@ -79,10 +86,14 @@ export function evaluateWorkloadPressure(usage, utcDate = new Date()) {
     || writes >= WORKLOAD_CAPACITY.monthlyD1Writes
     || (dailyReads != null && dailyReads >= WORKLOAD_CAPACITY.busyDayD1Reads)
     || (dailyWrites != null && dailyWrites >= WORKLOAD_CAPACITY.busyDayD1Writes)
+    || (dailyWorkersRequests != null && dailyWorkersRequests >= WORKLOAD_CAPACITY.busyDayWorkersRequests)
+    || (dailyWorkersCpuMs != null && dailyWorkersCpuMs >= WORKLOAD_CAPACITY.busyDayWorkersCpuMs)
     || extraHigh;
   const elevated = high
     || (dailyReads != null && dailyReads >= WORKLOAD_CAPACITY.dailyD1Reads)
-    || (dailyWrites != null && dailyWrites >= WORKLOAD_CAPACITY.dailyD1Writes);
+    || (dailyWrites != null && dailyWrites >= WORKLOAD_CAPACITY.dailyD1Writes)
+    || (dailyWorkersRequests != null && dailyWorkersRequests >= WORKLOAD_CAPACITY.dailyWorkersRequests)
+    || (dailyWorkersCpuMs != null && dailyWorkersCpuMs >= WORKLOAD_CAPACITY.dailyWorkersCpuMs);
   const level = emergency ? 'emergency' : high ? 'high' : elevated ? 'elevated' : 'normal';
 
   // No unattended historical expansion without a verified same-day baseline.
@@ -91,6 +102,8 @@ export function evaluateWorkloadPressure(usage, utcDate = new Date()) {
     level,
     telemetryAvailable: true,
     dailyTelemetryAvailable: sameDayMeasured,
+    dailyWorkersTelemetryAvailable:dailyWorkersRequests != null,
+    dailyWorkersCpuTelemetryAvailable:dailyWorkersCpuMs != null,
     allowExpansion: level === 'normal' && sameDayMeasured,
     allowSupporting: level !== 'emergency',
     reason: emergency ? 'monthly_emergency_reserve' : high ? 'capacity_high' : elevated ? 'capacity_elevated' : null

@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createTestEnv } from './helpers/d1.js';
+import { getCalendarYearDetailForm } from '../src/entity-detail-calendar-statistics.js';
 import {
   distanceGroupForMeters,
   getUpcomingEntryFacts,
   getUpcomingGameLeg,
+  getUpcomingLegHorseForms,
   listUpcomingGames
 } from '../src/routes/upcoming-games.js';
 
@@ -110,4 +112,60 @@ test('upcoming round treats null scratch state as active until an official scrat
   db.prepare("UPDATE race_entries SET scratched=NULL WHERE id='entry_1'").run();
   const data = await listUpcomingGames(env, { asOfDate:'2099-09-01', asOfNow:'2099-09-01T00:00:00Z' });
   assert.equal(data.items[0].xlabsCoverage.activeEntries, 8);
+});
+
+function countedEnv(base) {
+  let prepared = 0;
+  const db = new Proxy(base.DB, {
+    get(target, property) {
+      if (property === 'prepare') return (sql) => {
+        prepared += 1;
+        return target.prepare(sql);
+      };
+      const value = target[property];
+      return typeof value === 'function' ? value.bind(target) : value;
+    }
+  });
+  return { env:{ ...base, DB:db }, count:() => prepared };
+}
+
+test('upcoming horse forms use a single batch, preserve existing scoring and include every verified start', async () => {
+  const { env, db } = createTestEnv();
+  seedUpcoming(db);
+  for (let number = 2; number <= 12; number++) {
+    const horseId = 'leg1_horse_' + number;
+    db.prepare('INSERT INTO horses (id, canonical_name) VALUES (?,?)')
+      .run(horseId, 'Synthetic ' + number);
+    db.prepare('INSERT INTO race_entries (id,race_id,horse_id,start_number,scratched) VALUES (?,?,?,?,0)')
+      .run('leg1_entry_' + number, 'race_1',horseId,number);
+    const date = '2099-03-' + String(number).padStart(2, '0');
+    db.prepare('INSERT INTO races (id,track_id,race_date,race_number,scheduled_start_at,status) VALUES (?,?,?,?,?,?)')
+      .run('leg1_old_race_' + number,'track_a',date,1,date+'T12:00:00Z','finished');
+    db.prepare('INSERT INTO race_entries (id,race_id,horse_id,start_number,scratched) VALUES (?,?,?,?,0)')
+      .run('leg1_old_entry_' + number,'leg1_old_race_'+number,horseId,1);
+    db.prepare("INSERT INTO race_results (race_entry_id,placing,result_status) VALUES (?,?,'official')")
+      .run('leg1_old_entry_'+number,number%3+1);
+  }
+  const batch = countedEnv(env);
+  const result = await getUpcomingLegHorseForms(batch.env, 'round_up', 1, { asOfDate:'2099-09-19' });
+  assert.equal(result.forms.length,12);
+  const countAfterBatch = batch.count();
+  const legacy = countedEnv(env);
+  const opts = {asOfDate:'2099-09-19',year:2099,raceScope:'all',startMethod:'all',distanceGroup:'all'};
+  for (const item of result.forms) {
+    const single = await getCalendarYearDetailForm(legacy.env,'horses',item.horseId,opts);
+    assert.equal(item.score,single?.formLast?.score ?? null,item.horseId);
+    assert.equal(item.usedStarts,single?.formLast?.usedStarts ?? 0,item.horseId);
+  }
+  assert.ok(countAfterBatch*2 < legacy.count(),
+    'batch form lookups must use less than half the individual query preparations');
+});
+
+test('upcoming form batch retains the null/zero convention for horses with no result history', async () => {
+  const {env,db} = createTestEnv();
+  seedUpcoming(db);
+  const result = await getUpcomingLegHorseForms(env,'round_up',2,{asOfDate:'2099-09-19'});
+  assert.equal(result.forms.length,1);
+  assert.equal(result.forms[0].score,null);
+  assert.equal(result.forms[0].usedStarts,0);
 });
