@@ -265,9 +265,13 @@ async function handleFetch(request, env) {
   if (path === '/') return redirectResponse('/app');
   if (path.startsWith('/app')) return handleApp(request, env, url);
   if (path.startsWith('/v1/')) {
-    const denied = path.startsWith('/v1/storage-cleanup/')
-      ? requireStorageCleanupAdmin(request, env)
-      : requireAdmin(request, env);
+    // Backup credentials are scoped exclusively to backup endpoints:
+    // they MUST NOT authorize historical restore, cleanup or admin routes.
+    const denied = path.startsWith('/v1/storage-cleanup/legacy-backup/')
+      ? (legacyBackupCapability(request,env) ? null : json({error:'unauthorized'},401))
+      : path.startsWith('/v1/storage-cleanup/')
+        ? requireStorageCleanupAdmin(request, env)
+        : requireAdmin(request, env);
     if (denied) return denied;
   }
   if (request.method === 'POST' && isBudgetedExpansion(path)) {
