@@ -175,3 +175,55 @@ The size gate does not change application facts, registered systems,
 personal notes, X-Labs data or source provenance. No automatic backup or
 deletion is introduced. The safe inventory and manual backup still require
 separate operator actions; no live data was altered while adding this gate.
+
+## Large D1 backup: private multipart design (2026-11-08, review required)
+
+Read-only production inventory run 42515861630, pinned to deployed main
+1d10401721a1b3df84bcd474976b253cd523be3e, measured the D1 source at
+5,711,183,872 bytes (5.32 GiB). This exceeds the 5-GiB R2 single-PUT
+limit and the earlier 4-GiB safety guard. No large export has yet occurred.
+
+The verified aggregate data scope remains: 3,728 candidate legacy rows, 3,681
+first-stage potential rows, 9 protected systems and 208 selections. Three saved
+systems have registered analysis links; 24 external and 72 legacy reviews
+reference systems. Six editorial and eight AI race analysis records overlap
+the protected reference context. No direct orphans were found in five checks,
+but application-level links and source provenance are not thereby cleared.
+
+The new private multipart backup is separate from the small-backup workflow:
+- New dedicated LEGACY_MULTIPART_BACKUP_TOKEN and independent enable switch;
+  old admin, cleanup and single-backup credentials cannot access it.
+- A manually approved GitHub workflow, strict deployed-SHA validation,
+  full QA, production-operation lock, and temporary credential removal.
+  resume_only is the default; a new export requires explicit start_or_resume.
+- Cloudflare D1 polling export with a fixed bookmark. It may pause D1 queries:
+  only run in a quiet window; abandoned exports may be cancelled.
+- In-progress state and temporary signed download URLs stay inside private R2.
+  No SQL, URL or R2 object key is logged or returned to GitHub.
+- Each large D1 signed URL must accept an exact 206 HTTP byte-range probe.
+  D1's public export documentation does NOT explicitly guarantee this.
+  Non-206 responses and missing or changed source ETags stop safely.
+- Fixed 16 MiB R2 multipart chunks. Every chunk has exact source byte range,
+  SHA-256 digest and R2 uploaded-part ETag recorded privately. Last chunk may
+  be shorter, all other chunks meet the 5 MiB R2 minimum.
+- Maximum source D1 metadata size 32 GiB; maximum SQL export size 64 GiB;
+  no more than 4,096 chunks. Buffers are bounded below 128 MiB Worker memory.
+- On ambiguous part upload, the same part number may be retried. An explicit
+  resumed run can request a refreshed signed URL only if bookmark and original
+  URL object path match; otherwise the operation blocks.
+- R2 completed-object size, metadata and ETag are verified before recording a
+  completed D1 backup receipt, only AFTER D1 finishes exporting. If D1 receipt
+  fails, resume without uploading raw SQL again.
+- The original small backup continues to fail closed above its 4-GiB guard.
+
+Limits: Cloudflare signed export URL is available for one hour. Incomplete
+R2 multipart uploads normally expire after seven days. An uncertain export
+start, changed signed-source identity or ambiguous creation must be reviewed.
+A completed R2 upload and D1 receipt are NOT proof that the archive can be
+restored in a separate database. Before any destructive cleanup, a separate
+private **independent restore verification** must validate source facts,
+schema, provenance, protected systems and linked reference data.
+
+No production backup, restore, DELETE, migration, cleanup or automatically
+scheduled export is performed by this PR. Explicit approval for merge/deploy
+is separate from approval to start a potentially disruptive D1 export.
