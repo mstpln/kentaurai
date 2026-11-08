@@ -15,7 +15,7 @@ function envOk(env){
     throw new Error('legacy_backup_private_bindings_unavailable');
 }
 export function legacyBackupCapability(request,env,now=Date.now()){
-  const token=String(env?.STORAGE_CLEANUP_TOKEN||'');
+  const token=String(env?.LEGACY_BACKUP_TOKEN||'');
   const [issued,random,extra]=token.split('.');
   const start=Number(issued);
   return env?.LEGACY_BACKUP_ENABLED==='true' &&
@@ -23,7 +23,7 @@ export function legacyBackupCapability(request,env,now=Date.now()){
     random?.length>=32 && Number.isSafeInteger(start) &&
     start<=now && now-start<=FRESH_TOKEN_MS &&
     request.headers.get('authorization')==='Bearer '+token &&
-    token!==env?.ADMIN_TOKEN;
+    token!==env?.ADMIN_TOKEN && token!==env?.STORAGE_CLEANUP_TOKEN;
 }
 function exportEndpoint(env){
   const account=String(env.HISTORICAL_RECOVERY_ACCOUNT_ID||'');
