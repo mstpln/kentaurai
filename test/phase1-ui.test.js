@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { enhancePhase1Html } from '../src/phase1-ui.js';
+import { enhanceSettingsDriftHtml } from '../src/settings-drift-ui.js';
+import { enhanceTravdataHtml } from '../src/travdata-brand.js';
 import { createPhase1DemoRounds, createPhase1DemoHistoricalRound, createPhase1DemoSystems } from '../src/phase1-fixtures.js';
 import { displayStartResult, resultNet, summarizeSystems } from '../src/phase1-model.js';
 import { phase1Api, phase1ApiBrowserSource, completedPhase1Starts } from '../src/phase1-data.js';
@@ -271,4 +273,46 @@ test('horse card separator inherits exactly the card border color token', () => 
   const html = enhancePhase1Html('<html><head></head><body></body></html>', { asOfDate: '2028-01-02' });
   assert.match(html, /\.p1-horse\{background:[^}]+border:1px solid var\(--line\)/);
   assert.match(html, /\.p1-horse-separator\{height:1px;background:var\(--line\);margin:10px 0\}/);
+});
+
+
+test('settings navigation keeps the complete v079 Drift and Data UI instead of the legacy summary', () => {
+  const html = enhancePhase1Html('<html><head></head><body></body></html>', { asOfDate: '2028-01-02' });
+  const script = html.match(/<script id="kentaurai-phase1-script">([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(script);
+  const settings = script.match(/function renderSettings\(\)\{[\s\S]*?(?=async function loadBuilderRounds\()/)?.[0];
+  assert.ok(settings);
+  const rendered = [];
+  const ctx = {
+    currentRoute: 'upcoming',
+    setNav1: (value) => rendered.push(['nav', value]),
+    window: { __kentauraiSettingsDrift: { render: (tab) => rendered.push(['settings', tab]) } },
+    appEl: { innerHTML: 'original' },
+    pageHead: () => '', errorBox: () => ''
+  };
+  vm.runInNewContext(settings + ';renderSettings()', ctx);
+  assert.deepEqual(rendered, [['nav', ''], ['settings', 'drift']]);
+  assert.equal(ctx.currentRoute, 'settings');
+  assert.equal(ctx.appEl.innerHTML, 'original', 'Phase 1 must not overwrite the drift renderer');
+  assert.match(script, /state\.settingsTab='drift';state\.page='analysis';setNav1\(''\);renderSettings\(\)/);
+  assert.doesNotMatch(settings, /Datamängd|Datakällor|Senaste aktivitet/);
+});
+
+
+test('restored settings keeps all Drift/Data usage sections with TravData light theme styling', () => {
+  const base = '<html><head></head><body><button id="settingsButton"></button><main id="app"></main></body></html>';
+  const html = enhanceTravdataHtml(enhancePhase1Html(enhanceSettingsDriftHtml(base), { asOfDate:'2028-01-02' }));
+  assert.match(html, /window\.__kentauraiSettingsDrift=\{render:renderSettingsV079\}/);
+  assert.match(html, /Cloudflare-användning/);
+  assert.match(html, /Exakt morgonkostnad/);
+  assert.match(html, /D1 Query Insights/);
+  assert.match(html, /data-settings-primary="drift"/);
+  assert.match(html, /data-settings-primary="data"/);
+  const theme = html.match(/<style id="travdata-brand-theme">([\s\S]*?)<\/style>/)?.[1];
+  assert.ok(theme);
+  assert.match(theme, /\.settings-primary-tab\.active\{background:#0001FD!important;color:#FFFFFF!important/);
+  assert.match(theme, /\.settings-usage-row[^}]*background:#FFFFFF!important/);
+  assert.match(theme, /\.settings-usage-progress\{background:#ECECF4!important/);
+  assert.match(theme, /\.settings-switch\{background:#28784B!important/);
+  assert.match(theme, /font-family:Helvetica,Arial,sans-serif/);
 });
