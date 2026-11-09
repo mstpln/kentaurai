@@ -99,9 +99,9 @@ test('legacy minute cron is ignored without writing an orchestrator run', async 
   assert.equal(db.prepare("SELECT COUNT(*) AS n FROM import_runs WHERE source_type = 'scheduled_orchestrator'").get().n, 0);
 });
 
-test('automatic maintenance is reduced to one bounded morning schedule', () => {
+test('automatic maintenance uses primary morning work and one bounded recovery schedule', () => {
   const wrangler = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
-  assert.deepEqual(wrangler.triggers?.crons, ['15 5 * * *']);
+  assert.deepEqual(wrangler.triggers?.crons, ['15 5 * * *', '45 5 * * *']);
 
   const indexSource = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
   assert.doesNotMatch(indexSource, /BACKFILL_CRON/);
