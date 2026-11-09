@@ -80,7 +80,7 @@ test('morning daily jobs isolate a failure to its own bounded date', () => {
 
 test('morning scheduler pins official and X-Labs work to daily job ids only', () => {
   const wrangler = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
-  assert.deepEqual(wrangler.triggers?.crons, ['15 5 * * *']);
+  assert.deepEqual(wrangler.triggers?.crons, ['15 5 * * *', '45 5 * * *']);
 
   const source = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
   const officialIndex = source.indexOf("official_daily_incremental");
