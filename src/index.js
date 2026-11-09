@@ -75,6 +75,8 @@ import { getAutomationControl, getCloudflareUsage } from './settings-drift.js';
 import { MORNING_STAGE_BUDGETS, MORNING_RUN_BUDGET, NORMALIZATION_CHUNK_BUDGET, evaluateWorkloadPressure, morningStageDecision } from './morning-budget.js';
 
 const LIVE_MORNING_CRON = '15 5 * * *';
+const MORNING_RECOVERY_CRON = '45 5 * * *';
+const RECOVERY_INACTIVE_MS = 16 * 60_000;
 const DAILY_LIVE_NORMALIZE_RUNS = 16;
 const DAILY_OFFICIAL_BATCH_RUNS = 10;
 const DAILY_XLABS_BATCH_RUNS = 3;
@@ -867,26 +869,106 @@ async function runDailyXlabsIncremental(env, scheduledTime) {
 }
 
 export async function handleScheduled(controller, env) {
-  if (controller.cron !== LIVE_MORNING_CRON) {
+  const recovery = controller.cron === MORNING_RECOVERY_CRON;
+  if (controller.cron !== LIVE_MORNING_CRON && !recovery) {
     return { skipped:true, reason:'unsupported_cron', cron:controller.cron };
   }
-  const scheduledAt = new Date(controller.scheduledTime || Date.now()).toISOString();
-  const startedAt = new Date().toISOString();
-  const id = `cron_${crypto.randomUUID()}`;
-  const parts = [];
-  const safety = createRunSafetyState(MORNING_RUN_BUDGET);
-  let automationStopReason = null;
 
-  // Cloudflare analytics are delayed. Missing metrics are never zero usage.
-  // They cannot disable the bounded chain of current V85/V86 data.
+  const scheduledAt = new Date(controller.scheduledTime || Date.now()).toISOString();
+  const day = scheduledAt.slice(0, 10);
+  const id = `cron_${day.replaceAll('-', '')}`;
+  const startedAt = new Date().toISOString();
+  let saved = await env.DB.prepare(`
+    SELECT id, started_at, status, metadata_json
+    FROM import_runs WHERE id = ? AND source_type = 'scheduled_orchestrator'
+    LIMIT 1
+  `).bind(id).first();
+
+  // The second cron must never launch a new run or replay completed work.
+  if (recovery && !saved) return { skipped:true, reason:'no_morning_checkpoint' };
+  if (!recovery && saved) return { skipped:true, reason:'morning_already_started' };
+
+  if (!saved) {
+    await env.DB.prepare(`
+      INSERT OR IGNORE INTO import_runs
+        (id, source_type, started_at, status, error_count, metadata_json)
+      VALUES (?, 'scheduled_orchestrator', ?, 'running', 0, ?)
+    `).bind(id, startedAt, JSON.stringify({
+      cron:LIVE_MORNING_CRON, scheduledAt, checkpointAt:startedAt, parts:[]
+    })).run();
+    saved = await env.DB.prepare(`
+      SELECT id, started_at, status, metadata_json
+      FROM import_runs WHERE id = ? AND source_type = 'scheduled_orchestrator'
+      LIMIT 1
+    `).bind(id).first();
+  }
+  if (!saved) throw new Error('morning checkpoint could not be created');
+
+  let stored = {};
+  try { stored = JSON.parse(saved.metadata_json || '{}'); } catch {}
+  const parts = Array.isArray(stored.parts) ? stored.parts : [];
+  const essential = ['live_capture_morning','live_normalize_morning',
+    'official_daily_incremental','post_race_settlement',
+    'manual_system_settlement','xlabs_daily_incremental'];
+  const completed = new Set(parts.filter(part => part.ok === true && !part.skipped)
+    .map(part => part.name));
+  if (recovery && essential.every(name => completed.has(name))) {
+    return { skipped:true, reason:'morning_essentials_complete' };
+  }
+  if (recovery) {
+    const lastProgress = Date.parse(stored.checkpointAt || saved.started_at);
+    if (Number.isFinite(lastProgress) && Date.now() - lastProgress < RECOVERY_INACTIVE_MS) {
+      return { skipped:true, reason:'morning_still_active' };
+    }
+  }
+
+  const safety = createRunSafetyState(MORNING_RUN_BUDGET);
+  for (const part of parts) applyRunSafetyResult(safety, part.name, part);
+  let automationStopReason = null;
+  let usagePressure = stored.usagePressure || null;
+
+  async function checkpoint(final = false) {
+    const failures = parts.filter(part => part.ok === false);
+    const metadata = {
+      ...stored, cron:LIVE_MORNING_CRON, scheduledAt:stored.scheduledAt || scheduledAt,
+      checkpointAt:new Date().toISOString(), recoveryAttempted:recovery || Boolean(stored.recoveryAttempted),
+      safety, usagePressure, parts
+    };
+    await env.DB.prepare(`
+      UPDATE import_runs
+      SET status = ?, finished_at = ?, error_count = ?, error_json = ?, metadata_json = ?
+      WHERE id = ? AND source_type = 'scheduled_orchestrator'
+    `).bind(
+      final ? (failures.length ? 'failed' : 'success') : 'running',
+      final ? new Date().toISOString() : null,
+      failures.length,
+      failures.length ? JSON.stringify(failures.map(({ name, error }) => ({ name, error }))) : null,
+      JSON.stringify(metadata), id
+    ).run();
+    stored = metadata;
+  }
+
+  // The checkpoint exists before external analytics, so a timeout cannot
+  // erase evidence that the scheduled Worker actually started.
   const usage = await getCloudflareUsage(env, {
-    now:new Date(controller.scheduledTime || Date.now()), includeDailyUsage:true, includeWorkersUsage:true, includeR2DailyUsage:true, includeQueryInsights:false
+    now:new Date(controller.scheduledTime || Date.now()), includeDailyUsage:true,
+    includeWorkersUsage:true, includeR2DailyUsage:true, includeQueryInsights:false
   }).catch(() => ({ available:false, reason:'usage_unavailable' }));
   const pressure = evaluateWorkloadPressure(usage, controller.scheduledTime || Date.now());
+  usagePressure = { level:pressure.level, reason:pressure.reason || null,
+    telemetryAvailable:pressure.telemetryAvailable };
+
+  async function record(part) {
+    const existingIndex = parts.findIndex(value => value.name === part.name);
+    if (existingIndex >= 0) parts[existingIndex] = part;
+    else parts.push(part);
+    applyRunSafetyResult(safety, part.name, part);
+    await checkpoint();
+  }
 
   async function automationAllowed(name) {
     if (automationStopReason) {
-      parts.push(skippedScheduledPart(name, automationStopReason));
+      await record(skippedScheduledPart(name, automationStopReason));
       return false;
     }
     try {
@@ -897,62 +979,45 @@ export async function handleScheduled(controller, env) {
       console.error('automatic workflow control unavailable', error);
       automationStopReason = 'automation_control_unavailable';
     }
-    parts.push(skippedScheduledPart(name, automationStopReason));
+    await record(skippedScheduledPart(name, automationStopReason));
     return false;
   }
 
   async function runStage(name, action) {
+    if (completed.has(name)) return;
+    if (recovery && !essential.includes(name)) {
+      if (!parts.some(part => part.name === name)) {
+        await record(skippedScheduledPart(name, 'recovery_essential_only'));
+      }
+      return;
+    }
     if (!(await automationAllowed(name))) return;
     const decision = morningStageDecision(name, safety, pressure);
     if (!decision.run) {
-      parts.push(skippedScheduledPart(name, decision.reason));
+      await record(skippedScheduledPart(name, decision.reason));
       return;
     }
-    const part = await runScheduledPart(name, env, (observedEnv) => action(observedEnv));
-    parts.push(part);
-    applyRunSafetyResult(safety, name, part);
+    await record(await runScheduledPart(name, env, observedEnv => action(observedEnv)));
   }
 
   const recentPromotionCutoff = new Date(Number(controller.scheduledTime || Date.now()) - 3 * 86_400_000).toISOString();
-
-  // Essential current V85/V86 steps have separate budgets; previous cost
-  // can no longer starve results, settlement or X-Labs.
-  await runStage('live_capture_morning', (observedEnv) => captureUpcomingOfficialGames(observedEnv, controller.scheduledTime, {
-    includeToday:true, daysAhead: 6
+  await runStage('live_capture_morning', observedEnv => captureUpcomingOfficialGames(observedEnv, controller.scheduledTime, {
+    includeToday:true, daysAhead:6
   }));
-  await runStage('live_normalize_morning', (observedEnv) => runLiveNormalizationMorning(observedEnv));
-  await runStage('official_daily_incremental', (observedEnv) => runDailyOfficialIncremental(observedEnv, controller.scheduledTime));
-  await runStage('post_race_settlement', (observedEnv) => runPostRaceSettlementBatch(observedEnv));
-  await runStage('manual_system_settlement', (observedEnv) => settleNextTravdataManualSystems(observedEnv));
-  await runStage('xlabs_daily_incremental', (observedEnv) => runDailyXlabsIncremental(observedEnv, controller.scheduledTime));
-
-  // Supporting promotion is paused on abnormal cost or emergency billing
-  // pressure, never after arbitrary small legacy thresholds.
-  await runStage('recent_start_points_promotion', (observedEnv) => syncOnePendingHorseStartPointSource(observedEnv, {
-    minFetchedAt: recentPromotionCutoff
+  await runStage('live_normalize_morning', observedEnv => runLiveNormalizationMorning(observedEnv));
+  await runStage('official_daily_incremental', observedEnv => runDailyOfficialIncremental(observedEnv, controller.scheduledTime));
+  await runStage('post_race_settlement', observedEnv => runPostRaceSettlementBatch(observedEnv));
+  await runStage('manual_system_settlement', observedEnv => settleNextTravdataManualSystems(observedEnv));
+  await runStage('xlabs_daily_incremental', observedEnv => runDailyXlabsIncremental(observedEnv, controller.scheduledTime));
+  await runStage('recent_start_points_promotion', observedEnv => syncOnePendingHorseStartPointSource(observedEnv, {
+    minFetchedAt:recentPromotionCutoff
   }));
-  await runStage('recent_official_snapshot_promotion', (observedEnv) => syncOnePendingOfficialSnapshotSource(observedEnv, {
-    minFetchedAt: recentPromotionCutoff
+  await runStage('recent_official_snapshot_promotion', observedEnv => syncOnePendingOfficialSnapshotSource(observedEnv, {
+    minFetchedAt:recentPromotionCutoff
   }));
 
-  const failures = parts.filter((part) => !part.ok);
-  await env.DB.prepare(`
-    INSERT INTO import_runs
-      (id, source_type, started_at, finished_at, status, error_count, error_json, metadata_json)
-    VALUES (?, 'scheduled_orchestrator', ?, ?, ?, ?, ?, ?)
-  `).bind(
-    id, startedAt, new Date().toISOString(),
-    failures.length ? 'failed' : 'success',
-    failures.length,
-    failures.length ? JSON.stringify(failures.map(({ name, error }) => ({ name, error }))) : null,
-    JSON.stringify({
-      cron:controller.cron, scheduledAt, safety,
-      usagePressure:{ level:pressure.level, reason:pressure.reason || null,
-        telemetryAvailable:pressure.telemetryAvailable },
-      parts
-    })
-  ).run();
-  return { skipped:false, parts, safety, usagePressure:pressure.level };
+  await checkpoint(true);
+  return { skipped:false, recovery, parts, safety, usagePressure:pressure.level };
 }
 
 export default {
