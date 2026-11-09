@@ -953,13 +953,20 @@ export async function handleScheduled(controller, env) {
 
   // The checkpoint exists before external analytics, so a timeout cannot
   // erase evidence that the scheduled Worker actually started.
-  const usage = await getCloudflareUsage(env, {
-    now:new Date(controller.scheduledTime || Date.now()), includeDailyUsage:true,
-    includeWorkersUsage:true, includeR2DailyUsage:true, includeQueryInsights:false
-  }).catch(() => ({ available:false, reason:'usage_unavailable' }));
-  const pressure = evaluateWorkloadPressure(usage, controller.scheduledTime || Date.now());
-  usagePressure = { level:pressure.level, reason:pressure.reason || null,
-    telemetryAvailable:pressure.telemetryAvailable };
+  // Recovery does not need another account-wide Cloudflare analytics request:
+  // all recovery stages are essential and have their own run-local budgets.
+  // In particular, delayed analytics must not starve X-Labs a second time.
+  let pressure = { level:'unknown', telemetryAvailable:false,
+    allowSupporting:false, reason:'recovery_essential_only' };
+  if (!recovery) {
+    const usage = await getCloudflareUsage(env, {
+      now:new Date(controller.scheduledTime || Date.now()), includeDailyUsage:true,
+      includeWorkersUsage:true, includeR2DailyUsage:true, includeQueryInsights:false
+    }).catch(() => ({ available:false, reason:'usage_unavailable' }));
+    pressure = evaluateWorkloadPressure(usage, controller.scheduledTime || Date.now());
+    usagePressure = { level:pressure.level, reason:pressure.reason || null,
+      telemetryAvailable:pressure.telemetryAvailable };
+  }
 
   async function record(part) {
     const existingIndex = parts.findIndex(value => value.name === part.name);
@@ -1004,14 +1011,28 @@ export async function handleScheduled(controller, env) {
   }
 
   const recentPromotionCutoff = new Date(Number(controller.scheduledTime || Date.now()) - 3 * 86_400_000).toISOString();
-  await runStage('live_capture_morning', observedEnv => captureUpcomingOfficialGames(observedEnv, controller.scheduledTime, {
-    includeToday:true, daysAhead: 6
-  }));
-  await runStage('live_normalize_morning', observedEnv => runLiveNormalizationMorning(observedEnv));
-  await runStage('official_daily_incremental', observedEnv => runDailyOfficialIncremental(observedEnv, controller.scheduledTime));
-  await runStage('post_race_settlement', observedEnv => runPostRaceSettlementBatch(observedEnv));
-  await runStage('manual_system_settlement', observedEnv => settleNextTravdataManualSystems(observedEnv));
-  await runStage('xlabs_daily_incremental', observedEnv => runDailyXlabsIncremental(observedEnv, controller.scheduledTime));
+  if (recovery) {
+    // The primary run may have timed out in expensive live normalization.
+    // Resume yesterday's official results and X-Labs first; do not repeat
+    // the expensive normalizer ahead of downstream collection.
+    await runStage('official_daily_incremental', observedEnv => runDailyOfficialIncremental(observedEnv, controller.scheduledTime));
+    await runStage('post_race_settlement', observedEnv => runPostRaceSettlementBatch(observedEnv));
+    await runStage('manual_system_settlement', observedEnv => settleNextTravdataManualSystems(observedEnv));
+    await runStage('xlabs_daily_incremental', observedEnv => runDailyXlabsIncremental(observedEnv, controller.scheduledTime));
+    await runStage('live_capture_morning', observedEnv => captureUpcomingOfficialGames(observedEnv, controller.scheduledTime, {
+      includeToday:true, daysAhead: 6
+    }));
+    await runStage('live_normalize_morning', observedEnv => runLiveNormalizationMorning(observedEnv));
+  } else {
+    await runStage('live_capture_morning', observedEnv => captureUpcomingOfficialGames(observedEnv, controller.scheduledTime, {
+      includeToday:true, daysAhead: 6
+    }));
+    await runStage('live_normalize_morning', observedEnv => runLiveNormalizationMorning(observedEnv));
+    await runStage('official_daily_incremental', observedEnv => runDailyOfficialIncremental(observedEnv, controller.scheduledTime));
+    await runStage('post_race_settlement', observedEnv => runPostRaceSettlementBatch(observedEnv));
+    await runStage('manual_system_settlement', observedEnv => settleNextTravdataManualSystems(observedEnv));
+    await runStage('xlabs_daily_incremental', observedEnv => runDailyXlabsIncremental(observedEnv, controller.scheduledTime));
+  }
   await runStage('recent_start_points_promotion', observedEnv => syncOnePendingHorseStartPointSource(observedEnv, {
     minFetchedAt: recentPromotionCutoff
   }));
