@@ -86,6 +86,7 @@ test('missing same-day Cloudflare telemetry never authorizes ad-hoc expansion', 
 test('scheduled work keeps one cron, caps individual chunks and prioritizes results', () => {
   const config = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
   assert.match(config, /"15 5 \* \* \*"/);
+  assert.match(config, /"45 5 \* \* \*"/);
   const code = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
   assert.match(code, /getCloudflareUsage\(env,[\s\S]*?includeDailyUsage:true/);
   assert.match(code, /normalizeNextPendingOfficialGame\(chunkEnv, \{ maxSteps:12 \}\)/);
@@ -94,6 +95,18 @@ test('scheduled work keeps one cron, caps individual chunks and prioritizes resu
     < code.indexOf("await runStage('recent_start_points_promotion'"));
   assert.ok(code.indexOf("await runStage('xlabs_daily_incremental'")
     < code.indexOf("await runStage('recent_official_snapshot_promotion'"));
+});
+
+test('morning recovery checkpoints state and resumes only unfinished essentials', () => {
+  const code = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
+  assert.match(code, /const MORNING_RECOVERY_CRON = '45 5 \* \* \*'/);
+  assert.match(code, /if \(recovery && !saved\) return \{ skipped:true, reason:'no_morning_checkpoint'/);
+  assert.match(code, /essential\.every\(name => completed\.has\(name\)\)/);
+  assert.match(code, /Date\.now\(\) - lastProgress < RECOVERY_INACTIVE_MS/);
+  assert.match(code, /INSERT OR IGNORE INTO import_runs/);
+  assert.match(code, /await checkpoint\(\)/);
+  assert.match(code, /if \(completed\.has\(name\)\) return/);
+  assert.match(code, /if \(recovery && !essential\.includes\(name\)\)/);
 });
 
 test('Workers daily and monthly thresholds affect only optional expansion', () => {

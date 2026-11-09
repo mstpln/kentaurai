@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { createTestEnv } from './helpers/d1.js';
 import { normalizeCapturedOfficialGameSequential } from '../src/import/official-live-sequential.js';
 
@@ -29,4 +30,15 @@ test('production cursor guard derives progress only from source-backed race-entr
     () => normalizeCapturedOfficialGameSequential(env, 'src_progress', 2),
     /cursor cannot skip unfinished entries; highest safe cursor is 1/
   );
+});
+
+
+test('morning cursor count uses existing source index without a new migration', () => {
+  const { db } = createTestEnv();
+  const code = readFileSync(new URL('../src/import/official-live-sequential.js', import.meta.url), 'utf8');
+  assert.match(code, /FROM normalized_observations INDEXED BY idx_normalized_observations_source/);
+  const plan = db.prepare(
+    "EXPLAIN QUERY PLAN SELECT COUNT(*) AS n FROM normalized_observations INDEXED BY idx_normalized_observations_source WHERE source_record_id = ? AND entity_type = 'race_entry'"
+  ).all('source_synthetic');
+  assert.match(plan.map(row => row.detail).join(' '), /idx_normalized_observations_source/);
 });

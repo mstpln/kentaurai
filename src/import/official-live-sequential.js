@@ -14,7 +14,7 @@ export async function normalizeCapturedOfficialGameSequential(env, sourceRecordI
 
   const progress = await env.DB.prepare(`
     SELECT COUNT(*) AS n
-    FROM normalized_observations
+    FROM normalized_observations INDEXED BY idx_normalized_observations_source
     WHERE source_record_id = ? AND entity_type = 'race_entry'
   `).bind(sourceId).first();
   const completedEntries = Number(progress?.n ?? 0);

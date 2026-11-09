@@ -36,10 +36,10 @@ test('Step 1 export has no repair, historical backfill or automatic retry depend
   assert.match(source, /observeD1Operation\(env, 'step1_export'/);
 });
 
-test('production config preserves exactly the single morning cron', () => {
+test('production config keeps one primary morning cron and one conditional recovery', () => {
   const config = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
   const crons = [...config.matchAll(/"(\d+\s+\d+\s+\*\s+\*\s+\*)"/g)].map((match) => match[1]);
-  assert.deepEqual(crons, ['15 5 * * *']);
+  assert.deepEqual(crons, ['15 5 * * *', '45 5 * * *']);
 });
 
 

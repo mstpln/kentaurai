@@ -18,6 +18,7 @@ const HISTORICAL_SCOPE = 'historical_all';
 const DAILY_SCOPE = 'daily_v85_v86';
 const HISTORICAL_RETRY_DELAY_MS = 60_000;
 const DAILY_RETRY_DELAY_MS = 15 * 60_000;
+const DAILY_PREREQUISITE_LOOKBACK_DAYS = 3;
 export const MAX_XLABS_CHECKPOINTS_PER_BATCH = 3;
 
 function addDays(date, days) {
@@ -142,8 +143,12 @@ function dailyPrerequisiteExpired(job, now = Date.now()) {
   if (job.scope !== DAILY_SCOPE) return false;
   const instant = new Date(now);
   if (Number.isNaN(instant.getTime())) throw new Error('current time is invalid');
-  const yesterday = addDays(instant.toISOString().slice(0, 10), -1);
-  return job.next_date < yesterday;
+  // Keep the official prerequisite open while the date remains in the
+  // automatic three-day V85/V86 window. Expire on its final lookback day
+  // rather than silently closing it on day two.
+  const finalLookbackDate = addDays(instant.toISOString().slice(0, 10),
+    -(DAILY_PREREQUISITE_LOOKBACK_DAYS - 1));
+  return job.next_date < finalLookbackDate;
 }
 
 async function completeExpiredDailyPrerequisite(env, job, leaseToken) {

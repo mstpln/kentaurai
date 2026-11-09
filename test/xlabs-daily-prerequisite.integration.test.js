@@ -19,10 +19,23 @@ test('daily X-Labs waits for a missing official calendar while its target is sti
   assert.equal(stored.unavailable_dates, 0);
 });
 
-test('stale daily X-Labs closes without claiming telemetry unavailability when its official prerequisite never arrived', async () => {
+test('day-two X-Labs remains pending instead of expiring during the three-day lookback', async () => {
   const { env } = createTestEnv();
   const job = await ensureDailyXlabsJob(env, '2099-01-03T04:30:00Z');
   const result = await runXlabsBackfillStep(env, job.id, { now: '2099-01-04T00:01:00Z' });
+  assert.equal(result.status, 'waiting_for_official_live');
+  assert.equal(result.reason, 'calendar_missing');
+  assert.equal(result.done, false);
+  const stored = await getXlabsBackfill(env, job.id);
+  assert.equal(stored.status, 'running');
+  assert.equal(stored.processed_dates, 0);
+  assert.equal(stored.unavailable_dates, 0);
+});
+
+test('stale daily X-Labs closes without claiming telemetry unavailability when its official prerequisite never arrived', async () => {
+  const { env } = createTestEnv();
+  const job = await ensureDailyXlabsJob(env, '2099-01-03T04:30:00Z');
+  const result = await runXlabsBackfillStep(env, job.id, { now: '2099-01-05T00:01:00Z' });
 
   assert.equal(result.status, 'completed');
   assert.equal(result.reason, 'calendar_missing');

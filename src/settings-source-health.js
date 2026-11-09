@@ -277,12 +277,16 @@ async function latestFamilyRun(env, family) {
   `).bind(pattern).first();
 }
 
-function sourceCard({ id, historicalJob, historicalJobs = [], historicalProcessingState, supportingJobs = [], runs = [], fallbackRun, nowMs }) {
+function sourceCard({ id, historicalJob, historicalJobs = [], historicalProcessingState, supportingJobs = [], runs = [], fallbackRun, nowMs, automaticEnabled = true }) {
   const issues = [];
   for (const job of historicalJobs) {
     const processing = historicalProcessing(job, nowMs, { automaticEnabled: HISTORICAL_AUTOMATIC_ENABLED });
-    const historicalIssue = jobIssue(id, job, processing, nowMs, 'historical');
-    if (historicalIssue) issues.push(historicalIssue);
+    // Historical backfills are manual-only. Their old failures must not mark
+    // today's automatic official/X-Labs ingestion as broken.
+    if (HISTORICAL_AUTOMATIC_ENABLED) {
+      const historicalIssue = jobIssue(id, job, processing, nowMs, 'historical');
+      if (historicalIssue) issues.push(historicalIssue);
+    }
   }
 
   for (const { job, scope } of supportingJobs) {
@@ -304,12 +308,34 @@ function sourceCard({ id, historicalJob, historicalJobs = [], historicalProcessi
   );
 
   const hasEvidence = Boolean(historicalJob || supportingJobs.some(({ job }) => job) || runs.some(Boolean) || fallbackRun);
+  // A successful historical import cannot establish fresh daily ingestion.
+  // Jobs are created by the morning cron even on dates with no V85/V86 racing.
+  const latestAutomaticAt = newestIso(
+    ...supportingJobs.map(({ job }) => job?.last_run_at || job?.updated_at || job?.created_at),
+    ...runs.map(run => run?.finished_at || run?.started_at)
+  );
+  const freshestEvidenceAt = latestAutomaticAt || lastActivityAt;
+  const automaticAgeMs = freshestEvidenceAt ? nowMs - isoTime(freshestEvidenceAt) : null;
+  if (automaticEnabled && hasEvidence && (freshestEvidenceAt == null || automaticAgeMs > 48 * 60 * 60 * 1000)) {
+    issues.push({
+      key:`${id}:daily_activity_stale`, sourceId:id, severity:'action_required',
+      label:'Åtgärd krävs',
+      message:'Ingen färsk automatisk datainsamling har registrerats under de senaste två dygnen.',
+      error:null, at:latestAutomaticAt || lastActivityAt
+    });
+  }
   if (!historicalJob && !supportingJobs.some(({ job }) => job) && !runs.some(Boolean) && fallbackRun) {
     const fallbackIssue = runIssue(id, fallbackRun, nowMs);
     if (fallbackIssue) issues.push(fallbackIssue);
   }
 
-  const status = sourceStatus(hasEvidence, issues);
+  // A pending daily X-Labs job with a future retry and no error is waiting
+  // for official source readiness, not proof of successful X-Labs collection.
+  const waitingForOfficial = id === 'xlabs' && supportingJobs.some(({ job }) =>
+    job?.status === 'running' && Number(job?.consecutive_errors || 0) === 0
+    && (isoTime(job?.retry_after) || 0) > nowMs);
+  let status = sourceStatus(hasEvidence, issues);
+  if (status === 'working' && waitingForOfficial) status = 'waiting';
   const issue = strongestIssue(issues);
   return {
     id,
@@ -317,9 +343,11 @@ function sourceCard({ id, historicalJob, historicalJobs = [], historicalProcessi
     lastRunAt: lastActivityAt,
     message: status === 'working'
       ? 'Senaste registrerade aktivitet är utan aktuellt fel.'
-      : status === 'never_run'
-        ? 'Ingen körning registrerad ännu.'
-        : issue?.message || 'Ett fel kräver uppmärksamhet.',
+      : status === 'waiting'
+        ? 'Väntar på officiella loppuppgifter innan X-Labs kan fortsätta.'
+        : status === 'never_run'
+          ? 'Ingen körning registrerad ännu.'
+          : issue?.message || 'Ett fel kräver uppmärksamhet.',
     processing: historicalProcessingState,
     historicalJobs: visibleHistoricalJobs(historicalJobs, nowMs),
     issue,
@@ -343,7 +371,8 @@ export async function getSettingsSourceHealth(env, options = {}) {
     officialCapture,
     officialNormalize,
     officialFallback,
-    xlabsFallback
+    xlabsFallback,
+    automationControl
   ] = await Promise.all([
     historicalOfficialJobs(env),
     historicalXlabsJobs(env),
@@ -352,9 +381,11 @@ export async function getSettingsSourceHealth(env, options = {}) {
     latestRun(env, 'official_live_scheduled_capture'),
     latestRun(env, 'official_live_normalize_auto'),
     latestFamilyRun(env, 'official'),
-    latestFamilyRun(env, 'xlabs')
+    latestFamilyRun(env, 'xlabs'),
+    env.DB.prepare("SELECT control_value FROM runtime_controls WHERE control_key = 'automatic_workflows_enabled' LIMIT 1").first()
   ]);
 
+  const automaticEnabled = automationControl?.control_value !== '0';
   const officialHistorical = officialHistoricalJobs[0] || null;
   const xlabsHistorical = xlabsHistoricalJobs[0] || null;
   const officialProcessing = historicalProcessing(officialHistorical, nowMs, { automaticEnabled: HISTORICAL_AUTOMATIC_ENABLED });
@@ -368,7 +399,8 @@ export async function getSettingsSourceHealth(env, options = {}) {
     supportingJobs: officialDailyJobs.map((job) => ({ job, scope: 'daily' })),
     runs: [officialCapture, officialNormalize].filter(Boolean),
     fallbackRun: officialFallback,
-    nowMs
+    nowMs,
+    automaticEnabled
   });
 
   const xlabs = sourceCard({
@@ -378,7 +410,8 @@ export async function getSettingsSourceHealth(env, options = {}) {
     historicalProcessingState: xlabsProcessing,
     supportingJobs: xlabsDailyJobs.map((job) => ({ job, scope: 'daily' })),
     fallbackRun: xlabsFallback,
-    nowMs
+    nowMs,
+    automaticEnabled
   });
 
   const alerts = [...official.alerts, ...xlabs.alerts];

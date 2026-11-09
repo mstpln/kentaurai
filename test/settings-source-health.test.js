@@ -326,6 +326,63 @@ test('X-Labs daily retry error remains a red alert while historical work stays p
   assert.equal(result.alerts.length, 1);
 });
 
+test('an old failed manual historical job does not mark current official ingestion broken', async () => {
+  const { env, db } = createTestEnv();
+  insertOfficialHistorical(db, {
+    status:'failed', consecutive_errors:3,
+    last_error:'Synthetic obsolete manual import failure',
+    last_run_at:'2099-09-21T18:00:00Z'
+  });
+  insertOfficialDaily(db, {
+    status:'completed', start_date:'2099-09-20',end_date:'2099-09-20',
+    last_run_at:'2099-09-21T19:59:00Z'
+  });
+  const result = await getSettingsSourceHealth(env, { now:NOW });
+  const official = result.sources.find(source => source.id === 'official');
+  assert.equal(official.status,'working');
+  assert.equal(official.processing.status,'action_required');
+  assert.equal(official.issue,null);
+});
+
+test('stale X-Labs historical evidence is not reported as a working daily importer', async () => {
+  const { env, db } = createTestEnv();
+  insertXlabsHistorical(db, {
+    status:'completed',
+    last_run_at:'2099-09-18T06:31:00Z',
+    updated_at:'2099-09-18T06:31:00Z'
+  });
+  const result = await getSettingsSourceHealth(env, { now:NOW });
+  const xlabs = result.sources.find(source => source.id === 'xlabs');
+  assert.equal(xlabs.status,'action_required');
+  assert.match(xlabs.issue.message,/Ingen färsk automatisk datainsamling/);
+});
+
+test('X-Labs pending official source is shown as waiting rather than healthy ingestion', async () => {
+  const { env, db } = createTestEnv();
+  insertXlabsDaily(db, {
+    status:'running', consecutive_errors:0,
+    last_run_at:'2099-09-21T19:59:00Z',
+    retry_after:'2099-09-21T20:05:00Z'
+  });
+  const result = await getSettingsSourceHealth(env, { now:NOW });
+  const source = result.sources.find(item=>item.id==='xlabs');
+  assert.equal(source.status,'waiting');
+  assert.match(source.message,/Väntar på officiella loppuppgifter/);
+  assert.equal(source.issue,null);
+});
+
+test('intentional automation pause does not raise a daily freshness alert', async () => {
+  const { env, db } = createTestEnv();
+  insertXlabsHistorical(db, {
+    status:'completed', last_run_at:'2099-09-18T06:31:00Z'
+  });
+  db.prepare("UPDATE runtime_controls SET control_value='0' WHERE control_key='automatic_workflows_enabled'").run();
+  const result = await getSettingsSourceHealth(env, { now:NOW });
+  const xlabs = result.sources.find(source => source.id === 'xlabs');
+  assert.equal(xlabs.status,'working');
+  assert.equal(xlabs.issue,null);
+});
+
 test('acknowledgement hides the badge for the same incident and escalation creates a new badge', async () => {
   const { env, db } = createTestEnv();
   insertXlabsDaily(db, {
@@ -393,7 +450,7 @@ test('resolved incidents clear acknowledgement state so a later same-checkpoint 
 
 test('recovering one incident clears only its acknowledgement while another alert remains active', async () => {
   const { env, db } = createTestEnv();
-  insertOfficialHistorical(db, {
+  insertOfficialDaily(db, {
     status: 'failed',
     consecutive_errors: 3,
     last_error: 'Synthetic official terminal failure'
@@ -413,7 +470,7 @@ test('recovering one incident clears only its acknowledgement while another aler
   db.prepare(`
     UPDATE historical_backfill_jobs
     SET status='completed',consecutive_errors=0,last_error=NULL,last_run_at='2099-09-21T20:03:00Z'
-    WHERE id='official-history'
+    WHERE id='official-daily'
   `).run();
   alert = await getSettingsAlertState(env);
   assert.equal(alert.activeCount, 1);
@@ -424,7 +481,7 @@ test('recovering one incident clears only its acknowledgement while another aler
     UPDATE historical_backfill_jobs
     SET status='failed',consecutive_errors=3,last_error='Synthetic later official incident',
         last_run_at='2099-09-21T20:04:00Z'
-    WHERE id='official-history'
+    WHERE id='official-daily'
   `).run();
   alert = await getSettingsAlertState(env);
   assert.equal(alert.activeCount, 2);
