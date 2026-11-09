@@ -314,8 +314,9 @@ function sourceCard({ id, historicalJob, historicalJobs = [], historicalProcessi
     ...supportingJobs.map(({ job }) => job?.last_run_at || job?.updated_at || job?.created_at),
     ...runs.map(run => run?.finished_at || run?.started_at)
   );
-  const automaticAgeMs = latestAutomaticAt ? nowMs - isoTime(latestAutomaticAt) : null;
-  if (hasEvidence && (latestAutomaticAt == null || automaticAgeMs > 48 * 60 * 60 * 1000)) {
+  const freshestEvidenceAt = latestAutomaticAt || lastActivityAt;
+  const automaticAgeMs = freshestEvidenceAt ? nowMs - isoTime(freshestEvidenceAt) : null;
+  if (hasEvidence && (freshestEvidenceAt == null || automaticAgeMs > 48 * 60 * 60 * 1000)) {
     issues.push({
       key:`${id}:daily_activity_stale`, sourceId:id, severity:'action_required',
       label:'Åtgärd krävs',
