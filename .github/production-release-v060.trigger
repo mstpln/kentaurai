@@ -1,3 +1,3 @@
 release=kentaurai-v0.6.0
-source_main=8e1de2c5362ea783d9256c276b739305f7faf6e9
-release_nonce=2026-11-09-morning-recovery-pr345
+source_main=04b8f246ecb47e85d4ee4da7a29fa8ac9af290ec
+release_nonce=2026-11-09-align-settings-tabs-pr346
