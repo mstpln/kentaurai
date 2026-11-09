@@ -357,6 +357,18 @@ test('stale X-Labs historical evidence is not reported as a working daily import
   assert.match(xlabs.issue.message,/Ingen färsk automatisk datainsamling/);
 });
 
+test('intentional automation pause does not raise a daily freshness alert', async () => {
+  const { env, db } = createTestEnv();
+  insertXlabsHistorical(db, {
+    status:'completed', last_run_at:'2099-09-18T06:31:00Z'
+  });
+  db.prepare("UPDATE runtime_controls SET control_value='0' WHERE control_key='automatic_workflows_enabled'").run();
+  const result = await getSettingsSourceHealth(env, { now:NOW });
+  const xlabs = result.sources.find(source => source.id === 'xlabs');
+  assert.equal(xlabs.status,'working');
+  assert.equal(xlabs.issue,null);
+});
+
 test('acknowledgement hides the badge for the same incident and escalation creates a new badge', async () => {
   const { env, db } = createTestEnv();
   insertXlabsDaily(db, {
