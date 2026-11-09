@@ -329,7 +329,13 @@ function sourceCard({ id, historicalJob, historicalJobs = [], historicalProcessi
     if (fallbackIssue) issues.push(fallbackIssue);
   }
 
-  const status = sourceStatus(hasEvidence, issues);
+  // A pending daily X-Labs job with a future retry and no error is waiting
+  // for official source readiness, not proof of successful X-Labs collection.
+  const waitingForOfficial = id === 'xlabs' && supportingJobs.some(({ job }) =>
+    job?.status === 'running' && Number(job?.consecutive_errors || 0) === 0
+    && (isoTime(job?.retry_after) || 0) > nowMs);
+  let status = sourceStatus(hasEvidence, issues);
+  if (status === 'working' && waitingForOfficial) status = 'waiting';
   const issue = strongestIssue(issues);
   return {
     id,
@@ -337,9 +343,11 @@ function sourceCard({ id, historicalJob, historicalJobs = [], historicalProcessi
     lastRunAt: lastActivityAt,
     message: status === 'working'
       ? 'Senaste registrerade aktivitet är utan aktuellt fel.'
-      : status === 'never_run'
-        ? 'Ingen körning registrerad ännu.'
-        : issue?.message || 'Ett fel kräver uppmärksamhet.',
+      : status === 'waiting'
+        ? 'Väntar på officiella loppuppgifter innan X-Labs kan fortsätta.'
+        : status === 'never_run'
+          ? 'Ingen körning registrerad ännu.'
+          : issue?.message || 'Ett fel kräver uppmärksamhet.',
     processing: historicalProcessingState,
     historicalJobs: visibleHistoricalJobs(historicalJobs, nowMs),
     issue,
