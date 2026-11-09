@@ -869,7 +869,7 @@ async function runDailyXlabsIncremental(env, scheduledTime) {
   };
 }
 
-export async function handleScheduled(controller, env) {
+export async function handleScheduled(controller, env, options = {}) {
   const recovery = controller.cron === MORNING_RECOVERY_CRON;
   if (controller.cron !== LIVE_MORNING_CRON && !recovery) {
     return { skipped:true, reason:'unsupported_cron', cron:controller.cron };
@@ -916,6 +916,10 @@ export async function handleScheduled(controller, env) {
   if (recovery && essential.every(name => completed.has(name))) {
     return { skipped:true, reason:'morning_essentials_complete' };
   }
+  // Cloudflare may redeliver a Cron trigger; never execute recovery work twice.
+  if (recovery && stored.recoveryAttempted) {
+    return { skipped:true, reason:'recovery_already_attempted' };
+  }
   if (recovery) {
     const lastProgress = Date.parse(stored.checkpointAt || saved.started_at);
     const primaryStartedAt = Date.parse(saved.started_at);
@@ -950,6 +954,10 @@ export async function handleScheduled(controller, env) {
     ).run();
     stored = metadata;
   }
+
+  // Mark the recovery attempt before running any stage. A duplicate Cron
+  // delivery must remain a read-only skip, including after an interrupted retry.
+  if (recovery) await checkpoint();
 
   // The checkpoint exists before external analytics, so a timeout cannot
   // erase evidence that the scheduled Worker actually started.
@@ -1007,7 +1015,8 @@ export async function handleScheduled(controller, env) {
       await record(skippedScheduledPart(name, decision.reason));
       return;
     }
-    await record(await runScheduledPart(name, env, observedEnv => action(observedEnv)));
+    const stageAction = options.stageActions?.[name] || action;
+    await record(await runScheduledPart(name, env, observedEnv => stageAction(observedEnv)));
   }
 
   const recentPromotionCutoff = new Date(Number(controller.scheduledTime || Date.now()) - 3 * 86_400_000).toISOString();
