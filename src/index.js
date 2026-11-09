@@ -76,7 +76,8 @@ import { MORNING_STAGE_BUDGETS, MORNING_RUN_BUDGET, NORMALIZATION_CHUNK_BUDGET, 
 
 const LIVE_MORNING_CRON = '15 5 * * *';
 const MORNING_RECOVERY_CRON = '45 5 * * *';
-const RECOVERY_INACTIVE_MS = 16 * 60_000;
+const RECOVERY_INACTIVE_MS = 12 * 60_000;
+const RECOVERY_MIN_PRIMARY_AGE_MS = 18 * 60_000;
 const DAILY_LIVE_NORMALIZE_RUNS = 16;
 const DAILY_OFFICIAL_BATCH_RUNS = 10;
 const DAILY_XLABS_BATCH_RUNS = 3;
@@ -917,7 +918,9 @@ export async function handleScheduled(controller, env) {
   }
   if (recovery) {
     const lastProgress = Date.parse(stored.checkpointAt || saved.started_at);
-    if (Number.isFinite(lastProgress) && Date.now() - lastProgress < RECOVERY_INACTIVE_MS) {
+    const primaryStartedAt = Date.parse(saved.started_at);
+    if ((Number.isFinite(primaryStartedAt) && Date.now() - primaryStartedAt < RECOVERY_MIN_PRIMARY_AGE_MS)
+        || (Number.isFinite(lastProgress) && Date.now() - lastProgress < RECOVERY_INACTIVE_MS)) {
       return { skipped:true, reason:'morning_still_active' };
     }
   }
