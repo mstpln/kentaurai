@@ -177,8 +177,10 @@ test('upcoming card age uses verified same-year horse profile when normalized bi
   const missing = await getUpcomingGameLeg(env, 'round_up', 1);
   assert.equal(missing.entries[0].age, null);
 
+  db.prepare("INSERT INTO source_records (id,source_type,external_id,fetched_at,quality_status) VALUES (?,?,?,?,?)")
+    .run('src_prior','official_provider','prior-horse-age','2098-09-19T08:00:00Z','normalized_verified_subset');
   db.prepare("INSERT INTO horse_profile_snapshots (id,horse_id,observed_at,age_years,source_record_id,quality_status) VALUES (?,?,?,?,?,?)")
-    .run('profile_2098','horse_1','2098-09-19T08:00:00Z',5,'src_current','verified_official_snapshot');
+    .run('profile_2098','horse_1','2098-09-19T08:00:00Z',5,'src_prior','verified_official_snapshot');
   assert.equal((await getUpcomingGameLeg(env, 'round_up', 1)).entries[0].age, null,
     'a previous-year observation must not be presented as current age');
 
