@@ -276,9 +276,9 @@ test('horse card separator inherits exactly the card border color token', () => 
 
 test('settings navigation keeps the complete v079 Drift and Data UI instead of the legacy summary', () => {
   const html = enhancePhase1Html('<html><head></head><body></body></html>', { asOfDate: '2028-01-02' });
-  const script = html.match(/<script id="kentaurai-phase1-script">([\\s\\S]*?)<\\/script>/)?.[1];
+  const script = html.match(/<script id="kentaurai-phase1-script">([\s\S]*?)<\/script>/)?.[1];
   assert.ok(script);
-  const settings = script.match(/function renderSettings\\(\\)\\{[\\s\\S]*?(?=async function loadBuilderRounds\\()/)?.[0];
+  const settings = script.match(/function renderSettings\(\)\{[\s\S]*?(?=async function loadBuilderRounds\()/)?.[0];
   assert.ok(settings);
   const rendered = [];
   const ctx = {
@@ -292,6 +292,6 @@ test('settings navigation keeps the complete v079 Drift and Data UI instead of t
   assert.deepEqual(rendered, [['nav', ''], ['settings', 'drift']]);
   assert.equal(ctx.currentRoute, 'settings');
   assert.equal(ctx.appEl.innerHTML, 'original', 'Phase 1 must not overwrite the drift renderer');
-  assert.match(script, /state\\.settingsTab='drift';state\\.page='analysis';setNav1\\(''\\);renderSettings\\(\\)/);
+  assert.match(script, /state\.settingsTab='drift';state\.page='analysis';setNav1\(''\);renderSettings\(\)/);
   assert.doesNotMatch(settings, /Datamängd|Datakällor|Senaste aktivitet/);
 });
