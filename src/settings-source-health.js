@@ -281,8 +281,12 @@ function sourceCard({ id, historicalJob, historicalJobs = [], historicalProcessi
   const issues = [];
   for (const job of historicalJobs) {
     const processing = historicalProcessing(job, nowMs, { automaticEnabled: HISTORICAL_AUTOMATIC_ENABLED });
-    const historicalIssue = jobIssue(id, job, processing, nowMs, 'historical');
-    if (historicalIssue) issues.push(historicalIssue);
+    // Historical backfills are manual-only. Their old failures must not mark
+    // today's automatic official/X-Labs ingestion as broken.
+    if (HISTORICAL_AUTOMATIC_ENABLED) {
+      const historicalIssue = jobIssue(id, job, processing, nowMs, 'historical');
+      if (historicalIssue) issues.push(historicalIssue);
+    }
   }
 
   for (const { job, scope } of supportingJobs) {
@@ -304,6 +308,21 @@ function sourceCard({ id, historicalJob, historicalJobs = [], historicalProcessi
   );
 
   const hasEvidence = Boolean(historicalJob || supportingJobs.some(({ job }) => job) || runs.some(Boolean) || fallbackRun);
+  // A successful historical import cannot establish fresh daily ingestion.
+  // Jobs are created by the morning cron even on dates with no V85/V86 racing.
+  const latestAutomaticAt = newestIso(
+    ...supportingJobs.map(({ job }) => job?.last_run_at || job?.updated_at || job?.created_at),
+    ...runs.map(run => run?.finished_at || run?.started_at)
+  );
+  const automaticAgeMs = latestAutomaticAt ? nowMs - isoTime(latestAutomaticAt) : null;
+  if (hasEvidence && (latestAutomaticAt == null || automaticAgeMs > 48 * 60 * 60 * 1000)) {
+    issues.push({
+      key:`${id}:daily_activity_stale`, sourceId:id, severity:'action_required',
+      label:'Åtgärd krävs',
+      message:'Ingen färsk automatisk datainsamling har registrerats under de senaste två dygnen.',
+      error:null, at:latestAutomaticAt || lastActivityAt
+    });
+  }
   if (!historicalJob && !supportingJobs.some(({ job }) => job) && !runs.some(Boolean) && fallbackRun) {
     const fallbackIssue = runIssue(id, fallbackRun, nowMs);
     if (fallbackIssue) issues.push(fallbackIssue);
