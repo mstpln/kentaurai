@@ -586,7 +586,7 @@ test('production app contains the Drift/Data settings overlay and no concept bad
 test('scheduled orchestrator rechecks persisted automation control before every morning part', () => {
   const source = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8');
   assert.match(source, /async function automationAllowed\(name\)/);
-  assert.match(source, /async function runStage\(name, action\) \{\s*if \(!\(await automationAllowed\(name\)\)\) return;/);
+  assert.match(source, /async function runStage\(name, action\) \{[\s\S]*?if \(!\(await automationAllowed\(name\)\)\) return;/);
   assert.match(source, /morningStageDecision\(name, safety, pressure\)/);
   assert.match(source, /automationStopReason = 'automatic_workflows_paused'/);
   assert.match(source, /automationStopReason = 'automation_control_unavailable'/);
