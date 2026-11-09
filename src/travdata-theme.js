@@ -179,6 +179,40 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .p1-synthetic-banner{color:#6D20C4!important}
 .empty,.trend-empty,.trend-no-data,.entity-detail-empty{color:#62627B}
 .empty strong,.trend-empty h3,.trend-no-data strong{color:#010127}
+/* Settings Drift/Data visual alignment: preserve all v079 sections, metrics and interaction. */
+.settings-primary-tabs{background:#FFFFFF!important;border-color:#E4E4EF!important}
+.settings-primary-tab{font-family:var(--font-ui)!important;background:#FFFFFF!important;color:#62627B!important;border-color:#E4E4EF!important}
+.settings-primary-tab:hover{background:#F2F1F9!important;color:#010127!important}
+.settings-primary-tab.active{background:#0001FD!important;color:#FFFFFF!important;border-color:#0001FD!important}
+.settings-drift-summary{background:#E4E4EF!important;border-color:#E4E4EF!important}
+.settings-drift-summary-cell{background:#FFFFFF!important;color:#010127!important}
+.settings-drift-summary-label,.settings-automation-meta,.settings-drift-note,
+.settings-usage-period span,.settings-usage-rule,.settings-drift-source-desc,
+.settings-drift-source-stat span,.settings-drift-activity-meta,
+.settings-drift-activity-chevron,.settings-drift-activity-metric span,
+.settings-drift-activity-estimate-note,.settings-drift-activity-unavailable{color:#62627B!important}
+.settings-drift-summary-value,.settings-automation-title,.settings-usage-name,.settings-usage-cost,
+.settings-usage-value,.settings-drift-source-title,.settings-drift-activity-title,
+.settings-drift-activity-metric strong,.settings-cost-name,.settings-cost-value strong{color:#010127!important}
+.settings-drift-summary-value.good,.settings-switch-label,.settings-usage-percent.ok,
+.settings-drift-source-status,.settings-drift-activity-status{color:#28784B!important}
+.settings-drift-summary-value.bad,.settings-usage-percent.danger,.settings-drift-source-status.error,
+.settings-drift-activity-status.error,.settings-cost-stop{color:#C51C25!important}
+.settings-usage-percent.warning{color:#B86608!important}
+.settings-automation-dot,.settings-usage-progress-fill.ok{background:#28784B!important}
+.settings-automation-dot.paused{background:#77778D!important}
+.settings-switch{background:#28784B!important}
+.settings-switch.off{background:#C9C9D8!important}
+.settings-switch:before{background:#FFFFFF!important}
+.settings-switch-label.off{color:#62627B!important}
+.settings-drift-note,.settings-usage-row,.settings-drift-source,
+.settings-drift-activity-metric,.settings-cost-row{background:#FFFFFF!important;border-color:#E4E4EF!important}
+.settings-usage-progress{background:#ECECF4!important}
+.settings-usage-progress-fill.warning{background:#B86608!important}
+.settings-usage-progress-fill.danger{background:#C51C25!important}
+.settings-usage-unavailable{border-color:#E4E4EF!important;color:#62627B!important}
+.settings-usage-period,.settings-drift-source-stat,.settings-drift-activity-row{border-color:#E4E4EF!important}
+.settings-query-code{color:#35354D!important}
 @media(max-width:767px){
  :root{--travdata-title-size:24px;--travdata-subtitle-size:14px}
 }
