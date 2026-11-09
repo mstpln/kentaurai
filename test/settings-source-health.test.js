@@ -357,6 +357,20 @@ test('stale X-Labs historical evidence is not reported as a working daily import
   assert.match(xlabs.issue.message,/Ingen färsk automatisk datainsamling/);
 });
 
+test('X-Labs pending official source is shown as waiting rather than healthy ingestion', async () => {
+  const { env, db } = createTestEnv();
+  insertXlabsDaily(db, {
+    status:'running', consecutive_errors:0,
+    last_run_at:'2099-09-21T19:59:00Z',
+    retry_after:'2099-09-21T20:05:00Z'
+  });
+  const result = await getSettingsSourceHealth(env, { now:NOW });
+  const source = result.sources.find(item=>item.id==='xlabs');
+  assert.equal(source.status,'waiting');
+  assert.match(source.message,/Väntar på officiella loppuppgifter/);
+  assert.equal(source.issue,null);
+});
+
 test('intentional automation pause does not raise a daily freshness alert', async () => {
   const { env, db } = createTestEnv();
   insertXlabsHistorical(db, {
