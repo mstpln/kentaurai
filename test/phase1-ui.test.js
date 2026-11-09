@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { enhancePhase1Html } from '../src/phase1-ui.js';
+import { enhanceSettingsDriftHtml } from '../src/settings-drift-ui.js';
+import { enhanceTravdataHtml } from '../src/travdata-brand.js';
 import { createPhase1DemoRounds, createPhase1DemoHistoricalRound, createPhase1DemoSystems } from '../src/phase1-fixtures.js';
 import { displayStartResult, resultNet, summarizeSystems } from '../src/phase1-model.js';
 import { phase1Api, phase1ApiBrowserSource, completedPhase1Starts } from '../src/phase1-data.js';
@@ -294,4 +296,23 @@ test('settings navigation keeps the complete v079 Drift and Data UI instead of t
   assert.equal(ctx.appEl.innerHTML, 'original', 'Phase 1 must not overwrite the drift renderer');
   assert.match(script, /state\.settingsTab='drift';state\.page='analysis';setNav1\(''\);renderSettings\(\)/);
   assert.doesNotMatch(settings, /Datamängd|Datakällor|Senaste aktivitet/);
+});
+
+
+test('restored settings keeps all Drift/Data usage sections with TravData light theme styling', () => {
+  const base = '<html><head></head><body><button id="settingsButton"></button><main id="app"></main></body></html>';
+  const html = enhanceTravdataHtml(enhancePhase1Html(enhanceSettingsDriftHtml(base), { asOfDate:'2028-01-02' }));
+  assert.match(html, /window\.__kentauraiSettingsDrift=\{render:renderSettingsV079\}/);
+  assert.match(html, /Cloudflare-användning/);
+  assert.match(html, /Exakt morgonkostnad/);
+  assert.match(html, /D1 Query Insights/);
+  assert.match(html, /data-settings-primary="drift"/);
+  assert.match(html, /data-settings-primary="data"/);
+  const theme = html.match(/<style id="travdata-brand-theme">([\s\S]*?)<\/style>/)?.[1];
+  assert.ok(theme);
+  assert.match(theme, /\.settings-primary-tab\.active\{background:#0001FD!important;color:#FFFFFF!important/);
+  assert.match(theme, /\.settings-usage-row[^}]*background:#FFFFFF!important/);
+  assert.match(theme, /\.settings-usage-progress\{background:#ECECF4!important/);
+  assert.match(theme, /\.settings-switch\{background:#28784B!important/);
+  assert.match(theme, /font-family:Helvetica,Arial,sans-serif/);
 });
