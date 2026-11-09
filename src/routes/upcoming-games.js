@@ -308,6 +308,16 @@ export async function getUpcomingGameLeg(env, roundId, legNumber) {
       re.handicap_m,re.scratched,h.canonical_name horse_name,h.sex,h.birth_year,
       d.canonical_name driver_name,tr.canonical_name trainer_name,
       (
+        SELECT hp.age_years
+        FROM horse_profile_snapshots hp
+        WHERE hp.horse_id=re.horse_id
+          AND hp.quality_status='verified_official_snapshot'
+          AND hp.age_years BETWEEN 1 AND 30
+          AND substr(hp.observed_at,1,4)=?
+          AND datetime(hp.observed_at)<=datetime(?)
+        ORDER BY datetime(hp.observed_at) DESC,hp.id DESC LIMIT 1
+      ) verified_profile_age,
+      (
         SELECT bs.bet_percent
         FROM betting_snapshots bs
         WHERE bs.game_round_id=? AND bs.leg_number=? AND bs.race_entry_id=re.id
@@ -319,7 +329,7 @@ export async function getUpcomingGameLeg(env, roundId, legNumber) {
     LEFT JOIN trainers tr ON tr.id=re.trainer_id
     WHERE re.race_id=?
     ORDER BY re.start_number ASC,re.id ASC
-  `).bind(round.id, leg.legNumber, leg.raceId).all();
+  `).bind(round.roundDate.slice(0,4), targetStart, round.id, leg.legNumber, leg.raceId).all();
 
   // One batched equipment read for the leg, never one query per horse. Only verified
   // equipment observations can appear on the card; absent data stays unknown.
@@ -381,7 +391,7 @@ export async function getUpcomingGameLeg(env, roundId, legNumber) {
         horseId:row.horse_id,
         horseName:row.horse_name,
         sex:row.sex || null,
-        age:row.birth_year == null ? null : Number(round.roundDate.slice(0, 4)) - Number(row.birth_year),
+        age:row.birth_year == null ? (row.verified_profile_age == null ? null : Number(row.verified_profile_age)) : Number(round.roundDate.slice(0, 4)) - Number(row.birth_year),
         equipment:equipmentByEntry.get(row.race_entry_id) || null,
         driverId:row.driver_id || null,
         driverName:row.driver_name || null,
