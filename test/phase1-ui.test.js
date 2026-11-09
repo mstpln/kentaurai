@@ -265,3 +265,10 @@ test('starter cards render verified scratch, handicap and equipment states rathe
   assert.match(verified, /p1-equipment-changed/);
   assert.match(html, /sequenceHost.innerHTML='Form: '/);
 });
+
+
+test('horse card separator inherits exactly the card border color token', () => {
+  const html = enhancePhase1Html('<html><head></head><body></body></html>', { asOfDate: '2028-01-02' });
+  assert.match(html, /\.p1-horse\{background:[^}]+border:1px solid var\(--line\)/);
+  assert.match(html, /\.p1-horse-separator\{height:1px;background:var\(--line\);margin:10px 0\}/);
+});
