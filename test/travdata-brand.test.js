@@ -87,6 +87,19 @@ test('Helvetica body, italic Arial wordmark, navy banners and purple highlights 
   assert.match(html, /\.p1-horse \.p1-expand-btn\{background:transparent!important;border:0!important;box-shadow:none!important/);
 });
 
+test('Drift/Data segmented tabs match Trend colors in both states', () => {
+  const html = enhanceTravdataHtml(renderAppPage());
+  // The themed Settings overlay must use the same base / active palette
+  // and remove the light outer frame used by the earlier white variant.
+  assert.match(html, /\.settings-primary-tabs\{background:transparent!important;border:0!important;padding:0!important;box-shadow:none!important;color:#FFFFFF!important\}/);
+  assert.match(html, /\.settings-primary-tab\{font-family:var\(--font-ui\)!important;background:#010127!important;border-color:rgba\(255,255,255,.20\)!important;color:#FFFFFF!important\}/);
+  assert.match(html, /\.settings-primary-tab:hover\{background:#010127!important;color:#FFFFFF!important\}/);
+  assert.match(html, /\.settings-primary-tab\.active,\.settings-primary-tab\.active:hover\{background:#0001FD!important;border-color:#0001FD!important;color:#FFFFFF!important\}/);
+  assert.match(html, /\.trend-category-tabs \.segment-btn,\.statistics-category-nav \.statistics-category-btn,[\s\S]*?background:#010127!important/);
+  assert.match(html, /\.trend-category-tabs \.segment-btn\.active,\.statistics-category-nav \.statistics-category-btn\.active,[\s\S]*?background:#0001FD!important/);
+  assert.doesNotMatch(html, /\.settings-primary-tab\{[^}]*background:#FFFFFF!important/);
+});
+
 test('all page-heading families share responsive sizes, weight, line height and spacing', () => {
   const html = enhanceTravdataHtml(renderAppPage());
   assert.match(html, /--travdata-title-size:28px;--travdata-subtitle-size:16px/);

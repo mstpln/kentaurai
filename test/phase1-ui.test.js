@@ -310,7 +310,7 @@ test('restored settings keeps all Drift/Data usage sections with TravData light 
   assert.match(html, /data-settings-primary="data"/);
   const theme = html.match(/<style id="travdata-brand-theme">([\s\S]*?)<\/style>/)?.[1];
   assert.ok(theme);
-  assert.match(theme, /\.settings-primary-tab\.active\{background:#0001FD!important;color:#FFFFFF!important/);
+  assert.match(theme, /\.settings-primary-tab\.active,\.settings-primary-tab\.active:hover\{background:#0001FD!important;border-color:#0001FD!important;color:#FFFFFF!important/);
   assert.match(theme, /\.settings-usage-row[^}]*background:#FFFFFF!important/);
   assert.match(theme, /\.settings-usage-progress\{background:#ECECF4!important/);
   assert.match(theme, /\.settings-switch\{background:#28784B!important/);

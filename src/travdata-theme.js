@@ -180,10 +180,10 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .empty,.trend-empty,.trend-no-data,.entity-detail-empty{color:#62627B}
 .empty strong,.trend-empty h3,.trend-no-data strong{color:#010127}
 /* Settings Drift/Data visual alignment: preserve all v079 sections, metrics and interaction. */
-.settings-primary-tabs{background:#FFFFFF!important;border-color:#E4E4EF!important}
-.settings-primary-tab{font-family:var(--font-ui)!important;background:#FFFFFF!important;color:#62627B!important;border-color:#E4E4EF!important}
-.settings-primary-tab:hover{background:#F2F1F9!important;color:#010127!important}
-.settings-primary-tab.active{background:#0001FD!important;color:#FFFFFF!important;border-color:#0001FD!important}
+.settings-primary-tabs{background:transparent!important;border:0!important;padding:0!important;box-shadow:none!important;color:#FFFFFF!important}
+.settings-primary-tab{font-family:var(--font-ui)!important;background:#010127!important;border-color:rgba(255,255,255,.20)!important;color:#FFFFFF!important}
+.settings-primary-tab:hover{background:#010127!important;color:#FFFFFF!important}
+.settings-primary-tab.active,.settings-primary-tab.active:hover{background:#0001FD!important;border-color:#0001FD!important;color:#FFFFFF!important}
 .settings-drift-summary{background:#E4E4EF!important;border-color:#E4E4EF!important}
 .settings-drift-summary-cell{background:#FFFFFF!important;color:#010127!important}
 .settings-drift-summary-label,.settings-automation-meta,.settings-drift-note,
