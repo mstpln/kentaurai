@@ -68,7 +68,7 @@ export const phase1Css = `
 .p1-horse-scratched{background:#191211;border-color:#a64a51;border-left:3px solid #dc666e}
 .p1-horse-scratched .p1-horse-name{text-decoration:line-through;color:#b5a3a2}
 .p1-horse-scratched .p1-horse-info,.p1-horse-scratched .p1-horse-stats{opacity:.52}
-.p1-horse-separator{height:1px;background:#37342f;margin:10px 0}
+.p1-horse-separator{height:1px;background:var(--line);margin:10px 0}
 .p1-horse-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
 .p1-horse-stats .p1-horse-metric{grid-row:auto;text-align:left;min-width:0}
 .p1-horse-stats .p1-horse-metric small{font-size:8px;letter-spacing:.02em;white-space:nowrap}
