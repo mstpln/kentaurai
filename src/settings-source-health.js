@@ -277,7 +277,7 @@ async function latestFamilyRun(env, family) {
   `).bind(pattern).first();
 }
 
-function sourceCard({ id, historicalJob, historicalJobs = [], historicalProcessingState, supportingJobs = [], runs = [], fallbackRun, nowMs }) {
+function sourceCard({ id, historicalJob, historicalJobs = [], historicalProcessingState, supportingJobs = [], runs = [], fallbackRun, nowMs, automaticEnabled = true }) {
   const issues = [];
   for (const job of historicalJobs) {
     const processing = historicalProcessing(job, nowMs, { automaticEnabled: HISTORICAL_AUTOMATIC_ENABLED });
@@ -316,7 +316,7 @@ function sourceCard({ id, historicalJob, historicalJobs = [], historicalProcessi
   );
   const freshestEvidenceAt = latestAutomaticAt || lastActivityAt;
   const automaticAgeMs = freshestEvidenceAt ? nowMs - isoTime(freshestEvidenceAt) : null;
-  if (hasEvidence && (freshestEvidenceAt == null || automaticAgeMs > 48 * 60 * 60 * 1000)) {
+  if (automaticEnabled && hasEvidence && (freshestEvidenceAt == null || automaticAgeMs > 48 * 60 * 60 * 1000)) {
     issues.push({
       key:`${id}:daily_activity_stale`, sourceId:id, severity:'action_required',
       label:'Åtgärd krävs',
@@ -363,7 +363,8 @@ export async function getSettingsSourceHealth(env, options = {}) {
     officialCapture,
     officialNormalize,
     officialFallback,
-    xlabsFallback
+    xlabsFallback,
+    automationControl
   ] = await Promise.all([
     historicalOfficialJobs(env),
     historicalXlabsJobs(env),
@@ -372,9 +373,11 @@ export async function getSettingsSourceHealth(env, options = {}) {
     latestRun(env, 'official_live_scheduled_capture'),
     latestRun(env, 'official_live_normalize_auto'),
     latestFamilyRun(env, 'official'),
-    latestFamilyRun(env, 'xlabs')
+    latestFamilyRun(env, 'xlabs'),
+    env.DB.prepare("SELECT control_value FROM runtime_controls WHERE control_key = 'automatic_workflows_enabled' LIMIT 1").first()
   ]);
 
+  const automaticEnabled = automationControl?.control_value !== '0';
   const officialHistorical = officialHistoricalJobs[0] || null;
   const xlabsHistorical = xlabsHistoricalJobs[0] || null;
   const officialProcessing = historicalProcessing(officialHistorical, nowMs, { automaticEnabled: HISTORICAL_AUTOMATIC_ENABLED });
@@ -388,7 +391,8 @@ export async function getSettingsSourceHealth(env, options = {}) {
     supportingJobs: officialDailyJobs.map((job) => ({ job, scope: 'daily' })),
     runs: [officialCapture, officialNormalize].filter(Boolean),
     fallbackRun: officialFallback,
-    nowMs
+    nowMs,
+    automaticEnabled
   });
 
   const xlabs = sourceCard({
@@ -398,7 +402,8 @@ export async function getSettingsSourceHealth(env, options = {}) {
     historicalProcessingState: xlabsProcessing,
     supportingJobs: xlabsDailyJobs.map((job) => ({ job, scope: 'daily' })),
     fallbackRun: xlabsFallback,
-    nowMs
+    nowMs,
+    automaticEnabled
   });
 
   const alerts = [...official.alerts, ...xlabs.alerts];
