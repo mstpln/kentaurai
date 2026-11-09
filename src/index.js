@@ -1005,7 +1005,7 @@ export async function handleScheduled(controller, env) {
 
   const recentPromotionCutoff = new Date(Number(controller.scheduledTime || Date.now()) - 3 * 86_400_000).toISOString();
   await runStage('live_capture_morning', observedEnv => captureUpcomingOfficialGames(observedEnv, controller.scheduledTime, {
-    includeToday:true, daysAhead:6
+    includeToday:true, daysAhead: 6
   }));
   await runStage('live_normalize_morning', observedEnv => runLiveNormalizationMorning(observedEnv));
   await runStage('official_daily_incremental', observedEnv => runDailyOfficialIncremental(observedEnv, controller.scheduledTime));
@@ -1013,10 +1013,10 @@ export async function handleScheduled(controller, env) {
   await runStage('manual_system_settlement', observedEnv => settleNextTravdataManualSystems(observedEnv));
   await runStage('xlabs_daily_incremental', observedEnv => runDailyXlabsIncremental(observedEnv, controller.scheduledTime));
   await runStage('recent_start_points_promotion', observedEnv => syncOnePendingHorseStartPointSource(observedEnv, {
-    minFetchedAt:recentPromotionCutoff
+    minFetchedAt: recentPromotionCutoff
   }));
   await runStage('recent_official_snapshot_promotion', observedEnv => syncOnePendingOfficialSnapshotSource(observedEnv, {
-    minFetchedAt:recentPromotionCutoff
+    minFetchedAt: recentPromotionCutoff
   }));
 
   await checkpoint(true);
