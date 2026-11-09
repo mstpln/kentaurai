@@ -169,3 +169,24 @@ test('upcoming form batch retains the null/zero convention for horses with no re
   assert.equal(result.forms[0].score,null);
   assert.equal(result.forms[0].usedStarts,0);
 });
+
+
+test('upcoming card age uses verified same-year horse profile when normalized birth year is missing', async () => {
+  const { env, db } = createTestEnv();
+  seedUpcoming(db);
+  const missing = await getUpcomingGameLeg(env, 'round_up', 1);
+  assert.equal(missing.entries[0].age, null);
+
+  db.prepare("INSERT INTO horse_profile_snapshots (id,horse_id,observed_at,age_years,source_record_id,quality_status) VALUES (?,?,?,?,?,?)")
+    .run('profile_2098','horse_1','2098-09-19T08:00:00Z',5,'src_current','verified_official_snapshot');
+  assert.equal((await getUpcomingGameLeg(env, 'round_up', 1)).entries[0].age, null,
+    'a previous-year observation must not be presented as current age');
+
+  db.prepare("INSERT INTO horse_profile_snapshots (id,horse_id,observed_at,age_years,source_record_id,quality_status) VALUES (?,?,?,?,?,?)")
+    .run('profile_2099','horse_1','2099-09-19T09:05:00Z',6,'src_current','verified_official_snapshot');
+  assert.equal((await getUpcomingGameLeg(env, 'round_up', 1)).entries[0].age, 6);
+
+  db.prepare("UPDATE horses SET birth_year=2092 WHERE id='horse_1'").run();
+  assert.equal((await getUpcomingGameLeg(env, 'round_up', 1)).entries[0].age, 7,
+    'explicit normalized birth year takes precedence over profile age');
+});
